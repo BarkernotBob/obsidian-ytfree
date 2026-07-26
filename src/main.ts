@@ -2,6 +2,7 @@ import {
   App,
   MarkdownPostProcessorContext,
   MarkdownRenderChild,
+  MarkdownView,
   Notice,
   Plugin,
   PluginSettingTab,
@@ -50,16 +51,13 @@ export default class YtFreePlugin extends Plugin {
       name: "Insert timestamp at cursor",
       editorCallback: (editor) => {
         const player = this.activePlayer();
-        if (!player) {
+        if (!player || !this.lastActiveVideoId) {
           new Notice("YT Free: no player in this note yet. Play a video first.");
           return;
         }
-        const seconds = Math.floor(player.currentTime);
-        const text = this.settings.timestampFormat
-          .replace("{ts}", formatTimestamp(seconds))
-          .replace("{link}", `ytfree:${this.lastActiveVideoId}:${seconds}`)
-          .replace("{seconds}", String(seconds));
-        editor.replaceSelection(text);
+        editor.replaceSelection(
+          this.timestampText(this.lastActiveVideoId, Math.floor(player.currentTime)),
+        );
       },
     });
 
@@ -104,6 +102,29 @@ export default class YtFreePlugin extends Plugin {
     for (const player of this.players.values()) player.destroy();
     this.players.clear();
     this.cache.clear();
+  }
+
+  private timestampText(videoId: string, seconds: number): string {
+    return this.settings.timestampFormat
+      .replace("{ts}", formatTimestamp(seconds))
+      .replace("{link}", `ytfree:${videoId}:${seconds}`)
+      .replace("{seconds}", String(seconds));
+  }
+
+  /**
+   * Used by the player's Timestamp button, which has no editor of its own.
+   * Falls back to a Notice rather than failing silently when the note is in
+   * Reading view, where there is no cursor to write to.
+   */
+  private insertTimestampFromButton(videoId: string, seconds: number): void {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const editor = view?.editor;
+    if (!editor || view?.getMode() !== "source") {
+      new Notice("YT Free: switch to editing view to insert a timestamp.");
+      return;
+    }
+    this.lastActiveVideoId = videoId;
+    editor.replaceSelection(this.timestampText(videoId, seconds));
   }
 
   private activePlayer(): YtFreePlayer | null {
@@ -151,7 +172,9 @@ export default class YtFreePlugin extends Plugin {
       return stream;
     };
 
-    const player = new YtFreePlayer(wrapper, provider, setStatus);
+    const player = new YtFreePlayer(wrapper, provider, setStatus, (seconds) =>
+      this.insertTimestampFromButton(videoId, seconds),
+    );
     this.players.set(videoId, player);
     player.video.addEventListener("play", () => {
       this.lastActiveVideoId = videoId;

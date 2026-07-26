@@ -28,6 +28,57 @@
   border-radius: var(--radius-m);
 }
 
+/*
+ * Surfaces the controls Chromium buries in its "..." overflow menu.
+ * Fixed heights and widths throughout: pressing any button must not resize it
+ * or shift anything around it.
+ */
+.ytfree-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+
+.ytfree-btn {
+  height: 28px;
+  min-width: 64px;
+  padding: 0 10px;
+  font-size: var(--font-ui-smaller);
+  line-height: 28px;
+  text-align: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  cursor: pointer;
+  /* Fixed border and weight so hover/active never change the box size. */
+  font-weight: var(--font-normal);
+  box-sizing: border-box;
+}
+
+.ytfree-btn:hover {
+  background: var(--interactive-hover);
+}
+
+/* Widest label this button ever shows is "Pause"; pin it so the Play/Pause
+   swap cannot nudge the buttons beside it. */
+.ytfree-btn-play {
+  width: 72px;
+}
+
+.ytfree-speed {
+  height: 28px;
+  width: 72px;
+  font-size: var(--font-ui-smaller);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  box-sizing: border-box;
+}
+
 .ytfree-error {
   border: 1px solid var(--background-modifier-border);
   border-left: 3px solid var(--text-error);

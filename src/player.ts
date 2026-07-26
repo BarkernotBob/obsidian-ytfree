@@ -25,21 +25,99 @@ export class YtFreePlayer {
   private destroyed = false;
   private lastRecoveryAt = 0;
   private upgraded = false;
+  /** Survives source swaps; the <video> element resets these on every load. */
+  private playbackRate = 1;
 
   constructor(
     private container: HTMLElement,
     private provider: StreamProvider,
     private onStatus: (message: string | null) => void,
+    private onTimestamp?: (seconds: number) => void,
   ) {
     this.video = container.createEl("video", {
       cls: "ytfree-video",
       attr: { controls: "", playsinline: "", preload: "metadata" },
     });
 
+    this.buildControls();
+
     // Native error path (direct mp4, and some HLS failures).
     this.video.addEventListener("error", () => {
       if (this.video.error) void this.recover("playback error");
     });
+  }
+
+  /**
+   * Chromium hides Picture-in-Picture and playback speed behind the native
+   * overflow ("...") menu. This row surfaces them, plus skip and timestamp,
+   * without replacing the native scrubber and volume, which work well.
+   *
+   * Every control has a fixed size and no layout-affecting state change, so
+   * pressing one never moves its neighbours or the note content around it.
+   */
+  private buildControls(): void {
+    const bar = this.container.createDiv({ cls: "ytfree-controls" });
+
+    const button = (label: string, title: string, onClick: () => void) => {
+      const el = bar.createEl("button", { cls: "ytfree-btn", text: label, attr: { title } });
+      el.type = "button";
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        onClick();
+      });
+      return el;
+    };
+
+    const playBtn = button("Play", "Play or pause", () => {
+      if (this.video.paused) void this.video.play().catch(() => { /* ignore */ });
+      else this.video.pause();
+    });
+    playBtn.addClass("ytfree-btn-play");
+    // Text swap only — the button keeps a fixed width, so nothing shifts.
+    this.video.addEventListener("play", () => playBtn.setText("Pause"));
+    this.video.addEventListener("pause", () => playBtn.setText("Play"));
+
+    button("−10s", "Back 10 seconds", () => {
+      this.video.currentTime = Math.max(0, this.video.currentTime - 10);
+    });
+    button("+10s", "Forward 10 seconds", () => {
+      this.video.currentTime = this.video.currentTime + 10;
+    });
+
+    const speed = bar.createEl("select", { cls: "ytfree-speed", attr: { title: "Playback speed" } });
+    for (const rate of [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]) {
+      speed.createEl("option", { text: `${rate}×`, value: String(rate) });
+    }
+    speed.value = "1";
+    speed.addEventListener("change", () => {
+      this.playbackRate = Number(speed.value);
+      this.video.playbackRate = this.playbackRate;
+    });
+
+    button("PiP", "Picture-in-Picture", () => {
+      void this.togglePip();
+    });
+
+    button("Fullscreen", "Fullscreen", () => {
+      if (document.fullscreenElement) void document.exitFullscreen();
+      else void this.video.requestFullscreen().catch(() => { /* ignore */ });
+    });
+
+    if (this.onTimestamp) {
+      button("Timestamp", "Insert timestamp at cursor", () => {
+        this.onTimestamp?.(Math.floor(this.video.currentTime));
+      });
+    }
+  }
+
+  private async togglePip(): Promise<void> {
+    try {
+      if (document.pictureInPictureElement) await document.exitPictureInPicture();
+      else await this.video.requestPictureInPicture();
+    } catch {
+      this.onStatus("Picture-in-Picture is unavailable for this video.");
+      window.setTimeout(() => this.onStatus(null), 4000);
+    }
   }
 
   /**
@@ -75,8 +153,16 @@ export class YtFreePlayer {
     if (this.destroyed) return;
     this.teardownHls();
 
+    const volume = this.video.volume;
+    const muted = this.video.muted;
+
     const resume = () => {
       if (resumeAt > 0) this.video.currentTime = resumeAt;
+      // A quality upgrade or refresh must not quietly reset how the user set
+      // the player up.
+      this.video.playbackRate = this.playbackRate;
+      this.video.volume = volume;
+      this.video.muted = muted;
       if (autoplay) void this.video.play().catch(() => { /* user gesture may be required */ });
     };
 
