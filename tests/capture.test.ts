@@ -92,8 +92,8 @@ test("stampInsertOffset fires after indentation, quotes and headings", () => {
   assert.equal(stampInsertOffset("## ", 3, "a"), 3);
 });
 
-test("stampInsertOffset never fires on a bullet character", () => {
-  // Stamping here produced "[3:05](...) -", which Obsidian never turns into a
+test("stampInsertOffset does not fire on the bullet character itself", () => {
+  // Stamping here produced "[3:05](...) -", which Obsidian never renders as a
   // list, so bulleted lists could not be started at all.
   assert.equal(stampInsertOffset("", 0, "-"), null);
   assert.equal(stampInsertOffset("", 0, "*"), null);
@@ -101,12 +101,22 @@ test("stampInsertOffset never fires on a bullet character", () => {
   assert.equal(stampInsertOffset("  ", 2, "-"), null);
 });
 
-test("stampInsertOffset never fires on a line that is already a bullet", () => {
-  // Consequence worth knowing: bulleted lines carry no timestamp at all.
-  assert.equal(stampInsertOffset("- ", 2, "a"), null);
-  assert.equal(stampInsertOffset("* ", 2, "a"), null);
-  assert.equal(stampInsertOffset("  - ", 4, "a"), null);
-  assert.equal(stampInsertOffset("- [ ] ", 6, "a"), null);
+test("stampInsertOffset does not fire on whitespace", () => {
+  // The space after a bullet would otherwise take the stamp, leaving
+  // "- [3:05](...) " with the actual text stranded after it.
+  assert.equal(stampInsertOffset("-", 1, " "), null);
+  assert.equal(stampInsertOffset("", 0, " "), null);
+  assert.equal(stampInsertOffset("", 0, "\t"), null);
+});
+
+test("stampInsertOffset fires on the first word after a bullet", () => {
+  // The whole point of skipping the bullet and the space: the stamp arrives
+  // with the text, and the list still renders.
+  assert.equal(stampInsertOffset("- ", 2, "a"), 2);
+  assert.equal(stampInsertOffset("* ", 2, "a"), 2);
+  assert.equal(stampInsertOffset("  - ", 4, "a"), 4);
+  assert.equal(stampInsertOffset("- [ ] ", 6, "a"), 6);
+  assert.equal(stampInsertOffset("1. ", 3, "a"), 3);
 });
 
 test("stampInsertOffset stays quiet for every later character on the line", () => {

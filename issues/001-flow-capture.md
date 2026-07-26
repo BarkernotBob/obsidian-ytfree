@@ -31,12 +31,13 @@ Typing is the correct trigger because it is the same moment in every case: the i
 start writing a thought. There is now exactly one trigger and no interaction with Enter,
 which is left completely alone.
 
-- Fires after indentation, block quotes and heading markers.
-- **Never fires on a bulleted line.** Typing `-`, `*` or `+` as the first character does
-  not stamp, and a line that already starts with a bullet is never stamped either.
-  Stamping there produced `[3:05](…) -`, which Obsidian does not turn into a list, so
-  bulleted lists could not be started at all. Consequence, accepted deliberately: lines in
-  a bulleted list carry no timestamp. Use the command or the Timestamp button there.
+- Fires after indentation, block quotes, heading markers, list bullets and checkboxes.
+- **On a bulleted line the trigger is the first word, not the first keystroke.** Typing
+  `-`/`*`/`+` does not stamp, and neither does the space after it; the bullet is typed
+  clean so Obsidian renders the list, and the stamp arrives with the text that follows:
+  `- [3:05](…) the thing they said`. Stamping on the bullet itself produced
+  `[3:05](…) -`, which never renders as a list at all.
+- Whitespace never triggers a stamp. A space is not the start of a thought.
 - Does not fire when typing into a line that already has content: that is editing, not
   starting a thought.
 - Uses the existing `timestampText()` and `timestampFormat` setting — no new format.
@@ -145,9 +146,9 @@ stamp becomes the default path, not the only one.
    after the typed character.
 2. This works on the **first line of a note**, with no Enter pressed at any point.
 3. Enter itself is unmodified: it breaks the line and nothing else.
-4. The inserted timestamp equals the playback position minus `lookbackSeconds`, floored at
-   0.
-5. Clicking an auto-inserted timestamp seeks the player to that position.
+4. The inserted timestamp *displays* the playback position at capture; its link points to
+   that position minus `lookbackSeconds`, floored at 0.
+5. Clicking an auto-inserted timestamp seeks the player to the link's position.
 6. Stamping works identically whether the video is playing, paused by typing, or paused by
    the user.
 7. A note whose video has never been played does not stamp anything.
@@ -158,8 +159,9 @@ stamp becomes the default path, not the only one.
 11. Typing inside a fenced code block inserts no timestamp.
 12. A line that already contains a `ytfree:` timestamp never gets a second one, and typing
     into the middle or start of a line that already has content never stamps.
-13. Typing `-`, `*` or `+` on an empty line starts a normal bulleted list with no stamp,
-    and lines within that list are never stamped.
+13. Typing `-`, `*` or `+` on an empty line, then a space, produces a clean bullet with no
+    stamp; the first word typed after it is stamped, and the list still renders. The same
+    holds for an auto-continued bullet and for a checkbox (`- [ ] `).
 14. Pressing Enter never pauses the video; only typing a character does.
 15. `{ts}` renders the moment the line was written while the link seeks `lookbackSeconds`
     earlier — a line reading `3:05` navigates to `3:00`.
@@ -209,9 +211,11 @@ new build is loaded. Make a scratch note with a ` ```ytfree ` block and a video 
 14. Click one of the timestamps you created. **Expect:** the video jumps there and plays.
 
 **F. Bulleted lists and Enter**
-15. On an empty line, type `-` then a space then some words.
-    **Expect:** a normal bullet, and **no timestamp** on it. Press Enter, type more.
-    **Expect:** the auto-continued bullet also has no timestamp.
+15. On an empty line, type `-`, then a space, then some words.
+    **Expect:** the `-` and the space appear on their own with no timestamp, Obsidian turns
+    the line into a bullet, and the timestamp appears with your first word — after the
+    bullet: `- [3:05](…) your words`. Press Enter and type again.
+    **Expect:** the auto-continued bullet behaves the same way.
 16. Press Enter several times in a row while the video plays, without typing anything.
     **Expect:** the video keeps playing. Enter must not pause it.
 

@@ -25,19 +25,18 @@ export interface StampGateInput {
 }
 
 /**
- * Whitespace, block quotes and heading markers may sit before the stamp.
+ * Whitespace, block quotes, list bullets, checkboxes and heading markers may sit
+ * before the stamp — a line is still "new" when it is only a bullet so far.
  * Anything else means the line already has content.
- *
- * List bullets are deliberately *not* here. A stamp landing between the bullet
- * and the text is what stopped bulleted lists from being typed at all, so
- * bulleted lines are left alone entirely — see LIST_MARKERS.
  */
-const LINE_PREFIX = /^[ \t]*(?:>[ \t]*)*(?:#{1,6}[ \t]+)?$/;
+const LINE_PREFIX =
+  /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?(?:#{1,6}[ \t]+)?$/;
 
 /**
- * Typing one of these as the first character of a line is starting a list, not
- * starting a thought. Stamping there produced `[3:05](…) -`, which Obsidian
- * never turns into a bullet.
+ * Typing one of these as the first character of a line is starting a bullet,
+ * not starting a thought. Stamping there produced `[3:05](…) -`, which Obsidian
+ * never renders as a list. The bullet is typed clean; the stamp arrives with the
+ * first word after it instead.
  */
 const LIST_MARKERS = new Set(["-", "*", "+"]);
 
@@ -63,6 +62,10 @@ export function lineHasTimestamp(lineText: string): boolean {
  * Where to put the stamp for a keystroke landing at `cursorCh`, or null when
  * this keystroke is not the start of a new line.
  *
+ * On a bulleted line the answer is the first *word* character, not the first
+ * keystroke: `-` and the space after it are typed clean so Obsidian renders the
+ * list, and the stamp lands with the text that follows.
+ *
  * Null for the overwhelming majority of keystrokes — every character after the
  * first one on a line — so this is the cheap check that runs first.
  */
@@ -74,6 +77,9 @@ export function stampInsertOffset(
   if (cursorCh < 0 || cursorCh > lineText.length) return null;
   if (!typedText) return null;
   if (LIST_MARKERS.has(typedText[0])) return null;
+  // Whitespace is never the start of a thought. Without this, the space after a
+  // bullet would take the stamp and leave `- [3:05](…) ` with the text after it.
+  if (!typedText.trim()) return null;
   if (lineHasTimestamp(lineText)) return null;
   // Typing into the middle of a line that already has content is editing, not
   // starting a thought.
