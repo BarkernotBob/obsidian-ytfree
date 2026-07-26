@@ -79,6 +79,35 @@
   box-sizing: border-box;
 }
 
+/*
+ * Pinned player: sits above the note body inside .view-content (a flex column),
+ * so the note scrolls under it and the player stays in place.
+ *
+ * Height is fixed from a setting rather than driven by content, so nothing the
+ * player does — status line, control state, quality upgrade — can reflow the
+ * note text below it.
+ */
+.ytfree-pinned {
+  flex: 0 0 auto;
+  padding: 8px var(--file-margins, 16px) 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.ytfree-pinned .ytfree-video {
+  height: var(--ytfree-pinned-height, 40vh);
+  max-height: var(--ytfree-pinned-height, 40vh);
+  object-fit: contain;
+}
+
+/* Stands in for a fenced block whose video is already pinned above. */
+.ytfree-pinned-stub {
+  min-height: 1.6em;
+  line-height: 1.6em;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
 .ytfree-error {
   border: 1px solid var(--background-modifier-border);
   border-left: 3px solid var(--text-error);

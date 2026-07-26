@@ -9,6 +9,7 @@ import {
   Plugin,
   PluginSettingTab,
   Setting,
+  TFile,
 } from "obsidian";
 import {
   applyLookback,
@@ -36,6 +37,9 @@ interface YtFreeSettings {
   lookbackSeconds: number;
   pauseWhileTyping: boolean;
   resumeIdleMs: number;
+  pinnedPlayer: boolean;
+  pinnedHeightVh: number;
+  pinnedFrontmatterKeys: string;
 }
 
 const DEFAULT_SETTINGS: YtFreeSettings = {
@@ -46,6 +50,9 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   lookbackSeconds: 5,
   pauseWhileTyping: true,
   resumeIdleMs: 2000,
+  pinnedPlayer: true,
+  pinnedHeightVh: 40,
+  pinnedFrontmatterKeys: "media_link, url",
 };
 
 /**
@@ -62,10 +69,21 @@ interface PlayerEntry {
   sourcePath: string;
 }
 
+/**
+ * One pinned player per open markdown view, mounted above the note body so it
+ * stays put while the note scrolls under it.
+ */
+interface PinnedEntry {
+  videoId: string;
+  wrapper: HTMLElement;
+  entry: PlayerEntry | null;
+}
+
 export default class YtFreePlugin extends Plugin {
   settings: YtFreeSettings = DEFAULT_SETTINGS;
   private cache = new StreamCache();
   private players = new Map<string, PlayerEntry>();
+  private pinned = new Map<MarkdownView, PinnedEntry>();
   private lastActiveVideoId: string | null = null;
   private ytDlpPath: string | null = null;
   private resumeTimer: number | null = null;
@@ -136,14 +154,121 @@ export default class YtFreePlugin extends Plugin {
       entry.player.seekTo(Number(seconds) || 0);
     });
 
+    // Pinned player: driven entirely off frontmatter, so opening a Watch Later
+    // note is the whole interaction. Re-synced on anything that can change which
+    // note is on screen or what its frontmatter says.
+    this.app.workspace.onLayoutReady(() => this.syncPinnedPlayers());
+    this.registerEvent(this.app.workspace.on("layout-change", () => this.syncPinnedPlayers()));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.syncPinnedPlayers()));
+    this.registerEvent(this.app.workspace.on("file-open", () => this.syncPinnedPlayers()));
+    this.registerEvent(this.app.metadataCache.on("changed", () => this.syncPinnedPlayers()));
+
+    this.addCommand({
+      id: "toggle-pinned-player",
+      name: "Toggle pinned player for this note",
+      callback: async () => {
+        this.settings.pinnedPlayer = !this.settings.pinnedPlayer;
+        await this.saveSettings();
+        this.syncPinnedPlayers();
+        new Notice(`YT Free: pinned player ${this.settings.pinnedPlayer ? "on" : "off"}.`);
+      },
+    });
+
     this.addSettingTab(new YtFreeSettingTab(this.app, this));
   }
 
   onunload(): void {
     this.clearResumeTimer();
+    for (const view of [...this.pinned.keys()]) this.unmountPinned(view);
     for (const entry of this.players.values()) entry.player.destroy();
     this.players.clear();
     this.cache.clear();
+  }
+
+  // ---------------------------------------------------------------- pinned
+
+  /**
+   * The video a note's frontmatter points at, or null.
+   *
+   * Reads the same `media_link` property the vault already writes, so existing
+   * Watch Later notes light up without being touched.
+   */
+  pinnedVideoIdFor(path: string | undefined): string | null {
+    if (!this.settings.pinnedPlayer || !path) return null;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) return null;
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    if (!fm) return null;
+
+    for (const key of this.settings.pinnedFrontmatterKeys.split(",").map((k) => k.trim())) {
+      if (!key) continue;
+      const value = fm[key];
+      const raw = Array.isArray(value) ? value[0] : value;
+      if (typeof raw !== "string") continue;
+      const id = extractVideoId(raw);
+      if (id) return id;
+    }
+    return null;
+  }
+
+  /**
+   * Reconcile every open markdown view against what its frontmatter asks for.
+   * Idempotent: a view already showing the right video is left alone, so the
+   * frequent events driving this never interrupt playback.
+   */
+  private syncPinnedPlayers(): void {
+    const open = new Set<MarkdownView>();
+
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (!(view instanceof MarkdownView)) continue;
+      open.add(view);
+
+      const wanted = this.pinnedVideoIdFor(view.file?.path);
+      const current = this.pinned.get(view);
+
+      // `isConnected` catches the case where Obsidian rebuilt the view's DOM
+      // under us — same video, but our node is no longer in the document.
+      if (current && current.videoId === wanted && current.wrapper.isConnected) continue;
+
+      if (current) this.unmountPinned(view);
+      if (wanted && view.file) void this.mountPinned(view, wanted, view.file.path);
+    }
+
+    for (const view of [...this.pinned.keys()]) {
+      if (!open.has(view)) this.unmountPinned(view);
+    }
+  }
+
+  private async mountPinned(view: MarkdownView, videoId: string, sourcePath: string): Promise<void> {
+    const wrapper = createDiv({ cls: "ytfree-wrapper ytfree-pinned" });
+    wrapper.style.setProperty("--ytfree-pinned-height", `${this.settings.pinnedHeightVh}vh`);
+    view.contentEl.prepend(wrapper);
+
+    const record: PinnedEntry = { videoId, wrapper, entry: null };
+    this.pinned.set(view, record);
+
+    const entry = await this.buildPlayer(wrapper, videoId, sourcePath);
+
+    // The note may have been closed or switched while the stream resolved.
+    if (this.pinned.get(view) !== record) {
+      entry?.player.destroy();
+      if (entry && this.players.get(videoId) === entry) this.players.delete(videoId);
+      wrapper.remove();
+      return;
+    }
+    record.entry = entry;
+  }
+
+  private unmountPinned(view: MarkdownView): void {
+    const record = this.pinned.get(view);
+    if (!record) return;
+    this.pinned.delete(view);
+    if (record.entry) {
+      record.entry.player.destroy();
+      if (this.players.get(record.videoId) === record.entry) this.players.delete(record.videoId);
+    }
+    record.wrapper.remove();
   }
 
   // ---------------------------------------------------------------- capture
@@ -312,7 +437,52 @@ export default class YtFreePlugin extends Plugin {
     el: HTMLElement,
     ctx: MarkdownPostProcessorContext,
   ): Promise<void> {
+    const videoId = extractVideoId(source);
+
+    // A pinned player is already showing this video at the top of the note.
+    // Rendering a second one would fight it for the timestamp keying and buffer
+    // the same stream twice, so the fence stands down and says so.
+    if (videoId && this.pinnedVideoIdFor(ctx.sourcePath) === videoId) {
+      const note = el.createDiv({ cls: "ytfree-pinned-stub" });
+      note.setText("▲ Playing in the pinned player at the top of this note.");
+      return;
+    }
+
     const wrapper = el.createDiv({ cls: "ytfree-wrapper" });
+    if (!videoId) {
+      this.renderError(wrapper, "Not a YouTube URL or video ID.", source.trim());
+      return;
+    }
+
+    const entry = await this.buildPlayer(wrapper, videoId, ctx.sourcePath);
+    if (!entry) return;
+
+    // Tear the player down when the note or preview pane closes, so no stream
+    // keeps buffering in the background.
+    const self = this;
+    ctx.addChild(
+      new (class extends MarkdownRenderChild {
+        onunload(): void {
+          entry.player.destroy();
+          if (self.players.get(videoId) === entry) self.players.delete(videoId);
+        }
+      })(wrapper),
+    );
+  }
+
+  /**
+   * Build, register and load a player inside `wrapper`. Shared by the fenced
+   * block and the pinned player so the two can never drift apart — same
+   * controls, same recovery, same error text.
+   *
+   * Returns null when the stream could not be resolved; the error is already
+   * rendered into the wrapper by then.
+   */
+  private async buildPlayer(
+    wrapper: HTMLElement,
+    videoId: string,
+    sourcePath: string,
+  ): Promise<PlayerEntry | null> {
     // Reserved, fixed-height row so showing or clearing a status message never
     // shifts the player or the surrounding note content.
     const status = wrapper.createDiv({ cls: "ytfree-status" });
@@ -320,12 +490,6 @@ export default class YtFreePlugin extends Plugin {
       status.setText(message ?? "");
       status.toggleClass("ytfree-status-visible", message !== null);
     };
-
-    const videoId = extractVideoId(source);
-    if (!videoId) {
-      this.renderError(wrapper, "Not a YouTube URL or video ID.", source.trim());
-      return;
-    }
 
     const provider = async (
       mode: ResolveMode,
@@ -346,28 +510,17 @@ export default class YtFreePlugin extends Plugin {
     const player = new YtFreePlayer(wrapper, provider, setStatus, (seconds) =>
       this.insertTimestampFromButton(videoId, seconds),
     );
-    const entry: PlayerEntry = { player, videoId, sourcePath: ctx.sourcePath };
+    const entry: PlayerEntry = { player, videoId, sourcePath };
     this.players.set(videoId, entry);
     player.video.addEventListener("play", () => {
       this.lastActiveVideoId = videoId;
     });
 
-    // Tear the player down when the note or preview pane closes, so no stream
-    // keeps buffering in the background.
-    const self = this;
-    ctx.addChild(
-      new (class extends MarkdownRenderChild {
-        onunload(): void {
-          player.destroy();
-          if (self.players.get(videoId) === entry) self.players.delete(videoId);
-        }
-      })(wrapper),
-    );
-
     setStatus("Resolving stream…");
     try {
       await player.load(this.settings.upgradeToHighQuality);
       setStatus(null);
+      return entry;
     } catch (err) {
       player.destroy();
       this.players.delete(videoId);
@@ -384,6 +537,7 @@ export default class YtFreePlugin extends Plugin {
           `brew upgrade yt-dlp\n\n${(err as Error).message}`,
         );
       }
+      return null;
     }
   }
 
@@ -401,6 +555,16 @@ export default class YtFreePlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  /**
+   * Full rebuild, used when a setting changed the shape of the pinned player
+   * rather than which video it shows. Costs a re-resolve, but the stream cache
+   * usually makes that free, and settings changes are rare.
+   */
+  refreshPinnedPlayers(): void {
+    for (const view of [...this.pinned.keys()]) this.unmountPinned(view);
+    this.syncPinnedPlayers();
   }
 
   resetResolver(): void {
@@ -455,6 +619,50 @@ class YtFreeSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.timestampFormat = value;
             await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl).setName("Pinned player").setHeading();
+
+    new Setting(containerEl)
+      .setName("Pin the player to the top of the note")
+      .setDesc(
+        "When a note's frontmatter points at a YouTube video, the full player — controls, speed, PiP, timestamp — is mounted above the note body and stays there while you scroll. A ```ytfree block for the same video steps aside so you never get two players.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.pinnedPlayer).onChange(async (value) => {
+          this.plugin.settings.pinnedPlayer = value;
+          await this.plugin.saveSettings();
+          this.plugin.refreshPinnedPlayers();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Frontmatter properties")
+      .setDesc("Comma-separated, tried in order. The first one holding a YouTube URL wins.")
+      .addText((text) =>
+        text
+          .setPlaceholder("media_link, url")
+          .setValue(this.plugin.settings.pinnedFrontmatterKeys)
+          .onChange(async (value) => {
+            this.plugin.settings.pinnedFrontmatterKeys = value;
+            await this.plugin.saveSettings();
+            this.plugin.refreshPinnedPlayers();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Pinned player height")
+      .setDesc("Percent of the window height. Fixed, so the note text below never moves.")
+      .addSlider((slider) =>
+        slider
+          .setLimits(20, 70, 5)
+          .setValue(this.plugin.settings.pinnedHeightVh)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.pinnedHeightVh = value;
+            await this.plugin.saveSettings();
+            this.plugin.refreshPinnedPlayers();
           }),
       );
 

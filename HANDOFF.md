@@ -1,6 +1,35 @@
 # HANDOFF
 
-## Status — 2026-07-26
+## Status — 2026-07-26 (later)
+Pinned player shipped and installed; ad-hoc playlist URLs now resolve.
+All automated tests pass: 41 unit, 5 live. **Awaiting manual test.**
+
+## What just changed
+- **Pinned player.** When a note's frontmatter names a YouTube video
+  (`media_link`, then `url` — configurable), the full player mounts above the
+  note body inside `.view-content` and stays put while the note scrolls. This
+  replaces the Media Notes plugin, which owned that spot and has been disabled
+  in the vault's `community-plugins.json`.
+- Same player as the fenced block — controls, speed, PiP, timestamp, stream
+  recovery — because both now go through one `buildPlayer()`.
+- A ```ytfree fence whose video is already pinned renders a one-line stub
+  instead of a second player, so nothing double-buffers or fights over the
+  `players` map key.
+- Height is a fixed `vh` from settings, not content-driven: nothing the player
+  does can reflow the note text under it.
+- `syncPinnedPlayers()` is idempotent and reconciles on layout-change,
+  active-leaf-change, file-open and metadata changes; an `isConnected` check
+  catches Obsidian rebuilding a view's DOM underneath us.
+- **`watch_videos?video_ids=a,b,c` parses.** YouTube's ad-hoc playlist URL names
+  no single video, so `extractVideoIds()` returns the whole queue and
+  `extractVideoId()` takes the first. Handles `%2C` and plain commas.
+
+## Next step
+Manual test in Obsidian (relaunch first — Media Notes only stays off after a
+restart): open a Watch Later note, confirm one player at the top, confirm
+timestamps still stamp and seek, confirm no double player under the fence.
+
+## Previous status — 2026-07-26
 v1 confirmed working in Obsidian. Issue 001 (flow capture) is built and installed;
 **two rounds of manual-test feedback applied, awaiting re-test.** All automated tests
 pass: 39 unit, 5 live.

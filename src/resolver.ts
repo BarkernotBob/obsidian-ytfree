@@ -58,8 +58,29 @@ export class ResolveError extends Error {
 
 /** Pull an 11-character video ID out of any common YouTube URL shape. */
 export function extractVideoId(input: string): string | null {
+  return extractVideoIds(input)[0] ?? null;
+}
+
+/**
+ * Every video ID in a URL, in order.
+ *
+ * Usually one. The exception is YouTube's ad-hoc playlist URL
+ * (`/watch_videos?video_ids=a,b,c`, commas often percent-encoded), which names
+ * no single video at all — it is a whole queue. Callers that can only play one
+ * thing take the first; callers that can offer a choice use the list.
+ */
+export function extractVideoIds(input: string): string[] {
   const raw = input.trim();
-  if (/^[\w-]{11}$/.test(raw)) return raw;
+  if (/^[\w-]{11}$/.test(raw)) return [raw];
+
+  // Ad-hoc playlist: pull the ids out of the video_ids param specifically, so a
+  // stray 11-character token elsewhere in the URL cannot join the list.
+  const list = raw.match(/[?&]video_ids=([^&#]+)/);
+  if (list) {
+    const decoded = decodeURIComponent(list[1]);
+    const ids = decoded.split(",").map((s) => s.trim()).filter((s) => /^[\w-]{11}$/.test(s));
+    if (ids.length) return ids;
+  }
 
   const patterns = [
     /[?&]v=([\w-]{11})/,
@@ -70,9 +91,9 @@ export function extractVideoId(input: string): string | null {
   ];
   for (const p of patterns) {
     const m = raw.match(p);
-    if (m) return m[1];
+    if (m) return [m[1]];
   }
-  return null;
+  return [];
 }
 
 /**

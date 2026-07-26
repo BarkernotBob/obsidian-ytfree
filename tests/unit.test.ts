@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractVideoId, parseExpiry, StreamCache } from "../src/resolver.ts";
+import { extractVideoId, extractVideoIds, parseExpiry, StreamCache } from "../src/resolver.ts";
 import { formatTimestamp } from "../src/format.ts";
 
 test("extractVideoId handles every URL shape we accept", () => {
@@ -14,6 +14,27 @@ test("extractVideoId handles every URL shape we accept", () => {
   assert.equal(extractVideoId(`https://www.youtube.com/embed/${id}`), id);
   assert.equal(extractVideoId(`https://www.youtube.com/live/${id}`), id);
   assert.equal(extractVideoId(`  https://youtu.be/${id}  \n`), id);
+});
+
+test("ad-hoc playlist URLs yield every video, first one playable", () => {
+  // The shape YouTube produces from "play all" on a suggested queue: no v=
+  // param at all, commas percent-encoded, a title tacked on the end.
+  const url =
+    "https://www.youtube.com/watch_videos?video_ids=soYkEqDp760%2C1PGm8LslEb4%2CV-1RhQ1uuQ4" +
+    "&type=0&title=Deep+Dive+-+Social+Media+Misinformation";
+  assert.deepEqual(extractVideoIds(url), ["soYkEqDp760", "1PGm8LslEb4", "V-1RhQ1uuQ4"]);
+  assert.equal(extractVideoId(url), "soYkEqDp760");
+
+  // Plain commas too, since a hand-pasted URL is often already decoded.
+  assert.deepEqual(
+    extractVideoIds("https://www.youtube.com/watch_videos?video_ids=soYkEqDp760,1PGm8LslEb4"),
+    ["soYkEqDp760", "1PGm8LslEb4"],
+  );
+});
+
+test("extractVideoIds returns a single-element list for ordinary URLs", () => {
+  assert.deepEqual(extractVideoIds("https://youtu.be/dQw4w9WgXcQ?si=abc"), ["dQw4w9WgXcQ"]);
+  assert.deepEqual(extractVideoIds("https://vimeo.com/123456"), []);
 });
 
 test("extractVideoId rejects non-YouTube input", () => {
