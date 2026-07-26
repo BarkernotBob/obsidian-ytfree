@@ -14,9 +14,13 @@ All automated tests pass. The next action is BarkernotBob's manual test.
   preserving position.
 - Regression suites: 11 unit tests (`npm test`), 5 live tests (`npm run smoke`). All green.
 - Installed via `./install.sh` to `<vault>/.obsidian/plugins/ytfree`.
+- Backlog started: `issues/001-flow-capture.md` (auto-timestamp new lines, lookback
+  offset, pause-while-typing). Designed only — **not built**, deliberately blocked on the
+  manual test below.
 
 ## Exact next step
 BarkernotBob runs the manual test in `docs/MANUAL-TEST.md`. Report which steps fail.
+Only after that passes does issue 001 become buildable.
 
 Nothing else should be built until real playback in Obsidian is confirmed — every
 verification so far is from the command line, not from inside the app.
