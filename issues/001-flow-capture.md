@@ -1,7 +1,6 @@
 # 001 — Flow capture: auto-timestamp new lines, pause while typing
 
-**Status:** Open. Blocked on the v1 manual test (`docs/MANUAL-TEST.md`) passing.
-Nothing here gets built until real playback inside Obsidian is confirmed.
+**Status:** Built 2026-07-26. Automated tests pass. Awaiting the manual test below.
 
 **Created:** 2026-07-26
 
@@ -130,4 +129,52 @@ stamp becomes the default path, not the only one.
 
 ## Manual test (for BarkernotBob)
 
-To be written when this issue is complete, per the backlog rule.
+Reload Obsidian first (Settings → Community plugins → toggle YT Free off and on), so the
+new build is loaded. Make a scratch note with a ` ```ytfree ` block and a video you know.
+
+**A. The main thing**
+1. Play the video. Let it run ~30 seconds.
+2. Click at the bottom of the note, below the player, and press Enter.
+3. A timestamp should already be sitting on the new line, with the cursor after it. Type a
+   few words.
+4. Press Enter again, type a few more words. Repeat once more.
+5. **Expect:** three lines, each starting with its own timestamp, each roughly 5 seconds
+   *earlier* than where the video actually was when you pressed Enter.
+
+**B. The pause**
+6. While the video is playing, start typing a long sentence.
+7. **Expect:** the video pauses as soon as you type the first character, and starts again
+   about two seconds after you stop.
+8. Type in the middle of an existing line, not at the start of a new one.
+   **Expect:** it still pauses. Pausing is not limited to new lines.
+
+**C. Your own pause is respected** (this is the one most likely to be wrong)
+9. Pause the video yourself with the Play/Pause button.
+10. Type a sentence in the note, then stop typing and wait five seconds.
+11. **Expect:** the video stays paused. It must not start playing on its own.
+
+**D. Clicking back**
+12. Click one of the timestamps you created in step 5.
+13. **Expect:** the video jumps to that moment and plays.
+
+**E. Nothing else is broken**
+14. Open any note with no video in it. Press Enter a few times, type, press Enter again.
+    **Expect:** completely normal. No timestamps, no lag, no oddity.
+15. Back in the video note, click inside the ` ```ytfree ` block itself and press Enter.
+    **Expect:** a plain new line, no timestamp.
+16. Put your cursor at the end of a line that already has a timestamp and press Enter.
+    **Expect:** the new line gets its own timestamp, but the old line still has exactly one.
+
+**F. The switches**
+17. Settings → YT Free → Flow capture. Turn **Timestamp every new line** off.
+    **Expect:** Enter behaves like stock Obsidian; the Timestamp button still works.
+18. Turn it back on, turn **Pause while typing** off.
+    **Expect:** stamping still works, but the video keeps playing while you type.
+19. Turn both back on. Drag **Lookback** to 0, press Enter while playing.
+    **Expect:** the timestamp now matches the video position exactly.
+
+Report which numbered steps fail, and what happened instead.
+
+Tune note: if 5 seconds of lookback consistently lands too early or too late for the
+content you watch, change the Lookback slider rather than reporting it as a bug — that
+number was a guess, not a measurement.

@@ -27,6 +27,8 @@ export class YtFreePlayer {
   private upgraded = false;
   /** Survives source swaps; the <video> element resets these on every load. */
   private playbackRate = 1;
+  /** True only while playback is paused *by us* because the user is typing. */
+  private pausedByTyping = false;
 
   constructor(
     private container: HTMLElement,
@@ -44,6 +46,12 @@ export class YtFreePlayer {
     // Native error path (direct mp4, and some HLS failures).
     this.video.addEventListener("error", () => {
       if (this.video.error) void this.recover("playback error");
+    });
+
+    // Any play the user starts themselves ends our ownership of the pause, so a
+    // later idle timer can't claim credit for a state it didn't cause.
+    this.video.addEventListener("play", () => {
+      this.pausedByTyping = false;
     });
   }
 
@@ -228,6 +236,34 @@ export class YtFreePlayer {
   seekTo(seconds: number): void {
     this.video.currentTime = seconds;
     void this.video.play().catch(() => { /* ignore */ });
+  }
+
+  /**
+   * Pause because the user started typing. A no-op when playback is already
+   * stopped, which is what keeps a user's own pause from being taken over:
+   * `pausedByTyping` only ever becomes true for a pause we performed.
+   */
+  pauseForTyping(): void {
+    if (this.destroyed) return;
+    if (this.video.paused || this.video.ended) return;
+    this.pausedByTyping = true;
+    this.video.pause();
+  }
+
+  /** Resume only what we paused. A user-paused video stays paused. */
+  resumeAfterTyping(): void {
+    if (this.destroyed) return;
+    if (!this.pausedByTyping) return;
+    this.pausedByTyping = false;
+    void this.video.play().catch(() => { /* user gesture may be required */ });
+  }
+
+  get isPausedByTyping(): boolean {
+    return this.pausedByTyping;
+  }
+
+  get isPlaying(): boolean {
+    return !this.video.paused && !this.video.ended;
   }
 
   get currentTime(): number {

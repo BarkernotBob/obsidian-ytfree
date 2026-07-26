@@ -1,42 +1,52 @@
 # HANDOFF
 
 ## Status — 2026-07-26
-v1 built, installed to the MyVault vault, **not yet manually verified in Obsidian.**
-All automated tests pass. The next action is BarkernotBob's manual test.
+v1 confirmed working in Obsidian. Issue 001 (flow capture) is **built and installed, not
+yet manually verified.** All automated tests pass: 29 unit, 5 live.
 
 ## What just changed
-- Gates cleared first: `docs/RED-TEAM.md` (verdict: build, narrower than it looked) and
-  `docs/V1-SCOPE.md`.
-- Plugin implemented: `ytfree` code block → ad-free `<video>` with native controls + PiP,
-  timestamp insert/seek commands, settings tab.
-- Two-stage loading added after measurement showed a cold high-quality resolve can take
-  ~28s. Playback now starts at 360p in ~4s and upgrades to 1080p HLS in the background,
-  preserving position.
-- Regression suites: 11 unit tests (`npm test`), 5 live tests (`npm run smoke`). All green.
-- Installed via `./install.sh` to `<vault>/.obsidian/plugins/ytfree`.
-- Backlog started: `issues/001-flow-capture.md` (auto-timestamp new lines, lookback
-  offset, pause-while-typing). Designed only — **not built**, deliberately blocked on the
-  manual test below.
+- Issue 001 implemented: auto-timestamp on Enter, lookback offset, pause-while-typing.
+  All three on by default (`lookbackSeconds: 5`, `resumeIdleMs: 2000`).
+- New `src/capture.ts` holds the pure decision logic — lookback maths, the stamp gate,
+  fence detection — so the part most likely to break is unit-testable without an editor.
+- `src/player.ts` gained `pauseForTyping` / `resumeAfterTyping` and a `pausedByTyping`
+  flag, plus `isPlaying`.
+- `src/main.ts`: players are now `PlayerEntry { player, videoId, sourcePath }` so capture
+  can ask "which player is in *this* note" instead of falling back to any player.
+- Enter is intercepted with a `Prec.highest` CM6 keymap via `registerEditorExtension`;
+  typing is detected with an `EditorView.updateListener`.
+- `esbuild.config.mjs` now marks `@codemirror/*` external — verified in the built
+  `main.js`.
+- 18 new unit tests in `tests/capture.test.ts`.
 
 ## Exact next step
-BarkernotBob runs the manual test in `docs/MANUAL-TEST.md`. Report which steps fail.
-Only after that passes does issue 001 become buildable.
-
-Nothing else should be built until real playback in Obsidian is confirmed — every
-verification so far is from the command line, not from inside the app.
+BarkernotBob runs the manual test in `issues/001-flow-capture.md` (sections A–F). Report which
+numbered steps fail.
 
 ## Key decisions worth remembering
 - Notes store **video IDs only**. Never write a resolved URL to disk; they expire and are
   IP-locked. This is the core design constraint.
+- **The auto-stamp gate cannot be `!video.paused`.** With pause-while-typing on (the
+  default), the player is already paused when Enter arrives. The gate is "playing OR
+  paused-by-us". Getting this wrong silently disables auto-stamp in the default config.
+  Guarded by a named regression test.
+- **`pausedByTyping` is only ever set by a pause we performed**, because `pauseForTyping`
+  no-ops on an already-paused video. That is what stops the idle timer resuming a video
+  the user paused themselves.
+- **CodeMirror must stay external in the esbuild config.** Bundling a second copy means
+  our keymap registers against a different module instance and never fires. This failure
+  is silent — no error, the key just does nothing.
 - Resolution timing is unstable: measured 28s cold, then ~4s warm. yt-dlp appears to
   cache its JS challenge solver. Do not treat a single slow run as a regression — re-run.
 - `ios` player client is broken (returns images only). `android_vr` is the fast client
   but exposes 360p only. Both facts drove the two-stage design.
-- The vault already has `media-extended` installed. It does not conflict, but it is the
-  fallback if this project dies.
 
 ## Open risks
-- Not yet run inside Obsidian at all — Electron may reject something (hls.js worker,
-  child_process spawn under the plugin sandbox).
+- 5s lookback is a guess, not a measurement. It is a slider for that reason.
+- Players are keyed by video ID alone, so the same video open in two notes collapses to
+  one entry (last render wins). Flow capture would target the wrong note. Edge case, left
+  unfixed deliberately — see the comment on `PlayerEntry`.
+- `EditorView.updateListener` fires on any doc change, not strictly on keystrokes. A sync
+  or another plugin writing to the note will also pause playback.
 - `npm` flagged esbuild's postinstall script as unapproved. Build works, so it was not
   needed, but a clean clone may need `npm approve-scripts`.

@@ -7,7 +7,17 @@ const prod = process.argv[2] === "production";
 const ctx = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
-  external: ["obsidian", "electron", ...builtins],
+  // CodeMirror must stay external. Obsidian's editor is a running CM6 instance;
+  // bundling a second copy means our keymap registers against a different
+  // module and silently never fires.
+  external: [
+    "obsidian",
+    "electron",
+    "@codemirror/state",
+    "@codemirror/view",
+    "@codemirror/language",
+    ...builtins,
+  ],
   format: "cjs",
   target: "es2018",
   logLevel: "info",
