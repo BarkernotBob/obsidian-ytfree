@@ -86,9 +86,6 @@ export default class YtFreePlugin extends Plugin {
           this.handleInput(view, from, to, text),
         ),
       ),
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) this.handleTyping();
-      }),
     ]);
 
     this.addCommand({
@@ -101,9 +98,7 @@ export default class YtFreePlugin extends Plugin {
           new Notice("YT Free: no player in this note yet. Play a video first.");
           return;
         }
-        editor.replaceSelection(
-          this.timestampText(entry.videoId, this.captureSeconds(entry.player)),
-        );
+        editor.replaceSelection(this.stampFor(entry));
       },
     });
 
@@ -165,12 +160,16 @@ export default class YtFreePlugin extends Plugin {
    * normally. A bug in here must never eat a character.
    */
   private handleInput(view: EditorView, from: number, to: number, text: string): boolean {
+    // Pausing hangs off character input, not off document changes. Enter is a
+    // keymap command rather than an input, so it never reaches here — which is
+    // the point: breaking a line is not typing, and must not stop the video.
+    this.handleTyping();
+
     try {
       if (!this.settings.autoStampNewLine) return false;
-      if (!text) return false;
 
       const line = view.state.doc.lineAt(from);
-      const offset = stampInsertOffset(line.text, from - line.from);
+      const offset = stampInsertOffset(line.text, from - line.from, text);
       if (offset === null || from !== to) return false;
 
       const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -188,7 +187,7 @@ export default class YtFreePlugin extends Plugin {
       });
       if (!ok) return false;
 
-      const stamp = this.timestampText(entry.videoId, this.captureSeconds(entry.player));
+      const stamp = this.stampFor(entry);
       view.dispatch({
         changes: { from, to, insert: stamp + text },
         selection: { anchor: from + stamp.length + text.length },
@@ -202,8 +201,10 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * Any edit in a note with an active player pauses it, and playback resumes
-   * once typing stops. Scope is the whole note, not just the stamped line.
+   * Typing a character in a note with an active player pauses it, and playback
+   * resumes once typing stops. Scope is the whole note, not just the stamped
+   * line — but only real character input counts, so Enter (and any programmatic
+   * write, such as a sync) leaves playback alone.
    *
    * One shared debounced timer, not one per keystroke.
    */
@@ -239,11 +240,26 @@ export default class YtFreePlugin extends Plugin {
     return applyLookback(player.currentTime, this.settings.lookbackSeconds);
   }
 
-  private timestampText(videoId: string, seconds: number): string {
+  /**
+   * The displayed time and the seek target are deliberately different numbers.
+   *
+   * `{ts}` shows where you were when you wrote the line, because that is the
+   * moment you are looking for when you scan the note later. `{link}` points
+   * `lookbackSeconds` earlier, so clicking it drops you in slightly before the
+   * thing rather than just after it. Reading and replaying want different
+   * answers, so they get different answers.
+   */
+  private timestampText(videoId: string, displaySeconds: number, seekSeconds: number): string {
     return this.settings.timestampFormat
-      .replace("{ts}", formatTimestamp(seconds))
-      .replace("{link}", `ytfree:${videoId}:${seconds}`)
-      .replace("{seconds}", String(seconds));
+      .replace("{ts}", formatTimestamp(displaySeconds))
+      .replace("{link}", `ytfree:${videoId}:${seekSeconds}`)
+      .replace("{seconds}", String(seekSeconds));
+  }
+
+  /** Build a stamp from a player's current position. */
+  private stampFor(entry: PlayerEntry): string {
+    const display = Math.floor(entry.player.currentTime);
+    return this.timestampText(entry.videoId, display, this.captureSeconds(entry.player));
   }
 
   /**
@@ -261,7 +277,7 @@ export default class YtFreePlugin extends Plugin {
     this.lastActiveVideoId = videoId;
     // Lookback applies here too, so all three capture paths agree.
     editor.replaceSelection(
-      this.timestampText(videoId, applyLookback(seconds, this.settings.lookbackSeconds)),
+      this.timestampText(videoId, seconds, applyLookback(seconds, this.settings.lookbackSeconds)),
     );
   }
 
@@ -430,7 +446,9 @@ class YtFreeSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Timestamp format")
-      .setDesc("Placeholders: {ts} formatted time, {link} seek link, {seconds} raw seconds.")
+      .setDesc(
+        "Placeholders: {ts} the time you wrote the line, {link} seek link, {seconds} raw seek seconds. {ts} shows where you were; {link} and {seconds} point Lookback seconds earlier, so clicking lands just before it.",
+      )
       .addText((text) =>
         text
           .setValue(this.plugin.settings.timestampFormat)
@@ -457,7 +475,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Lookback")
       .setDesc(
-        "Seconds subtracted from every captured timestamp, because you decide something is worth noting after you hear it. Applies to auto-stamps, the command, and the Timestamp button. Tune it against your own notes — lectures want more, dense tutorials want less.",
+        "How far before the moment you wrote a line its timestamp link should land, because you decide something is worth noting after you hear it. The timestamp still displays the time you wrote at — only the click target moves back. Applies to auto-stamps, the command, and the Timestamp button.",
       )
       .addSlider((slider) =>
         slider

@@ -25,12 +25,21 @@ export interface StampGateInput {
 }
 
 /**
- * Whitespace, block quotes, list bullets, checkboxes and heading markers may
- * sit before the stamp — a line is still "new" when Obsidian has auto-continued
- * a list into it. Anything else means the line already has content.
+ * Whitespace, block quotes and heading markers may sit before the stamp.
+ * Anything else means the line already has content.
+ *
+ * List bullets are deliberately *not* here. A stamp landing between the bullet
+ * and the text is what stopped bulleted lists from being typed at all, so
+ * bulleted lines are left alone entirely — see LIST_MARKERS.
  */
-const LINE_PREFIX =
-  /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?(?:#{1,6}[ \t]+)?$/;
+const LINE_PREFIX = /^[ \t]*(?:>[ \t]*)*(?:#{1,6}[ \t]+)?$/;
+
+/**
+ * Typing one of these as the first character of a line is starting a list, not
+ * starting a thought. Stamping there produced `[3:05](…) -`, which Obsidian
+ * never turns into a bullet.
+ */
+const LIST_MARKERS = new Set(["-", "*", "+"]);
 
 /**
  * Shift a captured position back by the lookback offset.
@@ -57,8 +66,14 @@ export function lineHasTimestamp(lineText: string): boolean {
  * Null for the overwhelming majority of keystrokes — every character after the
  * first one on a line — so this is the cheap check that runs first.
  */
-export function stampInsertOffset(lineText: string, cursorCh: number): number | null {
+export function stampInsertOffset(
+  lineText: string,
+  cursorCh: number,
+  typedText: string,
+): number | null {
   if (cursorCh < 0 || cursorCh > lineText.length) return null;
+  if (!typedText) return null;
+  if (LIST_MARKERS.has(typedText[0])) return null;
   if (lineHasTimestamp(lineText)) return null;
   // Typing into the middle of a line that already has content is editing, not
   // starting a thought.

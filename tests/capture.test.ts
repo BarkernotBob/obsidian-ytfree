@@ -77,45 +77,57 @@ test("auto-stamp does not add a second stamp to a stamped line", () => {
 });
 
 test("stampInsertOffset fires on the first character of an empty line", () => {
-  assert.equal(stampInsertOffset("", 0), 0);
+  assert.equal(stampInsertOffset("", 0, "a"), 0);
 });
 
 test("stampInsertOffset fires on the first line of a note", () => {
   // Issue: the first line never got stamped under the Enter trigger, because
   // you don't press Enter to reach it. Typing is the trigger now, so it does.
-  assert.equal(stampInsertOffset("", 0), 0);
+  assert.equal(stampInsertOffset("", 0, "T"), 0);
 });
 
-test("stampInsertOffset fires after indentation and list markers", () => {
-  // Obsidian auto-continues lists, so the "new" line already contains "- ".
-  assert.equal(stampInsertOffset("  ", 2), 2);
-  assert.equal(stampInsertOffset("- ", 2), 2);
-  assert.equal(stampInsertOffset("  * ", 4), 4);
-  assert.equal(stampInsertOffset("1. ", 3), 3);
-  assert.equal(stampInsertOffset("- [ ] ", 6), 6);
-  assert.equal(stampInsertOffset("> ", 2), 2);
-  assert.equal(stampInsertOffset("## ", 3), 3);
+test("stampInsertOffset fires after indentation, quotes and headings", () => {
+  assert.equal(stampInsertOffset("  ", 2, "a"), 2);
+  assert.equal(stampInsertOffset("> ", 2, "a"), 2);
+  assert.equal(stampInsertOffset("## ", 3, "a"), 3);
+});
+
+test("stampInsertOffset never fires on a bullet character", () => {
+  // Stamping here produced "[3:05](...) -", which Obsidian never turns into a
+  // list, so bulleted lists could not be started at all.
+  assert.equal(stampInsertOffset("", 0, "-"), null);
+  assert.equal(stampInsertOffset("", 0, "*"), null);
+  assert.equal(stampInsertOffset("", 0, "+"), null);
+  assert.equal(stampInsertOffset("  ", 2, "-"), null);
+});
+
+test("stampInsertOffset never fires on a line that is already a bullet", () => {
+  // Consequence worth knowing: bulleted lines carry no timestamp at all.
+  assert.equal(stampInsertOffset("- ", 2, "a"), null);
+  assert.equal(stampInsertOffset("* ", 2, "a"), null);
+  assert.equal(stampInsertOffset("  - ", 4, "a"), null);
+  assert.equal(stampInsertOffset("- [ ] ", 6, "a"), null);
 });
 
 test("stampInsertOffset stays quiet for every later character on the line", () => {
   // The common case by far: this is what keeps one stamp per line.
-  assert.equal(stampInsertOffset("already typing", 14), null);
-  assert.equal(stampInsertOffset("- a", 3), null);
+  assert.equal(stampInsertOffset("already typing", 14, "a"), null);
 });
 
 test("stampInsertOffset stays quiet when editing into existing content", () => {
-  assert.equal(stampInsertOffset("existing text", 0), null);
-  assert.equal(stampInsertOffset("  existing", 2), null);
-  assert.equal(stampInsertOffset("existing text", 4), null);
+  assert.equal(stampInsertOffset("existing text", 0, "a"), null);
+  assert.equal(stampInsertOffset("  existing", 2, "a"), null);
+  assert.equal(stampInsertOffset("existing text", 4, "a"), null);
 });
 
 test("stampInsertOffset never adds a second stamp to a line", () => {
-  assert.equal(stampInsertOffset("[12:34](ytfree:abc:754) ", 24), null);
+  assert.equal(stampInsertOffset("[12:34](ytfree:abc:754) ", 24, "a"), null);
 });
 
-test("stampInsertOffset rejects an out-of-range cursor", () => {
-  assert.equal(stampInsertOffset("abc", -1), null);
-  assert.equal(stampInsertOffset("abc", 99), null);
+test("stampInsertOffset rejects an out-of-range cursor and empty input", () => {
+  assert.equal(stampInsertOffset("abc", -1, "a"), null);
+  assert.equal(stampInsertOffset("abc", 99, "a"), null);
+  assert.equal(stampInsertOffset("", 0, ""), null);
 });
 
 test("lineHasTimestamp only matches our own scheme", () => {

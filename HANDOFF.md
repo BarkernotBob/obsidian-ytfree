@@ -2,10 +2,22 @@
 
 ## Status — 2026-07-26
 v1 confirmed working in Obsidian. Issue 001 (flow capture) is built and installed;
-**first manual test found two problems, both fixed, awaiting re-test.** All automated
-tests pass: 36 unit, 5 live.
+**two rounds of manual-test feedback applied, awaiting re-test.** All automated tests
+pass: 38 unit, 5 live.
 
-## What just changed (second pass)
+## What just changed (third pass)
+- **Displayed time and seek target are now different numbers.** `{ts}` shows the moment
+  the line was written; `{link}` / `{seconds}` point `lookbackSeconds` earlier. A line
+  reading `3:05` seeks to `3:00`. Reading and replaying want different answers.
+- **Enter no longer pauses the video.** Pausing moved off `updateListener` (which fires
+  for Enter and for programmatic writes) onto the same `inputHandler` as stamping, so only
+  real character input pauses.
+- **Bulleted lines are never stamped.** Typing `-`/`*`/`+` first doesn't stamp, and a line
+  already starting with a bullet doesn't either. Stamping there produced `[3:05](…) -`,
+  which Obsidian won't render as a list. Accepted consequence: bulleted notes get no
+  auto-timestamps — the command and Timestamp button are the fallback there.
+
+## What changed in the second pass
 - **The trigger moved from Enter to the first character typed on a line.** Enter failed
   twice in real use: the first line of a note never got stamped (you don't press Enter to
   reach it), and Enter writing text raced with the typing that followed. Now
@@ -45,7 +57,13 @@ Reload the plugin in Obsidian, then run the manual test in `issues/001-flow-capt
   position is well defined in every state, so the gate doesn't ask. Guarded by a named
   regression test that also asserts no `isPlaying` field exists on the gate input.
 - **The trigger is typing, not Enter.** Enter can't stamp the first line of a note, and
-  an Enter that writes text races with the typing after it.
+  an Enter that writes text races with the typing after it. Enter must also not pause —
+  which is why pausing hangs off `inputHandler` and not off `updateListener`.
+- **Bulleted lines carry no stamp, on purpose.** A stamp between the bullet and the text
+  stops Obsidian rendering the list at all. Do not "fix" this by stamping after the
+  bullet without asking — it was tried and rejected.
+- **`{ts}` and `{link}` intentionally disagree.** The text shows where you were; the link
+  lands `lookbackSeconds` earlier. Making them match again would undo the point.
 - **`pausedByTyping` is only ever set by a pause we performed**, because `pauseForTyping`
   no-ops on an already-paused video. That is what stops the idle timer resuming a video
   the user paused themselves.

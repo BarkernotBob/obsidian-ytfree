@@ -31,8 +31,12 @@ Typing is the correct trigger because it is the same moment in every case: the i
 start writing a thought. There is now exactly one trigger and no interaction with Enter,
 which is left completely alone.
 
-- Fires after indentation, list bullets, checkboxes, block quotes and heading markers, so
-  an auto-continued list line still gets stamped — at the cursor, after the marker.
+- Fires after indentation, block quotes and heading markers.
+- **Never fires on a bulleted line.** Typing `-`, `*` or `+` as the first character does
+  not stamp, and a line that already starts with a bullet is never stamped either.
+  Stamping there produced `[3:05](…) -`, which Obsidian does not turn into a list, so
+  bulleted lists could not be started at all. Consequence, accepted deliberately: lines in
+  a bulleted list carry no timestamp. Use the command or the Timestamp button there.
 - Does not fire when typing into a line that already has content: that is editing, not
   starting a thought.
 - Uses the existing `timestampText()` and `timestampFormat` setting — no new format.
@@ -40,9 +44,14 @@ which is left completely alone.
 
 ### 2. Lookback offset
 
-Subtract a fixed offset from the captured position before formatting. You decide something
-is worth noting several seconds after you hear it; stamping at keypress time always lands
-past the thing you wanted.
+You decide something is worth noting several seconds after you hear it, so a raw capture
+always lands past the thing you wanted.
+
+**The displayed time and the seek target are different numbers.** `{ts}` shows the moment
+you wrote the line, because that is what you scan for when reading the note back. `{link}`
+and `{seconds}` point `lookbackSeconds` earlier, so clicking drops you in just before it.
+Reading and replaying want different answers, so they get different answers: a line that
+reads `3:05` seeks to `3:00`.
 
 - Default **5 seconds**. Clamped to `>= 0` so the start of a video can't produce a
   negative seek.
@@ -54,8 +63,11 @@ past the thing you wanted.
 Typing **anywhere** in a note that contains an active player pauses playback. Playback
 resumes after a short idle period with no keystrokes.
 
-- Scope is the whole note, not just the stamped line. Any keystroke in the editor of a
-  note containing an active player counts.
+- Scope is the whole note, not just the stamped line. Any typed character in a note
+  containing an active player counts.
+- **Enter does not pause.** Breaking a line is not typing. Pausing hangs off character
+  input, not off document changes, which also means a sync or another plugin writing to
+  the note leaves playback alone.
 - Idle resume delay: default **2000 ms**, configurable.
 - **Only resume if we were the one who paused.** Track a `pausedByTyping` flag. If the
   user paused the video themselves, typing must not silently restart it.
@@ -116,8 +128,10 @@ stamp becomes the default path, not the only one.
   (`stampInsertOffset`) rejects every character after the first on a line without touching
   the player, the workspace, or the document as a whole. The fence scan runs at most once
   per line.
-- Typing detection for pause: `EditorView.updateListener` on the same extension. Debounce
-  the resume timer; do not spawn one timer per keystroke.
+- Typing detection for pause: the *same* `inputHandler`, called before the stamp logic and
+  regardless of its outcome. Not `updateListener` — that fires for Enter and for
+  programmatic writes, both of which must not pause. Debounce the resume timer; do not
+  spawn one timer per keystroke.
 - Resolving "which player is in this note": `activePlayer()` / `lastActiveVideoId` already
   exist in `src/main.ts` but are global-ish. This issue needs note-scoped resolution —
   check whether the active `MarkdownView`'s file actually owns the player before acting.
@@ -144,12 +158,16 @@ stamp becomes the default path, not the only one.
 11. Typing inside a fenced code block inserts no timestamp.
 12. A line that already contains a `ytfree:` timestamp never gets a second one, and typing
     into the middle or start of a line that already has content never stamps.
-13. A line Obsidian auto-continued as a list (`- `) still stamps, after the bullet.
-14. Turning off `autoStampNewLine` stops stamping; turning off `pauseWhileTyping` leaves
+13. Typing `-`, `*` or `+` on an empty line starts a normal bulleted list with no stamp,
+    and lines within that list are never stamped.
+14. Pressing Enter never pauses the video; only typing a character does.
+15. `{ts}` renders the moment the line was written while the link seeks `lookbackSeconds`
+    earlier — a line reading `3:05` navigates to `3:00`.
+16. Turning off `autoStampNewLine` stops stamping; turning off `pauseWhileTyping` leaves
     playback running while typing; each is independent.
-15. `lookbackSeconds` applies equally to the `insert-timestamp` command and the player's
+17. `lookbackSeconds` applies equally to the `insert-timestamp` command and the player's
     Timestamp button.
-16. Unit tests cover the trigger shape, the gate logic and the lookback clamp. `npm test`
+18. Unit tests cover the trigger shape, the gate logic and the lookback clamp. `npm test`
     stays green.
 
 ## Manual test (for BarkernotBob)
@@ -163,8 +181,8 @@ new build is loaded. Make a scratch note with a ` ```ytfree ` block and a video 
 3. **Expect:** the timestamp appears the moment you type the first character, ahead of what
    you typed, and your typing continues normally after it. You never pressed Enter.
 4. Press Enter, type a few more words. Repeat once more.
-5. **Expect:** each line carries its own timestamp, each roughly 5 seconds *earlier* than
-   where the video was when you started that line.
+5. **Expect:** each line carries its own timestamp, matching where the video was when you
+   started that line. (The 5-second lookback is in the click target, not the text — see G.)
 6. Look at the moment Enter itself happens. **Expect:** Enter just breaks the line. Nothing
    is written until you type.
 
@@ -190,23 +208,34 @@ new build is loaded. Make a scratch note with a ` ```ytfree ` block and a video 
 **E. Clicking back**
 14. Click one of the timestamps you created. **Expect:** the video jumps there and plays.
 
-**F. Nothing else is broken**
-15. Open any note with no video in it. Type, press Enter, type again.
+**F. Bulleted lists and Enter**
+15. On an empty line, type `-` then a space then some words.
+    **Expect:** a normal bullet, and **no timestamp** on it. Press Enter, type more.
+    **Expect:** the auto-continued bullet also has no timestamp.
+16. Press Enter several times in a row while the video plays, without typing anything.
+    **Expect:** the video keeps playing. Enter must not pause it.
+
+**G. Displayed time vs. click target**
+17. Start a new line and note the timestamp it shows, and where the video actually was.
+    **Expect:** the timestamp reads the moment you started typing — not five seconds
+    earlier.
+18. Click that timestamp. **Expect:** the video jumps to about five seconds *before* the
+    time shown. Reading and replaying are meant to differ.
+
+**H. Nothing else is broken**
+19. Open any note with no video in it. Type, press Enter, type again.
     **Expect:** completely normal. No timestamps, no lag, no swallowed characters.
-16. In the video note, type a bullet list: press Enter, type `- `, then some words.
-    **Expect:** the stamp lands after the bullet, and Obsidian's auto-continued next bullet
-    also stamps when you start typing on it.
-17. Click inside the ` ```ytfree ` block and type. **Expect:** no timestamp.
-18. Click into the middle of a line you already wrote and type. **Expect:** no second
+20. Click inside the ` ```ytfree ` block and type. **Expect:** no timestamp.
+21. Click into the middle of a line you already wrote and type. **Expect:** no second
     timestamp on that line.
 
-**G. The switches**
-19. Settings → YT Free → Flow capture. Turn **Timestamp every new line** off, then type.
+**I. The switches**
+22. Settings → YT Free → Flow capture. Turn **Timestamp every new line** off, then type.
     **Expect:** normal typing, no stamps; the Timestamp button still works.
-20. Turn it back on, turn **Pause while typing** off.
+23. Turn it back on, turn **Pause while typing** off.
     **Expect:** stamping still works, but the video keeps playing while you type.
-21. Turn both back on. Drag **Lookback** to 0 and start a new line.
-    **Expect:** the timestamp now matches the video position exactly.
+24. Turn both back on. Drag **Lookback** to 0 and start a new line, then click the stamp.
+    **Expect:** the displayed time and the place it lands are now the same.
 
 Report which numbered steps fail, and what happened instead.
 
