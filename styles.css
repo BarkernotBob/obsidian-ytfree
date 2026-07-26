@@ -1,0 +1,49 @@
+.ytfree-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/*
+ * Fixed height, always present. The status line appears and disappears during
+ * stream refreshes; reserving its space means the player and the note text
+ * below it never shift.
+ */
+.ytfree-status {
+  min-height: 1.4em;
+  line-height: 1.4em;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  visibility: hidden;
+}
+
+.ytfree-status-visible {
+  visibility: visible;
+}
+
+.ytfree-video {
+  width: 100%;
+  max-height: 70vh;
+  background: #000;
+  border-radius: var(--radius-m);
+}
+
+.ytfree-error {
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--text-error);
+  border-radius: var(--radius-m);
+  padding: 0.75em 1em;
+}
+
+.ytfree-error p {
+  margin: 0.4em 0;
+}
+
+.ytfree-error pre {
+  white-space: pre-wrap;
+  font-size: var(--font-ui-smaller);
+  background: var(--background-secondary);
+  padding: 0.5em;
+  border-radius: var(--radius-s);
+  margin: 0;
+}

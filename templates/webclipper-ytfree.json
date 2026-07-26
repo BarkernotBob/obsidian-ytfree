@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "0.1.0",
+  "name": "YT Free video",
+  "behavior": "create",
+  "noteNameFormat": "{{title|safe_name}}",
+  "path": "Videos",
+  "noteContentFormat": "```ytfree\n{{url}}\n```\n\n## Notes\n\n",
+  "properties": [
+    { "name": "title", "value": "{{title}}", "type": "text" },
+    { "name": "source", "value": "{{url}}", "type": "text" },
+    { "name": "channel", "value": "{{author}}", "type": "text" },
+    { "name": "clipped", "value": "{{date}}", "type": "date" },
+    { "name": "tags", "value": "video", "type": "multitext" }
+  ],
+  "triggers": [
+    "/^https:\\/\\/(www\\.)?youtube\\.com\\/watch/",
+    "/^https:\\/\\/youtu\\.be\\//"
+  ]
+}

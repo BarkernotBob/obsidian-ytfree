@@ -1,0 +1,9 @@
+{
+  "id": "ytfree",
+  "name": "YT Free",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Play YouTube videos in notes without ads, by resolving the stream with yt-dlp instead of loading YouTube's player. Desktop only.",
+  "author": "BarkernotBob",
+  "isDesktopOnly": true
+}

@@ -1,0 +1,30 @@
+{
+  "name": "obsidian-ytfree",
+  "version": "0.1.0",
+  "description": "Ad-free YouTube playback inside Obsidian notes",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "test": "node --test \"tests/*.test.ts\"",
+    "smoke": "node --test \"tests/*.smoke.ts\"",
+    "check": "npm run test && npm run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "builtin-modules": "^5.3.0",
+    "esbuild": "^0.28.1",
+    "obsidian": "^1.13.1",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "hls.js": "^1.6.16"
+  }
+}
