@@ -5,6 +5,7 @@ import {
   isInsideCodeBlock,
   lineHasTimestamp,
   shouldAutoStamp,
+  stampInsertOffset,
 } from "../src/capture.ts";
 import type { StampGateInput } from "../src/capture.ts";
 
@@ -13,8 +14,7 @@ function gate(overrides: Partial<StampGateInput> = {}): StampGateInput {
   return {
     enabled: true,
     hasPlayer: true,
-    isPlaying: true,
-    pausedByTyping: false,
+    hasPlayed: true,
     lineText: "",
     insideCodeBlock: false,
     ...overrides,
@@ -42,20 +42,22 @@ test("applyLookback of zero is the raw position", () => {
   assert.equal(applyLookback(42, 0), 42);
 });
 
-test("auto-stamp fires while the video is playing", () => {
+test("auto-stamp fires once the video has been played", () => {
   assert.equal(shouldAutoStamp(gate()), true);
 });
 
-test("auto-stamp still fires when we paused the video for typing", () => {
-  // Regression guard for the interaction that makes this feature fail in its
-  // own default configuration: pause-while-typing is on, so by the time Enter
-  // arrives the player is paused. Gating on isPlaying alone kills auto-stamp
-  // entirely.
-  assert.equal(shouldAutoStamp(gate({ isPlaying: false, pausedByTyping: true })), true);
+test("auto-stamp is indifferent to play/pause state", () => {
+  // Regression guard. Pause-while-typing means the player is paused for most of
+  // the time you are actually writing, and the user may pause by hand to think.
+  // Any play-state condition here silently kills stamping in normal use, so the
+  // gate must not have one — hence there is no isPlaying field to set.
+  assert.equal(shouldAutoStamp(gate()), true);
+  assert.equal(Object.keys(gate()).includes("isPlaying"), false);
 });
 
-test("auto-stamp does not fire for a video the user paused", () => {
-  assert.equal(shouldAutoStamp(gate({ isPlaying: false, pausedByTyping: false })), false);
+test("auto-stamp does not fire for a video that was never started", () => {
+  // Otherwise a note whose video is untouched stamps every line 0:00.
+  assert.equal(shouldAutoStamp(gate({ hasPlayed: false })), false);
 });
 
 test("auto-stamp does not fire with no player in the note", () => {
@@ -72,6 +74,48 @@ test("auto-stamp does not fire inside a code block", () => {
 
 test("auto-stamp does not add a second stamp to a stamped line", () => {
   assert.equal(shouldAutoStamp(gate({ lineText: "[12:34](ytfree:abc:754) note" })), false);
+});
+
+test("stampInsertOffset fires on the first character of an empty line", () => {
+  assert.equal(stampInsertOffset("", 0), 0);
+});
+
+test("stampInsertOffset fires on the first line of a note", () => {
+  // Issue: the first line never got stamped under the Enter trigger, because
+  // you don't press Enter to reach it. Typing is the trigger now, so it does.
+  assert.equal(stampInsertOffset("", 0), 0);
+});
+
+test("stampInsertOffset fires after indentation and list markers", () => {
+  // Obsidian auto-continues lists, so the "new" line already contains "- ".
+  assert.equal(stampInsertOffset("  ", 2), 2);
+  assert.equal(stampInsertOffset("- ", 2), 2);
+  assert.equal(stampInsertOffset("  * ", 4), 4);
+  assert.equal(stampInsertOffset("1. ", 3), 3);
+  assert.equal(stampInsertOffset("- [ ] ", 6), 6);
+  assert.equal(stampInsertOffset("> ", 2), 2);
+  assert.equal(stampInsertOffset("## ", 3), 3);
+});
+
+test("stampInsertOffset stays quiet for every later character on the line", () => {
+  // The common case by far: this is what keeps one stamp per line.
+  assert.equal(stampInsertOffset("already typing", 14), null);
+  assert.equal(stampInsertOffset("- a", 3), null);
+});
+
+test("stampInsertOffset stays quiet when editing into existing content", () => {
+  assert.equal(stampInsertOffset("existing text", 0), null);
+  assert.equal(stampInsertOffset("  existing", 2), null);
+  assert.equal(stampInsertOffset("existing text", 4), null);
+});
+
+test("stampInsertOffset never adds a second stamp to a line", () => {
+  assert.equal(stampInsertOffset("[12:34](ytfree:abc:754) ", 24), null);
+});
+
+test("stampInsertOffset rejects an out-of-range cursor", () => {
+  assert.equal(stampInsertOffset("abc", -1), null);
+  assert.equal(stampInsertOffset("abc", 99), null);
 });
 
 test("lineHasTimestamp only matches our own scheme", () => {

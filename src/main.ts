@@ -1,5 +1,5 @@
 import { Prec } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 import {
   App,
   MarkdownPostProcessorContext,
@@ -10,7 +10,12 @@ import {
   PluginSettingTab,
   Setting,
 } from "obsidian";
-import { applyLookback, isInsideCodeBlock, shouldAutoStamp } from "./capture";
+import {
+  applyLookback,
+  isInsideCodeBlock,
+  shouldAutoStamp,
+  stampInsertOffset,
+} from "./capture";
 import { formatTimestamp } from "./format";
 import { YtFreePlayer } from "./player";
 import {
@@ -72,11 +77,15 @@ export default class YtFreePlugin extends Plugin {
       this.renderBlock(source, el, ctx),
     );
 
-    // Flow capture (issue 001). Highest precedence so our Enter handler is
-    // consulted before the default binding; returning false falls straight
-    // through to it.
+    // Flow capture (issue 001). The stamp rides on the first character typed on
+    // a line, so `inputHandler` — which sees real typing and not programmatic
+    // edits — is the right hook. Enter is left entirely alone.
     this.registerEditorExtension([
-      Prec.highest(keymap.of([{ key: "Enter", run: () => this.handleEnter() }])),
+      Prec.highest(
+        EditorView.inputHandler.of((view, from, to, text) =>
+          this.handleInput(view, from, to, text),
+        ),
+      ),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) this.handleTyping();
       }),
@@ -145,42 +154,49 @@ export default class YtFreePlugin extends Plugin {
   // ---------------------------------------------------------------- capture
 
   /**
-   * Enter in a note with an active player: create the new line with its
-   * timestamp already on it, cursor after it.
+   * The first character typed on a line carries the stamp in with it.
    *
-   * Returns true only when we handled the key. Every failure path — including
-   * an unexpected throw — returns false so Obsidian's own Enter still runs. A
-   * bug in here must never break the Enter key.
+   * Runs on every keystroke, so the cheap line-shape test comes first: it
+   * rejects every character after the first one on a line without touching the
+   * player, the workspace, or the document as a whole.
+   *
+   * Returns true only when we replaced the input ourselves. Every other path —
+   * including an unexpected throw — returns false, so the keystroke is typed
+   * normally. A bug in here must never eat a character.
    */
-  private handleEnter(): boolean {
+  private handleInput(view: EditorView, from: number, to: number, text: string): boolean {
     try {
       if (!this.settings.autoStampNewLine) return false;
+      if (!text) return false;
 
-      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-      const editor = view?.editor;
-      if (!editor || view?.getMode() !== "source") return false;
+      const line = view.state.doc.lineAt(from);
+      const offset = stampInsertOffset(line.text, from - line.from);
+      if (offset === null || from !== to) return false;
 
-      const entry = this.playerForPath(view.file?.path);
+      const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+      const entry = this.playerForPath(mdView?.file?.path);
       if (!entry) return false;
-
-      const cursor = editor.getCursor();
-      const lines = editor.getValue().split("\n");
 
       const ok = shouldAutoStamp({
         enabled: true,
         hasPlayer: true,
-        isPlaying: entry.player.isPlaying,
-        pausedByTyping: entry.player.isPausedByTyping,
-        lineText: lines[cursor.line] ?? "",
-        insideCodeBlock: isInsideCodeBlock(lines, cursor.line),
+        hasPlayed: entry.player.hasPlayed,
+        lineText: line.text,
+        // Only reached once per line, so scanning the document for fences here
+        // is not on the per-keystroke path.
+        insideCodeBlock: isInsideCodeBlock(view.state.doc.toString().split("\n"), line.number - 1),
       });
       if (!ok) return false;
 
       const stamp = this.timestampText(entry.videoId, this.captureSeconds(entry.player));
-      editor.replaceSelection("\n" + stamp);
+      view.dispatch({
+        changes: { from, to, insert: stamp + text },
+        selection: { anchor: from + stamp.length + text.length },
+        userEvent: "input.type",
+      });
       return true;
     } catch (err) {
-      console.error("YT Free: auto-stamp failed; falling back to default Enter.", err);
+      console.error("YT Free: auto-stamp failed; typing the character normally.", err);
       return false;
     }
   }
@@ -429,7 +445,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Timestamp every new line")
       .setDesc(
-        "While a video in the note is active, pressing Enter starts the new line with a timestamp already on it. Turn off to restore normal Enter and use the command or the Timestamp button instead.",
+        "Once a video in the note has been played, the first character you type on a line brings its timestamp in with it. Works on the first line of a note, and whether the video is playing or paused. Turn off to use the command or the Timestamp button instead.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.autoStampNewLine).onChange(async (value) => {

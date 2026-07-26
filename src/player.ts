@@ -29,6 +29,8 @@ export class YtFreePlayer {
   private playbackRate = 1;
   /** True only while playback is paused *by us* because the user is typing. */
   private pausedByTyping = false;
+  /** Has this player ever started? Stops an untouched note stamping 0:00. */
+  private started = false;
 
   constructor(
     private container: HTMLElement,
@@ -52,6 +54,7 @@ export class YtFreePlayer {
     // later idle timer can't claim credit for a state it didn't cause.
     this.video.addEventListener("play", () => {
       this.pausedByTyping = false;
+      this.started = true;
     });
   }
 
@@ -264,6 +267,10 @@ export class YtFreePlayer {
 
   get isPlaying(): boolean {
     return !this.video.paused && !this.video.ended;
+  }
+
+  get hasPlayed(): boolean {
+    return this.started;
   }
 
   get currentTime(): number {

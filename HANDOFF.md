@@ -1,35 +1,51 @@
 # HANDOFF
 
 ## Status — 2026-07-26
-v1 confirmed working in Obsidian. Issue 001 (flow capture) is **built and installed, not
-yet manually verified.** All automated tests pass: 29 unit, 5 live.
+v1 confirmed working in Obsidian. Issue 001 (flow capture) is built and installed;
+**first manual test found two problems, both fixed, awaiting re-test.** All automated
+tests pass: 36 unit, 5 live.
 
-## What just changed
-- Issue 001 implemented: auto-timestamp on Enter, lookback offset, pause-while-typing.
-  All three on by default (`lookbackSeconds: 5`, `resumeIdleMs: 2000`).
+## What just changed (second pass)
+- **The trigger moved from Enter to the first character typed on a line.** Enter failed
+  twice in real use: the first line of a note never got stamped (you don't press Enter to
+  reach it), and Enter writing text raced with the typing that followed. Now
+  `EditorView.inputHandler`, and Enter is untouched.
+- **Play/pause is no longer part of the stamp decision.** The old gate was "playing OR
+  paused-by-us", which still skipped stamps when the user paused by hand. Replaced with a
+  single `hasPlayed` guard, which exists only to stop an unplayed note stamping 0:00.
+- `stampInsertOffset()` decides where the stamp goes; it fires after indentation, list
+  bullets, checkboxes, quotes and headings, so auto-continued list lines still stamp.
+- Player gained `hasPlayed`. `isPlaying` / `isPausedByTyping` remain but no longer gate
+  stamping.
+
+## What changed in the first pass
+- Issue 001 implemented: auto-timestamp, lookback offset, pause-while-typing. All three
+  on by default (`lookbackSeconds: 5`, `resumeIdleMs: 2000`).
 - New `src/capture.ts` holds the pure decision logic — lookback maths, the stamp gate,
   fence detection — so the part most likely to break is unit-testable without an editor.
 - `src/player.ts` gained `pauseForTyping` / `resumeAfterTyping` and a `pausedByTyping`
   flag, plus `isPlaying`.
 - `src/main.ts`: players are now `PlayerEntry { player, videoId, sourcePath }` so capture
   can ask "which player is in *this* note" instead of falling back to any player.
-- Enter is intercepted with a `Prec.highest` CM6 keymap via `registerEditorExtension`;
-  typing is detected with an `EditorView.updateListener`.
+- Typing is detected with an `EditorView.updateListener` for the pause behaviour.
 - `esbuild.config.mjs` now marks `@codemirror/*` external — verified in the built
   `main.js`.
-- 18 new unit tests in `tests/capture.test.ts`.
+- New unit suite `tests/capture.test.ts`.
 
 ## Exact next step
-BarkernotBob runs the manual test in `issues/001-flow-capture.md` (sections A–F). Report which
-numbered steps fail.
+Reload the plugin in Obsidian, then run the manual test in `issues/001-flow-capture.md`
+(sections A–G). Section B is the one that was broken and is worth checking first.
 
 ## Key decisions worth remembering
 - Notes store **video IDs only**. Never write a resolved URL to disk; they expire and are
   IP-locked. This is the core design constraint.
-- **The auto-stamp gate cannot be `!video.paused`.** With pause-while-typing on (the
-  default), the player is already paused when Enter arrives. The gate is "playing OR
-  paused-by-us". Getting this wrong silently disables auto-stamp in the default config.
-  Guarded by a named regression test.
+- **The stamp gate must not test play/pause at all.** Two versions of this were wrong:
+  `!video.paused` (dead on arrival, since pause-while-typing pauses first) and then
+  "playing OR paused-by-us" (still skipped stamps when the user paused by hand). The
+  position is well defined in every state, so the gate doesn't ask. Guarded by a named
+  regression test that also asserts no `isPlaying` field exists on the gate input.
+- **The trigger is typing, not Enter.** Enter can't stamp the first line of a note, and
+  an Enter that writes text races with the typing after it.
 - **`pausedByTyping` is only ever set by a pause we performed**, because `pauseForTyping`
   no-ops on an already-paused video. That is what stops the idle timer resuming a video
   the user paused themselves.

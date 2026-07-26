@@ -3,6 +3,12 @@
  *
  * Kept free of Obsidian and DOM types on purpose: the gate below is the part
  * most likely to break, so it has to be unit-testable without an editor.
+ *
+ * The trigger is the *first character typed on a line*, not Enter. Enter was
+ * the original design and it was wrong twice: the first line of a note never
+ * got stamped (you don't press Enter to reach it), and having Enter both break
+ * the line and write text raced with the typing that followed. One trigger,
+ * one moment: you start writing a thought, the thought gets its timestamp.
  */
 
 export interface StampGateInput {
@@ -10,15 +16,21 @@ export interface StampGateInput {
   enabled: boolean;
   /** A ytfree player exists in the note being edited. */
   hasPlayer: boolean;
-  /** That player is actually playing right now. */
-  isPlaying: boolean;
-  /** That player is paused, and *we* paused it because the user is typing. */
-  pausedByTyping: boolean;
+  /** That player has been started at least once in this session. */
+  hasPlayed: boolean;
   /** Full text of the line the cursor sits on. */
   lineText: string;
   /** The cursor is inside a fenced code block. */
   insideCodeBlock: boolean;
 }
+
+/**
+ * Whitespace, block quotes, list bullets, checkboxes and heading markers may
+ * sit before the stamp — a line is still "new" when Obsidian has auto-continued
+ * a list into it. Anything else means the line already has content.
+ */
+const LINE_PREFIX =
+  /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?(?:#{1,6}[ \t]+)?$/;
 
 /**
  * Shift a captured position back by the lookback offset.
@@ -39,12 +51,48 @@ export function lineHasTimestamp(lineText: string): boolean {
 }
 
 /**
+ * Where to put the stamp for a keystroke landing at `cursorCh`, or null when
+ * this keystroke is not the start of a new line.
+ *
+ * Null for the overwhelming majority of keystrokes — every character after the
+ * first one on a line — so this is the cheap check that runs first.
+ */
+export function stampInsertOffset(lineText: string, cursorCh: number): number | null {
+  if (cursorCh < 0 || cursorCh > lineText.length) return null;
+  if (lineHasTimestamp(lineText)) return null;
+  // Typing into the middle of a line that already has content is editing, not
+  // starting a thought.
+  if (lineText.slice(cursorCh).trim() !== "") return null;
+  if (!LINE_PREFIX.test(lineText.slice(0, cursorCh))) return null;
+  return cursorCh;
+}
+
+/**
+ * The gate for auto-stamping.
+ *
+ * Deliberately says nothing about whether the video is playing. It can't:
+ * pause-while-typing means the player is paused for most of the time you are
+ * actually writing, and the user may also pause by hand to think. "Where the
+ * video is right now" is well defined in every one of those states, so
+ * play/pause is simply not part of the decision.
+ *
+ * `hasPlayed` is the one guard kept, and only to stop a note whose video was
+ * never started from stamping every line 0:00.
+ */
+export function shouldAutoStamp(input: StampGateInput): boolean {
+  if (!input.enabled) return false;
+  if (!input.hasPlayer) return false;
+  if (!input.hasPlayed) return false;
+  if (input.insideCodeBlock) return false;
+  if (lineHasTimestamp(input.lineText)) return false;
+  return true;
+}
+
+/**
  * Whether `lineIndex` sits inside a fenced code block.
  *
  * Broader than strictly required — it covers every fence, not just ` ```ytfree `
  * — because stamping inside *any* code block is wrong for the same reason.
- * The cursor's own line is included in the scan: pressing Enter on the opening
- * fence line puts the new line inside the block.
  */
 export function isInsideCodeBlock(lines: string[], lineIndex: number): boolean {
   let openMarker: string | null = null;
@@ -57,21 +105,4 @@ export function isInsideCodeBlock(lines: string[], lineIndex: number): boolean {
     else if (marker === openMarker) openMarker = null;
   }
   return openMarker !== null;
-}
-
-/**
- * The gate for auto-stamping a new line.
- *
- * The subtle one is `pausedByTyping`. With pause-while-typing on — the default —
- * the player is already paused by the time Enter arrives, so gating on
- * `isPlaying` alone would silently disable auto-stamp in the default
- * configuration. Both states have to count as "actively watching".
- */
-export function shouldAutoStamp(input: StampGateInput): boolean {
-  if (!input.enabled) return false;
-  if (!input.hasPlayer) return false;
-  if (!input.isPlaying && !input.pausedByTyping) return false;
-  if (input.insideCodeBlock) return false;
-  if (lineHasTimestamp(input.lineText)) return false;
-  return true;
 }
