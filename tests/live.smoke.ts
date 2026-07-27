@@ -91,6 +91,6 @@ test("a channel feed still carries IDs, descriptions and 15 entries", async () =
 });
 
 test("the Shorts probe still answers 303 for a long-form video", async () => {
-  const { probeIsShort } = await import("../src/hub.ts");
+  const { probeIsShort } = await import("../src/subscriptions.ts");
   assert.equal(await probeIsShort("vS6HEes8daw"), false);
 });

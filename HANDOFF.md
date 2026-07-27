@@ -1,6 +1,62 @@
 # HANDOFF
 
-## Status — 2026-07-27 (latest): mobile re-scoped, nothing built
+## Status — 2026-07-27 (latest): subscriptions hub built
+
+Issue 003 is **built and installed**. 113 unit tests and 7 live smoke tests
+pass, build clean. **Awaiting the 18-step manual test** at the bottom of
+`docs/V1-SCOPE-SUBSCRIPTIONS.md`.
+
+Subscribed channels are polled on a schedule, new videos land in a hub view, and
+clicking one turns it into a Watch Later note with the player already pinned.
+Nothing here replaces RSS Dashboard for podcasts — only the YouTube half.
+
+- `src/subscriptions.ts` — all the rules, no Obsidian: feed parsing, the Takeout
+  CSV, merge, expiry, the note shape, the Shorts probe. 30 tests.
+- `src/hub.ts` — the state file, the poller, the view, the import dialog.
+- Storage is `.obsidian/plugins/ytfree/subscriptions.json`, deliberately not
+  `data.json`: the index runs to thousands of rows and a poll should not rewrite
+  the settings file.
+
+### Three findings that only showed up against live data
+- **The feed header's `<yt:channelId>` drops the `UC` prefix**, while the same
+  tag inside an entry keeps it. The live smoke test caught this; nothing written
+  from the spec would have. The parser reads the ID off the self link instead.
+- **A nonexistent video ID answers 200 to the `/shorts/<id>` probe**, same as a
+  real Short. So "200 means Short" only holds for IDs that came from a feed, and
+  any other status is recorded as "unknown, ask again" — never as long-form.
+- **Expiry runs before the Shorts probe.** On a first import that is the
+  difference between a few dozen HTTP requests and fifteen hundred.
+
+### Decisions worth keeping
+- **Clicking a video does not remove its card.** Under the New filter, marking an
+  item Kept would drop it out of the list and pull everything below it upward —
+  the reflow-on-click the global rule forbids. The card stays put and only its
+  marker changes; the list re-filters on the next refresh, poll or filter change.
+- **Descriptions are cached at poll time**, which is the hub's whole reason to
+  exist over an RSS reader. The feed is a rolling 15-entry window; by the time
+  you click, the video may have fallen out of it.
+- **Expiry is measured from the publish date, not from when we first saw it.** A
+  fresh import then trims itself to the last 30 days instead of dumping every
+  channel's whole window into the hub, and "30 days" means the same thing on
+  both Macs.
+- **Expiry never touches a file.** It removes a row from a JSON index. Kept items
+  are exempt, and deleting a note by hand does not resurrect the item.
+- **Re-importing Takeout never removes a channel.** Unsubscribing on YouTube is
+  not a statement about what you want to keep seeing here.
+- **The poll ticker asks "is it due yet" every minute** rather than being an
+  interval set to the poll period, so changing the period in settings takes
+  effect immediately rather than at the next restart. Poll-on-load is skipped if
+  the last poll was under five minutes ago.
+- **The Takeout CSV is parsed by header name with a positional fallback.** The
+  exact column names were never verified against a real export, and an
+  unrecognised header must not silently import zero channels.
+
+### Known limitation, documented rather than fixed
+The 15-entry window has no backfill. If Obsidian stays closed longer than a
+channel takes to publish 15 videos, those videos are missed permanently.
+Polling on startup narrows it; nothing closes it.
+
+## Status — 2026-07-27 (transcript auto-fetch): mobile re-scoped, nothing built
 
 **Start the next session here.** Nothing in `src/` changed. Two issues were
 rewritten, one spike was added, and the mobile plan changed shape entirely.

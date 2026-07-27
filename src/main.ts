@@ -373,16 +373,21 @@ export default class YtFreePlugin extends Plugin {
     // Polling on load is the only thing that narrows the real limitation here:
     // the feed is a 15-entry window with no backfill, so a channel that posts
     // 16 videos while Obsidian is closed loses the oldest permanently.
-    this.app.workspace.onLayoutReady(() => {
-      void this.subscriptions.poll().then(() => this.refreshHub());
-    });
+    this.app.workspace.onLayoutReady(() => void this.maybePoll(5));
 
-    this.registerInterval(
-      window.setInterval(
-        () => void this.subscriptions.poll().then(() => this.refreshHub()),
-        Math.max(5, this.settings.subscriptionsPollMinutes) * 60_000,
-      ),
-    );
+    // A fixed ticker asking "is it due yet", rather than an interval set to the
+    // poll period: changing the period in settings takes effect immediately
+    // instead of at the next restart.
+    this.registerInterval(window.setInterval(() => void this.maybePoll(), 60_000));
+  }
+
+  /** Poll if the last one is older than the configured gap (or `floor`). */
+  private async maybePoll(floorMinutes?: number): Promise<void> {
+    const minutes = floorMinutes ?? Math.max(5, this.settings.subscriptionsPollMinutes);
+    const last = Date.parse(this.subscriptions.state.lastPolledAt ?? "");
+    if (Number.isFinite(last) && Date.now() - last < minutes * 60_000) return;
+    await this.subscriptions.poll();
+    this.refreshHub();
   }
 
   hubSettings(): HubSettings {

@@ -98,6 +98,40 @@ export function shortsProbeUrl(videoId: string): string {
 }
 
 /**
+ * Ask YouTube whether a video is a Short, without downloading it.
+ *
+ * `/shorts/<id>` answers 200 for a Short and 303 (redirecting to `/watch`) for
+ * long-form. It is the only field-free way to tell them apart: the feed mixes
+ * both and marks neither. This has to be a raw request rather than Obsidian's
+ * `requestUrl`, because the answer *is* the redirect and `requestUrl` follows
+ * it, turning every video into a 200.
+ *
+ * Any other status returns null, meaning "ask again later" rather than
+ * "long-form". A nonexistent ID also answers 200 — measured — so guessing from
+ * an unexpected status would hide real videos.
+ */
+export function probeIsShort(videoId: string): Promise<boolean | null> {
+  return new Promise((resolve) => {
+    const req = httpsRequest(
+      shortsProbeUrl(videoId),
+      { method: "GET", headers: { "user-agent": "Mozilla/5.0" } },
+      (res) => {
+        res.destroy();
+        if (res.statusCode === 200) resolve(true);
+        else if (res.statusCode === 303 || res.statusCode === 302) resolve(false);
+        else resolve(null);
+      },
+    );
+    req.on("error", () => resolve(null));
+    req.setTimeout(15000, () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.end();
+  });
+}
+
+/**
  * A channel ID out of whatever the user pasted: a bare `UC…`, a `/channel/UC…`
  * URL, or any URL containing one.
  *
@@ -298,8 +332,11 @@ export function parseChannelFeed(xml: string): ParsedFeed {
     });
   }
 
+  // Not `<yt:channelId>` in the header: measured against a live feed, that tag
+  // carries the ID with its `UC` prefix stripped, while the same tag inside an
+  // entry carries it intact. Scanning for the full shape is right either way.
   return {
-    channelId: tagText(head, "yt:channelId"),
+    channelId: parseChannelInput(head),
     channelTitle: tagText(head, "title"),
     entries,
   };

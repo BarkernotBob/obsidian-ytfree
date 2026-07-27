@@ -153,6 +153,17 @@ test("the feed yields channel, entries, description and views", () => {
   assert.equal(second.thumbnail, "");
 });
 
+// Measured on a live feed: the header's own <yt:channelId> drops the UC prefix,
+// while the same tag inside an entry keeps it. The self link is the honest one.
+test("the channel ID survives the header's prefix-stripped copy", () => {
+  const feed = `<feed>
+ <link rel="self" href="http://www.youtube.com/feeds/videos.xml?channel_id=${CHANNEL}"/>
+ <yt:channelId>${CHANNEL.slice(2)}</yt:channelId>
+ <title>SmarterEveryDay</title>
+</feed>`;
+  assert.equal(parseChannelFeed(feed).channelId, CHANNEL);
+});
+
 test("a feed with no entries parses rather than throwing", () => {
   const parsed = parseChannelFeed("<feed><title>Empty</title></feed>");
   assert.deepEqual(parsed.entries, []);

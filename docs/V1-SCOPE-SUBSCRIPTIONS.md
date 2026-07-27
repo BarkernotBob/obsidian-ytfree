@@ -159,5 +159,84 @@ data instead of a scrape:
 10. Shorts are absent from the hub by default and present when the setting is on.
 11. Clicking any control in the hub moves nothing else on screen.
 
+## What was built (2026-07-27)
+
+All of the above, plus three things the scope did not anticipate:
+
+- **The feed header's `<yt:channelId>` is wrong.** It carries the ID with the
+  `UC` prefix stripped, while the same tag inside an entry carries it intact.
+  Caught by the live smoke test, not by anything written from the spec. The
+  parser reads the ID off the self link instead.
+- **A nonexistent video ID also answers 200 to the Shorts probe**, so "200 means
+  Short" only holds for IDs that came out of a feed. Anything other than 200 or
+  303 is recorded as "unknown, ask again", never as long-form.
+- **Expiry runs before the Shorts probe.** On a first import that is the
+  difference between a few dozen HTTP requests and fifteen hundred.
+
+Two deliberate departures from the letter of the scope:
+
+- **Clicking a video does not remove its card.** Under the New filter, making an
+  item Kept would drop it from the list and pull everything below it upward —
+  exactly the reflow-on-click the global rule forbids. The card stays put and
+  only its marker changes; the list re-filters on the next refresh or poll.
+- **Poll-on-load is skipped if the last poll was under five minutes ago.**
+  Restarting Obsidian three times in a row should not mean three full sweeps of
+  every channel.
+
+Storage is `.obsidian/plugins/ytfree/subscriptions.json`, separate from
+`data.json` so a poll does not rewrite the settings file.
+
 ## Manual test (for BarkernotBob)
-To be written when v1 is complete, per the backlog rule.
+
+Relaunch Obsidian first — this is a new `main.js`.
+
+**Getting channels in**
+1. Command palette → **YT Free: Import YouTube subscriptions**. A dialog opens.
+2. Click **Choose File** and pick your Takeout `subscriptions.csv`. Expect a line
+   like "312 channels in the file — 312 new, 0 already here", then the hub opens
+   and starts checking. Give it a minute on a first run.
+   - No Takeout export handy? Type `https://www.youtube.com/@smartereveryday`
+     into "Or add one channel" and press **Add** instead.
+3. Run the import command again with the same file. Expect "… — 0 new, 312
+   already here". Nothing should be duplicated.
+
+**The hub**
+4. Click the YouTube icon in the left ribbon. The hub opens as a full tab, with a
+   channel list down the left and videos newest-first on the right.
+5. Confirm the **New** filter is selected and that what you see is roughly the
+   last 30 days across your channels — not every channel's entire history.
+6. Click a channel in the left list. Only that channel's videos should remain.
+   Click **All channels** to go back.
+7. Look for a channel showing a red **!** instead of a count. Hover it — it
+   should name the error. Everything else should still have polled.
+
+**Clicking a video into a note**
+8. Click any video card. A note should appear in `Watch Later/`, open, and its
+   pinned player should load and play.
+9. Scroll to `## Description`. If the video has chapters, click one — the pinned
+   player should seek there.
+10. Go back to the hub tab. **The card you clicked should still be exactly where
+    it was**, now with a tick on the right. Nothing above or below it moved.
+11. Click that same card again. It should open the note you already have, not
+    create a second one.
+12. Switch to **Kept**. Your clicked videos should be there and nothing else.
+
+**Shorts**
+13. Confirm no Shorts are in the list. Then Settings → YT Free → Subscriptions
+    hub → turn **Include Shorts** on and click the refresh icon in the hub.
+    Shorts should appear, labelled "Short" in the grey line under the title.
+
+**Expiry, and the rule that matters most**
+14. Click the **×** on a video you do not want. It should dim in place.
+15. Settings → YT Free → **Forget unwatched videos after** → drag to 5 days.
+    Back in the hub, click refresh. Videos older than 5 days that you never
+    clicked should be gone from the list.
+16. **Check that no note was deleted.** Open `Watch Later/` in the file explorer
+    and confirm every note you made in step 8 is still there, including any whose
+    video was just expired out of the hub.
+17. Delete one of those notes by hand. Click refresh in the hub. The video must
+    **not** reappear under New.
+
+**Restart**
+18. Quit and reopen Obsidian. The hub should remember your channels, what you
+    kept, and what you dismissed.
