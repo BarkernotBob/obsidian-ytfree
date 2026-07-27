@@ -1,6 +1,56 @@
 # HANDOFF
 
-## Status — 2026-07-27 (latest)
+## Status — 2026-07-27 (latest): mobile re-scoped, nothing built
+
+**Start the next session here.** Nothing in `src/` changed. Two issues were
+rewritten, one spike was added, and the mobile plan changed shape entirely.
+
+### What changed and why
+
+The iframe route is dead and the GitHub Pages shim is rejected. **Mobile will
+resolve the stream in the plugin and play it in a plain `<video>` element** — the
+same thing desktop does, with InnerTube standing in for yt-dlp.
+
+- **The error-153 confound is closed.** oEmbed returns `200` for `h0EGCnBjTVk`,
+  so embedding is *enabled* and the embed still refused to play. The cause is
+  `capacitor://localhost` not being an http(s) origin, and nothing the plugin
+  passes can fix that.
+- **InnerTube returns unciphered, playable URLs.** Measured 10/10: status OK,
+  zero `signatureCipher` formats, itag 18 (360p muxed) on every video, and those
+  URLs serve bytes with no PO token. No `base.js`, no eval, no crypto — which is
+  what makes this a different proposition from the "reimplement yt-dlp" that the
+  old issue 004 correctly rejected.
+- **Mobile therefore ends up ad-free**, plus native PiP, AirPlay, background
+  audio, and lock-screen transport.
+- **HLS is gone** (1 of 10 videos) and `dashManifestUrl` never appears on any
+  client version 17.x–20.x. Do not design around either.
+
+### The split
+
+- **[Issue 004](issues/004-mobile-viewer.md) — v1, 360p.** itag 18 into a
+  `<video>`, docked at the top of the note. Seeking becomes
+  `video.currentTime = secs`, which deletes the whole postMessage handshake.
+- **[Issue 005](issues/005-mobile-full-quality.md) — v2, full quality.** Separate
+  video/audio streams, so MSE, a synthesized manifest, and a custom loader
+  (googlevideo sends no `Access-Control-Allow-Origin`, so plain `fetch` is
+  blocked). iOS 17.1 floor via `ManagedMediaSource`.
+
+360p ships first on purpose: the risk in 004 is not the resolver, it is getting
+the plugin to load on iOS at all — every Node import is currently top-level and
+throws at module load. That work should not wait behind a media-engine project.
+
+### Next step
+
+1. `node spikes/innertube/probe.mjs` — five seconds, and the entire plan rests on
+   it. Baseline 2026-07-27 is 10/10 PASS.
+2. Then §1 of issue 004: `src/desktop/`, the new `src/stream.ts`, drop
+   `isDesktopOnly`. Desktop must not change behaviour.
+
+Open call for 005, not yet made: spike the paired `<video>`+`<audio>` route
+(route C) for one sitting first. If sync holds, it deletes that issue's entire
+media-engine cost.
+
+## Status — 2026-07-27 (transcript auto-fetch)
 Transcript now fetches **automatically for new notes**, from both the template
 and the Web Clipper. 83 unit tests pass, build clean, installed. **Awaiting
 manual test** — the automatic path is event-driven inside Obsidian and is the
