@@ -104,9 +104,15 @@ export function formatBytes(bytes: number): string {
 /**
  * Format selector.
  *
- * Anything above ~720p arrives as separate video and audio streams that need
- * ffmpeg to merge. Without ffmpeg we ask for a pre-muxed format instead: a
- * worse download beats a failed one.
+ * Everything except itag 18 arrives as separate video and audio streams that
+ * need ffmpeg to merge. Without ffmpeg we ask for a pre-muxed format instead,
+ * which in practice means itag 18 and nothing else.
+ *
+ * Measured 2026-07-26 across three videos: itag 18 (360p) was the *only*
+ * pre-muxed format on every one. The old 720p progressive format (itag 22) is
+ * effectively gone from YouTube, so "no ffmpeg" means 360p, not "somewhere
+ * between 360p and 720p". A worse download still beats a failed one, but the
+ * caller must say which one the user got.
  */
 export function formatSelector(hasFfmpeg: boolean): string {
   return hasFfmpeg ? "bv*+ba/b" : "b[ext=mp4]/b";

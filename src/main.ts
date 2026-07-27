@@ -420,7 +420,7 @@ export default class YtFreePlugin extends Plugin {
       notice.setMessage(
         this.ffmpegPath
           ? "YT Free: downloaded. This note now plays the local copy."
-          : "YT Free: downloaded at pre-muxed quality — install ffmpeg (brew install ffmpeg) for 1080p.",
+          : "YT Free: downloaded at 360p — that is the only quality available without ffmpeg. Streaming this note was higher quality. brew install ffmpeg, then re-download.",
       );
     } catch (err) {
       entry?.player.setDownloadState("idle");
@@ -899,7 +899,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("ffmpeg path")
       .setDesc(
-        "Leave blank to auto-detect. Without ffmpeg, downloads fall back to the best pre-muxed quality (usually 360–720p) instead of failing.",
+        "Leave blank to auto-detect. Required for downloads above 360p: YouTube only serves one pre-muxed format (itag 18, 360p) and everything better needs ffmpeg to merge separate video and audio. Streaming is unaffected — that reaches 1080p without ffmpeg.",
       )
       .addText((text) =>
         text

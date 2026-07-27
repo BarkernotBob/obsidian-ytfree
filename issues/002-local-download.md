@@ -91,9 +91,15 @@ Anything above 360p arrives as separate video and audio streams that need ffmpeg
 v1 handles this honestly rather than silently:
 
 - ffmpeg present → download `bv*+ba/b` (best available, merged).
-- ffmpeg absent → download the best **pre-muxed** format (usually 720p or 360p) and say so
-  in the status line, with `brew install ffmpeg` as the fix. A worse download beats a
-  failed one.
+- ffmpeg absent → download the best **pre-muxed** format and say so, with
+  `brew install ffmpeg` as the fix. A worse download beats a failed one.
+
+**Measured 2026-07-26 (`yt-dlp -F` on three videos): itag 18 / 360p was the only pre-muxed
+format on every one.** The old 720p progressive format (itag 22) is effectively gone from
+YouTube. So "no ffmpeg" means exactly 360p — and since streaming reaches 1080p via HLS
+without ffmpeg, **downloading without ffmpeg is a quality downgrade**, not a sidegrade.
+The completion message must say so plainly, or the user trades resolution for offline
+without knowing they made the trade.
 
 ### 6. Space
 
@@ -152,7 +158,8 @@ message under 2GB free. Warn but proceed over 2GB per file.
 - `src/download.ts` holds everything testable without Obsidian: filename rules, progress
   parsing, argument construction, the `[videoId]` file search.
 - **ffmpeg is not installed on this Mac.** The pre-muxed fallback is therefore the live
-  path today, not a corner case — expect ~360–720p until `brew install ffmpeg`.
+  path today, not a corner case — and it means 360p exactly, which is *worse* than what
+  streaming already gives. Downloads are not worth doing until `brew install ffmpeg`.
 - Verified for real: `--print after_move:filepath --no-simulate` downloads and prints the
   final absolute path on its own line, which is how the plugin learns the extension.
 - Local files play through Obsidian's `app://local/` handler. A plain `file://` URL is
