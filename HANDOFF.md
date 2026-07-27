@@ -1,6 +1,49 @@
 # HANDOFF
 
 ## Status — 2026-07-27 (latest)
+Transcript now fetches **automatically for new notes**, from both the template
+and the Web Clipper. 83 unit tests pass, build clean, installed. **Awaiting
+manual test** — the automatic path is event-driven inside Obsidian and is the
+one part of this that no test here can exercise.
+
+## What just changed (auto-fetch)
+- **Automatic fetch for notes created this session.** No template or clipper
+  change was needed: both create a file, and that single condition covers both
+  without either side knowing the plugin exists.
+- **"Created this session" is the whole gate**, and it is deliberate. Opening an
+  old note must never trigger a surprise yt-dlp call and a five-thousand-word
+  append. Old notes still have the command.
+- **`vault.create` is registered only after `onLayoutReady`.** Obsidian fires
+  `create` for every existing file during startup; registering earlier would
+  make the entire vault look new and queue a fetch for all of it.
+- **Driven off `metadataCache.changed`, not `create`.** A Templater note is
+  empty at create time — the frontmatter naming the video does not exist yet.
+  `create` and `file-open` also try, which costs nothing: with no video ID yet
+  the call returns without recording an attempt, so a later event still fires.
+- **Renames are tracked.** Templater renames the note after filling it in, so
+  the path recorded at create time is not the path the fetch would see.
+- **Fetches are serialized and delayed 1.5s.** Clipping four videos in a row
+  must not start four yt-dlp processes, and the delay lets the template finish
+  writing rather than racing it for the file. Content is re-read at the last
+  moment, so a note that gained a transcript in between is left alone.
+- Failures still speak up. Only the "nothing to add" case is silenced on the
+  automatic path — a note silently missing a transcript is indistinguishable
+  from a video that has no captions.
+- Off switch: Settings -> YT Free -> Transcript -> *Fetch automatically for new
+  notes*.
+
+## Next step — manual test (automatic path)
+1. Relaunch Obsidian.
+2. New note from `Templates/8.Watch_Later_Template.md`. Within ~10s expect a
+   "fetching transcript..." notice, then `## Most replayed` and `## Transcript`
+   appear on their own. Confirm Notes and Description survived.
+3. Clip a video with the Web Clipper. Same result, no command run.
+4. **Open an old Watch Later note. Nothing should happen.** This is the check
+   that matters most.
+5. Clip two videos back to back — the second fetch should start after the first
+   finishes, not alongside it.
+
+## Status — 2026-07-27 (subscriptions hub scoping)
 **Issue 003 (subscriptions hub) is scoped, not built** — see
 `docs/V1-SCOPE-SUBSCRIPTIONS.md`. Nothing in `src/` changed. It replaces RSS
 Dashboard for the YouTube half only; RSS Dashboard stays for Overcast podcasts.
@@ -13,7 +56,7 @@ to the vault. Verified end to end against a real video (Mark Rober,
 `h0EGCnBjTVk`): uploaded captions found, 520 cues → 25 sections, 8 replay peaks,
 27KB note. **Awaiting manual test.**
 
-## What just changed
+## What just changed (transcript command)
 - **New command: "Fetch transcript and most-replayed moments".** Answers the
   case that started this — a video whose uploader wrote no chapters, which is
   most of them. Writes two sections into the note.

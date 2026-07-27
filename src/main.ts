@@ -76,6 +76,7 @@ interface YtFreeSettings {
   linkifyTimestamps: boolean;
   transcriptLanguage: string;
   transcriptIntervalSeconds: number;
+  autoFetchTranscript: boolean;
   heatmapPeaks: number;
   downloadFolder: string;
   ffmpegPath: string;
@@ -99,6 +100,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   linkifyTimestamps: true,
   transcriptLanguage: "en",
   transcriptIntervalSeconds: 60,
+  autoFetchTranscript: true,
   heatmapPeaks: 8,
   // Deliberately outside the vault: the vault is in iCloud, and a 700MB video
   // inside it would sync to every device and eat the quota.
@@ -137,6 +139,11 @@ export default class YtFreePlugin extends Plugin {
   private pinned = new Map<MarkdownView, PinnedEntry>();
   /** Last note whose properties we collapsed in a given view, so we do it once. */
   private collapsed = new Map<MarkdownView, string>();
+  /** Notes created since startup — the only ones eligible for an auto-fetch. */
+  private createdThisSession = new Set<string>();
+  private autoFetchAttempted = new Set<string>();
+  /** Auto-fetches run one at a time, however many notes arrive at once. */
+  private autoFetchChain: Promise<void> = Promise.resolve();
   private lastActiveVideoId: string | null = null;
   private ytDlpPath: string | null = null;
   private resumeTimer: number | null = null;
@@ -219,8 +226,47 @@ export default class YtFreePlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => this.syncPinnedPlayers());
     this.registerEvent(this.app.workspace.on("layout-change", () => this.syncPinnedPlayers()));
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.syncPinnedPlayers()));
-    this.registerEvent(this.app.workspace.on("file-open", () => this.syncPinnedPlayers()));
-    this.registerEvent(this.app.metadataCache.on("changed", () => this.syncPinnedPlayers()));
+    this.registerEvent(
+      this.app.workspace.on("file-open", (file) => {
+        this.syncPinnedPlayers();
+        if (file) this.queueAutoFetch(file);
+      }),
+    );
+    this.registerEvent(
+      this.app.metadataCache.on("changed", (file) => {
+        this.syncPinnedPlayers();
+        this.queueAutoFetch(file);
+      }),
+    );
+
+    // Registered only after layout is ready: during startup Obsidian fires
+    // `create` for every file already in the vault, which would make the whole
+    // vault look new and queue a transcript fetch for all of it.
+    this.app.workspace.onLayoutReady(() => {
+      this.registerEvent(
+        this.app.vault.on("create", (file) => {
+          if (!(file instanceof TFile) || file.extension !== "md") return;
+          this.createdThisSession.add(file.path);
+          // A clipped note arrives complete, so its frontmatter may already be
+          // readable here. Free to try: with no video ID yet this does nothing
+          // and does not count as an attempt, so `changed` still gets its turn.
+          this.queueAutoFetch(file);
+        }),
+      );
+    });
+
+    // Templater renames a note after filling it in, so the path recorded at
+    // create time is not the path the fetch will see.
+    this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (this.createdThisSession.delete(oldPath) && file instanceof TFile) {
+          this.createdThisSession.add(file.path);
+        }
+        if (this.autoFetchAttempted.delete(oldPath) && file instanceof TFile) {
+          this.autoFetchAttempted.add(file.path);
+        }
+      }),
+    );
 
     this.addCommand({
       id: "download-video",
@@ -374,6 +420,53 @@ export default class YtFreePlugin extends Plugin {
     attempt();
   }
 
+  // -------------------------------------------------------- transcript auto
+
+  /**
+   * Consider a note for an automatic transcript fetch.
+   *
+   * Deliberately limited to notes created during this session. Both sources
+   * that matter — the Templater template and the Web Clipper — create a file,
+   * so that single condition covers both without either needing to know the
+   * plugin exists. It also means opening an old note never triggers a surprise
+   * network call and a five-thousand-word append.
+   *
+   * Driven off `metadataCache.changed` rather than `vault.create`, because at
+   * create time a Templater note is still empty: the frontmatter naming the
+   * video does not exist yet. This fires again once it does.
+   */
+  private queueAutoFetch(file: TFile): void {
+    if (!this.settings.autoFetchTranscript) return;
+    if (!this.createdThisSession.has(file.path)) return;
+    if (this.autoFetchAttempted.has(file.path)) return;
+
+    const videoId = this.videoIdForNote(file.path);
+    if (!videoId) return;
+
+    this.autoFetchAttempted.add(file.path);
+
+    // Serialized: clipping four videos in a row should not put four yt-dlp
+    // processes on the machine at once. Each is only a few seconds.
+    this.autoFetchChain = this.autoFetchChain
+      .then(() => this.autoFetchTranscript(file, videoId))
+      .catch(() => undefined);
+  }
+
+  private async autoFetchTranscript(file: TFile, videoId: string): Promise<void> {
+    // The template is still writing and renaming when the frontmatter first
+    // parses. Let it finish rather than racing it for the file.
+    await new Promise((resolve) => window.setTimeout(resolve, 1500));
+
+    if (!(this.app.vault.getAbstractFileByPath(file.path) instanceof TFile)) return;
+
+    // Re-read rather than trusting the earlier check: the note may have gained a
+    // transcript in the meantime, from the command or from sync.
+    const content = await this.app.vault.cachedRead(file);
+    if (content.includes(TRANSCRIPT_HEADING)) return;
+
+    await this.fetchTranscriptInto(file, videoId, true);
+  }
+
   // ------------------------------------------------------------- transcript
 
   /**
@@ -384,9 +477,8 @@ export default class YtFreePlugin extends Plugin {
    * something to read: search a phrase in the vault, click, and the pinned
    * player lands on the second it was said.
    *
-   * Explicitly a command rather than something that happens on open. It costs a
-   * yt-dlp call and a caption download, and a note should never quietly grow by
-   * five thousand words because you looked at it.
+   * Available as a command for any note, and run automatically for notes
+   * created this session — see `queueAutoFetch`.
    */
   private async fetchTranscriptForActiveNote(): Promise<void> {
     const context = this.activeNoteVideo();
@@ -394,8 +486,17 @@ export default class YtFreePlugin extends Plugin {
       new Notice("YT Free: this note does not name a video.");
       return;
     }
-    const { file, videoId } = context;
+    await this.fetchTranscriptInto(context.file, context.videoId, false);
+  }
 
+  /**
+   * The work itself, shared by the command and the automatic path.
+   *
+   * `quiet` only suppresses the "nothing to add" case. A real failure always
+   * says so: a note that silently lacks a transcript looks identical to a video
+   * that has no captions, and telling those apart afterwards is guesswork.
+   */
+  private async fetchTranscriptInto(file: TFile, videoId: string, quiet: boolean): Promise<void> {
     let ytDlpPath: string;
     try {
       ytDlpPath = this.ytDlpPath ?? (await findYtDlp(this.settings.ytDlpPath));
@@ -423,12 +524,14 @@ export default class YtFreePlugin extends Plugin {
 
       if (paragraphs.length === 0 && peaks.length === 0) {
         progress.hide();
-        new Notice(
-          track
-            ? "YT Free: captions were empty for this video."
-            : `YT Free: no ${this.settings.transcriptLanguage} captions and no heatmap for this video.`,
-          8000,
-        );
+        if (!quiet) {
+          new Notice(
+            track
+              ? "YT Free: captions were empty for this video."
+              : `YT Free: no ${this.settings.transcriptLanguage} captions and no heatmap for this video.`,
+            8000,
+          );
+        }
         return;
       }
 
@@ -1198,6 +1301,18 @@ class YtFreeSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl).setName("Transcript").setHeading();
+
+    new Setting(containerEl)
+      .setName("Fetch automatically for new notes")
+      .setDesc(
+        "Notes created this session — from the template or the Web Clipper — get their transcript and replay peaks without being asked. Opening an older note never triggers it; use the command for those.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.autoFetchTranscript).onChange(async (value) => {
+          this.plugin.settings.autoFetchTranscript = value;
+          await this.plugin.saveSettings();
+        }),
+      );
 
     new Setting(containerEl)
       .setName("Section length")
