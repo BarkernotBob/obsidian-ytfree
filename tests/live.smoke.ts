@@ -59,3 +59,38 @@ test("an invalid video id fails loudly rather than silently", async () => {
     "a bad id must throw so the UI can show an actionable error",
   );
 });
+
+// --------------------------------------------------------- subscriptions hub
+
+/**
+ * The hub's other live dependency: the channel feed, and the Shorts probe.
+ *
+ * Neither goes through yt-dlp, so neither is covered by the tests above. Both
+ * are undocumented endpoints that YouTube can change at any time — this is what
+ * would notice.
+ */
+test("a channel feed still carries IDs, descriptions and 15 entries", async () => {
+  const { parseChannelFeed, feedUrl } = await import("../src/subscriptions.ts");
+  const response = await fetch(feedUrl("UC6107grRI4m0o2-emgoDnAA"));
+  assert.equal(response.status, 200);
+
+  const feed = parseChannelFeed(await response.text());
+  assert.equal(feed.channelId, "UC6107grRI4m0o2-emgoDnAA");
+  assert.ok(feed.channelTitle, "the feed should name the channel");
+  // The rolling window is the constraint the whole hub is designed around.
+  assert.equal(feed.entries.length, 15, "the feed window is no longer 15 entries");
+
+  const first = feed.entries[0];
+  assert.match(first.videoId, /^[A-Za-z0-9_-]{11}$/);
+  assert.ok(first.published && Number.isFinite(Date.parse(first.published)));
+  assert.ok(first.thumbnail.startsWith("https://"));
+  assert.ok(
+    feed.entries.some((entry) => entry.description.length > 100),
+    "no entry carried a full description — the hub's whole reason for caching at poll time",
+  );
+});
+
+test("the Shorts probe still answers 303 for a long-form video", async () => {
+  const { probeIsShort } = await import("../src/hub.ts");
+  assert.equal(await probeIsShort("vS6HEes8daw"), false);
+});

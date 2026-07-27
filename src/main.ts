@@ -37,6 +37,13 @@ import {
 } from "./download";
 import { findTimestamps } from "./description";
 import { formatTimestamp } from "./format";
+import {
+  HUB_VIEW_TYPE,
+  HubSettings,
+  HubView,
+  ImportSubscriptionsModal,
+  SubscriptionsStore,
+} from "./hub";
 import type { Cue } from "./transcript";
 import {
   fetchVideoInfo,
@@ -80,6 +87,10 @@ interface YtFreeSettings {
   heatmapPeaks: number;
   downloadFolder: string;
   ffmpegPath: string;
+  subscriptionsPollMinutes: number;
+  subscriptionsExpiryDays: number;
+  subscriptionsIncludeShorts: boolean;
+  watchLaterFolder: string;
 }
 
 /** Frontmatter key holding the path to a downloaded copy. */
@@ -106,6 +117,10 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   // inside it would sync to every device and eat the quota.
   downloadFolder: join(homedir(), "Movies", "YT Free"),
   ffmpegPath: "",
+  subscriptionsPollMinutes: 60,
+  subscriptionsExpiryDays: 30,
+  subscriptionsIncludeShorts: false,
+  watchLaterFolder: "Watch Later",
 };
 
 /**
@@ -150,9 +165,11 @@ export default class YtFreePlugin extends Plugin {
   private downloads = new Map<string, DownloadHandle>();
   /** undefined = not probed yet; null = probed and absent. */
   private ffmpegPath: string | null | undefined = undefined;
+  subscriptions!: SubscriptionsStore;
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    await this.setupSubscriptions();
 
     this.registerMarkdownCodeBlockProcessor("ytfree", (source, el, ctx) =>
       this.renderBlock(source, el, ctx),
@@ -298,6 +315,103 @@ export default class YtFreePlugin extends Plugin {
     });
 
     this.addSettingTab(new YtFreeSettingTab(this.app, this));
+  }
+
+  // ---------------------------------------------------------- subscriptions
+
+  /**
+   * The subscriptions hub (issue 003).
+   *
+   * State lives in its own file next to `data.json` rather than inside it: the
+   * index is thousands of rows, and settings should not be rewritten every time
+   * a poll lands.
+   */
+  private async setupSubscriptions(): Promise<void> {
+    const dir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+    this.subscriptions = new SubscriptionsStore(
+      this.app,
+      `${dir}/subscriptions.json`,
+      () => this.hubSettings(),
+    );
+    await this.subscriptions.load();
+
+    this.registerView(
+      HUB_VIEW_TYPE,
+      (leaf) => new HubView(leaf, this.subscriptions, () => this.hubSettings()),
+    );
+
+    this.addRibbonIcon("youtube", "YT Free subscriptions", () => void this.openHub());
+
+    this.addCommand({
+      id: "open-subscriptions-hub",
+      name: "Open subscriptions hub",
+      callback: () => void this.openHub(),
+    });
+
+    this.addCommand({
+      id: "import-subscriptions",
+      name: "Import YouTube subscriptions",
+      callback: () => {
+        new ImportSubscriptionsModal(this.app, this.subscriptions, () => {
+          void this.openHub().then(() => void this.subscriptions.poll().then(() => this.refreshHub()));
+        }).open();
+      },
+    });
+
+    this.addCommand({
+      id: "poll-subscriptions",
+      name: "Check subscriptions for new videos",
+      callback: () => {
+        if (this.subscriptions.state.channels.length === 0) {
+          new Notice("YT Free: no channels yet. Run “Import YouTube subscriptions” first.");
+          return;
+        }
+        void this.subscriptions.poll().then(() => this.refreshHub());
+      },
+    });
+
+    // Polling on load is the only thing that narrows the real limitation here:
+    // the feed is a 15-entry window with no backfill, so a channel that posts
+    // 16 videos while Obsidian is closed loses the oldest permanently.
+    this.app.workspace.onLayoutReady(() => {
+      void this.subscriptions.poll().then(() => this.refreshHub());
+    });
+
+    this.registerInterval(
+      window.setInterval(
+        () => void this.subscriptions.poll().then(() => this.refreshHub()),
+        Math.max(5, this.settings.subscriptionsPollMinutes) * 60_000,
+      ),
+    );
+  }
+
+  hubSettings(): HubSettings {
+    return {
+      pollMinutes: this.settings.subscriptionsPollMinutes,
+      expiryDays: this.settings.subscriptionsExpiryDays,
+      includeShorts: this.settings.subscriptionsIncludeShorts,
+      watchLaterFolder: this.settings.watchLaterFolder,
+    };
+  }
+
+  /** Re-filter every open hub. Poll results can change what a filter matches. */
+  refreshHub(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)) {
+      if (leaf.view instanceof HubView) leaf.view.renderAll();
+    }
+  }
+
+  private async openHub(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE);
+    if (existing.length > 0) {
+      await this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    // A full tab, not the sidebar: the hub is a grid of thumbnails and a
+    // 250px-wide strip makes it unreadable.
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: HUB_VIEW_TYPE, active: true });
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   onunload(): void {
@@ -1185,6 +1299,81 @@ class YtFreeSettingTab extends PluginSettingTab {
             this.plugin.settings.timestampFormat = value;
             await this.plugin.saveSettings();
           }),
+      );
+
+    new Setting(containerEl).setName("Subscriptions hub").setHeading();
+
+    new Setting(containerEl)
+      .setName("Import subscriptions")
+      .setDesc(
+        "Google Takeout → YouTube and YouTube Music → subscriptions only. Importing again later adds new channels and removes nothing.",
+      )
+      .addButton((button) =>
+        button
+          .setButtonText("Import…")
+          .onClick(() =>
+            new ImportSubscriptionsModal(this.app, this.plugin.subscriptions, () =>
+              this.plugin.refreshHub(),
+            ).open(),
+          ),
+      );
+
+    new Setting(containerEl)
+      .setName("New-note folder")
+      .setDesc("Where clicking a video in the hub puts its note.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Watch Later")
+          .setValue(this.plugin.settings.watchLaterFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.watchLaterFolder = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Check every")
+      .setDesc(
+        "Minutes between checks, plus once when Obsidian starts. A channel feed only holds its last 15 videos, so a long gap between checks can lose the oldest of a burst for good.",
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(15, 360, 15)
+          .setValue(this.plugin.settings.subscriptionsPollMinutes)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.subscriptionsPollMinutes = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Forget unwatched videos after")
+      .setDesc(
+        "Days. Measured from the publish date. Only videos you never clicked are removed, and only from the hub — this never deletes a note. Zero keeps everything.",
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(0, 180, 5)
+          .setValue(this.plugin.settings.subscriptionsExpiryDays)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.subscriptionsExpiryDays = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Include Shorts")
+      .setDesc(
+        "The feed mixes Shorts with normal videos and marks neither, so each new video is checked once to tell them apart. Off by default.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.subscriptionsIncludeShorts).onChange(async (value) => {
+          this.plugin.settings.subscriptionsIncludeShorts = value;
+          await this.plugin.saveSettings();
+          this.plugin.refreshHub();
+        }),
       );
 
     new Setting(containerEl).setName("Offline downloads").setHeading();

@@ -153,3 +153,235 @@
   color: var(--link-color-hover);
   text-decoration: underline;
 }
+
+/* ------------------------------------------------------------------ hub ---
+   The subscriptions hub. Every dimension that a click could change is fixed:
+   card height, thumbnail box, the state-marker column and the dismiss button
+   all keep their space whether or not they are filled, so marking a video Kept
+   moves nothing on screen. */
+
+.ytfree-hub {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ytfree-hub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+  padding: 0.6em 0.8em 0.4em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+
+.ytfree-hub-filters {
+  display: flex;
+  gap: 0.3em;
+}
+
+/* Active state is a background change only. A weight or border change would
+   re-measure the button and nudge its neighbours. */
+.ytfree-hub-filter {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: var(--cursor);
+  padding: 0.3em 0.8em;
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-hub-filter:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ytfree-hub-filter.is-active {
+  background: var(--background-modifier-active-hover);
+  color: var(--text-normal);
+}
+
+.ytfree-hub-icon-button {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: var(--cursor);
+  padding: 0.3em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ytfree-hub-icon-button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+/* Reserved line: a status message appearing must not push the list down. */
+.ytfree-hub-status {
+  flex: 0 0 auto;
+  height: 1.8em;
+  line-height: 1.8em;
+  padding: 0 0.9em;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ytfree-hub-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ytfree-hub-channels {
+  flex: 0 0 200px;
+  overflow-y: auto;
+  border-right: 1px solid var(--background-modifier-border);
+  padding: 0.4em 0.3em;
+}
+
+.ytfree-hub-channel {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 2em;
+  padding: 0 0.5em;
+  border-radius: var(--radius-s);
+  cursor: var(--cursor);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.ytfree-hub-channel:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ytfree-hub-channel.is-active {
+  background: var(--background-modifier-active-hover);
+  color: var(--text-normal);
+}
+
+.ytfree-hub-channel.is-broken .ytfree-hub-channel-count {
+  color: var(--text-error);
+}
+
+.ytfree-hub-channel-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Fixed width whether or not there is a count in it. */
+.ytfree-hub-channel-count {
+  flex: 0 0 2em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-ui-smaller);
+}
+
+.ytfree-hub-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.4em;
+}
+
+.ytfree-hub-empty {
+  padding: 2em 1em;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.ytfree-hub-card {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  height: 90px;
+  padding: 0 0.5em;
+  border-radius: var(--radius-m);
+  cursor: var(--cursor-link);
+}
+
+.ytfree-hub-card:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ytfree-hub-card.is-dismissed {
+  opacity: 0.45;
+}
+
+.ytfree-hub-thumb {
+  flex: 0 0 128px;
+  width: 128px;
+  height: 72px;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  background: var(--background-secondary);
+}
+
+.ytfree-hub-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ytfree-hub-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Two lines maximum, always: a long title must not make its card taller than
+   the one above it. */
+.ytfree-hub-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+  max-height: 2.7em;
+  color: var(--text-normal);
+}
+
+.ytfree-hub-sub {
+  margin-top: 0.25em;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ytfree-hub-marker,
+.ytfree-hub-dismiss {
+  flex: 0 0 2em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 2em;
+  color: var(--text-muted);
+}
+
+.ytfree-hub-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-hub-file {
+  margin: 0.5em 0;
+}
+
+.ytfree-hub-modal-status {
+  min-height: 1.6em;
+  line-height: 1.6em;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
