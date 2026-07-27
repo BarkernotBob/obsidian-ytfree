@@ -1,0 +1,9 @@
+{
+  "id": "ytfree-spike",
+  "name": "YT Free Spike (mobile iframe)",
+  "version": "0.0.1",
+  "minAppVersion": "1.5.0",
+  "description": "Throwaway spike for issue 004: can Obsidian mobile host a plugin-injected YouTube iframe, and can we seek it? Delete after answering.",
+  "author": "BarkernotBob",
+  "isDesktopOnly": false
+}
