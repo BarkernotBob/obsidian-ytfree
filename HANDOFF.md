@@ -1,6 +1,13 @@
 # HANDOFF
 
 ## Status — 2026-07-27 (latest)
+**Issue 003 (subscriptions hub) is scoped, not built** — see
+`docs/V1-SCOPE-SUBSCRIPTIONS.md`. Nothing in `src/` changed. It replaces RSS
+Dashboard for the YouTube half only; RSS Dashboard stays for Overcast podcasts.
+The load-bearing finding is that the channel feed carries the full description,
+so the note path needs no watch-page scrape — but the feed is a rolling
+**15-entry** window, which is the constraint the whole design has to respect.
+
 Transcript + most-replayed shipped. 83 unit tests pass, build clean, installed
 to the vault. Verified end to end against a real video (Mark Rober,
 `h0EGCnBjTVk`): uploaded captions found, 520 cues → 25 sections, 8 replay peaks,
