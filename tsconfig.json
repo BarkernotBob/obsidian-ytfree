@@ -7,6 +7,10 @@
     "allowJs": true,
     "noImplicitAny": true,
     "moduleResolution": "bundler",
+    // `node --test` runs the TypeScript sources directly and resolves imports
+    // literally, so a cross-module import in a tested file must carry its
+    // extension. esbuild and tsc both accept it; Node will not work without it.
+    "allowImportingTsExtensions": true,
     "importHelpers": true,
     "isolatedModules": true,
     "strictNullChecks": true,

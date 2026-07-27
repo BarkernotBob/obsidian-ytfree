@@ -1,6 +1,52 @@
 # HANDOFF
 
-## Status — 2026-07-26 (latest)
+## Status — 2026-07-27 (latest)
+Transcript + most-replayed shipped. 83 unit tests pass, build clean, installed
+to the vault. Verified end to end against a real video (Mark Rober,
+`h0EGCnBjTVk`): uploaded captions found, 520 cues → 25 sections, 8 replay peaks,
+27KB note. **Awaiting manual test.**
+
+## What just changed
+- **New command: "Fetch transcript and most-replayed moments".** Answers the
+  case that started this — a video whose uploader wrote no chapters, which is
+  most of them. Writes two sections into the note.
+- **`## Transcript`** — the full transcript, grouped into ~60-second sections
+  (configurable 15–180s), each headed by a seek link. The point is not reading
+  it top to bottom: search a phrase in the vault, click, and the pinned player
+  lands on the second it was said.
+- **`## Most replayed`** — YouTube's replay heatmap, top 8 peaks (0–20). A
+  greedy minimum-gap pass is what makes this useful: the heatmap is sampled
+  every ~15s and one spike covers several buckets, so sorting by value alone
+  returns the same moment eight times. Each peak is labelled with the transcript
+  line spoken there, because a bare timestamp tells you nothing.
+- **One `yt-dlp -J` call** (~3s) yields both the caption-track list and the
+  heatmap. The caption URL it returns is already signed and immediately valid,
+  so it is fetched directly — no second yt-dlp call, no temp files.
+- **Uploader captions beat auto-generated** when both exist. Language keys match
+  by prefix: YouTube's multi-language audio produces `en-US-<id>` where you
+  expect `en`, which is exactly the shape the test video has.
+- **`upsertSection` replaces, never duplicates.** A section runs to the next
+  `## `, so re-running the command leaves your Notes and the Description alone.
+  An empty body deletes the section rather than leaving a bare heading.
+- `allowImportingTsExtensions` is now on: `node --test` runs the TS sources
+  directly and resolves imports literally, so `transcript.ts` importing
+  `format.ts` needs the extension.
+
+## Next step — manual test
+1. Relaunch Obsidian (new `main.js`).
+2. Open a Watch Later note, run **YT Free: Fetch transcript and most-replayed
+   moments** from the command palette. Expect a notice, then ~3–8s, then two new
+   sections at the bottom.
+3. Click a transcript timestamp and a replay peak — both should seek the pinned
+   player.
+4. Run the command a second time: sections should be replaced, not duplicated,
+   and your Notes untouched.
+5. Search the vault for a phrase from the middle of the video, click through
+   from the search result, confirm it lands at the right moment.
+6. Settings → YT Free → Transcript: drop section length to 15s, re-run, confirm
+   more sections; set most-replayed to 0, re-run, confirm the section is gone.
+
+## Previous status — 2026-07-26
 Note-shape pass: properties collapse, in-note player retired, description with
 clickable chapters. 58 unit tests pass, build clean, installed to the vault.
 **Awaiting manual test (see below).**

@@ -1,0 +1,239 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import type { Cue } from "../src/transcript.ts";
+import {
+  cueTextAt,
+  groupCues,
+  HEATMAP_HEADING,
+  parseJson3,
+  pickCaptionTrack,
+  renderHeatmap,
+  renderTranscript,
+  topPeaks,
+  TRANSCRIPT_HEADING,
+  upsertSection,
+} from "../src/transcript.ts";
+
+const ID = "h0EGCnBjTVk";
+
+const json3 = (events: Array<[number, string[]]>) =>
+  JSON.stringify({
+    events: events.map(([tStartMs, segs]) => ({ tStartMs, segs: segs.map((utf8) => ({ utf8 })) })),
+  });
+
+// ------------------------------------------------------------ track picking
+
+test("pickCaptionTrack prefers uploader captions over auto-generated", () => {
+  const info = {
+    subtitles: { en: [{ ext: "json3", url: "manual" }] },
+    automatic_captions: { en: [{ ext: "json3", url: "auto" }] },
+  };
+  assert.deepEqual(pickCaptionTrack(info), { url: "manual", lang: "en", auto: false });
+});
+
+test("pickCaptionTrack falls back to auto-generated when there is nothing else", () => {
+  const info = { automatic_captions: { en: [{ ext: "json3", url: "auto" }] } };
+  assert.deepEqual(pickCaptionTrack(info), { url: "auto", lang: "en", auto: true });
+});
+
+test("pickCaptionTrack matches YouTube's multi-audio language keys", () => {
+  // Real shape from a Mark Rober video: the only English track is `en-US-<id>`.
+  const info = { subtitles: { "en-US-zsweiKMxjbg": [{ ext: "json3", url: "dubbed" }] } };
+  assert.equal(pickCaptionTrack(info)?.url, "dubbed");
+});
+
+test("pickCaptionTrack takes the exact language code ahead of a suffixed one", () => {
+  const info = {
+    subtitles: {
+      "en-US-zsweiKMxjbg": [{ ext: "json3", url: "suffixed" }],
+      en: [{ ext: "json3", url: "exact" }],
+    },
+  };
+  assert.equal(pickCaptionTrack(info)?.url, "exact");
+});
+
+test("pickCaptionTrack ignores tracks that are not json3, and unrelated languages", () => {
+  assert.equal(pickCaptionTrack({ subtitles: { en: [{ ext: "vtt", url: "v" }] } }), null);
+  assert.equal(pickCaptionTrack({ subtitles: { fr: [{ ext: "json3", url: "f" }] } }), null);
+  assert.equal(pickCaptionTrack({}), null);
+});
+
+// ------------------------------------------------------------------ parsing
+
+test("parseJson3 joins word-level segments back into one cue", () => {
+  const cues = parseJson3(json3([[1500, ["Hello", " there", " world"]]]));
+  assert.deepEqual(cues, [{ seconds: 1, text: "Hello there world" }]);
+});
+
+test("parseJson3 drops the blank spacer events YouTube interleaves", () => {
+  const cues = parseJson3(json3([[0, ["real"]], [500, ["\n"]], [1000, ["also real"]]]));
+  assert.deepEqual(cues.map((c) => c.text), ["real", "also real"]);
+});
+
+test("parseJson3 returns nothing rather than throwing on junk", () => {
+  assert.deepEqual(parseJson3("<html>not json</html>"), []);
+  assert.deepEqual(parseJson3("{}"), []);
+});
+
+// ----------------------------------------------------------------- grouping
+
+const cuesEvery = (step: number, count: number): Cue[] =>
+  Array.from({ length: count }, (_, i) => ({ seconds: i * step, text: `line${i}` }));
+
+test("groupCues collects cues into sections of about the requested length", () => {
+  const paragraphs = groupCues(cuesEvery(10, 12), 60);
+  assert.equal(paragraphs.length, 2);
+  assert.equal(paragraphs[0].seconds, 0);
+  assert.equal(paragraphs[1].seconds, 60);
+  assert.equal(paragraphs[0].text, "line0 line1 line2 line3 line4 line5");
+});
+
+test("groupCues measures from the section start, so one long gap cannot double a section", () => {
+  // A 5-minute silence must start a new section, not stretch the previous one.
+  const cues: Cue[] = [
+    { seconds: 0, text: "a" },
+    { seconds: 300, text: "b" },
+    { seconds: 310, text: "c" },
+  ];
+  const paragraphs = groupCues(cues, 60);
+  assert.deepEqual(paragraphs.map((p) => p.seconds), [0, 300]);
+});
+
+test("groupCues timestamps land on real cue starts, not on a round grid", () => {
+  const cues: Cue[] = [
+    { seconds: 0, text: "a" },
+    { seconds: 73, text: "b" },
+  ];
+  // 73, not 60: a link must land where someone is talking.
+  assert.deepEqual(groupCues(cues, 60).map((p) => p.seconds), [0, 73]);
+});
+
+test("groupCues handles an empty transcript", () => {
+  assert.deepEqual(groupCues([], 60), []);
+});
+
+// ------------------------------------------------------------------- peaks
+
+test("topPeaks spreads the peaks out instead of returning one spike eight times", () => {
+  // A single spike covers several 15s buckets; naive sorting returns all of them.
+  const heatmap = [
+    { start_time: 0, value: 0.1 },
+    { start_time: 15, value: 0.99 },
+    { start_time: 30, value: 0.98 },
+    { start_time: 45, value: 0.97 },
+    { start_time: 600, value: 0.9 },
+  ];
+  const peaks = topPeaks(heatmap, 3);
+  assert.deepEqual(peaks.map((p) => p.seconds), [15, 600]);
+});
+
+test("topPeaks returns chronological order, not leaderboard order", () => {
+  const heatmap = [
+    { start_time: 0, value: 0.2 },
+    { start_time: 300, value: 0.9 },
+    { start_time: 600, value: 0.5 },
+  ];
+  assert.deepEqual(topPeaks(heatmap, 3).map((p) => p.seconds), [0, 300, 600]);
+});
+
+test("topPeaks copes with no heatmap and with a zero count", () => {
+  assert.deepEqual(topPeaks(undefined, 8), []);
+  assert.deepEqual(topPeaks([{ start_time: 0, value: 1 }], 0), []);
+});
+
+test("cueTextAt labels a peak with what is being said there", () => {
+  const cues: Cue[] = [
+    { seconds: 0, text: "intro" },
+    { seconds: 100, text: "the interesting bit" },
+    { seconds: 200, text: "outro" },
+  ];
+  assert.equal(cueTextAt(cues, 105, 100), "the interesting bit outro");
+  // Before the first cue, fall back to the first cue rather than nothing.
+  assert.equal(cueTextAt(cues, 0, 5), "intro");
+  assert.equal(cueTextAt([], 100), "");
+});
+
+test("cueTextAt truncates on a word boundary", () => {
+  const cues: Cue[] = [{ seconds: 0, text: "one two three four five six seven" }];
+  const label = cueTextAt(cues, 0, 12);
+  assert.equal(label, "one two…");
+});
+
+// ---------------------------------------------------------------- rendering
+
+test("renderTranscript makes every section a seek link", () => {
+  const md = renderTranscript(
+    [
+      { seconds: 0, text: "First." },
+      { seconds: 73, text: "Second." },
+    ],
+    ID,
+    { url: "u", lang: "en", auto: true },
+  );
+  assert.match(md, /Auto-generated captions \(en\), 2 sections\./);
+  assert.match(md, /\*\*\[0:00\]\(ytfree:h0EGCnBjTVk:0\)\*\* First\./);
+  assert.match(md, /\*\*\[1:13\]\(ytfree:h0EGCnBjTVk:73\)\*\* Second\./);
+});
+
+test("renderHeatmap lists labelled peaks, and nothing at all when there are none", () => {
+  const cues: Cue[] = [{ seconds: 100, text: "the good part" }];
+  const md = renderHeatmap([{ seconds: 100, value: 0.9 }], cues, ID);
+  assert.equal(md, "- **[1:40](ytfree:h0EGCnBjTVk:100)** — the good part");
+  assert.equal(renderHeatmap([], cues, ID), "");
+});
+
+test("renderHeatmap still lists a peak when there is no transcript to label it", () => {
+  assert.equal(renderHeatmap([{ seconds: 60, value: 1 }], [], ID), "- **[1:00](ytfree:h0EGCnBjTVk:60)**");
+});
+
+// ----------------------------------------------------------------- upsert
+
+const NOTE = `---
+title: "A video"
+---
+
+## Notes
+
+my own note
+
+## Description
+0:00 something
+`;
+
+test("upsertSection appends a new section without touching what is above it", () => {
+  const out = upsertSection(NOTE, TRANSCRIPT_HEADING, "**[0:00](x)** hello");
+  assert.match(out, /## Notes\n\nmy own note/);
+  assert.match(out, /## Description\n0:00 something/);
+  assert.match(out, /## Transcript\n\*\*\[0:00\]\(x\)\*\* hello/);
+});
+
+test("upsertSection replaces rather than duplicates on a second run", () => {
+  const once = upsertSection(NOTE, TRANSCRIPT_HEADING, "old body");
+  const twice = upsertSection(once, TRANSCRIPT_HEADING, "new body");
+  assert.equal(twice.match(/## Transcript/g)?.length, 1);
+  assert.match(twice, /## Transcript\nnew body/);
+  assert.doesNotMatch(twice, /old body/);
+});
+
+test("upsertSection stops at the next heading, leaving later sections intact", () => {
+  const withBoth = upsertSection(
+    upsertSection(NOTE, HEATMAP_HEADING, "- peak"),
+    TRANSCRIPT_HEADING,
+    "words",
+  );
+  const replaced = upsertSection(withBoth, HEATMAP_HEADING, "- different peak");
+  assert.match(replaced, /## Most replayed\n- different peak/);
+  assert.match(replaced, /## Transcript\nwords/);
+  assert.doesNotMatch(replaced, /- peak\n/);
+});
+
+test("upsertSection with an empty body removes the section instead of leaving a bare heading", () => {
+  const withSection = upsertSection(NOTE, HEATMAP_HEADING, "- peak");
+  const removed = upsertSection(withSection, HEATMAP_HEADING, "");
+  assert.doesNotMatch(removed, /Most replayed/);
+  assert.match(removed, /## Description/);
+});
+
+test("upsertSection with an empty body on a note that never had the section is a no-op", () => {
+  assert.equal(upsertSection(NOTE, HEATMAP_HEADING, ""), NOTE);
+});

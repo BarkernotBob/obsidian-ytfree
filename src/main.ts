@@ -13,6 +13,7 @@ import {
   Notice,
   Plugin,
   PluginSettingTab,
+  requestUrl,
   Setting,
   TFile,
 } from "obsidian";
@@ -36,6 +37,19 @@ import {
 } from "./download";
 import { findTimestamps } from "./description";
 import { formatTimestamp } from "./format";
+import type { Cue } from "./transcript";
+import {
+  fetchVideoInfo,
+  groupCues,
+  HEATMAP_HEADING,
+  parseJson3,
+  pickCaptionTrack,
+  renderHeatmap,
+  renderTranscript,
+  topPeaks,
+  TRANSCRIPT_HEADING,
+  upsertSection,
+} from "./transcript";
 import { YtFreePlayer } from "./player";
 import {
   extractVideoId,
@@ -60,6 +74,9 @@ interface YtFreeSettings {
   pinnedFrontmatterKeys: string;
   collapseProperties: boolean;
   linkifyTimestamps: boolean;
+  transcriptLanguage: string;
+  transcriptIntervalSeconds: number;
+  heatmapPeaks: number;
   downloadFolder: string;
   ffmpegPath: string;
 }
@@ -80,6 +97,9 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   pinnedFrontmatterKeys: "media_link, url",
   collapseProperties: true,
   linkifyTimestamps: true,
+  transcriptLanguage: "en",
+  transcriptIntervalSeconds: 60,
+  heatmapPeaks: 8,
   // Deliberately outside the vault: the vault is in iCloud, and a 700MB video
   // inside it would sync to every device and eat the quota.
   downloadFolder: join(homedir(), "Movies", "YT Free"),
@@ -225,6 +245,12 @@ export default class YtFreePlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: "fetch-transcript",
+      name: "Fetch transcript and most-replayed moments",
+      callback: () => void this.fetchTranscriptForActiveNote(),
+    });
+
     this.addSettingTab(new YtFreeSettingTab(this.app, this));
   }
 
@@ -346,6 +372,88 @@ export default class YtFreePlugin extends Plugin {
       if (!container.hasClass("is-collapsed")) container.addClass("is-collapsed");
     };
     attempt();
+  }
+
+  // ------------------------------------------------------------- transcript
+
+  /**
+   * Write a timestamped transcript and a most-replayed list into the note.
+   *
+   * This is the answer for a video whose uploader wrote no chapters — which is
+   * most of them. Every paragraph is a seek link, so the transcript is not just
+   * something to read: search a phrase in the vault, click, and the pinned
+   * player lands on the second it was said.
+   *
+   * Explicitly a command rather than something that happens on open. It costs a
+   * yt-dlp call and a caption download, and a note should never quietly grow by
+   * five thousand words because you looked at it.
+   */
+  private async fetchTranscriptForActiveNote(): Promise<void> {
+    const context = this.activeNoteVideo();
+    if (!context) {
+      new Notice("YT Free: this note does not name a video.");
+      return;
+    }
+    const { file, videoId } = context;
+
+    let ytDlpPath: string;
+    try {
+      ytDlpPath = this.ytDlpPath ?? (await findYtDlp(this.settings.ytDlpPath));
+      this.ytDlpPath = ytDlpPath;
+    } catch {
+      new Notice("YT Free: yt-dlp not found. Install it, or set its path in settings.");
+      return;
+    }
+
+    const progress = new Notice("YT Free: fetching transcript…", 0);
+    try {
+      const info = await fetchVideoInfo(ytDlpPath, videoId);
+      const track = pickCaptionTrack(info, this.settings.transcriptLanguage.trim() || "en");
+
+      let cues: Cue[] = [];
+      if (track) {
+        // The URL yt-dlp hands back is already signed and immediately valid, so
+        // it can be fetched directly — no second yt-dlp call, no temp file.
+        const response = await requestUrl({ url: track.url, throw: true });
+        cues = parseJson3(response.text);
+      }
+
+      const paragraphs = groupCues(cues, this.settings.transcriptIntervalSeconds);
+      const peaks = topPeaks(info.heatmap, this.settings.heatmapPeaks);
+
+      if (paragraphs.length === 0 && peaks.length === 0) {
+        progress.hide();
+        new Notice(
+          track
+            ? "YT Free: captions were empty for this video."
+            : `YT Free: no ${this.settings.transcriptLanguage} captions and no heatmap for this video.`,
+          8000,
+        );
+        return;
+      }
+
+      await this.app.vault.process(file, (content) => {
+        // Heatmap first: it is the short list you scan, and the transcript is
+        // the long thing you scroll past everything else to reach.
+        let next = upsertSection(content, HEATMAP_HEADING, renderHeatmap(peaks, cues, videoId));
+        next = upsertSection(
+          next,
+          TRANSCRIPT_HEADING,
+          renderTranscript(paragraphs, videoId, track),
+        );
+        return next;
+      });
+
+      progress.hide();
+      const parts: string[] = [];
+      if (paragraphs.length) parts.push(`${paragraphs.length} transcript sections`);
+      if (peaks.length) parts.push(`${peaks.length} replay peaks`);
+      new Notice(`YT Free: added ${parts.join(" and ")}.`);
+    } catch (err) {
+      progress.hide();
+      const detail = err instanceof Error ? err.message : String(err);
+      new Notice(`YT Free: transcript failed — ${detail}`, 10000);
+    }
   }
 
   // ------------------------------------------------------------ description
@@ -1087,6 +1195,55 @@ class YtFreeSettingTab extends PluginSettingTab {
           this.plugin.settings.linkifyTimestamps = value;
           await this.plugin.saveSettings();
         }),
+      );
+
+    new Setting(containerEl).setName("Transcript").setHeading();
+
+    new Setting(containerEl)
+      .setName("Section length")
+      .setDesc(
+        "How much transcript sits under each seek link. Shorter means more precise links and a longer note. Timestamps land on real caption starts, so a section is never exactly this long.",
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(15, 180, 15)
+          .setValue(this.plugin.settings.transcriptIntervalSeconds)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.transcriptIntervalSeconds = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Most-replayed moments")
+      .setDesc(
+        "How many replay peaks to list above the transcript, labelled with what is being said there. Zero turns the section off.",
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(0, 20, 1)
+          .setValue(this.plugin.settings.heatmapPeaks)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.heatmapPeaks = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Caption language")
+      .setDesc(
+        "Language code to look for. Uploader-written captions are preferred over auto-generated ones when both exist.",
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("en")
+          .setValue(this.plugin.settings.transcriptLanguage)
+          .onChange(async (value) => {
+            this.plugin.settings.transcriptLanguage = value;
+            await this.plugin.saveSettings();
+          }),
       );
 
     new Setting(containerEl).setName("Flow capture").setHeading();
