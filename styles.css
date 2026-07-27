@@ -138,3 +138,18 @@
   border-radius: var(--radius-s);
   margin: 0;
 }
+
+/* Timestamps linkified out of a pasted description. Styled like Obsidian's own
+   internal links, but with no underline reserve or weight change on hover — a
+   hover must not re-measure the line and shift the text after it. */
+.ytfree-timestamp-link {
+  color: var(--link-color);
+  cursor: var(--cursor-link);
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.ytfree-timestamp-link:hover {
+  color: var(--link-color-hover);
+  text-decoration: underline;
+}

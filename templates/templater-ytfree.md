@@ -9,14 +9,10 @@ const id = match ? (match[1] || match[2] || match[3] || match[4] || match[5]) : 
 if (!id) { new Notice("Not a YouTube URL"); return; }
 -%>
 ---
-source: https://www.youtube.com/watch?v=<% id %>
+media_link: https://www.youtube.com/watch?v=<% id %>
 clipped: <% tp.date.now("YYYY-MM-DD") %>
 tags:
   - video
 ---
-
-```ytfree
-<% id %>
-```
 
 ## Notes

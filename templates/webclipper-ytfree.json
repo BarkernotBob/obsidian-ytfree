@@ -4,10 +4,10 @@
   "behavior": "create",
   "noteNameFormat": "{{title|safe_name}}",
   "path": "Videos",
-  "noteContentFormat": "```ytfree\n{{url}}\n```\n\n## Notes\n\n",
+  "noteContentFormat": "## Notes\n\n\n## Description\n{{schema:@VideoObject:description}}\n",
   "properties": [
     { "name": "title", "value": "{{title}}", "type": "text" },
-    { "name": "source", "value": "{{url}}", "type": "text" },
+    { "name": "media_link", "value": "{{url}}", "type": "text" },
     { "name": "channel", "value": "{{author}}", "type": "text" },
     { "name": "clipped", "value": "{{date}}", "type": "date" },
     { "name": "tags", "value": "video", "type": "multitext" }

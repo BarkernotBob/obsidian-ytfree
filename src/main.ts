@@ -34,6 +34,7 @@ import {
   MIN_FREE_BYTES,
   resolveLocalFile,
 } from "./download";
+import { findTimestamps } from "./description";
 import { formatTimestamp } from "./format";
 import { YtFreePlayer } from "./player";
 import {
@@ -57,6 +58,8 @@ interface YtFreeSettings {
   pinnedPlayer: boolean;
   pinnedHeightVh: number;
   pinnedFrontmatterKeys: string;
+  collapseProperties: boolean;
+  linkifyTimestamps: boolean;
   downloadFolder: string;
   ffmpegPath: string;
 }
@@ -75,6 +78,8 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   pinnedPlayer: true,
   pinnedHeightVh: 40,
   pinnedFrontmatterKeys: "media_link, url",
+  collapseProperties: true,
+  linkifyTimestamps: true,
   // Deliberately outside the vault: the vault is in iCloud, and a 700MB video
   // inside it would sync to every device and eat the quota.
   downloadFolder: join(homedir(), "Movies", "YT Free"),
@@ -110,6 +115,8 @@ export default class YtFreePlugin extends Plugin {
   private cache = new StreamCache();
   private players = new Map<string, PlayerEntry>();
   private pinned = new Map<MarkdownView, PinnedEntry>();
+  /** Last note whose properties we collapsed in a given view, so we do it once. */
+  private collapsed = new Map<MarkdownView, string>();
   private lastActiveVideoId: string | null = null;
   private ytDlpPath: string | null = null;
   private resumeTimer: number | null = null;
@@ -123,6 +130,9 @@ export default class YtFreePlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor("ytfree", (source, el, ctx) =>
       this.renderBlock(source, el, ctx),
     );
+
+    // Bare timestamps in a pasted description become seek links at render time.
+    this.registerMarkdownPostProcessor((el, ctx) => this.linkifyRendered(el, ctx));
 
     // Flow capture (issue 001). The stamp rides on the first character typed on
     // a line, so `inputHandler` — which sees real typing and not programmatic
@@ -276,6 +286,12 @@ export default class YtFreePlugin extends Plugin {
       const wanted = this.pinnedVideoIdFor(view.file?.path);
       const current = this.pinned.get(view);
 
+      // Keyed off "this note has a video", not off the player, so it still
+      // applies when the pinned player is switched off.
+      const path = view.file?.path;
+      if (path && this.videoIdForNote(path)) this.collapseProperties(view, path);
+      else if (path && this.collapsed.get(view) !== path) this.collapsed.delete(view);
+
       // `isConnected` catches the case where Obsidian rebuilt the view's DOM
       // under us — same video, but our node is no longer in the document.
       if (current && current.videoId === wanted && current.wrapper.isConnected) continue;
@@ -286,6 +302,99 @@ export default class YtFreePlugin extends Plugin {
 
     for (const view of [...this.pinned.keys()]) {
       if (!open.has(view)) this.unmountPinned(view);
+    }
+    for (const view of [...this.collapsed.keys()]) {
+      if (!open.has(view)) this.collapsed.delete(view);
+    }
+  }
+
+  // ------------------------------------------------------------- properties
+
+  /**
+   * Collapse the properties table on a video note.
+   *
+   * A Watch Later note carries eleven properties, and with the pinned player
+   * above them the note's own text starts a screen and a half down. Collapsing
+   * is per-note behaviour, so it can't be the global Obsidian setting, and CSS
+   * can't express "collapsed until clicked" — hence doing it here.
+   *
+   * Clicking Obsidian's own heading rather than setting `is-collapsed` directly
+   * keeps its internal state and the arrow in agreement, so the first click to
+   * re-open works. Done once per file per view: if you expand the properties,
+   * they stay expanded until you open a different note.
+   */
+  private collapseProperties(view: MarkdownView, path: string): void {
+    if (!this.settings.collapseProperties) return;
+    if (this.collapsed.get(view) === path) return;
+
+    // The metadata table is built with the rest of the view, which may not have
+    // happened yet when frontmatter is what told us to mount in the first place.
+    let attempts = 0;
+    const attempt = (): void => {
+      if (view.file?.path !== path) return;
+      const container = view.contentEl.querySelector<HTMLElement>(".metadata-container");
+      if (!container) {
+        if (++attempts < 10) window.setTimeout(attempt, 100);
+        return;
+      }
+      this.collapsed.set(view, path);
+      if (container.hasClass("is-collapsed")) return;
+      const heading = container.querySelector<HTMLElement>(".metadata-properties-heading");
+      if (heading) heading.click();
+      // Belt and braces: if a future Obsidian stops toggling on that click, fall
+      // back to the class the stylesheet actually keys on.
+      if (!container.hasClass("is-collapsed")) container.addClass("is-collapsed");
+    };
+    attempt();
+  }
+
+  // ------------------------------------------------------------ description
+
+  /**
+   * Rewrite bare `mm:ss` text in a rendered note as seek links.
+   *
+   * Only runs on notes that name a video, because the seek link needs an ID and
+   * a timestamp in an unrelated note is just a number. Text already inside a
+   * link, code span or the player chrome is left alone, so stamps written by
+   * flow capture — which are real markdown links — pass through untouched.
+   */
+  private linkifyRendered(el: HTMLElement, ctx: MarkdownPostProcessorContext): void {
+    if (!this.settings.linkifyTimestamps) return;
+    const videoId = this.videoIdForNote(ctx.sourcePath);
+    if (!videoId) return;
+
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const targets: Text[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node as Text;
+      // Cheap reject first: this runs over every text node of every note.
+      if (!text.nodeValue || !text.nodeValue.includes(":")) continue;
+      if (text.parentElement?.closest("a, code, pre, .ytfree-wrapper")) continue;
+      targets.push(text);
+    }
+
+    for (const node of targets) {
+      const value = node.nodeValue ?? "";
+      const matches = findTimestamps(value);
+      if (matches.length === 0) continue;
+
+      const fragment = document.createDocumentFragment();
+      let cursor = 0;
+      for (const match of matches) {
+        if (match.index > cursor) {
+          fragment.appendChild(document.createTextNode(value.slice(cursor, match.index)));
+        }
+        const link = document.createElement("a");
+        link.className = "ytfree-timestamp-link";
+        link.setAttribute("href", `ytfree:${videoId}:${match.seconds}`);
+        link.textContent = match.text;
+        fragment.appendChild(link);
+        cursor = match.index + match.text.length;
+      }
+      if (cursor < value.length) {
+        fragment.appendChild(document.createTextNode(value.slice(cursor)));
+      }
+      node.parentNode?.replaceChild(fragment, node);
     }
   }
 
@@ -954,6 +1063,30 @@ class YtFreeSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
             this.plugin.refreshPinnedPlayers();
           }),
+      );
+
+    new Setting(containerEl)
+      .setName("Collapse properties on video notes")
+      .setDesc(
+        "Fold the properties table when you open a note whose frontmatter names a video, so the player and your notes start at the top. Expanding it by hand sticks until you open another note.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.collapseProperties).onChange(async (value) => {
+          this.plugin.settings.collapseProperties = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Link timestamps in the note body")
+      .setDesc(
+        "Render bare times like 1:02:03 — the chapter list in a pasted description — as clickable seek links. Only on notes that name a video.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.linkifyTimestamps).onChange(async (value) => {
+          this.plugin.settings.linkifyTimestamps = value;
+          await this.plugin.saveSettings();
+        }),
       );
 
     new Setting(containerEl).setName("Flow capture").setHeading();

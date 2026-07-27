@@ -1,6 +1,49 @@
 # HANDOFF
 
 ## Status — 2026-07-26 (latest)
+Note-shape pass: properties collapse, in-note player retired, description with
+clickable chapters. 58 unit tests pass, build clean, installed to the vault.
+**Awaiting manual test (see below).**
+
+## What just changed
+- **Properties collapse on video notes.** Opening a note whose frontmatter names
+  a video folds the properties table, so the pinned player and the note text are
+  what you land on. Obsidian's own collapse toggle is clicked rather than the
+  `is-collapsed` class being set, so its internal state and the arrow agree and
+  the first click to re-open works. Done once per note per view — expanding by
+  hand sticks until you open a different note. Off switch in settings.
+- **No more in-note player.** The ```ytfree fence is gone from the Templater
+  template and both Web Clipper templates; the pinned player is the only player.
+  The fence still works for notes that already have one (it renders the stub).
+- **`## Description` with clickable chapters.** Bare `mm:ss` / `h:mm:ss` text in
+  a note that names a video renders as a seek link into the pinned player, using
+  the same `ytfree:<id>:<secs>` scheme flow capture writes. This lives in the
+  plugin, not the templates, because the Web Clipper can copy a description but
+  cannot rewrite it — and doing it at render time also fixes notes clipped
+  before today.
+  - The Templater template additionally writes **real markdown links** into the
+    file, because it has the video ID at creation time and a link in the source
+    survives the plugin being off.
+  - `src/description.ts` holds the matcher: guards keep `1:02:03` from also
+    yielding `02:03`, keep decimals like `1.5:30` out, and skip anything already
+    inside a markdown link.
+- **Templater now scrapes the watch page.** oEmbed carries no description, so
+  `shortDescription` and `lengthSeconds` are read out of the page HTML. Failure
+  is non-fatal: the note is created with the description section empty.
+
+## Next step
+Manual test:
+1. Relaunch Obsidian (new `main.js`).
+2. New note from `Templates/8.Watch_Later_Template.md`, paste a URL for a video
+   that has chapters. Expect: properties collapsed, one player at the top, no
+   fence, `## Description` populated with clickable timestamps.
+3. Click a chapter timestamp — the pinned player should seek there.
+4. Expand properties by hand, scroll, switch tabs and come back — they should
+   stay expanded until you open a different note.
+5. Re-import `System Templates/Obsidian Clipper - Watch Later (YT Free).json`
+   into Web Clipper, clip a video, confirm the same shape.
+
+## Previous status — 2026-07-26
 Issue 002 (offline download) built and installed. 51 unit tests pass; the yt-dlp
 argument shape was verified against a real 19-second download. **Awaiting the
 14-step manual test in `issues/002-local-download.md`.**
