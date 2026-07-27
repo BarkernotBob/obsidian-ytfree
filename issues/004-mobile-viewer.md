@@ -1,8 +1,53 @@
 # 004 — A viewer that works on Obsidian mobile
 
-**Status:** Scoped 2026-07-27. Not built. Awaiting approval.
+**Status:** Scoped 2026-07-27. **Blocked** — the spike says the embed cannot play here. Not
+built. See "Spike findings" below.
 
 **Created:** 2026-07-27
+
+## Spike findings (2026-07-27) — option B does not work as scoped
+
+Two runs of [`spikes/mobile-iframe`](../spikes/mobile-iframe/README.md) on an iPhone,
+iOS 18.7:
+
+| | Result |
+|---|---|
+| `ytfree:` link interception | **PASS** |
+| `postMessage` channel to the frame | **PASS**, 1.3–2.7s on youtube.com |
+| Video actually plays | **FAIL — Error 153, every variant** |
+
+Error 153 appeared on all eight combinations: both hosts, and all four parameter variants
+(no JS API at all; API with no `origin`; API with `origin=capacitor://localhost`; API with
+`origin=https://www.youtube.com`).
+
+The first hypothesis — that `enablejsapi=1` is what demands a valid origin — is **wrong**.
+The `plain` variant, with no JS API opt-in whatsoever, fails identically.
+
+Root cause: Obsidian iOS runs at `capacitor://localhost`. That is not an http(s) origin, so
+the framed embed sends no usable `Referer`, and YouTube's player refuses to configure
+itself without one. This is not a parameter that can be corrected — it is a property of the
+webview, and nothing the plugin passes can change it.
+
+Note what *did* pass. The messaging channel opens fine and the scheme handler works, so if
+a player can ever be made to render, driving it is already solved.
+
+### Where that leaves it
+
+Two paths survive, both changes to this issue's premise rather than fixes to it:
+
+- **A hosted shim.** A ~20-line static page on an https origin we control (GitHub Pages)
+  that hosts the embed and relays seek commands by `postMessage`. YouTube then sees a
+  legitimate referrer. This is the only route to in-app playback that does not involve
+  reimplementing yt-dlp. Cost: playback depends on a page staying published, and it is
+  public content.
+- **Hand off to the YouTube app.** A timestamp tap opens `https://youtu.be/<id>?t=<secs>`.
+  Not in-app, no player to build, nothing to host, cannot break. Playback quality and
+  background audio are better than an embed would give.
+
+Undecided pending one confound check: every run used the same video id (`h0EGCnBjTVk`).
+Error 153 is *also* what YouTube returns for a video whose owner disabled embedding, so
+the result needs reproducing on a second, known-embeddable id before 153 is attributed to
+the origin with certainty.
 
 ## Problem
 
