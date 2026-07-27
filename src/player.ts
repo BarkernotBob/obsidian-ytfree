@@ -31,12 +31,20 @@ export class YtFreePlayer {
   private pausedByTyping = false;
   /** Has this player ever started? Stops an untouched note stamping 0:00. */
   private started = false;
+  /**
+   * Playing a file off disk. Local files do not expire and are not IP-locked,
+   * so the whole recovery path is inert — and must stay inert, or a transient
+   * decode error would drag the player back onto the network.
+   */
+  private local = false;
+  private downloadBtn: HTMLButtonElement | null = null;
 
   constructor(
     private container: HTMLElement,
     private provider: StreamProvider,
     private onStatus: (message: string | null) => void,
     private onTimestamp?: (seconds: number) => void,
+    private onDownload?: () => void,
   ) {
     this.video = container.createEl("video", {
       cls: "ytfree-video",
@@ -119,6 +127,30 @@ export class YtFreePlayer {
         this.onTimestamp?.(Math.floor(this.video.currentTime));
       });
     }
+
+    if (this.onDownload) {
+      // Fixed width, and only ever a text swap inside it: "Download" → "12%" →
+      // "Downloaded". The row cannot reflow while a download runs.
+      this.downloadBtn = button("Download", "Download this video for offline", () => {
+        this.onDownload?.();
+      });
+      this.downloadBtn.addClass("ytfree-btn-download");
+    }
+  }
+
+  /** Progress feedback on the Download button itself. */
+  setDownloadState(state: "idle" | "running" | "done", percent?: number): void {
+    if (!this.downloadBtn) return;
+    if (state === "running") {
+      this.downloadBtn.setText(percent === undefined ? "…" : `${Math.round(percent)}%`);
+      this.downloadBtn.disabled = true;
+    } else if (state === "done") {
+      this.downloadBtn.setText("Downloaded");
+      this.downloadBtn.disabled = true;
+    } else {
+      this.downloadBtn.setText("Download");
+      this.downloadBtn.disabled = false;
+    }
   }
 
   private async togglePip(): Promise<void> {
@@ -144,6 +176,56 @@ export class YtFreePlayer {
     if (upgradeToHighQuality) void this.upgrade();
   }
 
+  /**
+   * Play a file from disk. No yt-dlp, no resolve, no expiry — first frame is
+   * immediate.
+   *
+   * `onFail` exists because a local file can be corrupt, truncated by a crashed
+   * download, or on an unmounted volume. Rather than showing a dead player, the
+   * caller is told to fall back to streaming.
+   */
+  loadLocal(url: string, onFail: () => void): void {
+    this.local = true;
+    this.teardownHls();
+    const fail = () => {
+      if (!this.local) return;
+      this.local = false;
+      onFail();
+    };
+    this.video.addEventListener("error", fail, { once: true });
+    this.video.src = url;
+    this.video.load();
+  }
+
+  /**
+   * Swap a streaming player onto a freshly downloaded file without interrupting
+   * it — same position, same play state. Reuses the quality-upgrade path, which
+   * already exists to do exactly this for a different reason.
+   */
+  swapToLocal(url: string): void {
+    if (this.destroyed) return;
+    const resumeAt = this.video.currentTime;
+    const wasPlaying = this.isPlaying;
+
+    this.local = true;
+    this.teardownHls();
+    this.video.src = url;
+    this.video.addEventListener(
+      "loadedmetadata",
+      () => {
+        if (resumeAt > 0) this.video.currentTime = resumeAt;
+        this.video.playbackRate = this.playbackRate;
+        if (wasPlaying) void this.video.play().catch(() => { /* ignore */ });
+      },
+      { once: true },
+    );
+    this.video.load();
+  }
+
+  get isLocal(): boolean {
+    return this.local;
+  }
+
   private async upgrade(): Promise<void> {
     let stream: ResolvedStream;
     try {
@@ -151,7 +233,7 @@ export class YtFreePlayer {
     } catch {
       return; // 360p already plays; a failed upgrade is not worth interrupting for.
     }
-    if (this.destroyed || this.recovering) return;
+    if (this.destroyed || this.recovering || this.local) return;
     if (!stream.isHls) return; // no quality gain, so don't disturb playback
 
     const resumeAt = this.video.currentTime;
@@ -204,6 +286,9 @@ export class YtFreePlayer {
   /** Re-resolve the stream and resume from wherever playback was. */
   private async recover(reason: string): Promise<void> {
     if (this.destroyed || this.recovering) return;
+    // A local file has nothing to re-resolve. Its failure path is loadLocal's
+    // onFail, which falls back to streaming once, deliberately.
+    if (this.local) return;
 
     if (Date.now() - this.lastRecoveryAt > 60_000) this.recoveries = 0;
 

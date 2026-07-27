@@ -2,6 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { extractVideoId, extractVideoIds, parseExpiry, StreamCache } from "../src/resolver.ts";
 import { formatTimestamp } from "../src/format.ts";
+import {
+  buildArgs,
+  downloadBaseName,
+  findByVideoId,
+  formatSelector,
+  localFileUrl,
+  parseProgress,
+  sanitizeFilename,
+} from "../src/download.ts";
 
 test("extractVideoId handles every URL shape we accept", () => {
   const id = "dQw4w9WgXcQ";
@@ -117,4 +126,90 @@ test("StreamCache invalidate clears both modes", () => {
 
 test("StreamCache misses on an unknown id", () => {
   assert.equal(new StreamCache().get("nope", "fast"), null);
+});
+
+// ---------------------------------------------------------------- downloads
+
+test("sanitizeFilename removes what macOS and Obsidian both dislike", () => {
+  assert.equal(sanitizeFilename("Ecclesiastes 7:1 — What/About\\Bob?"), "Ecclesiastes 7 1 — What About Bob");
+  assert.equal(sanitizeFilename("  spaced   out  \n"), "spaced out");
+  assert.equal(sanitizeFilename(""), "");
+});
+
+test("downloadBaseName keeps the video id even when the title is huge", () => {
+  const id = "dQw4w9WgXcQ";
+  const name = downloadBaseName("x".repeat(400), id);
+  assert.ok(name.endsWith(`[${id}]`), "id must survive truncation — it is the identity");
+  assert.ok(name.length < 160);
+});
+
+test("downloadBaseName falls back to the id alone when there is no title", () => {
+  assert.equal(downloadBaseName("   ", "dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+});
+
+test("findByVideoId survives the file being renamed", () => {
+  const id = "dQw4w9WgXcQ";
+  const files = ["unrelated.mp4", `Renamed By Hand [${id}].mp4`, `Other [aaaaaaaaaaa].mp4`];
+  assert.equal(findByVideoId(files, id), `Renamed By Hand [${id}].mp4`);
+});
+
+test("findByVideoId never returns a partial download", () => {
+  const id = "dQw4w9WgXcQ";
+  assert.equal(findByVideoId([`Half Done [${id}].mp4.part`], id), null);
+});
+
+test("parseProgress reads yt-dlp progress lines and ignores everything else", () => {
+  assert.deepEqual(parseProgress("[download]   1.2% of  723.45MiB at  5.00MiB/s ETA 02:24"), {
+    percent: 1.2,
+    totalBytes: Math.round(723.45 * 1024 ** 2),
+  });
+  assert.deepEqual(parseProgress("[download] 100% of 1.50GiB in 00:02:24"), {
+    percent: 100,
+    totalBytes: Math.round(1.5 * 1024 ** 3),
+  });
+  // Estimated sizes are printed with a tilde.
+  assert.equal(parseProgress("[download]  50.0% of ~ 100.00MiB at 1.00MiB/s")?.percent, 50);
+  assert.equal(parseProgress("[youtube] Extracting URL: https://..."), null);
+  assert.equal(parseProgress("/Users/me/Movies/YT Free/Some Title [abc].mp4"), null);
+  assert.equal(parseProgress(""), null);
+});
+
+test("formatSelector drops to a pre-muxed format without ffmpeg", () => {
+  assert.ok(formatSelector(true).includes("+"), "with ffmpeg we merge separate streams");
+  assert.ok(!formatSelector(false).includes("+"), "without ffmpeg nothing may need merging");
+});
+
+test("buildArgs downloads rather than simulating, and prints the final path", () => {
+  const args = buildArgs({
+    videoId: "dQw4w9WgXcQ",
+    ytDlpPath: "/opt/homebrew/bin/yt-dlp",
+    ffmpegPath: "/opt/homebrew/bin/ffmpeg",
+    destDir: "/tmp/yt",
+    baseName: "Title [dQw4w9WgXcQ]",
+    onProgress: () => undefined,
+  });
+  // --print implies --simulate, so its absence would mean nothing downloads.
+  assert.ok(args.includes("--no-simulate"));
+  assert.ok(args.includes("after_move:filepath"));
+  assert.ok(args.includes("--ffmpeg-location"));
+  assert.ok(args.some((a) => a.includes("%(ext)s")), "extension is yt-dlp's to choose");
+  assert.ok(args[args.length - 1].endsWith("dQw4w9WgXcQ"));
+});
+
+test("buildArgs omits --ffmpeg-location when ffmpeg is absent", () => {
+  const args = buildArgs({
+    videoId: "dQw4w9WgXcQ",
+    ytDlpPath: "yt-dlp",
+    ffmpegPath: null,
+    destDir: "/tmp/yt",
+    baseName: "x",
+    onProgress: () => undefined,
+  });
+  assert.ok(!args.includes("--ffmpeg-location"));
+});
+
+test("localFileUrl uses Obsidian's local scheme and escapes spaces", () => {
+  const url = localFileUrl("/Users/me/Movies/YT Free/Some Title [abc].mp4");
+  assert.ok(url.startsWith("app://local/"));
+  assert.ok(!url.includes(" "), "a raw space would break the resource URL");
 });

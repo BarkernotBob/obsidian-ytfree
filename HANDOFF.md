@@ -1,6 +1,34 @@
 # HANDOFF
 
-## Status — 2026-07-26 (later)
+## Status — 2026-07-26 (latest)
+Issue 002 (offline download) built and installed. 51 unit tests pass; the yt-dlp
+argument shape was verified against a real 19-second download. **Awaiting the
+14-step manual test in `issues/002-local-download.md`.**
+
+A pickup note for the download work also lives in the vault at
+`MyVault/YT Free — Offline Download Plan.md`, per BarkernotBob's request.
+
+## What just changed (issue 002)
+- **Download button + two commands.** Downloads the note's video to
+  `~/Movies/YT Free/`, writes `local_media:` into the frontmatter, and swaps the
+  running player onto the file at the same position — the swap is invisible.
+- **`media_link` is never replaced.** Timestamps are keyed by video ID parsed out
+  of that URL; replacing it with a path would kill every `ytfree:` link in the
+  note, lose provenance, and make re-download impossible.
+- **Files live outside the vault** (iCloud). That means frontmatter syncs to the
+  second Mac and the file does not, so that Mac silently streams. Deliberate.
+- **`<title> [<videoId>].mp4`.** If the recorded path is gone, the folder is
+  searched for the bracketed ID, so renaming in Finder is harmless.
+- **No ffmpeg on this Mac**, so the pre-muxed fallback is the live path today,
+  not a corner case. Downloads say so rather than failing.
+- Local playback goes through Obsidian's `app://local/` handler; `file://` is
+  blocked by the renderer. A bad local file falls back to streaming once.
+- `src/download.ts` isolates everything testable without Obsidian.
+
+## Next step
+Manual test (issue 002). Relaunch Obsidian first.
+
+## Previous status — 2026-07-26 (later)
 Pinned player shipped and installed; ad-hoc playlist URLs now resolve.
 All automated tests pass: 41 unit, 5 live. **Awaiting manual test.**
 

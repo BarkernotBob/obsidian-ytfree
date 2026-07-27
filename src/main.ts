@@ -1,7 +1,12 @@
 import { Prec } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { existsSync } from "fs";
+import { mkdir, unlink } from "fs/promises";
+import { homedir } from "os";
+import { join } from "path";
 import {
   App,
+  FileSystemAdapter,
   MarkdownPostProcessorContext,
   MarkdownRenderChild,
   MarkdownView,
@@ -17,6 +22,18 @@ import {
   shouldAutoStamp,
   stampInsertOffset,
 } from "./capture";
+import {
+  DownloadHandle,
+  downloadBaseName,
+  downloadVideo,
+  findFfmpeg,
+  formatBytes,
+  freeBytes,
+  LARGE_FILE_BYTES,
+  localFileUrl,
+  MIN_FREE_BYTES,
+  resolveLocalFile,
+} from "./download";
 import { formatTimestamp } from "./format";
 import { YtFreePlayer } from "./player";
 import {
@@ -40,7 +57,12 @@ interface YtFreeSettings {
   pinnedPlayer: boolean;
   pinnedHeightVh: number;
   pinnedFrontmatterKeys: string;
+  downloadFolder: string;
+  ffmpegPath: string;
 }
+
+/** Frontmatter key holding the path to a downloaded copy. */
+export const LOCAL_MEDIA_KEY = "local_media";
 
 const DEFAULT_SETTINGS: YtFreeSettings = {
   ytDlpPath: "",
@@ -53,6 +75,10 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   pinnedPlayer: true,
   pinnedHeightVh: 40,
   pinnedFrontmatterKeys: "media_link, url",
+  // Deliberately outside the vault: the vault is in iCloud, and a 700MB video
+  // inside it would sync to every device and eat the quota.
+  downloadFolder: join(homedir(), "Movies", "YT Free"),
+  ffmpegPath: "",
 };
 
 /**
@@ -87,6 +113,9 @@ export default class YtFreePlugin extends Plugin {
   private lastActiveVideoId: string | null = null;
   private ytDlpPath: string | null = null;
   private resumeTimer: number | null = null;
+  private downloads = new Map<string, DownloadHandle>();
+  /** undefined = not probed yet; null = probed and absent. */
+  private ffmpegPath: string | null | undefined = undefined;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -164,6 +193,18 @@ export default class YtFreePlugin extends Plugin {
     this.registerEvent(this.app.metadataCache.on("changed", () => this.syncPinnedPlayers()));
 
     this.addCommand({
+      id: "download-video",
+      name: "Download this video for offline",
+      callback: () => void this.downloadForActiveNote(),
+    });
+
+    this.addCommand({
+      id: "delete-local-copy",
+      name: "Delete the local copy of this video",
+      callback: () => void this.deleteLocalCopy(),
+    });
+
+    this.addCommand({
       id: "toggle-pinned-player",
       name: "Toggle pinned player for this note",
       callback: async () => {
@@ -179,6 +220,8 @@ export default class YtFreePlugin extends Plugin {
 
   onunload(): void {
     this.clearResumeTimer();
+    for (const handle of this.downloads.values()) handle.cancel();
+    this.downloads.clear();
     for (const view of [...this.pinned.keys()]) this.unmountPinned(view);
     for (const entry of this.players.values()) entry.player.destroy();
     this.players.clear();
@@ -194,7 +237,13 @@ export default class YtFreePlugin extends Plugin {
    * Watch Later notes light up without being touched.
    */
   pinnedVideoIdFor(path: string | undefined): string | null {
-    if (!this.settings.pinnedPlayer || !path) return null;
+    if (!this.settings.pinnedPlayer) return null;
+    return this.videoIdForNote(path);
+  }
+
+  /** Same lookup, without the pinned-player gate — downloads need it either way. */
+  videoIdForNote(path: string | undefined): string | null {
+    if (!path) return null;
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) return null;
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
@@ -238,6 +287,173 @@ export default class YtFreePlugin extends Plugin {
     for (const view of [...this.pinned.keys()]) {
       if (!open.has(view)) this.unmountPinned(view);
     }
+  }
+
+  // -------------------------------------------------------------- download
+
+  /**
+   * The local copy of a note's video, or null when there isn't one on this
+   * machine — the normal case on a second Mac, where the frontmatter syncs but
+   * the file does not. Silence is the correct behaviour there.
+   */
+  private async localFileFor(path: string | undefined, videoId: string): Promise<string | null> {
+    if (!path) return null;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) return null;
+    const recorded = this.app.metadataCache.getFileCache(file)?.frontmatter?.[LOCAL_MEDIA_KEY];
+    // Search the folder even with nothing recorded: a file downloaded on this
+    // Mac is findable by its [videoId] marker regardless of what the note says.
+    return resolveLocalFile(
+      typeof recorded === "string" ? recorded : "",
+      this.settings.downloadFolder,
+      videoId,
+    );
+  }
+
+  private async setLocalMedia(file: TFile, path: string | null): Promise<void> {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (path) fm[LOCAL_MEDIA_KEY] = path;
+      else delete fm[LOCAL_MEDIA_KEY];
+    });
+  }
+
+  /** Active note, plus the video it points at. Both are required to download. */
+  private activeNoteVideo(): { file: TFile; videoId: string } | null {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const file = view?.file;
+    if (!file) return null;
+    const videoId = this.videoIdForNote(file.path);
+    return videoId ? { file, videoId } : null;
+  }
+
+  private async downloadForActiveNote(): Promise<void> {
+    const context = this.activeNoteVideo();
+    if (!context) {
+      new Notice("YT Free: this note does not point at a YouTube video.");
+      return;
+    }
+    await this.startDownload(context.videoId, context.file);
+  }
+
+  /**
+   * Download the video, record it in the note, and swap the running player onto
+   * the file without interrupting playback.
+   */
+  private async startDownload(videoId: string, file: TFile): Promise<void> {
+    if (this.downloads.has(videoId)) {
+      this.downloads.get(videoId)?.cancel();
+      this.downloads.delete(videoId);
+      new Notice("YT Free: download cancelled.");
+      return;
+    }
+
+    const entry = this.players.get(videoId);
+    const existing = await this.localFileFor(file.path, videoId);
+    if (existing) {
+      await this.setLocalMedia(file, existing);
+      new Notice("YT Free: already downloaded.");
+      entry?.player.setDownloadState("done");
+      return;
+    }
+
+    const dir = this.settings.downloadFolder;
+    try {
+      await mkdir(dir, { recursive: true });
+    } catch (err) {
+      new Notice(`YT Free: cannot create ${dir} — ${(err as Error).message}`);
+      return;
+    }
+
+    const free = await freeBytes(dir);
+    if (free !== null && free < MIN_FREE_BYTES) {
+      new Notice(`YT Free: only ${formatBytes(free)} free. Downloading needs at least 2 GB.`);
+      return;
+    }
+
+    if (!this.ytDlpPath) {
+      try {
+        this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
+      } catch {
+        new Notice("YT Free: yt-dlp is not installed, or Obsidian cannot find it.");
+        return;
+      }
+    }
+
+    // Cached across downloads; an ffmpeg install mid-session is rare enough to
+    // be worth a plugin reload.
+    if (this.ffmpegPath === undefined) {
+      this.ffmpegPath = await findFfmpeg(this.settings.ffmpegPath);
+    }
+
+    const title =
+      (this.app.metadataCache.getFileCache(file)?.frontmatter?.title as string) || file.basename;
+    const baseName = downloadBaseName(String(title), videoId);
+
+    let warnedLarge = false;
+    const notice = new Notice("YT Free: starting download…", 0);
+    entry?.player.setDownloadState("running");
+
+    const handle = downloadVideo({
+      videoId,
+      ytDlpPath: this.ytDlpPath,
+      ffmpegPath: this.ffmpegPath,
+      destDir: dir,
+      baseName,
+      onProgress: (percent, totalBytes) => {
+        if (!warnedLarge && totalBytes !== null && totalBytes > LARGE_FILE_BYTES) {
+          warnedLarge = true;
+          new Notice(`YT Free: this one is ${formatBytes(totalBytes)}.`);
+        }
+        const size = totalBytes === null ? "" : ` of ${formatBytes(totalBytes)}`;
+        notice.setMessage(`YT Free: downloading ${percent.toFixed(1)}%${size} — run the command again to cancel`);
+        entry?.player.setDownloadState("running", percent);
+      },
+    });
+    this.downloads.set(videoId, handle);
+
+    try {
+      const finalPath = await handle.done;
+      await this.setLocalMedia(file, finalPath);
+      // Same position, same play state — the swap should be invisible.
+      this.players.get(videoId)?.player.swapToLocal(localFileUrl(finalPath));
+      entry?.player.setDownloadState("done");
+      notice.setMessage(
+        this.ffmpegPath
+          ? "YT Free: downloaded. This note now plays the local copy."
+          : "YT Free: downloaded at pre-muxed quality — install ffmpeg (brew install ffmpeg) for 1080p.",
+      );
+    } catch (err) {
+      entry?.player.setDownloadState("idle");
+      const message = (err as Error).message;
+      notice.setMessage(
+        message === "cancelled" ? "YT Free: download cancelled." : `YT Free: download failed — ${message}`,
+      );
+    } finally {
+      this.downloads.delete(videoId);
+      window.setTimeout(() => notice.hide(), 8000);
+    }
+  }
+
+  private async deleteLocalCopy(): Promise<void> {
+    const context = this.activeNoteVideo();
+    if (!context) {
+      new Notice("YT Free: this note does not point at a YouTube video.");
+      return;
+    }
+    const local = await this.localFileFor(context.file.path, context.videoId);
+    if (!local) {
+      await this.setLocalMedia(context.file, null);
+      new Notice("YT Free: no local copy on this Mac.");
+      return;
+    }
+    try {
+      await unlink(local);
+    } catch (err) {
+      new Notice(`YT Free: could not delete the file — ${(err as Error).message}`);
+      return;
+    }
+    await this.setLocalMedia(context.file, null);
+    new Notice("YT Free: local copy deleted. This note streams again from now on.");
   }
 
   private async mountPinned(view: MarkdownView, videoId: string, sourcePath: string): Promise<void> {
@@ -507,14 +723,33 @@ export default class YtFreePlugin extends Plugin {
       return stream;
     };
 
-    const player = new YtFreePlayer(wrapper, provider, setStatus, (seconds) =>
-      this.insertTimestampFromButton(videoId, seconds),
+    const noteFile = this.app.vault.getAbstractFileByPath(sourcePath);
+    const player = new YtFreePlayer(
+      wrapper,
+      provider,
+      setStatus,
+      (seconds) => this.insertTimestampFromButton(videoId, seconds),
+      noteFile instanceof TFile ? () => void this.startDownload(videoId, noteFile) : undefined,
     );
     const entry: PlayerEntry = { player, videoId, sourcePath };
     this.players.set(videoId, entry);
     player.video.addEventListener("play", () => {
       this.lastActiveVideoId = videoId;
     });
+
+    // A present local copy wins: no yt-dlp, no expiry, instant first frame.
+    const localFile = await this.localFileFor(sourcePath, videoId);
+    if (localFile) {
+      player.setDownloadState("done");
+      player.loadLocal(localFileUrl(localFile), () => {
+        // Corrupt file, unmounted volume, truncated download. Say so once, then
+        // fall back to the network rather than showing a dead player.
+        setStatus("Local copy could not be played — streaming instead.");
+        window.setTimeout(() => setStatus(null), 6000);
+        void player.load(this.settings.upgradeToHighQuality).catch(() => undefined);
+      });
+      return entry;
+    }
 
     setStatus("Resolving stream…");
     try {
@@ -565,6 +800,16 @@ export default class YtFreePlugin extends Plugin {
   refreshPinnedPlayers(): void {
     for (const view of [...this.pinned.keys()]) this.unmountPinned(view);
     this.syncPinnedPlayers();
+  }
+
+  /** Absolute path of the vault on disk, or null on a non-file adapter. */
+  vaultPath(): string | null {
+    const adapter = this.app.vault.adapter;
+    return adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
+  }
+
+  resetFfmpeg(): void {
+    this.ffmpegPath = undefined;
   }
 
   resetResolver(): void {
@@ -618,6 +863,51 @@ class YtFreeSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.timestampFormat)
           .onChange(async (value) => {
             this.plugin.settings.timestampFormat = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl).setName("Offline downloads").setHeading();
+
+    const folderSetting = new Setting(containerEl)
+      .setName("Download folder")
+      .addText((text) =>
+        text
+          .setPlaceholder(DEFAULT_SETTINGS.downloadFolder)
+          .setValue(this.plugin.settings.downloadFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.downloadFolder = value.trim() || DEFAULT_SETTINGS.downloadFolder;
+            await this.plugin.saveSettings();
+            describeFolder();
+          }),
+      );
+
+    // A path inside the vault is the one mistake here that is expensive and hard
+    // to undo, because the vault syncs. Say so at the moment it is made.
+    const describeFolder = () => {
+      const vaultPath = this.plugin.vaultPath();
+      const chosen = this.plugin.settings.downloadFolder;
+      const inVault = Boolean(vaultPath) && chosen.startsWith(vaultPath as string);
+      folderSetting.setDesc(
+        inVault
+          ? "⚠ This folder is inside your vault. Downloads will sync to every device and count against iCloud storage. Pick somewhere outside the vault."
+          : "Where downloaded videos are kept. Outside the vault on purpose — these files are a local cache, not vault content.",
+      );
+    };
+    describeFolder();
+
+    new Setting(containerEl)
+      .setName("ffmpeg path")
+      .setDesc(
+        "Leave blank to auto-detect. Without ffmpeg, downloads fall back to the best pre-muxed quality (usually 360–720p) instead of failing.",
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("/opt/homebrew/bin/ffmpeg")
+          .setValue(this.plugin.settings.ffmpegPath)
+          .onChange(async (value) => {
+            this.plugin.settings.ffmpegPath = value.trim();
+            this.plugin.resetFfmpeg();
             await this.plugin.saveSettings();
           }),
       );

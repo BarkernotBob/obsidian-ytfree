@@ -68,6 +68,17 @@
   width: 72px;
 }
 
+/* Widest label is "Downloaded"; pinning the width means download progress
+   ticking through "12%" cannot nudge the row. */
+.ytfree-btn-download {
+  width: 96px;
+}
+
+.ytfree-btn:disabled {
+  cursor: default;
+  color: var(--text-muted);
+}
+
 .ytfree-speed {
   height: 28px;
   width: 72px;

@@ -1,6 +1,7 @@
 # 002 — Download a video for offline, and play the local copy
 
-**Status:** Scoped, not built.
+**Status:** Built 2026-07-26. 51 unit tests pass; the yt-dlp argument shape was verified
+against a real 19-second download. Awaiting the manual test below.
 
 **Created:** 2026-07-26
 
@@ -146,6 +147,48 @@ message under 2GB free. Warn but proceed over 2GB per file.
 8. The delete command removes both the file and the frontmatter key.
 9. Pressing the Download button does not resize the control row or shift the note.
 
+## Build notes (2026-07-26)
+
+- `src/download.ts` holds everything testable without Obsidian: filename rules, progress
+  parsing, argument construction, the `[videoId]` file search.
+- **ffmpeg is not installed on this Mac.** The pre-muxed fallback is therefore the live
+  path today, not a corner case — expect ~360–720p until `brew install ffmpeg`.
+- Verified for real: `--print after_move:filepath --no-simulate` downloads and prints the
+  final absolute path on its own line, which is how the plugin learns the extension.
+- Local files play through Obsidian's `app://local/` handler. A plain `file://` URL is
+  blocked by the renderer, so that is not a fallback.
+- Stream recovery is disabled while playing local (`player.isLocal`); a local file's only
+  failure path is one fallback to streaming.
+
 ## Manual test (for BarkernotBob)
 
-To be written when the feature is complete, per the backlog rule.
+Do these in order. Anything that doesn't match, stop and say so.
+
+1. **Fully quit and relaunch Obsidian** (Cmd-Q). Open a Watch Later note with a video.
+2. Look at the player's control row. There should be a **Download** button on the right.
+3. Click it. Within a second or two a notice appears at the bottom right, counting up a
+   percentage. The button label changes to that percentage too.
+4. **While it downloads, watch the control row.** No button should move, resize, or shift.
+   The note text below the player should not move either.
+5. Let it finish. The notice should say it downloaded. If it mentions "pre-muxed quality",
+   that is expected — you don't have ffmpeg installed.
+6. **The video should keep playing without a hiccup** — same spot, still playing. It is now
+   playing off your disk, not YouTube.
+7. Open the note's frontmatter (Cmd-E to edit view, scroll to the top). There should be a
+   new `local_media:` line with a path ending in `.mp4`. The `media_link:` line should be
+   completely unchanged.
+8. Click a timestamp link in your notes. It should still seek correctly.
+9. In Finder, open `~/Movies/YT Free/`. The file should be there, named
+   `<video title> [<11 characters>].mp4`.
+10. Close the note and reopen it. The video should appear **instantly** — no "Resolving
+    stream…" message at all.
+11. **Rename the file in Finder** — change the words at the front, but leave the
+    `[...]` part alone. Close and reopen the note. It should still play.
+12. **Move the file to the Desktop** (simulating your other Mac, which won't have it).
+    Close and reopen the note. It should play normally by streaming, with no error popup.
+    Move it back afterwards.
+13. Run **YT Free: Delete the local copy of this video** from the command palette. The
+    file should disappear from `~/Movies/YT Free/`, and `local_media:` should vanish from
+    the frontmatter.
+14. Start a download again and, while it is running, run the download command a second
+    time. It should cancel, and `~/Movies/YT Free/` should be left with no `.part` file.
