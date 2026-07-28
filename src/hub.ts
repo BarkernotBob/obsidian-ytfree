@@ -340,7 +340,13 @@ export class HubView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("ytfree-hub");
-    root.toggleClass("is-phone", this.phone);
+    // NOT `is-phone`: that is Obsidian's own body class, and its rule block
+    // redeclares `--view-top-spacing: 0`. Putting it on the view-content made
+    // the element redefine the variable Obsidian's own
+    // `.is-phone .mod-root … .view-content { margin-top: var(--view-top-spacing) }`
+    // reads, so the hub lost the space reserved for the fixed view header and
+    // sat underneath it. Namespaced class, no collision.
+    root.toggleClass("ytfree-phone", this.phone);
 
     const header = root.createDiv({ cls: "ytfree-hub-header" });
 

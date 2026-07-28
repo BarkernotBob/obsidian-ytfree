@@ -1,6 +1,40 @@
 # HANDOFF
 
-## Status — 2026-07-28 (latest): mobile round 2 — controls, touch links, reopen
+## Status — 2026-07-28 (latest): keyboard scroll + hub header, both reproduced
+
+Built and installed. 140 tests pass, build clean. Both bugs were **reproduced
+locally** before fixing, in a headless harness (`/tmp/ytharness`, disposable):
+Obsidian's real `app.css` extracted from `obsidian.asar`, a 390×844 phone
+viewport, and a hand-built copy of the phone DOM. No more guessing at iOS from
+the desktop.
+
+1. **The video slid off the top when the keyboard opened, and stayed there.**
+   A markdown `.view-content` is `display: block; height: 100%; overflow:
+   hidden`, and the view inside it is `height: 100%` — so prepending the docked
+   player made the content exactly one player taller than its box. `overflow:
+   hidden` hides a scrollbar; it does not stop the engine scrolling. iOS
+   scrolled *that* box to bring the caret into view, and nothing scrolls it
+   back. Measured on the old CSS: `scrollTop` 0 → 453 after a caret scroll, and
+   it stays 453. Fix: `.view-content.ytfree-has-docked` is a flex column and the
+   note body is `flex: 1 1 auto; min-height: 0; height: auto`, so there is no
+   overflow left to scroll (`scrollHeight === clientHeight`, measured). A scroll
+   listener resets `scrollTop` as a backstop. The reopen bar gets both too.
+2. **The hub sat under the fixed view header — our own bug.** `HubView.build`
+   put Obsidian's `is-phone` class on its `contentEl`. `.is-phone` is a *body*
+   class whose rule block redeclares `--view-top-spacing: 0`; on the
+   view-content it shadowed the value that Obsidian's own
+   `.is-phone .mod-root … .view-content { margin-top: var(--view-top-spacing) }`
+   reads, so the reserved space computed to 0. Renamed to `ytfree-phone`
+   (styles.css follows). Measured: `margin-top` 0px → 111px, hub header now
+   starts at y=111 against a header ending at y=104.
+
+### Next step
+
+Phone check: open a note with a video, tap into the body, close the keyboard —
+the video must stay put; and open the hub — its filter/sync row must clear
+Obsidian's header.
+
+## Status — 2026-07-28: mobile round 2 — controls, touch links, reopen
 
 Built and installed. 140 tests pass, build clean. **Not yet run on an iPhone** —
 manual test steps 17–27 in [docs/MOBILE-UX.md](docs/MOBILE-UX.md) cover this

@@ -155,6 +155,33 @@
   --view-top-spacing-markdown: var(--size-4-2, 8px);
 }
 
+/*
+ * The note body must give up the height the player takes.
+ *
+ * A markdown `.view-content` is `display: block; height: 100%; overflow: hidden`
+ * and its child view is `height: 100%` — so prepending the player made the
+ * content exactly one player taller than the box that holds it. `overflow:
+ * hidden` hides a scrollbar; it does not stop the engine from scrolling. When
+ * iOS opened the keyboard and scrolled the caret into view it scrolled *this*
+ * box, slid the video off the top, and left it there: nothing else scrolls that
+ * container back, so the offset stuck after the keyboard closed.
+ *
+ * A flex column with a shrinkable body means there is no overflow left to
+ * scroll. Only while a player (or its reopen bar) is docked; removing the class
+ * hands the view straight back to Obsidian.
+ */
+.view-content.ytfree-has-docked {
+  display: flex;
+  flex-direction: column;
+}
+
+.view-content.ytfree-has-docked > .markdown-source-view,
+.view-content.ytfree-has-docked > .markdown-reading-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
 .ytfree-media {
   position: relative;
   width: 100%;
@@ -663,7 +690,7 @@
    into a horizontal scroll; here the filters and the channels collapse behind
    one disclosure, and any selection closes it again. See docs/MOBILE-UX.md. */
 
-.ytfree-hub.is-phone .ytfree-hub-header {
+.ytfree-hub.ytfree-phone .ytfree-hub-header {
   padding: 0.4em 0.6em;
   gap: 0.4em;
 }
@@ -710,12 +737,12 @@
   transform: rotate(180deg);
 }
 
-.ytfree-hub.is-phone .ytfree-hub-body {
+.ytfree-hub.ytfree-phone .ytfree-hub-body {
   display: block;
   position: relative;
 }
 
-.ytfree-hub.is-phone .ytfree-hub-list {
+.ytfree-hub.ytfree-phone .ytfree-hub-list {
   height: 100%;
   padding: 0.3em 0.5em;
 }
@@ -766,11 +793,11 @@
 }
 
 /* Three equal chips on one row — never a horizontal scroller. */
-.ytfree-hub.is-phone .ytfree-hub-filters {
+.ytfree-hub.ytfree-phone .ytfree-hub-filters {
   gap: 0.4em;
 }
 
-.ytfree-hub.is-phone .ytfree-hub-filter {
+.ytfree-hub.ytfree-phone .ytfree-hub-filter {
   flex: 1 1 0;
   min-width: 0;
   height: 40px;
@@ -779,7 +806,7 @@
   font-size: var(--font-ui-small);
 }
 
-.ytfree-hub.is-phone .ytfree-hub-channels {
+.ytfree-hub.ytfree-phone .ytfree-hub-channels {
   flex: none;
   padding: 0;
   overflow: visible;
@@ -788,19 +815,19 @@
 
 /* A real touch target, and vertical — the channel list is the thing that used
    to be a sideways-scrolling column. */
-.ytfree-hub.is-phone .ytfree-hub-channel {
+.ytfree-hub.ytfree-phone .ytfree-hub-channel {
   height: 44px;
   padding: 0 0.4em;
   font-size: var(--font-ui-medium);
 }
 
-.ytfree-hub.is-phone .ytfree-hub-card {
+.ytfree-hub.ytfree-phone .ytfree-hub-card {
   height: 74px;
   gap: 0.6em;
   padding: 0 0.2em;
 }
 
-.ytfree-hub.is-phone .ytfree-hub-thumb {
+.ytfree-hub.ytfree-phone .ytfree-hub-thumb {
   position: relative;
   flex: 0 0 104px;
   width: 104px;
@@ -809,7 +836,7 @@
 
 /* Badge, not a column: absolutely positioned, so appearing costs no width and
    marking an item Kept still moves nothing. */
-.ytfree-hub.is-phone .ytfree-hub-marker {
+.ytfree-hub.ytfree-phone .ytfree-hub-marker {
   position: absolute;
   top: 4px;
   left: 4px;
@@ -827,13 +854,13 @@
   visibility: hidden;
 }
 
-.ytfree-hub.is-phone .ytfree-hub-title {
+.ytfree-hub.ytfree-phone .ytfree-hub-title {
   font-size: var(--font-ui-small);
   line-height: 1.3;
   max-height: 2.6em;
 }
 
-.ytfree-hub.is-phone .ytfree-hub-dismiss {
+.ytfree-hub.ytfree-phone .ytfree-hub-dismiss {
   flex: 0 0 44px;
   width: 44px;
   height: 44px;

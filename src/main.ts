@@ -217,6 +217,8 @@ export default class YtFreePlugin extends Plugin {
   private dismissed = new Map<MarkdownView, string>();
   /** The "Show video" bar standing in for a closed player, per view. */
   private reopened = new Map<MarkdownView, HTMLElement>();
+  /** Scroll listeners pinning a docked view at the top — see holdDockedLayout. */
+  private dockGuards = new Map<MarkdownView, () => void>();
   /**
    * The second a timestamp asked for, per video, kept only until the stream
    * resolves. If it never does, the "Open in YouTube" fallback needs it to land
@@ -1362,7 +1364,7 @@ export default class YtFreePlugin extends Plugin {
     // Marks the view for the CSS that has to override Obsidian's own — see the
     // `.ytfree-has-docked` rules in styles.css. A class beats `:has()` here
     // because it is exact and it is removed the moment the player goes.
-    if (mobile) view.contentEl.addClass("ytfree-has-docked");
+    if (mobile) this.holdDockedLayout(view);
 
     const record: PinnedEntry = { videoId, wrapper, entry: null };
     this.pinned.set(view, record);
@@ -1388,7 +1390,41 @@ export default class YtFreePlugin extends Plugin {
       if (this.players.get(record.videoId) === record.entry) this.players.delete(record.videoId);
     }
     record.wrapper.remove();
-    view.contentEl.removeClass("ytfree-has-docked");
+    // The reopen bar sits in the same place and needs the same layout, so the
+    // class only comes off when nothing of ours is left in the view.
+    if (!this.reopened.get(view)?.isConnected) this.releaseDockedLayout(view);
+  }
+
+  /**
+   * Hold the note body to the height the player left it.
+   *
+   * The class is what styles.css keys the flex column off. The listener is the
+   * belt to its braces: a markdown `.view-content` is `overflow: hidden`, which
+   * hides a scrollbar but does not stop iOS from scrolling the box itself to
+   * bring the caret into view when the keyboard opens — and once it has, no
+   * gesture scrolls it back, so the video stays parked off the top of the
+   * screen. Anything that scrolls this container is not the user; undo it.
+   */
+  private holdDockedLayout(view: MarkdownView): void {
+    const el = view.contentEl;
+    el.addClass("ytfree-has-docked");
+    if (this.dockGuards.has(view)) return;
+    const guard = (): void => {
+      if (el.scrollTop !== 0) el.scrollTop = 0;
+      if (el.scrollLeft !== 0) el.scrollLeft = 0;
+    };
+    el.addEventListener("scroll", guard, { passive: true });
+    this.dockGuards.set(view, guard);
+  }
+
+  private releaseDockedLayout(view: MarkdownView): void {
+    const el = view.contentEl;
+    el.removeClass("ytfree-has-docked");
+    const guard = this.dockGuards.get(view);
+    if (guard) {
+      el.removeEventListener("scroll", guard);
+      this.dockGuards.delete(view);
+    }
   }
 
   /**
@@ -1405,6 +1441,7 @@ export default class YtFreePlugin extends Plugin {
     if (!videoId) {
       current?.remove();
       this.reopened.delete(view);
+      if (!this.pinned.has(view)) this.releaseDockedLayout(view);
       return;
     }
     if (current?.isConnected) return;
@@ -1423,6 +1460,9 @@ export default class YtFreePlugin extends Plugin {
     });
     view.contentEl.prepend(bar);
     this.reopened.set(view, bar);
+    // The bar is shorter than the player but it overflows the view the same
+    // way, so it gets the same flex column and the same scroll guard.
+    if (!Platform.isDesktopApp) this.holdDockedLayout(view);
   }
 
   // ---------------------------------------------------------------- capture
