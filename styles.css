@@ -441,8 +441,11 @@
   background: var(--background-modifier-hover);
 }
 
+/* Greyed for three seconds, then removed — the grey period is the undo. The
+   card keeps its size throughout, so nothing around it moves until it goes. */
 .ytfree-hub-card.is-dismissed {
   opacity: 0.45;
+  filter: grayscale(1);
 }
 
 .ytfree-hub-thumb {

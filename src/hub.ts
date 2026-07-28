@@ -40,6 +40,15 @@ import {
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
 
+/**
+ * How long a dismissed card stays on screen, greyed, before it goes.
+ *
+ * The grey period is the undo: clicking the button again inside it puts the
+ * item back. Removing on the first click would need a separate undo affordance
+ * for a mis-click, which is the thing this window replaces.
+ */
+export const DISMISS_GRACE_MS = 3000;
+
 export interface HubSettings {
   pollMinutes: number;
   expiryDays: number;
@@ -267,11 +276,15 @@ export class HubView extends ItemView {
   private statusEl!: HTMLElement;
   /** Cards on screen right now, so a click can update one in place. */
   private cards = new Map<string, HTMLElement>();
+  /** Dismissed cards counting down to removal, keyed by video ID. */
+  private removalTimers = new Map<string, number>();
 
   constructor(
     leaf: WorkspaceLeaf,
     private store: SubscriptionsStore,
     private settings: () => HubSettings,
+    /** What the toolbar's sync button runs. Null falls back to a feed poll. */
+    private sync: (() => Promise<void>) | null = null,
   ) {
     super(leaf);
   }
@@ -299,6 +312,7 @@ export class HubView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.clearRemovals();
     this.unsubscribe?.();
     this.unsubscribe = null;
   }
@@ -329,11 +343,15 @@ export class HubView extends ItemView {
     }
 
     const actions = header.createDiv({ cls: "ytfree-hub-actions" });
+    // The same thing the settings pane's "Sync now" runs, notices included, so
+    // there is only one meaning of "sync" in the plugin.
     const refresh = actions.createEl("button", { cls: "ytfree-hub-icon-button" });
-    refresh.setAttribute("aria-label", "Check for new videos");
+    refresh.setAttribute("aria-label", "Sync now — your account, then the channel feeds");
+    refresh.setAttribute("title", "Sync now — your account, then the channel feeds");
     setIcon(refresh, "refresh-cw");
     refresh.addEventListener("click", () => {
-      void this.store.poll().then(() => this.renderAll());
+      const run = this.sync ? this.sync() : this.store.poll();
+      void run.then(() => this.renderAll());
     });
 
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status" });
@@ -415,6 +433,7 @@ export class HubView extends ItemView {
 
   private renderList(): void {
     if (!this.listEl) return;
+    this.clearRemovals();
     this.listEl.empty();
     this.cards.clear();
 
@@ -465,12 +484,13 @@ export class HubView extends ItemView {
     const dismiss = card.createDiv({ cls: "ytfree-hub-dismiss" });
     const button = new ButtonComponent(dismiss)
       .setIcon("x")
-      .setTooltip("Dismiss")
+      .setTooltip("Remove — click again within 3 seconds to undo")
       .onClick((evt) => {
         evt.stopPropagation();
         this.store.dismiss(item);
         this.paintMarker(marker, item);
         card.toggleClass("is-dismissed", item.state === "dismissed");
+        this.scheduleRemoval(item, card);
       });
     button.buttonEl.addClass("ytfree-hub-icon-button");
 
@@ -480,6 +500,40 @@ export class HubView extends ItemView {
         (err: unknown) => new Notice(`YT Free: could not create the note — ${String(err)}`),
       );
     });
+  }
+
+  /**
+   * Start — or cancel — the countdown that takes a dismissed card off screen.
+   *
+   * Un-dismissing cancels, so the pair of clicks leaves nothing running.
+   */
+  private scheduleRemoval(item: HubItem, card: HTMLElement): void {
+    const pending = this.removalTimers.get(item.videoId);
+    if (pending !== undefined) {
+      window.clearTimeout(pending);
+      this.removalTimers.delete(item.videoId);
+    }
+    if (item.state !== "dismissed") return;
+
+    const timer = window.setTimeout(() => {
+      this.removalTimers.delete(item.videoId);
+      // Un-dismissed and re-dismissed inside the window, or opened: whatever the
+      // item is now, only a still-dismissed one disappears.
+      if (item.state !== "dismissed") return;
+      card.remove();
+      this.cards.delete(item.videoId);
+      // The empty state is part of the list, so an emptied list is re-rendered
+      // rather than left blank.
+      if (this.cards.size === 0) this.renderList();
+      this.renderStatus();
+    }, DISMISS_GRACE_MS);
+    this.removalTimers.set(item.videoId, timer);
+  }
+
+  /** Drop every countdown. A redraw or a closed view leaves none running. */
+  private clearRemovals(): void {
+    for (const timer of this.removalTimers.values()) window.clearTimeout(timer);
+    this.removalTimers.clear();
   }
 
   private paintMarker(marker: HTMLElement, item: HubItem): void {

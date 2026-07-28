@@ -397,7 +397,8 @@ export default class YtFreePlugin extends Plugin {
 
     this.registerView(
       HUB_VIEW_TYPE,
-      (leaf) => new HubView(leaf, this.subscriptions, () => this.hubSettings()),
+      (leaf) =>
+        new HubView(leaf, this.subscriptions, () => this.hubSettings(), () => this.syncNow()),
     );
 
     this.addRibbonIcon("youtube", "YT Free subscriptions", () => void this.openHub());
@@ -439,6 +440,28 @@ export default class YtFreePlugin extends Plugin {
     // poll period: changing the period in settings takes effect immediately
     // instead of at the next restart.
     this.registerInterval(window.setInterval(() => void this.maybePoll(), 60_000));
+  }
+
+  /**
+   * One "sync", with one meaning: the hub's sync button and the settings pane's
+   * Sync now both run this, so they cannot drift apart or report differently.
+   *
+   * The account goes first — it is what adds channels and Watch Later items —
+   * and the feed poll then fills in descriptions for whatever it added. When
+   * there is no session, the account half is skipped silently rather than
+   * nagging someone who deliberately never signed in.
+   */
+  async syncNow(): Promise<void> {
+    const signedIn =
+      Platform.isDesktopApp && this.settings.accountSession.status === "signed-in";
+    if (signedIn) await this.syncAccount(true);
+    await this.subscriptions.poll();
+    this.refreshHub();
+    // Without a session `syncAccount` said nothing, so the click needs its own
+    // acknowledgement — a button that flashes nothing looks broken.
+    if (!signedIn) {
+      new Notice(`YT Free: checked ${this.subscriptions.state.channels.length} channels.`);
+    }
   }
 
   /** Poll if the last one is older than the configured gap (or `floor`). */
@@ -1834,10 +1857,11 @@ class YtFreeSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Sync now")
-      .setDesc("Pull subscriptions, Watch Later and history immediately, without waiting for the schedule.")
-      .addButton((button) =>
-        button.setButtonText("Sync").onClick(() => void plugin.syncAccount(true)),
-      );
+      .setDesc(
+        "Pull subscriptions, Watch Later and history immediately, then check the channel feeds. " +
+          "The sync button in the hub runs exactly this.",
+      )
+      .addButton((button) => button.setButtonText("Sync").onClick(() => void plugin.syncNow()));
 
     new Setting(containerEl)
       .setName("Sync every")
