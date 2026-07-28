@@ -24,7 +24,11 @@ function assertNoEagerNodeRequires(file) {
   // Everything before the CJS export marker is esbuild's prelude and its lazy
   // `__esm` closures; the eager module body is what runs at load.
   const body = src.slice(src.indexOf("module.exports="));
-  const leaked = builtins.filter((name) => body.includes(`require("${name}")`));
+  // `@electron/remote` belongs on this list for the same reason the builtins
+  // do: it exists only in the desktop renderer, so requiring it at load time
+  // kills the plugin on iOS just as thoroughly as `child_process` would.
+  const guarded = [...builtins, "@electron/remote"];
+  const leaked = guarded.filter((name) => body.includes(`require("${name}")`));
 
   if (leaked.length) {
     console.error(
@@ -45,6 +49,10 @@ const ctx = await esbuild.context({
   external: [
     "obsidian",
     "electron",
+    // The sign-in window reaches Electron's session store through the remote
+    // module. It exists only in the desktop renderer and must not be bundled;
+    // `src/desktop/signin.ts` is the only file that requires it.
+    "@electron/remote",
     "@codemirror/state",
     "@codemirror/view",
     "@codemirror/language",

@@ -61,11 +61,24 @@ Three rules for the build fall out of it:
    never goes near it. Two variables differed between the blocked run and the
    passing one, so this is the safe reading rather than an isolated cause.
 
-Still unverified, and now the first thing the build must do: whether the session
-cookies can be read back out of the partition and whether **yt-dlp accepts
-them** for `:ytsubs`. The spike came down before those commands ran. Cheap to
-answer now that sign-in is solved, and if it fails the rest of this scope is
-dead — so it goes first, before any UI.
+### The cookie handoff — verified 2026-07-28, end to end
+
+Run before any UI was written, which was the point of doing it first.
+
+| Question | Answer |
+|---|---|
+| Can the session cookies be read back out of the partition? | **Yes** — 41 cookies across `.google.com`, `.youtube.com`, `accounts.google.com`, all eight auth cookies present |
+| Does yt-dlp accept them? | **Yes** — `--cookies FILE --flat-playlist --playlist-end 5 :ytsubs` exited 0 and printed five real subscription videos, empty stderr |
+
+So the design works end to end and the scope stands as written. One thing the
+run also settled, which the scope had wrong:
+
+**`:ytsubs` is the subscription *feed*, not the subscription list.** Its entries
+are videos, each naming the channel that posted it — so it yields only channels
+that have uploaded recently, which is a strictly smaller set than a Takeout
+export. The subscription manager page, `https://www.youtube.com/feed/channels`,
+is the one whose entries are channels. The build asks for that first and falls
+back to `:ytsubs`, and acceptance criterion 4 is a claim about the first path.
 
 ## The split, which is the whole point
 
@@ -185,4 +198,71 @@ on your phone or TV, so the hub can mark it as already seen.
     the hub still polls RSS, notes still open, playback is unaffected.
 
 ## Manual test (for BarkernotBob)
-To be written when v1 is complete, per the backlog rule.
+
+Reload the plugin first: Obsidian → Settings → Community plugins → toggle **YT
+Free** off and on. Open the console with ⌥⌘I before you start; step 4 logs there.
+
+**A — sign in**
+
+1. Settings → YT Free. Under **YouTube account** the status line reads *Not
+   signed in* and the button says **Sign in…**.
+2. Click **Sign in…**. A window opens on youtube.com. Sign in from the avatar in
+   its top right, exactly as you would in a browser.
+   - *If Google says "this browser or app may not be secure": stop and tell me.
+     That is the block the spike avoided, and it means Google changed something.*
+3. When sign-in finishes the window closes on its own within a few seconds, and
+   a notice says **signed in as <your name>** (or just "signed in" — the name is
+   cosmetic).
+4. Settings now reads *Signed in as … Not synced yet*, then a moment later
+   *Synced just now*. A second notice reports how many channels, Watch Later
+   items and watched videos it found.
+5. **The claim to check, not just the happy path:** in Terminal, run
+   `ls -l ~/Library/Application\ Support/obsidian-ytfree/cookies.txt`. It should
+   exist and show `-rw-------`. Then search your vault for `LOGIN_INFO` — there
+   must be no hit anywhere inside it.
+
+**B — subscriptions**
+
+6. Open the hub (the YouTube ribbon icon). The channel list on the left should
+   hold your real subscriptions. If you previously imported a Takeout CSV, the
+   count should be about the same — tell me if it is dramatically smaller, that
+   means it fell back to the feed.
+7. Run **Sync account now** from the command palette a second time. The notice
+   should say **0 new** channels. Re-syncing must never add duplicates.
+
+**C — Watch Later**
+
+8. Add a video to Watch Later on youtube.com, then run **Sync account now**.
+9. In the hub, switch to **All**. The video should appear, labelled *Watch
+   Later*, near the bottom (it has no publish date, so it sorts last).
+10. Click it. A note is created in your Watch Later folder with the player
+    pinned. Its Description section says it came from Watch Later and has no
+    description — that is expected, not a failure.
+
+**D — watched**
+
+11. Watch a few seconds of any video from your subscriptions **on your phone or
+    in a browser**, so it lands in your YouTube history.
+12. Run **Sync account now**. That video should disappear from the hub's **New**
+    list, and appear in **All** labelled *Watched* with a dimmed thumbnail.
+13. Settings → **Show watched videos in New** → on. It comes back into New.
+
+**E — the whole reason this design exists**
+
+14. In Obsidian, play a video for a minute or two.
+15. Go to <https://www.youtube.com/feed/history> in your browser. **That video
+    must not be there.** If it is, the cookie split has leaked onto the playback
+    path and that is a bug worth stopping for.
+
+**F — sign out**
+
+16. Settings → **Sign out**. The status returns to *Not signed in* and a notice
+    says the cookie file was deleted. Re-run the `ls -l` from step 5: no file.
+17. Run **Sync account now**. It should say you are not signed in — once, and
+    not repeatedly.
+18. Confirm the rest still works signed out: the hub still refreshes (the ⟳
+    button), notes still open, video still plays. None of that ever used the
+    account.
+19. Finally, revoke the session on Google's side at
+    <https://myaccount.google.com/device-activity> — signing out here deletes the
+    local copy but does not tell Google anything.

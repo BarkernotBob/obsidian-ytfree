@@ -45,6 +45,8 @@ export interface HubSettings {
   expiryDays: number;
   includeShorts: boolean;
   watchLaterFolder: string;
+  /** Keep videos the account says were already watched in the New list. */
+  showWatched: boolean;
 }
 
 /** Run `worker` over `items`, at most `limit` in flight. */
@@ -407,6 +409,7 @@ export class HubView extends ItemView {
       filter: this.filter,
       channelId: this.channelFilter,
       includeShorts: this.settings().includeShorts,
+      showWatched: this.settings().showWatched,
     });
   }
 
@@ -448,7 +451,12 @@ export class HubView extends ItemView {
     const sub = meta.createDiv({ cls: "ytfree-hub-sub" });
     const bits = [item.channelTitle, relativeAge(item.published, now), formatViews(item.views)];
     if (item.isShort) bits.push("Short");
+    // Where it came from, and whether it is already seen. A Watch Later item
+    // has no publish date, so without the label it looks like a bug.
+    if (item.origin === "watchlater" || item.origin === "both") bits.push("Watch Later");
+    if (item.watched) bits.push("Watched");
     sub.setText(bits.filter(Boolean).join(" · "));
+    card.toggleClass("is-watched", Boolean(item.watched));
 
     // Fixed-width column, filled or not, so marking an item Kept moves nothing.
     const marker = card.createDiv({ cls: "ytfree-hub-marker" });

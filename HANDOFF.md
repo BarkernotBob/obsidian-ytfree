@@ -1,6 +1,73 @@
 # HANDOFF
 
-## Status — 2026-07-28: issue 006 approved, gate spiked and passed, not built
+## Status — 2026-07-28 (latest): issue 006 built — sign in and account import
+
+**Built and installed. 137 unit tests pass, build clean. Awaiting the manual
+test** at the bottom of `docs/V1-SCOPE-ACCOUNT-IMPORT.md`.
+
+### The gate is closed — verified end to end, before any UI
+
+The spike's two unanswered questions were answered first, by reinstalling the
+spike rather than guessing:
+
+- **41 cookies came back out of the partition**, all eight auth cookies present.
+- **yt-dlp accepted them.** `--cookies FILE --flat-playlist --playlist-end 5
+  :ytsubs` exited 0 and printed five real subscription videos, empty stderr.
+
+The spike plugin folder and the cookie file are deleted again. The session was
+wiped with the spike's command 5, so signing in through the real UI starts clean.
+
+### The one thing the scope had wrong
+
+**`:ytsubs` is the subscription *feed*, not the subscription list.** Its entries
+are videos that name their channel, so it only yields channels that posted
+recently — strictly smaller than a Takeout export. The subscription manager page
+`https://www.youtube.com/feed/channels` is the one whose entries are channels.
+
+`syncAccount` asks for `/feed/channels` first and falls back to `:ytsubs` only
+when it returns nothing. **`/feed/channels` has never been run with cookies** —
+without them yt-dlp matches the extractor and then fails to resolve, which is
+what you would expect either way. Step B6 of the manual test is what proves it:
+a channel count far below the Takeout count means it fell back.
+
+### What is built
+
+- `src/account.ts` — no Node, no Obsidian: Netscape serialisation, the `--print`
+  parsing, the Watch Later merge, the watched marking, the session status
+  wording and the due/expiry rules. 14 tests.
+- `src/desktop/signin.ts` — the `<webview>` modal. Its header comment is the
+  spike's three rules and is the first thing to read if sign-in ever breaks.
+- `src/desktop/account.ts` — the cookie file (mode 600, outside the vault) and
+  `listWithCookies`.
+- Settings gain a **YouTube account** section; commands gain sign in, sign out,
+  and sync now. `HubItem` gains `origin` and `watched`.
+
+### Four decisions worth knowing before touching this again
+
+- **The build guard now also covers `@electron/remote`.** It is desktop-renderer
+  only, so an eager require kills the plugin on iOS exactly like `child_process`
+  would, and the old guard only knew about Node builtins. Verified by
+  deliberately leaking it — the build failed with the right message.
+- **A failed sync marks the session expired only when the error looks like an
+  expired session.** A timeout is not a sign-out; treating it as one would log
+  you out on a flaky network. Every other failure records the error and *still*
+  advances `lastSyncAt`, so a broken sync waits a full period instead of
+  retrying every minute. Hammering is what gets an account flagged.
+- **Watched items are hidden from New and nowhere else.** All and Kept are where
+  you go looking for something specific; withholding it there would be a bug.
+- **Watch Later items have no publish date**, because flat mode carries none.
+  That is load-bearing rather than sloppy: `expireItems` ignores items it cannot
+  date, so a Watch Later item never expires out of the hub on its own.
+
+### Not yet proven, and only a real sign-in can prove it
+
+`/feed/channels` with cookies (above); the display-name probe, which is a fixed
+regex over two known fields and falls back to a nameless "Signed in"; and
+acceptance criterion 7 — that playing in Obsidian leaves no trace in YouTube
+history. That last one is step E of the manual test and is the reason the whole
+design exists.
+
+## Status — 2026-07-28: issue 006 approved, gate spiked and passed (superseded)
 
 Sign in to YouTube from inside Obsidian and import subscriptions, Watch Later
 and history. Scope is `docs/V1-SCOPE-ACCOUNT-IMPORT.md`, **approved 2026-07-28**.
@@ -72,7 +139,7 @@ stays as the record; it never merges. Note `.obsidian/plugins/ytfree-spike/`
 (the 004 mobile-iframe spike) was **left alone** — it belongs to 004 and was not
 mine to remove.
 
-## Status — 2026-07-28 (latest): issue 004 built — mobile viewer
+## Status — 2026-07-28: issue 004 built — mobile viewer
 
 Issue 004 is **built and installed**. 123 unit tests pass, build clean.
 **Awaiting the manual test** at the bottom of `issues/004-mobile-viewer.md`.

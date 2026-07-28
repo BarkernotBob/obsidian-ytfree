@@ -512,3 +512,64 @@
   font-size: var(--font-ui-small);
   color: var(--text-muted);
 }
+
+/* ---------------------------------------------------------------- account */
+
+/*
+ * The sign-in window. Sized in the stylesheet rather than inline so the modal
+ * has its final dimensions before the webview loads — a window that grows once
+ * YouTube renders would move the avatar out from under the pointer.
+ */
+.ytfree-signin-modal {
+  width: min(560px, 90vw);
+  height: min(780px, 88vh);
+}
+
+.ytfree-signin-status {
+  min-height: 1.6em;
+  line-height: 1.6em;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.ytfree-signin-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0.4em 0;
+}
+
+.ytfree-signin-navbutton {
+  padding: 0 0.6em;
+}
+
+.ytfree-signin-url {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.ytfree-signin-view {
+  width: 100%;
+  height: calc(100% - 6em);
+  min-height: 520px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+/* Reserved line: the session status changes length as it changes state. */
+.ytfree-account-status {
+  min-height: 1.6em;
+  line-height: 1.6em;
+  margin-top: 0.4em;
+  color: var(--text-accent);
+}
+
+/* The label swaps between "Sign in…" and "Sign out"; the width must not. */
+.ytfree-account-button {
+  min-width: 7.5em;
+}
+
+/* Already seen elsewhere — dimmed, never hidden outside the New filter. */
+.ytfree-hub-card.is-watched .ytfree-hub-thumb {
+  opacity: 0.55;
+}

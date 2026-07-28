@@ -15,6 +15,18 @@ import {
   TFile,
 } from "obsidian";
 import {
+  AccountSession,
+  applyWatched,
+  channelsFromChannelsPage,
+  channelsFromSubsFeed,
+  describeSession,
+  emptySession,
+  looksLikeExpiry,
+  mergeWatchLater,
+  syncIsDue,
+  videoIdsFrom,
+} from "./account";
+import {
   applyLookback,
   isInsideCodeBlock,
   shouldAutoStamp,
@@ -90,6 +102,13 @@ interface YtFreeSettings {
   subscriptionsExpiryDays: number;
   subscriptionsIncludeShorts: boolean;
   watchLaterFolder: string;
+  accountSyncHours: number;
+  accountHistoryLimit: number;
+  accountShowWatched: boolean;
+  /** Blank means `defaultCookieFile()` — which needs `os.homedir()`, so it
+   * cannot be spelled out in the defaults any more than the download folder can. */
+  accountCookieFile: string;
+  accountSession: AccountSession;
 }
 
 /** Frontmatter key holding the path to a downloaded copy. */
@@ -122,6 +141,14 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   subscriptionsExpiryDays: 30,
   subscriptionsIncludeShorts: false,
   watchLaterFolder: "Watch Later",
+  // 12 hours, because yt-dlp's own documentation warns that recurring
+  // authenticated requests can get an account flagged. Raising it is a decision
+  // with a consequence, not a preference.
+  accountSyncHours: 12,
+  accountHistoryLimit: 200,
+  accountShowWatched: false,
+  accountCookieFile: "",
+  accountSession: emptySession(),
 };
 
 /**
@@ -184,10 +211,14 @@ export default class YtFreePlugin extends Plugin {
   /** undefined = not probed yet; null = probed and absent. */
   private ffmpegPath: string | null | undefined = undefined;
   subscriptions!: SubscriptionsStore;
+  /** Authenticated calls are serialized: never two account syncs at once. */
+  private accountSyncing = false;
+  private settingTab: YtFreeSettingTab | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
     await this.setupSubscriptions();
+    await this.setupAccount();
 
     this.registerMarkdownCodeBlockProcessor("ytfree", (source, el, ctx) =>
       this.renderBlock(source, el, ctx),
@@ -342,7 +373,8 @@ export default class YtFreePlugin extends Plugin {
       },
     });
 
-    this.addSettingTab(new YtFreeSettingTab(this.app, this));
+    this.settingTab = new YtFreeSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
   }
 
   // ---------------------------------------------------------- subscriptions
@@ -424,7 +456,207 @@ export default class YtFreePlugin extends Plugin {
       expiryDays: this.settings.subscriptionsExpiryDays,
       includeShorts: this.settings.subscriptionsIncludeShorts,
       watchLaterFolder: this.settings.watchLaterFolder,
+      showWatched: this.settings.accountShowWatched,
     };
+  }
+
+  // --------------------------------------------------------------- account
+
+  /**
+   * The signed-in half (issue 006): subscriptions, Watch Later and history come
+   * *in*; nothing goes out. Cookies are attached here and nowhere else in the
+   * plugin — not to playback, not to stream resolution, not to RSS polling, not
+   * to transcripts or downloads. That split is the feature: what you watch in
+   * Obsidian is never attributed to your YouTube account.
+   */
+  private async setupAccount(): Promise<void> {
+    if (!Platform.isDesktopApp) return;
+
+    this.addCommand({
+      id: "sign-in-youtube",
+      name: "Sign in to YouTube",
+      callback: () => void this.signIn(),
+    });
+
+    this.addCommand({
+      id: "sign-out-youtube",
+      name: "Sign out of YouTube",
+      callback: () => void this.signOut(),
+    });
+
+    this.addCommand({
+      id: "sync-account",
+      name: "Sync account now (subscriptions, Watch Later, history)",
+      callback: () => void this.syncAccount(true),
+    });
+
+    // Shares the subscriptions ticker's shape — ask "is it due yet" every
+    // minute — so changing the period in settings takes effect immediately.
+    this.registerInterval(
+      window.setInterval(() => {
+        if (syncIsDue(this.settings.accountSession, this.settings.accountSyncHours, new Date())) {
+          void this.syncAccount(false);
+        }
+      }, 60_000),
+    );
+  }
+
+  async signIn(): Promise<void> {
+    if (!Platform.isDesktopApp) return;
+    const { SignInModal, resolveCookieFile, writeCookieFile } = await desktop();
+    new SignInModal(this.app, async ({ cookies, name }) => {
+      const file = resolveCookieFile(this.settings.accountCookieFile);
+      writeCookieFile(file, cookies);
+      this.settings.accountSession = {
+        status: "signed-in",
+        name,
+        lastSyncAt: null,
+        lastError: null,
+      };
+      await this.saveSettings();
+      this.refreshSettingsTab();
+      // The first sync is the proof that any of it worked, so it is not left
+      // to the schedule twelve hours from now.
+      void this.syncAccount(true);
+    }).open();
+  }
+
+  async signOut(): Promise<void> {
+    if (!Platform.isDesktopApp) return;
+    const { clearSignInPartition, deleteCookieFile, resolveCookieFile } = await desktop();
+    await clearSignInPartition();
+    const file = resolveCookieFile(this.settings.accountCookieFile);
+    const deleted = deleteCookieFile(file);
+    this.settings.accountSession = emptySession();
+    await this.saveSettings();
+    this.refreshSettingsTab();
+    new Notice(
+      deleted
+        ? "YT Free: signed out. The cookie file is deleted."
+        : "YT Free: signed out. There was no cookie file to delete.",
+    );
+  }
+
+  /**
+   * One authenticated cycle: all three lists, in order, never concurrently.
+   *
+   * On failure the session is marked expired only when the error looks like an
+   * expired session — a timeout is not a sign-out, and treating it as one would
+   * make a flaky network log you out. Everything else records the error and
+   * *still* advances the clock, so a broken sync waits a full period instead of
+   * retrying every minute. Hammering is the thing that gets an account flagged;
+   * failing quietly for twelve hours is not.
+   */
+  async syncAccount(manual: boolean): Promise<void> {
+    if (!Platform.isDesktopApp) return;
+    const session = this.settings.accountSession;
+    if (session.status !== "signed-in") {
+      if (manual) new Notice("YT Free: not signed in. Run “Sign in to YouTube” first.");
+      return;
+    }
+    if (this.accountSyncing) {
+      if (manual) new Notice("YT Free: a sync is already running.");
+      return;
+    }
+    this.accountSyncing = true;
+    if (manual) new Notice("YT Free: syncing your account…");
+
+    const api = await desktop();
+    try {
+      const cookieFile = api.resolveCookieFile(this.settings.accountCookieFile);
+      if (!api.cookieFileExists(cookieFile)) {
+        throw new Error("cookies are no longer valid: the cookie file is gone");
+      }
+      const ytDlpPath = await this.resolveYtDlp();
+
+      // Subscriptions. `/feed/channels` is the subscription manager and lists
+      // every channel; `:ytsubs` is the subscription *feed* and its entries are
+      // videos, so it only names channels that have posted recently. The first
+      // is what a Takeout export matches, so it goes first and the second is a
+      // fallback rather than an equivalent.
+      let channels = channelsFromChannelsPage(
+        await api
+          .listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.channelsPage)
+          .catch(() => []),
+      );
+      let source = "subscription manager";
+      if (channels.length === 0) {
+        channels = channelsFromSubsFeed(
+          await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.subsFeed, {
+            limit: 300,
+          }),
+        );
+        source = "subscription feed";
+      }
+      const addedChannels = channels.length > 0 ? this.subscriptions.addChannels(channels) : 0;
+
+      // Watch Later.
+      const wlRows = await api.listWithCookies(
+        ytDlpPath,
+        cookieFile,
+        api.ACCOUNT_TARGETS.watchLater,
+      );
+      const merged = mergeWatchLater(this.subscriptions.state.items, wlRows, new Date());
+      this.subscriptions.state.items = merged.items;
+
+      // History, bounded. The full list is enormous and almost all of it is
+      // irrelevant to a hub that only holds the last thirty days.
+      const historyRows = await api.listWithCookies(
+        ytDlpPath,
+        cookieFile,
+        api.ACCOUNT_TARGETS.history,
+        { limit: Math.max(1, this.settings.accountHistoryLimit) },
+      );
+      const marked = applyWatched(this.subscriptions.state.items, videoIdsFrom(historyRows));
+
+      await this.subscriptions.save();
+      this.refreshHub();
+
+      this.settings.accountSession = {
+        ...session,
+        status: "signed-in",
+        lastSyncAt: new Date().toISOString(),
+        lastError: null,
+      };
+      await this.saveSettings();
+      this.refreshSettingsTab();
+
+      if (manual) {
+        new Notice(
+          `YT Free: ${channels.length} channels from the ${source} (${addedChannels} new), ` +
+            `${merged.added} new from Watch Later, ${marked} marked watched.`,
+          8000,
+        );
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      const expired = looksLikeExpiry(message);
+      this.settings.accountSession = {
+        ...session,
+        status: expired ? "expired" : "signed-in",
+        // Advancing the clock on a failure is deliberate: see the note above.
+        lastSyncAt: expired ? session.lastSyncAt : new Date().toISOString(),
+        lastError: message.slice(0, 300),
+      };
+      await this.saveSettings();
+      this.refreshSettingsTab();
+      if (manual || expired) {
+        new Notice(
+          expired
+            ? "YT Free: your YouTube session expired. Sign in again — syncing has stopped until you do."
+            : `YT Free: account sync failed — ${message}`,
+          10000,
+        );
+      }
+      console.error("YT Free: account sync failed.", err);
+    } finally {
+      this.accountSyncing = false;
+    }
+  }
+
+  /** Redraw an open settings tab, so a status line is never stale on screen. */
+  private refreshSettingsTab(): void {
+    this.settingTab?.refresh();
   }
 
   /** Re-filter every open hub. Poll results can change what a filter matches. */
@@ -1530,11 +1762,146 @@ export default class YtFreePlugin extends Plugin {
     this.ytDlpPath = null;
     this.cache.clear();
   }
+
+  /** The yt-dlp binary, probed once and remembered until a setting changes it. */
+  private async resolveYtDlp(): Promise<string> {
+    if (this.ytDlpPath) return this.ytDlpPath;
+    const { findYtDlp } = await desktop();
+    this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
+    return this.ytDlpPath;
+  }
 }
 
 class YtFreeSettingTab extends PluginSettingTab {
+  /**
+   * The account status line and its button, kept so a sync finishing can update
+   * them in place. Redrawing the whole tab would move everything under the
+   * pointer for a line of text that changed.
+   */
+  private accountStatusEl: HTMLElement | null = null;
+  private accountButtonEl: HTMLElement | null = null;
+
   constructor(app: App, private plugin: YtFreePlugin) {
     super(app, plugin);
+  }
+
+  /** Called when a sign-in or a sync changes the session. */
+  refresh(): void {
+    const session = this.plugin.settings.accountSession;
+    this.accountStatusEl?.setText(describeSession(session, new Date()));
+    this.accountButtonEl?.setText(session.status === "signed-out" ? "Sign in…" : "Sign out");
+  }
+
+  hide(): void {
+    this.accountStatusEl = null;
+    this.accountButtonEl = null;
+  }
+
+  /**
+   * The signed-in section. Deliberately blunt about what it stores: what a
+   * sign-in captures is a live Google session, not a scoped token, and someone
+   * who has that file can act as this account anywhere until it is signed out.
+   */
+  private displayAccount(containerEl: HTMLElement): void {
+    const plugin = this.plugin;
+    new Setting(containerEl).setName("YouTube account").setHeading();
+
+    const account = new Setting(containerEl)
+      .setName("Sign in to YouTube")
+      .setDesc(
+        "Fills the hub from your real account — subscriptions, Watch Later, and what you have already watched. " +
+          "You type into Google's own page; the plugin never sees your password. " +
+          "Playback stays signed out, so nothing you watch here is added to your YouTube history.",
+      );
+
+    // Its own line, with reserved height, so the status changing from “Not
+    // signed in” to a name and a sync time never moves the rows below it.
+    this.accountStatusEl = account.descEl.createDiv({ cls: "ytfree-account-status" });
+    this.accountStatusEl.setText(describeSession(plugin.settings.accountSession, new Date()));
+
+    account.addButton((button) => {
+      // Fixed width: the label swaps between “Sign in…” and “Sign out”, and a
+      // button that resizes itself would shove its neighbour sideways.
+      button.buttonEl.addClass("ytfree-account-button");
+      this.accountButtonEl = button.buttonEl;
+      button
+        .setButtonText(plugin.settings.accountSession.status === "signed-out" ? "Sign in…" : "Sign out")
+        .onClick(() => {
+          if (plugin.settings.accountSession.status === "signed-out") void plugin.signIn();
+          else void plugin.signOut();
+        });
+    });
+
+    new Setting(containerEl)
+      .setName("Sync now")
+      .setDesc("Pull subscriptions, Watch Later and history immediately, without waiting for the schedule.")
+      .addButton((button) =>
+        button.setButtonText("Sync").onClick(() => void plugin.syncAccount(true)),
+      );
+
+    new Setting(containerEl)
+      .setName("Sync every")
+      .setDesc(
+        "Hours between authenticated syncs. yt-dlp warns that frequent authenticated requests can get an account flagged, " +
+          "so this is a floor rather than a target — leave it high unless you have a reason.",
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(1, 48, 1)
+          .setValue(plugin.settings.accountSyncHours)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            plugin.settings.accountSyncHours = value;
+            await plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("History depth")
+      .setDesc(
+        "How many recent videos of your watch history to read each sync, to mark things you have already seen. " +
+          "History is read-only — nothing here ever writes to it.",
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(50, 1000, 50)
+          .setValue(plugin.settings.accountHistoryLimit)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            plugin.settings.accountHistoryLimit = value;
+            await plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Show watched videos in New")
+      .setDesc(
+        "Off by default: a video you already watched on your phone or TV drops out of the New list. It stays in All and Kept either way.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(plugin.settings.accountShowWatched).onChange(async (value) => {
+          plugin.settings.accountShowWatched = value;
+          await plugin.saveSettings();
+          plugin.refreshHub();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Session file")
+      .setDesc(
+        "Where the signed-in session is kept, in the format yt-dlp reads. Blank means ~/Library/Application Support/obsidian-ytfree/cookies.txt. " +
+          "Kept outside the vault on purpose: this file is a live Google session — full access to the account, not a limited token — and the vault syncs through iCloud. " +
+          "Treat it like a password, and sign out to delete it.",
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("~/Library/Application Support/obsidian-ytfree/cookies.txt")
+          .setValue(plugin.settings.accountCookieFile)
+          .onChange(async (value) => {
+            plugin.settings.accountCookieFile = value.trim();
+            await plugin.saveSettings();
+          }),
+      );
   }
 
   display(): void {
@@ -1593,6 +1960,11 @@ class YtFreeSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
       );
+
+    // Signing in needs an Electron webview and yt-dlp, neither of which exists
+    // on a phone. The whole section would be controls for something that cannot
+    // happen there.
+    if (desktopApp) this.displayAccount(containerEl);
 
     new Setting(containerEl).setName("Subscriptions hub").setHeading();
 

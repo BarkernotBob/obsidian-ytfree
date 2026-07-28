@@ -15,6 +15,8 @@
  * imported at the top of a file mobile loads.
  */
 
+export * from "./account.ts";
 export * from "./download.ts";
 export * from "./resolver.ts";
+export * from "./signin.ts";
 export * from "./transcript-fetch.ts";

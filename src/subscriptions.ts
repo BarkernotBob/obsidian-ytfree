@@ -50,7 +50,17 @@ export interface HubItem {
   seenAt: string;
   /** Vault path of the note a click created, if it still points anywhere. */
   notePath?: string;
+  /**
+   * Where it came from. Absent on everything written before the account import
+   * existed, which is read as "feed" — the only source there was.
+   */
+  origin?: ItemOrigin;
+  /** Seen on another device, per the account's watch history. Never written to. */
+  watched?: boolean;
 }
+
+/** A channel feed, your Watch Later list, or both. */
+export type ItemOrigin = "feed" | "watchlater" | "both";
 
 export interface SubscriptionsState {
   version: 1;
@@ -344,6 +354,7 @@ export function mergeItems(
       isShort: null,
       state: "new",
       seenAt: now.toISOString(),
+      origin: "feed",
     });
   }
 
@@ -379,16 +390,32 @@ export function expireItems(
 
 export type HubFilter = "new" | "all" | "kept";
 
-/** What the hub shows, newest first, after the filters have had their say. */
+/**
+ * What the hub shows, newest first, after the filters have had their say.
+ *
+ * Watched items are hidden from New and nowhere else: All and Kept are the two
+ * places you go looking for something specific, and silently withholding it
+ * there would be a bug rather than a filter. A Watch Later item carries no
+ * publish date, so it sorts to the bottom of a list ordered by one — which is
+ * right: it is the oldest thing there in every sense that matters.
+ */
 export function visibleItems(
   items: HubItem[],
-  options: { filter: HubFilter; channelId: string | null; includeShorts: boolean },
+  options: {
+    filter: HubFilter;
+    channelId: string | null;
+    includeShorts: boolean;
+    showWatched?: boolean;
+  },
 ): HubItem[] {
   return items
     .filter((item) => {
       if (options.channelId && item.channelId !== options.channelId) return false;
       if (!options.includeShorts && item.isShort === true) return false;
-      if (options.filter === "new") return item.state === "new";
+      if (options.filter === "new") {
+        if (item.watched && !options.showWatched) return false;
+        return item.state === "new";
+      }
       if (options.filter === "kept") return item.state === "kept";
       return item.state !== "dismissed";
     })
@@ -450,7 +477,9 @@ export function buildWatchLaterNote(item: HubItem, now: Date): string {
     // at render time, but a link in the file survives the plugin being off.
     item.description
       ? linkifyTimestamps(item.description, item.videoId)
-      : "_No description in the channel feed._",
+      : item.origin === "watchlater"
+        ? "_From your YouTube Watch Later, which carries no description. It will fill in if this channel's feed still holds the video._"
+        : "_No description in the channel feed._",
     "",
   ];
   return lines.join("\n");
