@@ -11,6 +11,7 @@ import {
   ButtonComponent,
   ItemView,
   Modal,
+  MarkdownView,
   Notice,
   Platform,
   Setting,
@@ -39,15 +40,6 @@ import {
 } from "./subscriptions";
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
-
-/**
- * How long a dismissed card stays on screen, greyed, before it goes.
- *
- * The grey period is the undo: clicking the button again inside it puts the
- * item back. Removing on the first click would need a separate undo affordance
- * for a mis-click, which is the thing this window replaces.
- */
-export const DISMISS_GRACE_MS = 3000;
 
 export interface HubSettings {
   pollMinutes: number;
@@ -239,8 +231,10 @@ export class SubscriptionsStore {
       }
     }
 
+    let created = false;
     if (!(file instanceof TFile)) {
       file = await this.app.vault.create(path, buildWatchLaterNote(item, new Date()));
+      created = true;
     }
 
     item.state = "kept";
@@ -248,7 +242,22 @@ export class SubscriptionsStore {
     this.emit();
     void this.save();
 
-    if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
+    if (file instanceof TFile) {
+      const leaf = this.app.workspace.getLeaf(false);
+      await leaf.openFile(file);
+      // A fresh note is for writing, so start the cursor in the Notes section
+      // rather than at the top of the frontmatter.
+      if (created && leaf.view instanceof MarkdownView) {
+        const editor = leaf.view.editor;
+        for (let i = 0; i < editor.lineCount(); i++) {
+          if (editor.getLine(i) === "## Notes") {
+            editor.setCursor({ line: i + 1, ch: 0 });
+            editor.focus();
+            break;
+          }
+        }
+      }
+    }
   }
 
   dismiss(item: HubItem): void {
@@ -276,8 +285,6 @@ export class HubView extends ItemView {
   private statusEl!: HTMLElement;
   /** Cards on screen right now, so a click can update one in place. */
   private cards = new Map<string, HTMLElement>();
-  /** Dismissed cards counting down to removal, keyed by video ID. */
-  private removalTimers = new Map<string, number>();
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -312,7 +319,6 @@ export class HubView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    this.clearRemovals();
     this.unsubscribe?.();
     this.unsubscribe = null;
   }
@@ -433,7 +439,6 @@ export class HubView extends ItemView {
 
   private renderList(): void {
     if (!this.listEl) return;
-    this.clearRemovals();
     this.listEl.empty();
     this.cards.clear();
 
@@ -484,13 +489,16 @@ export class HubView extends ItemView {
     const dismiss = card.createDiv({ cls: "ytfree-hub-dismiss" });
     const button = new ButtonComponent(dismiss)
       .setIcon("x")
-      .setTooltip("Remove — click again within 3 seconds to undo")
+      .setTooltip("Remove")
       .onClick((evt) => {
         evt.stopPropagation();
         this.store.dismiss(item);
-        this.paintMarker(marker, item);
-        card.toggleClass("is-dismissed", item.state === "dismissed");
-        this.scheduleRemoval(item, card);
+        card.remove();
+        this.cards.delete(item.videoId);
+        // The empty state is part of the list, so an emptied list is re-rendered
+        // rather than left blank.
+        if (this.cards.size === 0) this.renderList();
+        this.renderStatus();
       });
     button.buttonEl.addClass("ytfree-hub-icon-button");
 
@@ -500,40 +508,6 @@ export class HubView extends ItemView {
         (err: unknown) => new Notice(`YT Free: could not create the note — ${String(err)}`),
       );
     });
-  }
-
-  /**
-   * Start — or cancel — the countdown that takes a dismissed card off screen.
-   *
-   * Un-dismissing cancels, so the pair of clicks leaves nothing running.
-   */
-  private scheduleRemoval(item: HubItem, card: HTMLElement): void {
-    const pending = this.removalTimers.get(item.videoId);
-    if (pending !== undefined) {
-      window.clearTimeout(pending);
-      this.removalTimers.delete(item.videoId);
-    }
-    if (item.state !== "dismissed") return;
-
-    const timer = window.setTimeout(() => {
-      this.removalTimers.delete(item.videoId);
-      // Un-dismissed and re-dismissed inside the window, or opened: whatever the
-      // item is now, only a still-dismissed one disappears.
-      if (item.state !== "dismissed") return;
-      card.remove();
-      this.cards.delete(item.videoId);
-      // The empty state is part of the list, so an emptied list is re-rendered
-      // rather than left blank.
-      if (this.cards.size === 0) this.renderList();
-      this.renderStatus();
-    }, DISMISS_GRACE_MS);
-    this.removalTimers.set(item.videoId, timer);
-  }
-
-  /** Drop every countdown. A redraw or a closed view leaves none running. */
-  private clearRemovals(): void {
-    for (const timer of this.removalTimers.values()) window.clearTimeout(timer);
-    this.removalTimers.clear();
   }
 
   private paintMarker(marker: HTMLElement, item: HubItem): void {

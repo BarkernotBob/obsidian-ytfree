@@ -468,9 +468,7 @@ export function buildWatchLaterNote(item: HubItem, now: Date): string {
     `media_link: ${url}`,
     "length: ",
     "---",
-    "",
     "## Notes",
-    "",
     "",
     "## Description",
     // Real markdown links, written at creation time: the plugin also linkifies

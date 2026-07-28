@@ -4,13 +4,33 @@
   "behavior": "create",
   "noteNameFormat": "{{title|safe_name}}",
   "path": "Videos",
-  "noteContentFormat": "## Notes\n\n\n## Description\n{{schema:@VideoObject:description}}\n",
+  "noteContentFormat": "## Notes\n\n## Description\n{{schema:@VideoObject:description}}\n",
   "properties": [
-    { "name": "title", "value": "{{title}}", "type": "text" },
-    { "name": "media_link", "value": "{{url}}", "type": "text" },
-    { "name": "channel", "value": "{{author}}", "type": "text" },
-    { "name": "clipped", "value": "{{date}}", "type": "date" },
-    { "name": "tags", "value": "video", "type": "multitext" }
+    {
+      "name": "title",
+      "value": "{{title}}",
+      "type": "text"
+    },
+    {
+      "name": "media_link",
+      "value": "{{url}}",
+      "type": "text"
+    },
+    {
+      "name": "channel",
+      "value": "{{author}}",
+      "type": "text"
+    },
+    {
+      "name": "clipped",
+      "value": "{{date}}",
+      "type": "date"
+    },
+    {
+      "name": "tags",
+      "value": "video",
+      "type": "multitext"
+    }
   ],
   "triggers": [
     "/^https:\\/\\/(www\\.)?youtube\\.com\\/watch/",

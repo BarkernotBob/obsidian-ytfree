@@ -1,5 +1,15 @@
 # HANDOFF
 
+## Status — 2026-07-28 (later): new-note ergonomics
+
+- `buildWatchLaterNote` and both templates no longer emit a blank line between
+  the frontmatter and `## Notes`.
+- Hub-created notes open with the cursor on the empty line under `## Notes`
+  (`openItem`); the Templater templates do the same via `tp.file.cursor()`.
+- Vault-wide spacing between properties and body is now a CSS snippet in the
+  vault (`.obsidian/snippets/tight-properties.css`) — tight gap + hairline
+  divider, expanded or collapsed. Not part of this repo.
+
 ## Status — 2026-07-28: timestamp clicks fixed in both views
 
 Timestamp links (`ytfree:` scheme) stopped seeking — Obsidian's own link

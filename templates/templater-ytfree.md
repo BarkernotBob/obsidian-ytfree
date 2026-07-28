@@ -14,5 +14,5 @@ clipped: <% tp.date.now("YYYY-MM-DD") %>
 tags:
   - video
 ---
-
 ## Notes
+<% tp.file.cursor() %>
