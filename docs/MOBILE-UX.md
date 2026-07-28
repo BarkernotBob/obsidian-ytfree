@@ -298,14 +298,25 @@ stylesheet, not observed. Steps 3 and 6 are the ones that prove it.
 24. While typing, keep an eye on the video at the top. **It must not drift,
     shift, or half-scroll out of view.** If it does, note whether it happened
     while the keyboard was opening.
-25. Tap "Close" on the player. A single slim bar reading **▶ Show video** should
-    appear where the video was.
-26. Tap that bar. The video should come back, in the same place, with the same
-    button row.
-27. Leave the note, come back to it. Whatever state you left it in (video shown
-    or the ▶ bar) is fine — but there must never be *neither*.
+25. **Collapse.** Tap **Collapse** in the control row. The picture folds away,
+    playback pauses, and the control row stays. Tap **Show video** (the same
+    button) — the video comes back **at the same timestamp**, not at 0:00.
+26. **Play and PiP from cold.** Open a video note and, without touching the ▶ on
+    the poster, tap **Play**. The video should resolve and start. Repeat on a
+    fresh note with **PiP** instead — one tap should be enough.
+27. **Editing.** With the video playing, tap into the note body. The video
+    should fold away *immediately* and the control row with it, so you get the
+    screen for your text. Type a line, then stop and wait two seconds: **the
+    audio should come back on its own while the video stays folded.**
+28. Dismiss the keyboard. The video should reappear, playing, **at the position
+    it reached while you were typing** — not where it was when you started.
+29. Leave the note and come back. The player should be there, expanded.
 
 **What to report:** the step number, and what you saw instead. For 13, 16, 17,
-23 and 24 a screenshot is worth more than a description. Steps 23 and 24 are the
-ones I am least sure about — the fix there is reasoned from Obsidian's CSS and a
-known iOS WebKit behaviour, not something I have reproduced.
+23 and 24 a screenshot is worth more than a description.
+
+Step 27 is the one to watch: the audio has to survive the fold. The collapsed
+media box is zero-height with the `<video>` clipped inside it rather than
+`display: none`, because iOS WebKit stops playback on the latter — if the sound
+dies when the keyboard opens, that is the reason and the fix is a clipped
+sliver instead of a zero box.

@@ -181,10 +181,23 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
  * Known limitation: the same video embedded in two open notes collapses to one
  * entry, last render wins. Not worth a second index until it bites.
  */
+/**
+ * Why the video is hidden, or null if it is not.
+ *
+ * The two reasons behave differently on the way back: a collapse the reader
+ * asked for stays until they ask for the opposite, while one the keyboard
+ * caused is undone by the keyboard going away. Neither ever unmounts the
+ * player, so the position — and any audio still playing — survives both.
+ */
+type CollapseMode = "manual" | "keyboard" | null;
+
 interface PlayerEntry {
   player: YtFreePlayer;
   videoId: string;
   sourcePath: string;
+  /** The docked wrapper, so the collapse toggle has something to key off. */
+  wrapper: HTMLElement;
+  collapsed: CollapseMode;
   /**
    * Mobile: the stream has not been resolved yet. The player is mounted and
    * takes up its final space from the moment the note opens, but nothing is
@@ -213,10 +226,6 @@ export default class YtFreePlugin extends Plugin {
   private pinned = new Map<MarkdownView, PinnedEntry>();
   /** Last note whose properties we collapsed in a given view, so we do it once. */
   private collapsed = new Map<MarkdownView, string>();
-  /** Notes whose docked player the reader closed by hand, per view. */
-  private dismissed = new Map<MarkdownView, string>();
-  /** The "Show video" bar standing in for a closed player, per view. */
-  private reopened = new Map<MarkdownView, HTMLElement>();
   /** Scroll listeners pinning a docked view at the top — see holdDockedLayout. */
   private dockGuards = new Map<MarkdownView, () => void>();
   /**
@@ -233,8 +242,18 @@ export default class YtFreePlugin extends Plugin {
   private lastActiveVideoId: string | null = null;
   /** Seek link under the mouse at mousedown, consumed by the matching click. */
   private armedSeekLink: { videoId: string; seconds: number } | null = null;
-  /** Where a touch started, so a scroll can be told from a tap. */
+  /**
+   * Where a touch started, so a scroll can be told from a tap.
+   *
+   * Two of them, and they must stay separate. The document-level capture
+   * handler and the CodeMirror handler both see every touch, and capture on
+   * `document` runs first — so while these shared one field, the anchor handler
+   * cleared the origin on `touchend` before the editor handler could read it,
+   * and every Live Preview timestamp tap was thrown away as "no origin". That
+   * is exactly why timestamps worked in Reading view and nowhere else.
+   */
   private touchOrigin: { x: number; y: number } | null = null;
+  private editorTouchOrigin: { x: number; y: number } | null = null;
   /** Reading-view seek anchor under a touchstart, consumed by its touchend. */
   private armedSeekAnchor: HTMLAnchorElement | null = null;
   private ytDlpPath: string | null = null;
@@ -289,15 +308,15 @@ export default class YtFreePlugin extends Plugin {
           // the seek cannot run twice.
           touchstart: (evt, view) => {
             const touch = evt.touches[0];
-            this.touchOrigin = touch ? { x: touch.clientX, y: touch.clientY } : null;
+            this.editorTouchOrigin = touch ? { x: touch.clientX, y: touch.clientY } : null;
             this.armedSeekLink = touch ? this.editorSeekLinkAt(touch, view, true) : null;
             return false;
           },
           touchend: (evt, view) => {
             const armed = this.armedSeekLink;
-            const origin = this.touchOrigin;
+            const origin = this.editorTouchOrigin;
             this.armedSeekLink = null;
-            this.touchOrigin = null;
+            this.editorTouchOrigin = null;
             if (!armed || !origin) return false;
 
             const touch = evt.changedTouches[0];
@@ -407,6 +426,36 @@ export default class YtFreePlugin extends Plugin {
       },
       { capture: true },
     );
+
+    // The video folds away while the keyboard is up. Focus is what makes it
+    // immediate — waiting for the keyboard's own animation would collapse the
+    // video a beat after the text had already been shoved off screen.
+    if (!Platform.isDesktopApp) {
+      this.registerDomEvent(document, "focusin", (evt) => {
+        const target = evt.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (!target.closest(".markdown-source-view")) return;
+        this.collapseForKeyboard();
+      });
+
+      // …and unfolds when the keyboard goes, however it went: the Done button
+      // blurs the editor, a swipe-down does not.
+      this.registerDomEvent(document, "focusout", () => {
+        window.setTimeout(() => {
+          if (!this.keyboardIsOpen()) this.releaseKeyboardCollapse();
+        }, 150);
+      });
+      const vv = window.visualViewport;
+      if (vv) {
+        // Not registerDomEvent: its overloads only cover Document, Window and
+        // HTMLElement, and the visual viewport is none of the three.
+        const onResize = (): void => {
+          if (!this.keyboardIsOpen()) this.releaseKeyboardCollapse();
+        };
+        vv.addEventListener("resize", onResize);
+        this.register(() => vv.removeEventListener("resize", onResize));
+      }
+    }
 
     // Pinned player: driven entirely off frontmatter, so opening a Watch Later
     // note is the whole interaction. Re-synced on anything that can change which
@@ -824,7 +873,6 @@ export default class YtFreePlugin extends Plugin {
     for (const handle of this.downloads.values()) handle.cancel();
     this.downloads.clear();
     for (const view of [...this.pinned.keys()]) this.unmountPinned(view);
-    for (const view of [...this.reopened.keys()]) this.syncReopenBar(view, null);
     for (const entry of this.players.values()) entry.player.destroy();
     this.players.clear();
     this.cache.clear();
@@ -876,18 +924,8 @@ export default class YtFreePlugin extends Plugin {
       open.add(view);
 
       const path = view.file?.path;
-      // A player the reader closed stays closed, but only for the note it was
-      // closed on: opening a different note in this view brings it back.
-      if (this.dismissed.has(view) && this.dismissed.get(view) !== path) {
-        this.dismissed.delete(view);
-      }
-      const asked = this.pinnedVideoIdFor(path);
-      const closed = this.dismissed.get(view) === path;
-      const wanted = closed ? null : asked;
+      const wanted = this.pinnedVideoIdFor(path);
       const current = this.pinned.get(view);
-
-      // A closed player leaves a way back, and only then.
-      this.syncReopenBar(view, closed ? asked : null);
 
       // Keyed off "this note has a video", not off the player, so it still
       // applies when the pinned player is switched off.
@@ -907,12 +945,6 @@ export default class YtFreePlugin extends Plugin {
     }
     for (const view of [...this.collapsed.keys()]) {
       if (!open.has(view)) this.collapsed.delete(view);
-    }
-    for (const view of [...this.dismissed.keys()]) {
-      if (!open.has(view)) this.dismissed.delete(view);
-    }
-    for (const view of [...this.reopened.keys()]) {
-      if (!open.has(view)) this.syncReopenBar(view, null);
     }
   }
 
@@ -1390,9 +1422,7 @@ export default class YtFreePlugin extends Plugin {
       if (this.players.get(record.videoId) === record.entry) this.players.delete(record.videoId);
     }
     record.wrapper.remove();
-    // The reopen bar sits in the same place and needs the same layout, so the
-    // class only comes off when nothing of ours is left in the view.
-    if (!this.reopened.get(view)?.isConnected) this.releaseDockedLayout(view);
+    this.releaseDockedLayout(view);
   }
 
   /**
@@ -1425,44 +1455,6 @@ export default class YtFreePlugin extends Plugin {
       el.removeEventListener("scroll", guard);
       this.dockGuards.delete(view);
     }
-  }
-
-  /**
-   * What a closed player leaves behind: a one-line bar that opens it again.
-   *
-   * Closing used to remove the only route back — the player is driven off
-   * frontmatter, so nothing in the note offers to bring it back and the
-   * dismissal survives navigating away and returning. A slim bar costs one line
-   * of the space that closing just reclaimed, and it is the only thing on
-   * screen that knows the note has a video at all.
-   */
-  private syncReopenBar(view: MarkdownView, videoId: string | null): void {
-    const current = this.reopened.get(view);
-    if (!videoId) {
-      current?.remove();
-      this.reopened.delete(view);
-      if (!this.pinned.has(view)) this.releaseDockedLayout(view);
-      return;
-    }
-    if (current?.isConnected) return;
-
-    const bar = createDiv({ cls: "ytfree-wrapper ytfree-reopen" });
-    const button = bar.createEl("button", {
-      cls: "ytfree-reopen-button",
-      text: "▶  Show video",
-      attr: { type: "button" },
-    });
-    button.addEventListener("click", () => {
-      this.dismissed.delete(view);
-      bar.remove();
-      this.reopened.delete(view);
-      this.syncPinnedPlayers();
-    });
-    view.contentEl.prepend(bar);
-    this.reopened.set(view, bar);
-    // The bar is shorter than the player but it overflows the view the same
-    // way, so it gets the same flex column and the same scroll guard.
-    if (!Platform.isDesktopApp) this.holdDockedLayout(view);
   }
 
   // ---------------------------------------------------------------- capture
@@ -1783,10 +1775,22 @@ export default class YtFreePlugin extends Plugin {
         : undefined,
       {
         mediaHost: media,
-        onClose: mobile ? () => this.closePlayerFor(videoId) : undefined,
+        onToggleCollapse: mobile ? () => this.toggleCollapse(videoId) : undefined,
+        // Reads `activate` at call time, not now: the lazy loader is attached
+        // further down, after this player exists.
+        ensureLoaded: mobile
+          ? () => this.players.get(videoId)?.activate?.() ?? Promise.resolve()
+          : undefined,
       },
     );
-    const entry: PlayerEntry = { player, videoId, sourcePath, activate: null };
+    const entry: PlayerEntry = {
+      player,
+      videoId,
+      sourcePath,
+      wrapper,
+      collapsed: null,
+      activate: null,
+    };
     this.players.set(videoId, entry);
     player.video.addEventListener("play", () => {
       this.lastActiveVideoId = videoId;
@@ -2010,17 +2014,74 @@ export default class YtFreePlugin extends Plugin {
    * remembered per view and per note, the same way collapsed properties are, so
    * navigating away and back brings the player with you.
    */
-  private closePlayerFor(videoId: string): void {
-    for (const [view, record] of this.pinned) {
-      if (record.videoId !== videoId) continue;
-      const path = view.file?.path;
-      if (path) this.dismissed.set(view, path);
-      this.unmountPinned(view);
-      // Puts the "Show video" bar in the space that just opened up, in the same
-      // step — the reader never sees a note with no way back to its video.
-      this.syncPinnedPlayers();
+  /**
+   * Hide the picture, keep the player.
+   *
+   * Collapsing used to tear the player down and leave a "Show video" bar, which
+   * lost the reader's place in the video every time. Now only the media box
+   * loses its height: the element stays mounted, so the position, the buffer
+   * and any audio are all exactly where they were, and coming back is instant.
+   * Collapsing by hand also pauses — you are putting the video away.
+   */
+  private toggleCollapse(videoId: string): void {
+    const entry = this.players.get(videoId);
+    if (!entry) return;
+    if (entry.collapsed) {
+      this.setCollapsed(entry, null);
       return;
     }
+    entry.player.pause();
+    this.setCollapsed(entry, "manual");
+  }
+
+  private setCollapsed(entry: PlayerEntry, mode: CollapseMode): void {
+    entry.collapsed = mode;
+    entry.wrapper.toggleClass("is-collapsed", mode !== null);
+    entry.wrapper.toggleClass("is-collapsed-keyboard", mode === "keyboard");
+    entry.player.setCollapsed(mode !== null);
+  }
+
+  /**
+   * The keyboard takes the video's space, and gives it back.
+   *
+   * Editing a note on a phone with a 16:9 player docked above it left about two
+   * lines of text visible between the video and the keyboard. So the video
+   * folds away the moment the editor takes focus and unfolds when the keyboard
+   * goes — without pausing, which is the point: pause-while-typing and its idle
+   * resume go on working underneath, so the audio comes back on its own after
+   * two seconds and the video stays out of the way until you are done.
+   *
+   * A collapse the reader asked for is not touched by any of this.
+   */
+  private collapseForKeyboard(): void {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const entry = this.playerForPath(view?.file?.path);
+    if (!entry || entry.collapsed) return;
+    this.setCollapsed(entry, "keyboard");
+  }
+
+  private releaseKeyboardCollapse(): void {
+    for (const entry of this.players.values()) {
+      if (entry.collapsed === "keyboard") this.setCollapsed(entry, null);
+    }
+  }
+
+  /**
+   * Is the on-screen keyboard up?
+   *
+   * Obsidian keeps `--keyboard-height` on the document element and animates it,
+   * so it is the app's own answer rather than our guess. The visual viewport is
+   * the fallback for the case where that variable never arrives.
+   */
+  private keyboardIsOpen(): boolean {
+    const raw = getComputedStyle(document.documentElement)
+      .getPropertyValue("--keyboard-height")
+      .trim();
+    const height = Number.parseFloat(raw);
+    if (Number.isFinite(height) && raw !== "") return height > 1;
+
+    const vv = window.visualViewport;
+    return vv ? window.innerHeight - vv.height > 120 : false;
   }
 
   private renderError(parent: HTMLElement, message: string, detail: string): void {

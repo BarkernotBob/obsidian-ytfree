@@ -74,6 +74,12 @@
   width: 96px;
 }
 
+/* "Collapse" ↔ "Show video". Same reason: the button that changes the layout
+   below it must not change its own. */
+.ytfree-btn-collapse {
+  width: 104px;
+}
+
 .ytfree-btn:disabled {
   cursor: default;
   color: var(--text-muted);
@@ -226,38 +232,40 @@
 }
 
 /*
- * Reopening a closed player.
+ * Collapsed: the picture folds away, the player does not.
  *
- * Closing is one tap; without this the video is gone until the note is closed
- * and reopened. The bar takes the docked player's place in the flex column, so
- * it clears the floating header the same way, and it is one line tall — closing
- * the player still buys back the whole video box.
+ * The media box loses its height and the video is clipped inside it rather
+ * than being hidden — `display: none` on a playing `<video>` stops playback on
+ * iOS WebKit, and the whole point of collapsing is that the audio, the buffer
+ * and the reader's position all survive it. The control row stays put, so
+ * playing, PiP and coming back are all still one tap away.
  */
-.ytfree-reopen {
-  flex: 0 0 auto;
-  padding: var(--view-top-spacing-markdown, 0px) var(--file-margins, 16px) 6px;
-  background: var(--background-primary);
-  border-bottom: 1px solid var(--background-modifier-border);
+.ytfree-docked.is-collapsed .ytfree-media {
+  aspect-ratio: auto;
+  height: 0;
 }
 
-.ytfree-reopen ~ .markdown-source-view,
-.ytfree-reopen ~ .markdown-reading-view {
-  --view-top-spacing-markdown: var(--size-4-2, 8px);
+/*
+ * Collapsed by the keyboard, the controls go too.
+ *
+ * A wrapped control row is three thumb-sized lines — the same space the
+ * collapse was trying to hand back to the note. Nothing needs them here: the
+ * keyboard closing brings the whole player back on its own. A collapse the
+ * reader asked for keeps them, because there they are the way back.
+ */
+.ytfree-docked.is-collapsed-keyboard .ytfree-controls,
+.ytfree-docked.is-collapsed-keyboard .ytfree-status {
+  display: none;
 }
 
-.ytfree-reopen-button {
-  display: block;
+.ytfree-docked.is-collapsed .ytfree-video,
+.ytfree-docked.is-collapsed .ytfree-poster,
+.ytfree-docked.is-collapsed .ytfree-fallback {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
-  height: 38px;
-  padding: 0 10px;
-  box-sizing: border-box;
-  font-size: var(--font-ui-small);
-  text-align: center;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  background: var(--interactive-normal);
-  color: var(--text-normal);
-  cursor: pointer;
+  height: 56.25vw;
 }
 
 /*
@@ -860,10 +868,22 @@
   max-height: 2.6em;
 }
 
+/* The right fifth of the card, full height, and the button fills all of it —
+   removing an item is the action this list is for, and a 44px square in the
+   corner of a 74px row was a target you had to aim at. */
 .ytfree-hub.ytfree-phone .ytfree-hub-dismiss {
-  flex: 0 0 44px;
-  width: 44px;
-  height: 44px;
+  flex: 0 0 20%;
+  width: 20%;
+  height: 100%;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-dismiss .ytfree-hub-icon-button {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border-radius: 0;
+  --icon-size: 24px;
 }
 
 /* ---------------------------------------------------------------- account */

@@ -1,6 +1,45 @@
 # HANDOFF
 
-## Status — 2026-07-28 (latest): keyboard scroll + hub header, both reproduced
+## Status — 2026-07-28 (latest): collapse replaces close, lazy controls, LP timestamps
+
+Built and installed. 140 tests pass, build clean. Manual steps 25–29 in
+[docs/MOBILE-UX.md](docs/MOBILE-UX.md).
+
+1. **Close → Collapse, and it no longer tears the player down.** The old Close
+   unmounted the player and left a "Show video" bar, which lost the position
+   every time. Collapsing now only takes the height off the media box; the
+   `<video>` stays mounted and clipped (not `display: none` — that stops
+   playback on iOS), so position, buffer and audio all survive. Collapsing by
+   hand also pauses; the same button reads "Show video" and brings it back.
+   `dismissed`, `reopened` and `syncReopenBar` are gone with it — one state
+   instead of two.
+2. **The keyboard collapses the video, and only the keyboard un-collapses it.**
+   Editor focus folds the player *and* the control row (that row wraps to three
+   thumb-height lines — 114px, the space the fold was meant to give back).
+   Measured on a 390×844 phone: note body 335px → 718px. No pause is issued, so
+   pause-while-typing and its idle resume keep working underneath: audio comes
+   back after the 2s idle while the video stays folded. `--keyboard-height` on
+   the document element is the signal for the way back, with the visual
+   viewport as fallback.
+3. **Play/PiP/Fullscreen resolve the stream themselves.** Mobile mounts without
+   resolving, so before the poster was tapped those controls were acting on an
+   empty `<video>`. They all go through `withMedia` now, which primes the
+   gesture synchronously and awaits the same lazy `activate` the poster uses.
+4. **Live Preview timestamps — a shared-field bug.** The document-level touch
+   handler and the CodeMirror one shared `touchOrigin`, and capture on
+   `document` runs first: the anchor path cleared the origin on `touchend`
+   before the editor path could read it, so every Live Preview tap bailed out
+   as "no origin". Reading view worked because it never reaches the editor
+   handler. Separate `editorTouchOrigin` field.
+5. **Hub delete target** is the right 20% of the card, full height, with the
+   button filling it (measured 73.5×74 on a 374px card).
+
+### Next step
+
+Steps 25–29 on the phone. 27 is the one that decides the design: the audio has
+to keep playing while the media box is zero-height.
+
+## Status — 2026-07-28: keyboard scroll + hub header, both reproduced
 
 Built and installed. 140 tests pass, build clean. Both bugs were **reproduced
 locally** before fixing, in a headless harness (`/tmp/ytharness`, disposable):

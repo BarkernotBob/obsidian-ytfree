@@ -17,8 +17,18 @@ export interface PlayerOptions {
    * fallback, so the media has its own host.
    */
   mediaHost?: HTMLElement;
-  /** Shown at the end of the control row. Mobile uses it to close the player. */
-  onClose?: () => void;
+  /**
+   * Shown at the end of the control row. Mobile uses it to collapse the video
+   * out of sight — the player keeps running and keeps its position, so this is
+   * a view toggle, not a teardown.
+   */
+  onToggleCollapse?: () => void;
+  /**
+   * Mobile resolves the stream lazily, and until it has there is nothing for
+   * Play, PiP or Fullscreen to act on. Every control that needs media calls
+   * this first; it resolves immediately once the stream is up.
+   */
+  ensureLoaded?: () => Promise<void>;
 }
 
 /**
@@ -50,6 +60,9 @@ export class YtFreePlayer {
    */
   private local = false;
   private downloadBtn: HTMLButtonElement | null = null;
+  private collapseBtn: HTMLButtonElement | null = null;
+  /** The lazy resolve, once asked for. Every later caller awaits the same one. */
+  private loading: Promise<void> | null = null;
 
   constructor(
     private container: HTMLElement,
@@ -106,8 +119,11 @@ export class YtFreePlayer {
     };
 
     const playBtn = button("Play", "Play or pause", () => {
-      if (this.video.paused) void this.video.play().catch(() => { /* ignore */ });
-      else this.video.pause();
+      if (!this.video.paused) {
+        this.video.pause();
+        return;
+      }
+      void this.withMedia(() => this.play());
     });
     playBtn.addClass("ytfree-btn-play");
     // Text swap only — the button keeps a fixed width, so nothing shifts.
@@ -132,11 +148,11 @@ export class YtFreePlayer {
     });
 
     button("PiP", "Picture-in-Picture", () => {
-      void this.togglePip();
+      void this.withMedia(() => this.togglePip());
     });
 
     button("Fullscreen", "Fullscreen", () => {
-      void this.toggleFullscreen();
+      void this.withMedia(() => this.toggleFullscreen());
     });
 
     if (this.onTimestamp) {
@@ -145,8 +161,13 @@ export class YtFreePlayer {
       });
     }
 
-    if (this.options.onClose) {
-      button("Close", "Close the player", () => this.options.onClose?.());
+    if (this.options.onToggleCollapse) {
+      // Fixed width in CSS, because the label is the state: "Collapse" while
+      // the video is showing, "Show video" while it is not.
+      this.collapseBtn = button("Collapse", "Collapse the video", () =>
+        this.options.onToggleCollapse?.(),
+      );
+      this.collapseBtn.addClass("ytfree-btn-collapse");
     }
 
     if (this.onDownload) {
@@ -157,6 +178,45 @@ export class YtFreePlayer {
       });
       this.downloadBtn.addClass("ytfree-btn-download");
     }
+  }
+
+  /**
+   * Run something that needs actual media, resolving the stream first if it has
+   * not been fetched yet.
+   *
+   * Mobile mounts the player without resolving anything, so before the poster
+   * was tapped every control acting on the `<video>` was acting on an empty
+   * element: Play did nothing, PiP had no picture. They all come through here
+   * now, so the first tap on any of them is the tap that starts the video.
+   *
+   * `primeForGesture` has to happen synchronously, inside the tap, or iOS will
+   * refuse to play once the resolve returns — and only when there is nothing
+   * loaded, since `load()` on a playing element would restart it.
+   */
+  private async withMedia(run: () => void | Promise<void>): Promise<void> {
+    const ensure = this.options.ensureLoaded;
+    if (ensure && this.video.readyState === 0) {
+      this.primeForGesture();
+      this.loading ??= ensure().finally(() => {
+        this.loading = null;
+      });
+      try {
+        await this.loading;
+      } catch {
+        return; // The failure is already on screen as the fallback panel.
+      }
+    }
+    await run();
+  }
+
+  /** Reflect collapsed state in the button that toggles it. */
+  setCollapsed(collapsed: boolean): void {
+    if (!this.collapseBtn) return;
+    this.collapseBtn.setText(collapsed ? "Show video" : "Collapse");
+    this.collapseBtn.setAttribute(
+      "title",
+      collapsed ? "Show the video again" : "Collapse the video",
+    );
   }
 
   /** Progress feedback on the Download button itself. */
@@ -447,6 +507,18 @@ export class YtFreePlayer {
   play(): void {
     if (this.destroyed) return;
     void this.video.play().catch(() => { /* a gesture may still be required */ });
+  }
+
+  /**
+   * Stop playback where it is, on the user's say-so.
+   *
+   * Deliberately not `pauseForTyping`: this pause is the user's, so the idle
+   * timer must never resume it.
+   */
+  pause(): void {
+    if (this.destroyed) return;
+    this.pausedByTyping = false;
+    this.video.pause();
   }
 
   /**
