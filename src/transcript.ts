@@ -1,8 +1,11 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
-import { formatTimestamp } from "./format.ts";
+/**
+ * Transcript parsing and rendering. Platform-neutral on purpose: the one part
+ * that needs yt-dlp — fetching the info JSON — lives in
+ * `desktop/transcript-fetch.ts`, so this file and its tests stay loadable
+ * anywhere.
+ */
 
-const pExecFile = promisify(execFile);
+import { formatTimestamp } from "./format.ts";
 
 /** Headings the fetch owns outright: rewritten wholesale on every run. */
 export const TRANSCRIPT_HEADING = "## Transcript";
@@ -45,28 +48,7 @@ export interface VideoInfo {
   duration?: number;
 }
 
-// ------------------------------------------------------------------- yt-dlp
-
-/**
- * One `yt-dlp -J` call answers both features: it lists every caption track with
- * a signed, immediately-usable URL, and it carries the replay heatmap. Takes
- * about three seconds. Doing it twice would be three seconds wasted.
- */
-export async function fetchVideoInfo(ytDlpPath: string, videoId: string): Promise<VideoInfo> {
-  const { stdout } = await pExecFile(
-    ytDlpPath,
-    [
-      "--no-warnings",
-      "--no-playlist",
-      "--skip-download",
-      "-J",
-      `https://www.youtube.com/watch?v=${videoId}`,
-    ],
-    // Info JSON for a long video with 150+ caption languages runs to megabytes.
-    { timeout: 120_000, maxBuffer: 64 * 1024 * 1024 },
-  );
-  return JSON.parse(stdout) as VideoInfo;
-}
+// ----------------------------------------------------------------- selection
 
 /**
  * The best English caption track, human-written for preference.

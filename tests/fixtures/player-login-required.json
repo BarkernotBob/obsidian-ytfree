@@ -1,0 +1,9 @@
+{
+  "playabilityStatus": {
+    "status": "LOGIN_REQUIRED",
+    "reason": "This video may be inappropriate for some users."
+  },
+  "videoDetails": {
+    "title": "The Witcher 3: Wild Hunt - The Sword Of Destiny Trailer"
+  }
+}

@@ -1,9 +1,5 @@
 import { Prec } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { existsSync } from "fs";
-import { mkdir, unlink } from "fs/promises";
-import { homedir } from "os";
-import { join } from "path";
 import {
   App,
   FileSystemAdapter,
@@ -11,6 +7,7 @@ import {
   MarkdownRenderChild,
   MarkdownView,
   Notice,
+  Platform,
   Plugin,
   PluginSettingTab,
   requestUrl,
@@ -23,18 +20,7 @@ import {
   shouldAutoStamp,
   stampInsertOffset,
 } from "./capture";
-import {
-  DownloadHandle,
-  downloadBaseName,
-  downloadVideo,
-  findFfmpeg,
-  formatBytes,
-  freeBytes,
-  LARGE_FILE_BYTES,
-  localFileUrl,
-  MIN_FREE_BYTES,
-  resolveLocalFile,
-} from "./download";
+import type { DownloadHandle } from "./desktop/download.ts";
 import { findTimestamps } from "./description";
 import { formatTimestamp } from "./format";
 import {
@@ -46,7 +32,6 @@ import {
 } from "./hub";
 import type { Cue } from "./transcript";
 import {
-  fetchVideoInfo,
   groupCues,
   HEATMAP_HEADING,
   parseJson3,
@@ -60,13 +45,27 @@ import {
 import { YtFreePlayer } from "./player";
 import {
   extractVideoId,
-  findYtDlp,
   ResolveMode,
-  resolveStream,
   ResolvedStream,
   StreamCache,
   YtDlpMissingError,
-} from "./resolver";
+} from "./stream";
+
+/**
+ * The single door into the desktop-only code.
+ *
+ * Everything under `src/desktop/` imports a Node builtin at the top level, and
+ * on iOS that throws at module load — before `onload`, so the plugin dies
+ * rather than degrading. Only ever reached from behind `Platform.isDesktopApp`;
+ * esbuild keeps the dynamically-imported subgraph in a lazily-initialised
+ * closure, so the `require` calls happen on first use and never at startup.
+ */
+type DesktopApi = typeof import("./desktop/index.ts");
+let desktopApi: Promise<DesktopApi> | null = null;
+function desktop(): Promise<DesktopApi> {
+  if (!desktopApi) desktopApi = import("./desktop/index.ts");
+  return desktopApi;
+}
 
 interface YtFreeSettings {
   ytDlpPath: string;
@@ -113,9 +112,11 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   transcriptIntervalSeconds: 60,
   autoFetchTranscript: true,
   heatmapPeaks: 8,
-  // Deliberately outside the vault: the vault is in iCloud, and a 700MB video
-  // inside it would sync to every device and eat the quota.
-  downloadFolder: join(homedir(), "Movies", "YT Free"),
+  // Blank means "wherever `defaultDownloadFolder()` says", which is
+  // ~/Movies/YT Free — deliberately outside the vault, because the vault is in
+  // iCloud and a 700MB video inside it would sync to every device. It cannot be
+  // spelled out here: `os.homedir()` is unreachable at module load on mobile.
+  downloadFolder: "",
   ffmpegPath: "",
   subscriptionsPollMinutes: 60,
   subscriptionsExpiryDays: 30,
@@ -135,6 +136,15 @@ interface PlayerEntry {
   player: YtFreePlayer;
   videoId: string;
   sourcePath: string;
+  /**
+   * Mobile: the stream has not been resolved yet. The player is mounted and
+   * takes up its final space from the moment the note opens, but nothing is
+   * fetched until the poster or a timestamp is tapped — opening a note on
+   * cellular should not cost a video.
+   *
+   * Resolves once; every later caller awaits the same promise.
+   */
+  activate: (() => Promise<void>) | null;
 }
 
 /**
@@ -154,6 +164,14 @@ export default class YtFreePlugin extends Plugin {
   private pinned = new Map<MarkdownView, PinnedEntry>();
   /** Last note whose properties we collapsed in a given view, so we do it once. */
   private collapsed = new Map<MarkdownView, string>();
+  /** Notes whose docked player the reader closed by hand, per view. */
+  private dismissed = new Map<MarkdownView, string>();
+  /**
+   * The second a timestamp asked for, per video, kept only until the stream
+   * resolves. If it never does, the "Open in YouTube" fallback needs it to land
+   * where the note pointed instead of at the start.
+   */
+  private pendingSeek = new Map<string, number>();
   /** Notes created since startup — the only ones eligible for an auto-fetch. */
   private createdThisSession = new Set<string>();
   private autoFetchAttempted = new Set<string>();
@@ -234,7 +252,12 @@ export default class YtFreePlugin extends Plugin {
         return;
       }
       this.lastActiveVideoId = videoId;
-      entry.player.seekTo(Number(seconds) || 0);
+
+      // Claim the tap now, synchronously. On mobile the player may still have
+      // to resolve a URL, and by the time that returns iOS no longer counts
+      // this as a user gesture — so the element has to be touched first.
+      entry.player.primeForGesture();
+      void this.seekEntry(entry, Number(seconds) || 0);
     });
 
     // Pinned player: driven entirely off frontmatter, so opening a Watch Later
@@ -285,17 +308,28 @@ export default class YtFreePlugin extends Plugin {
       }),
     );
 
-    this.addCommand({
-      id: "download-video",
-      name: "Download this video for offline",
-      callback: () => void this.downloadForActiveNote(),
-    });
+    // Download and transcript both shell out to yt-dlp, which does not exist on
+    // a phone. Registering them anyway would put commands in mobile's palette
+    // that can only ever answer with an error.
+    if (Platform.isDesktopApp) {
+      this.addCommand({
+        id: "download-video",
+        name: "Download this video for offline",
+        callback: () => void this.downloadForActiveNote(),
+      });
 
-    this.addCommand({
-      id: "delete-local-copy",
-      name: "Delete the local copy of this video",
-      callback: () => void this.deleteLocalCopy(),
-    });
+      this.addCommand({
+        id: "delete-local-copy",
+        name: "Delete the local copy of this video",
+        callback: () => void this.deleteLocalCopy(),
+      });
+
+      this.addCommand({
+        id: "fetch-transcript",
+        name: "Fetch transcript and most-replayed moments",
+        callback: () => void this.fetchTranscriptForActiveNote(),
+      });
+    }
 
     this.addCommand({
       id: "toggle-pinned-player",
@@ -306,12 +340,6 @@ export default class YtFreePlugin extends Plugin {
         this.syncPinnedPlayers();
         new Notice(`YT Free: pinned player ${this.settings.pinnedPlayer ? "on" : "off"}.`);
       },
-    });
-
-    this.addCommand({
-      id: "fetch-transcript",
-      name: "Fetch transcript and most-replayed moments",
-      callback: () => void this.fetchTranscriptForActiveNote(),
     });
 
     this.addSettingTab(new YtFreeSettingTab(this.app, this));
@@ -474,12 +502,18 @@ export default class YtFreePlugin extends Plugin {
       if (!(view instanceof MarkdownView)) continue;
       open.add(view);
 
-      const wanted = this.pinnedVideoIdFor(view.file?.path);
+      const path = view.file?.path;
+      // A player the reader closed stays closed, but only for the note it was
+      // closed on: opening a different note in this view brings it back.
+      if (this.dismissed.has(view) && this.dismissed.get(view) !== path) {
+        this.dismissed.delete(view);
+      }
+      const wanted =
+        this.dismissed.get(view) === path ? null : this.pinnedVideoIdFor(path);
       const current = this.pinned.get(view);
 
       // Keyed off "this note has a video", not off the player, so it still
       // applies when the pinned player is switched off.
-      const path = view.file?.path;
       if (path && this.videoIdForNote(path)) this.collapseProperties(view, path);
       else if (path && this.collapsed.get(view) !== path) this.collapsed.delete(view);
 
@@ -496,6 +530,9 @@ export default class YtFreePlugin extends Plugin {
     }
     for (const view of [...this.collapsed.keys()]) {
       if (!open.has(view)) this.collapsed.delete(view);
+    }
+    for (const view of [...this.dismissed.keys()]) {
+      if (!open.has(view)) this.dismissed.delete(view);
     }
   }
 
@@ -555,6 +592,9 @@ export default class YtFreePlugin extends Plugin {
    * video does not exist yet. This fires again once it does.
    */
   private queueAutoFetch(file: TFile): void {
+    // No yt-dlp on a phone. A note clipped on mobile simply arrives without a
+    // transcript and picks one up the next time it is opened on the Mac.
+    if (!Platform.isDesktopApp) return;
     if (!this.settings.autoFetchTranscript) return;
     if (!this.createdThisSession.has(file.path)) return;
     if (this.autoFetchAttempted.has(file.path)) return;
@@ -616,6 +656,8 @@ export default class YtFreePlugin extends Plugin {
    * that has no captions, and telling those apart afterwards is guesswork.
    */
   private async fetchTranscriptInto(file: TFile, videoId: string, quiet: boolean): Promise<void> {
+    const { fetchVideoInfo, findYtDlp } = await desktop();
+
     let ytDlpPath: string;
     try {
       ytDlpPath = this.ytDlpPath ?? (await findYtDlp(this.settings.ytDlpPath));
@@ -736,17 +778,29 @@ export default class YtFreePlugin extends Plugin {
    * the file does not. Silence is the correct behaviour there.
    */
   private async localFileFor(path: string | undefined, videoId: string): Promise<string | null> {
+    // A phone has no download folder to look in, and `local_media` in synced
+    // frontmatter points at a path on the Mac. Streaming is the only answer.
+    if (!Platform.isDesktopApp) return null;
     if (!path) return null;
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) return null;
     const recorded = this.app.metadataCache.getFileCache(file)?.frontmatter?.[LOCAL_MEDIA_KEY];
+    const { resolveLocalFile } = await desktop();
     // Search the folder even with nothing recorded: a file downloaded on this
     // Mac is findable by its [videoId] marker regardless of what the note says.
     return resolveLocalFile(
       typeof recorded === "string" ? recorded : "",
-      this.settings.downloadFolder,
+      await this.downloadFolder(),
       videoId,
     );
+  }
+
+  /** The configured download folder, or the platform default when it is blank. */
+  async downloadFolder(): Promise<string> {
+    const configured = this.settings.downloadFolder.trim();
+    if (configured) return configured;
+    const { defaultDownloadFolder } = await desktop();
+    return defaultDownloadFolder();
   }
 
   private async setLocalMedia(file: TFile, path: string | null): Promise<void> {
@@ -779,6 +833,19 @@ export default class YtFreePlugin extends Plugin {
    * the file without interrupting playback.
    */
   private async startDownload(videoId: string, file: TFile): Promise<void> {
+    const {
+      downloadBaseName,
+      downloadVideo,
+      ensureDir,
+      findFfmpeg,
+      formatBytes,
+      freeBytes,
+      findYtDlp,
+      LARGE_FILE_BYTES,
+      localFileUrl,
+      MIN_FREE_BYTES,
+    } = await desktop();
+
     if (this.downloads.has(videoId)) {
       this.downloads.get(videoId)?.cancel();
       this.downloads.delete(videoId);
@@ -795,9 +862,9 @@ export default class YtFreePlugin extends Plugin {
       return;
     }
 
-    const dir = this.settings.downloadFolder;
+    const dir = await this.downloadFolder();
     try {
-      await mkdir(dir, { recursive: true });
+      await ensureDir(dir);
     } catch (err) {
       new Notice(`YT Free: cannot create ${dir} — ${(err as Error).message}`);
       return;
@@ -885,8 +952,9 @@ export default class YtFreePlugin extends Plugin {
       new Notice("YT Free: no local copy on this Mac.");
       return;
     }
+    const { removeFile } = await desktop();
     try {
-      await unlink(local);
+      await removeFile(local);
     } catch (err) {
       new Notice(`YT Free: could not delete the file — ${(err as Error).message}`);
       return;
@@ -895,9 +963,23 @@ export default class YtFreePlugin extends Plugin {
     new Notice("YT Free: local copy deleted. This note streams again from now on.");
   }
 
+  /**
+   * Mount the player above the note body.
+   *
+   * Mobile docks instead of floating and reserves its height from the first
+   * frame of the mount, before anything is fetched. A draggable panel hovering
+   * over a 390pt screen covers the note it belongs to, and a player that grows
+   * into place when the stream arrives would push the note text down under the
+   * reader's thumb.
+   */
   private async mountPinned(view: MarkdownView, videoId: string, sourcePath: string): Promise<void> {
-    const wrapper = createDiv({ cls: "ytfree-wrapper ytfree-pinned" });
-    wrapper.style.setProperty("--ytfree-pinned-height", `${this.settings.pinnedHeightVh}vh`);
+    const mobile = !Platform.isDesktopApp;
+    const wrapper = createDiv({
+      cls: mobile ? "ytfree-wrapper ytfree-pinned ytfree-docked" : "ytfree-wrapper ytfree-pinned",
+    });
+    if (!mobile) {
+      wrapper.style.setProperty("--ytfree-pinned-height", `${this.settings.pinnedHeightVh}vh`);
+    }
     view.contentEl.prepend(wrapper);
 
     const record: PinnedEntry = { videoId, wrapper, entry: null };
@@ -1138,6 +1220,8 @@ export default class YtFreePlugin extends Plugin {
     videoId: string,
     sourcePath: string,
   ): Promise<PlayerEntry | null> {
+    const mobile = !Platform.isDesktopApp;
+
     // Reserved, fixed-height row so showing or clearing a status message never
     // shifts the player or the surrounding note content.
     const status = wrapper.createDiv({ cls: "ytfree-status" });
@@ -1146,21 +1230,14 @@ export default class YtFreePlugin extends Plugin {
       status.toggleClass("ytfree-status-visible", message !== null);
     };
 
-    const provider = async (
-      mode: ResolveMode,
-      forceRefresh: boolean,
-    ): Promise<ResolvedStream> => {
-      if (forceRefresh) this.cache.invalidate(videoId);
-      const cached = this.cache.get(videoId, mode);
-      if (cached) return cached;
+    // Mobile keeps the media in its own fixed-aspect box, so the poster, the
+    // video and the fallback all occupy exactly the same space and swapping
+    // between them moves nothing.
+    const media = mobile ? wrapper.createDiv({ cls: "ytfree-media" }) : wrapper;
 
-      if (!this.ytDlpPath) {
-        this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-      }
-      const stream = await resolveStream(videoId, this.ytDlpPath, mode);
-      this.cache.set(videoId, stream);
-      return stream;
-    };
+    const provider = mobile
+      ? this.mobileProvider(videoId)
+      : this.desktopProvider(videoId);
 
     const noteFile = this.app.vault.getAbstractFileByPath(sourcePath);
     const player = new YtFreePlayer(
@@ -1168,9 +1245,18 @@ export default class YtFreePlugin extends Plugin {
       provider,
       setStatus,
       (seconds) => this.insertTimestampFromButton(videoId, seconds),
-      noteFile instanceof TFile ? () => void this.startDownload(videoId, noteFile) : undefined,
+      // Downloading needs yt-dlp, so the button is desktop-only. A note file is
+      // also required — there is nowhere to record the path without one.
+      !mobile && noteFile instanceof TFile
+        ? () => void this.startDownload(videoId, noteFile)
+        : undefined,
+      {
+        mediaHost: media,
+        minimalControls: mobile,
+        onClose: mobile ? () => this.closePlayerFor(videoId) : undefined,
+      },
     );
-    const entry: PlayerEntry = { player, videoId, sourcePath };
+    const entry: PlayerEntry = { player, videoId, sourcePath, activate: null };
     this.players.set(videoId, entry);
     player.video.addEventListener("play", () => {
       this.lastActiveVideoId = videoId;
@@ -1179,6 +1265,7 @@ export default class YtFreePlugin extends Plugin {
     // A present local copy wins: no yt-dlp, no expiry, instant first frame.
     const localFile = await this.localFileFor(sourcePath, videoId);
     if (localFile) {
+      const { localFileUrl } = await desktop();
       player.setDownloadState("done");
       player.loadLocal(localFileUrl(localFile), () => {
         // Corrupt file, unmounted volume, truncated download. Say so once, then
@@ -1187,6 +1274,11 @@ export default class YtFreePlugin extends Plugin {
         window.setTimeout(() => setStatus(null), 6000);
         void player.load(this.settings.upgradeToHighQuality).catch(() => undefined);
       });
+      return entry;
+    }
+
+    if (mobile) {
+      this.deferMobileLoad(entry, media, setStatus);
       return entry;
     }
 
@@ -1212,6 +1304,189 @@ export default class YtFreePlugin extends Plugin {
         );
       }
       return null;
+    }
+  }
+
+  /** yt-dlp, via the stream cache. Desktop only. */
+  private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
+    return async (mode, forceRefresh) => {
+      if (forceRefresh) this.cache.invalidate(videoId);
+      const cached = this.cache.get(videoId, mode);
+      if (cached) return cached;
+
+      const { findYtDlp, resolveStream } = await desktop();
+      if (!this.ytDlpPath) {
+        this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
+      }
+      const stream = await resolveStream(videoId, this.ytDlpPath, mode);
+      this.cache.set(videoId, stream);
+      return stream;
+    };
+  }
+
+  /**
+   * InnerTube, via the same cache. Mobile only.
+   *
+   * The mode is ignored: 360p is all this resolver can reach, so asking for
+   * "quality" would only mean resolving the same thing twice.
+   */
+  private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
+    return async (_mode, forceRefresh) => {
+      if (forceRefresh) this.cache.invalidate(videoId);
+      const cached = this.cache.get(videoId, "fast");
+      if (cached) return cached;
+
+      const { resolveMobileStream } = await import("./mobile/innertube.ts");
+      const stream = await resolveMobileStream(videoId);
+      this.cache.set(videoId, stream);
+      return stream;
+    };
+  }
+
+  /**
+   * Mobile: mount now, resolve later.
+   *
+   * Opening a note should not cost a video. The player takes up its final space
+   * immediately and shows a poster; the stream is fetched the first time
+   * something asks to play — a tap on the poster, or a tapped timestamp.
+   */
+  private deferMobileLoad(
+    entry: PlayerEntry,
+    media: HTMLElement,
+    setStatus: (message: string | null) => void,
+  ): void {
+    const { player, videoId } = entry;
+
+    // Absolutely positioned over the media box, so adding and removing it
+    // cannot affect the layout of anything.
+    const poster = media.createEl("button", { cls: "ytfree-poster", attr: { type: "button" } });
+    const thumb = poster.createEl("img", { cls: "ytfree-poster-image", attr: { alt: "" } });
+    thumb.src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+    poster.createDiv({ cls: "ytfree-poster-play", text: "▶" });
+
+    let started: Promise<void> | null = null;
+
+    const activate = (): Promise<void> => {
+      if (started) return started;
+      poster.disabled = true;
+      setStatus("Resolving stream…");
+      started = player
+        .load(false)
+        .then(() => {
+          poster.remove();
+          media.querySelector(".ytfree-fallback")?.remove();
+          setStatus(null);
+          player.play();
+        })
+        .catch((err: unknown) => {
+          // Reset, so a failure caused by a dead connection can be tried again.
+          // The retry has to be a control inside the fallback: the fallback
+          // covers the media box, and therefore covers the poster underneath.
+          started = null;
+          poster.disabled = false;
+          setStatus(null);
+          this.renderMobileFallback(media, entry, err, () => {
+            player.primeForGesture();
+            void activate();
+          });
+        });
+      return started;
+    };
+
+    entry.activate = activate;
+    poster.addEventListener("click", () => {
+      // Same reason as the timestamp handler: claim the gesture before the
+      // resolve throws it away.
+      player.primeForGesture();
+      void activate();
+    });
+  }
+
+  /**
+   * Seek, resolving the stream first if it has not been fetched yet.
+   *
+   * On desktop `activate` is null and this is the plain seek it always was.
+   */
+  private async seekEntry(entry: PlayerEntry, seconds: number): Promise<void> {
+    if (entry.activate) {
+      this.pendingSeek.set(entry.videoId, seconds);
+      await entry.activate();
+    }
+    entry.player.seekWhenReady(seconds);
+  }
+
+  /**
+   * The one control a failed resolve must always show.
+   *
+   * A dead player with no explanation is the worst outcome here, and retrying
+   * in a loop is the second worst. The link carries the timestamp that was
+   * tapped, so the fallback lands where the note pointed rather than at 0:00.
+   */
+  private renderMobileFallback(
+    media: HTMLElement,
+    entry: PlayerEntry,
+    err: unknown,
+    retry: () => void,
+  ): void {
+    media.querySelector(".ytfree-fallback")?.remove();
+
+    const seconds = this.pendingSeek.get(entry.videoId) ?? 0;
+    const kind = (err as { kind?: string })?.kind;
+    const detail =
+      kind === "login"
+        ? "This video needs a signed-in account — age-restricted or members-only."
+        : kind === "network"
+          ? "Could not reach YouTube. Check your connection and try again."
+          : kind === "no-format"
+            ? "YouTube offered no single-file format for this video."
+            : `Could not resolve this video. ${err instanceof Error ? err.message : String(err)}`;
+
+    const box = media.createDiv({ cls: "ytfree-fallback" });
+    box.createDiv({ cls: "ytfree-fallback-text", text: detail });
+
+    const actions = box.createDiv({ cls: "ytfree-fallback-actions" });
+    const link = actions.createEl("a", {
+      cls: "ytfree-fallback-link",
+      text: seconds > 0 ? `Open in YouTube at ${formatTimestamp(seconds)}` : "Open in YouTube",
+    });
+    link.href = seconds > 0
+      ? `https://youtu.be/${entry.videoId}?t=${seconds}`
+      : `https://youtu.be/${entry.videoId}`;
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noopener");
+
+    // Only worth offering when trying again could plausibly work. A removed or
+    // age-restricted video will fail identically every time, and a button that
+    // is guaranteed to fail is worse than no button.
+    if (kind === "network") {
+      const again = actions.createEl("button", {
+        cls: "ytfree-fallback-retry",
+        text: "Try again",
+        attr: { type: "button" },
+      });
+      again.addEventListener("click", () => {
+        box.remove();
+        retry();
+      });
+    }
+  }
+
+  /**
+   * Mobile's close control: unmount the docked player and give the space back
+   * in one step.
+   *
+   * The dismissal has to be recorded, because the very next `layout-change`
+   * would otherwise read the same frontmatter and mount it straight back. It is
+   * remembered per view and per note, the same way collapsed properties are, so
+   * navigating away and back brings the player with you.
+   */
+  private closePlayerFor(videoId: string): void {
+    for (const [view, record] of this.pinned) {
+      if (record.videoId !== videoId) continue;
+      const path = view.file?.path;
+      if (path) this.dismissed.set(view, path);
+      this.unmountPinned(view);
+      return;
     }
   }
 
@@ -1264,33 +1539,46 @@ class YtFreeSettingTab extends PluginSettingTab {
 
   display(): void {
     const { containerEl } = this;
+    const desktopApp = Platform.isDesktopApp;
     containerEl.empty();
 
-    new Setting(containerEl)
-      .setName("yt-dlp path")
-      .setDesc("Leave blank to auto-detect. Obsidian does not inherit your shell PATH, so a full path may be needed.")
-      .addText((text) =>
-        text
-          .setPlaceholder("/opt/homebrew/bin/yt-dlp")
-          .setValue(this.plugin.settings.ytDlpPath)
-          .onChange(async (value) => {
-            this.plugin.settings.ytDlpPath = value.trim();
-            this.plugin.resetResolver();
+    if (desktopApp) {
+      new Setting(containerEl)
+        .setName("yt-dlp path")
+        .setDesc("Leave blank to auto-detect. Obsidian does not inherit your shell PATH, so a full path may be needed.")
+        .addText((text) =>
+          text
+            .setPlaceholder("/opt/homebrew/bin/yt-dlp")
+            .setValue(this.plugin.settings.ytDlpPath)
+            .onChange(async (value) => {
+              this.plugin.settings.ytDlpPath = value.trim();
+              this.plugin.resetResolver();
+              await this.plugin.saveSettings();
+            }),
+        );
+
+      new Setting(containerEl)
+        .setName("Upgrade to high quality")
+        .setDesc(
+          "Video always starts fast at 360p, then silently upgrades to 1080p once the higher-quality stream resolves (about 30 seconds). Turn off to stay at 360p and save bandwidth.",
+        )
+        .addToggle((toggle) =>
+          toggle.setValue(this.plugin.settings.upgradeToHighQuality).onChange(async (value) => {
+            this.plugin.settings.upgradeToHighQuality = value;
             await this.plugin.saveSettings();
           }),
-      );
-
-    new Setting(containerEl)
-      .setName("Upgrade to high quality")
-      .setDesc(
-        "Video always starts fast at 360p, then silently upgrades to 1080p once the higher-quality stream resolves (about 30 seconds). Turn off to stay at 360p and save bandwidth.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.upgradeToHighQuality).onChange(async (value) => {
-          this.plugin.settings.upgradeToHighQuality = value;
-          await this.plugin.saveSettings();
-        }),
-      );
+        );
+    } else {
+      // Saying this once, plainly, beats a mobile user wondering why the
+      // picture is soft and where the download button went.
+      new Setting(containerEl)
+        .setName("On this device")
+        .setDesc(
+          "Playback here resolves the stream in the plugin and plays it in a normal video element — ad-free, at 360p. " +
+            "Quality above 360p, downloading, and transcript fetching all need yt-dlp, which only exists on the desktop app. " +
+            "Fetch a transcript on the Mac and it syncs to this note like any other text.",
+        );
+    }
 
     new Setting(containerEl)
       .setName("Timestamp format")
@@ -1381,50 +1669,56 @@ class YtFreeSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Offline downloads").setHeading();
+    // Downloading needs yt-dlp and a filesystem, so on mobile this whole
+    // section would only be settings for something that cannot happen.
+    if (desktopApp) {
+      new Setting(containerEl).setName("Offline downloads").setHeading();
 
-    const folderSetting = new Setting(containerEl)
-      .setName("Download folder")
-      .addText((text) =>
-        text
-          .setPlaceholder(DEFAULT_SETTINGS.downloadFolder)
-          .setValue(this.plugin.settings.downloadFolder)
-          .onChange(async (value) => {
-            this.plugin.settings.downloadFolder = value.trim() || DEFAULT_SETTINGS.downloadFolder;
-            await this.plugin.saveSettings();
-            describeFolder();
-          }),
-      );
+      const folderSetting = new Setting(containerEl)
+        .setName("Download folder")
+        .addText((text) =>
+          text
+            .setPlaceholder("~/Movies/YT Free")
+            .setValue(this.plugin.settings.downloadFolder)
+            .onChange(async (value) => {
+              // Blank stays blank and means the default — which cannot be
+              // spelled out in the defaults, because it needs `os.homedir()`.
+              this.plugin.settings.downloadFolder = value.trim();
+              await this.plugin.saveSettings();
+              describeFolder();
+            }),
+        );
 
-    // A path inside the vault is the one mistake here that is expensive and hard
-    // to undo, because the vault syncs. Say so at the moment it is made.
-    const describeFolder = () => {
-      const vaultPath = this.plugin.vaultPath();
-      const chosen = this.plugin.settings.downloadFolder;
-      const inVault = Boolean(vaultPath) && chosen.startsWith(vaultPath as string);
-      folderSetting.setDesc(
-        inVault
-          ? "⚠ This folder is inside your vault. Downloads will sync to every device and count against iCloud storage. Pick somewhere outside the vault."
-          : "Where downloaded videos are kept. Outside the vault on purpose — these files are a local cache, not vault content.",
-      );
-    };
-    describeFolder();
+      // A path inside the vault is the one mistake here that is expensive and
+      // hard to undo, because the vault syncs. Say so at the moment it is made.
+      const describeFolder = () => {
+        const vaultPath = this.plugin.vaultPath();
+        const chosen = this.plugin.settings.downloadFolder.trim();
+        const inVault = Boolean(chosen) && Boolean(vaultPath) && chosen.startsWith(vaultPath as string);
+        folderSetting.setDesc(
+          inVault
+            ? "⚠ This folder is inside your vault. Downloads will sync to every device and count against iCloud storage. Pick somewhere outside the vault."
+            : "Where downloaded videos are kept. Blank means ~/Movies/YT Free. Outside the vault on purpose — these files are a local cache, not vault content.",
+        );
+      };
+      describeFolder();
 
-    new Setting(containerEl)
-      .setName("ffmpeg path")
-      .setDesc(
-        "Leave blank to auto-detect. Required for downloads above 360p: YouTube only serves one pre-muxed format (itag 18, 360p) and everything better needs ffmpeg to merge separate video and audio. Streaming is unaffected — that reaches 1080p without ffmpeg.",
-      )
-      .addText((text) =>
-        text
-          .setPlaceholder("/opt/homebrew/bin/ffmpeg")
-          .setValue(this.plugin.settings.ffmpegPath)
-          .onChange(async (value) => {
-            this.plugin.settings.ffmpegPath = value.trim();
-            this.plugin.resetFfmpeg();
-            await this.plugin.saveSettings();
-          }),
-      );
+      new Setting(containerEl)
+        .setName("ffmpeg path")
+        .setDesc(
+          "Leave blank to auto-detect. Required for downloads above 360p: YouTube only serves one pre-muxed format (itag 18, 360p) and everything better needs ffmpeg to merge separate video and audio. Streaming is unaffected — that reaches 1080p without ffmpeg.",
+        )
+        .addText((text) =>
+          text
+            .setPlaceholder("/opt/homebrew/bin/ffmpeg")
+            .setValue(this.plugin.settings.ffmpegPath)
+            .onChange(async (value) => {
+              this.plugin.settings.ffmpegPath = value.trim();
+              this.plugin.resetFfmpeg();
+              await this.plugin.saveSettings();
+            }),
+        );
+    }
 
     new Setting(containerEl).setName("Pinned player").setHeading();
 

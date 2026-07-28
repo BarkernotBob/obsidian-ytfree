@@ -1,0 +1,26 @@
+{
+  "playabilityStatus": {
+    "status": "OK"
+  },
+  "streamingData": {
+    "formats": [
+      {
+        "itag": 18,
+        "mimeType": "video/mp4; codecs=\"avc1.42001E, mp4a.40.2\"",
+        "qualityLabel": "360p",
+        "url": "https://rr5---sn-8xgp1vo-p5il.googlevideo.com/videoplayback?expire=1785279062&ei=9t1oavrtJsiZ2_gPoteCkQI&ip=REDACTED&id=o-AISAm6EFhm0wHZJmhFz2wdmu629lLlIrP1_pY77whtx1&itag=18&source=youtube&requiressl=yes&xpc=EgVo2aDSNQ%3D%3D&cps=1745&met=1785257462%2C&mh=eU&mm=31%2C26&mn=sn-8xgp1vo-p5il%2Csn-qja5mc-5j&ms=au%2Conr&mv=m&mvi=5&pl=24&rms=au%2Cau&pcm2=no&initcwndbps=540000&bui=AZFlqhMBG-ZP5CbtQfwHpITBQJbKEVNF5efJ6oi-B_Whd2uJQgUfcWpBJxMgOAVYk1tTBi5SRwj2AdKS&spc=SQ-umhcrbG90cRGLf8gBDiO9TBqW-SWWOlun6_P0i94KzB7TjIWJ3SmxxGnaG21OSwE&vprv=1&svpuc=1&mime=video%2Fmp4&rqh=1&gir=yes&clen=210198330&ratebypass=yes&dur=3330.763&lmt=1785036215042635&mt=1785257125&fvip=4&fexp=51565115%2C51946837%2C51992868&c=ANDROID&txp=3309224&sparams=expire%2Cei%2Cip%2Cid%2Citag%2Csource%2Crequiressl%2Cxpc%2Cpcm2%2Cbui%2Cspc%2Cvprv%2Csvpuc%2Cmime%2Crqh%2Cgir%2Cclen%2Cratebypass%2Cdur%2Clmt&sig=AE0s2JYwRgIhAK2K-yzoq5qnUnGJ_uYkNZe3eLnLfhyG9rx6uibmkIrgAiEAp_vBoJuFHAwXehcT017TX2SGolxcIl4nKWSlm0fHGZo%3D&lsparams=cps%2Cmet%2Cmh%2Cmm%2Cmn%2Cms%2Cmv%2Cmvi%2Cpl%2Crms%2Cinitcwndbps&lsig=APaTxxMwRgIhAIGOUHod2LGfL9B6khxc4j4F2dfh7wSJhHB6us2ffl6KAiEAvxYLMqtzH3viBIPLL61BDCQkt1CFynt0u1XC6LGjIGU%3D"
+      }
+    ],
+    "adaptiveFormats": [
+      {
+        "itag": 315,
+        "mimeType": "video/webm; codecs=\"vp9\"",
+        "qualityLabel": "2160p60",
+        "url": "https://rr5---sn-8xgp1vo-p5il.googlevideo.com/videoplayback?expire=1785279062&ei=9t1oavrtJsiZ2_gPoteCkQI&ip=REDACTED&id=o-AISAm6EFhm0wHZJmhFz2wdmu629lLlIrP1_pY77whtx1&itag=315&source=youtube&requiressl=yes&xpc=EgVo2aDSNQ%3D%3D&cps=1745&met=1785257462%2C&mh=eU&mm=31%2C26&mn=sn-8xgp1vo-p5il%2Csn-qja5mc-5j&ms=au%2Conr&mv=m&mvi=5&pl=24&rms=au%2Cau&pcm2=no&initcwndbps=540000&bui=AZFlqhM_gwRdG9stL6EelqwaZFvJlkgOt__bV8Gvg858mSQDSariBFjFeySAg93ywkaUPczK87mqmO-C&spc=SQ-umhcobG90cRGLf8gBDiO9TBqX-SWWOlun6_P0i94KzB7TjIWJ3SmxxFnf822e&vprv=1&svpuc=1&mime=video%2Fwebm&rqh=1&gir=yes&clen=7837741592&dur=3330.660&lmt=1785036463652645&mt=1785257125&fvip=4&keepalive=yes&fexp=51565115%2C51946837%2C51992868&c=ANDROID&txp=330F224&sparams=expire%2Cei%2Cip%2Cid%2Citag%2Csource%2Crequiressl%2Cxpc%2Cpcm2%2Cbui%2Cspc%2Cvprv%2Csvpuc%2Cmime%2Crqh%2Cgir%2Cclen%2Cdur%2Clmt&sig=AE0s2JYwRgIhAIdEtosTHfmERoYRql60Mga1ODvaluL61t0ZNTj89Bg3AiEA-CDhCdhGzRBeh5-a5pwbPnKowb2I0PwdxsESKmG6JzQ%3D&lsparams=cps%2Cmet%2Cmh%2Cmm%2Cmn%2Cms%2Cmv%2Cmvi%2Cpl%2Crms%2Cinitcwndbps&lsig=APaTxxMwRgIhAIGOUHod2LGfL9B6khxc4j4F2dfh7wSJhHB6us2ffl6KAiEAvxYLMqtzH3viBIPLL61BDCQkt1CFynt0u1XC6LGjIGU%3D"
+      }
+    ]
+  },
+  "videoDetails": {
+    "title": "The PROBLEM with Capitalism - Smarter Every Day 316"
+  }
+}

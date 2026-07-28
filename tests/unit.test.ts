@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractVideoId, extractVideoIds, parseExpiry, StreamCache } from "../src/resolver.ts";
+import { extractVideoId, extractVideoIds, parseExpiry, StreamCache } from "../src/stream.ts";
 import { formatTimestamp } from "../src/format.ts";
 import {
   buildArgs,
@@ -10,7 +10,7 @@ import {
   localFileUrl,
   parseProgress,
   sanitizeFilename,
-} from "../src/download.ts";
+} from "../src/desktop/download.ts";
 
 test("extractVideoId handles every URL shape we accept", () => {
   const id = "dQw4w9WgXcQ";

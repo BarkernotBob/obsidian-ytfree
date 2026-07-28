@@ -9,7 +9,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findYtDlp, resolveStream, parseExpiry } from "../src/resolver.ts";
+import { findYtDlp, resolveStream } from "../src/desktop/resolver.ts";
+import { parseExpiry } from "../src/stream.ts";
 
 // Stable, long-lived, non-age-restricted video.
 const VIDEO_ID = "dQw4w9WgXcQ";
@@ -91,6 +92,6 @@ test("a channel feed still carries IDs, descriptions and 15 entries", async () =
 });
 
 test("the Shorts probe still answers 303 for a long-form video", async () => {
-  const { probeIsShort } = await import("../src/subscriptions.ts");
+  const { probeIsShort } = await import("../src/desktop/shorts-probe.ts");
   assert.equal(await probeIsShort("vS6HEes8daw"), false);
 });

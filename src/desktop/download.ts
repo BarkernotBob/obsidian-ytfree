@@ -1,10 +1,33 @@
 import { execFile, spawn } from "child_process";
 import { existsSync } from "fs";
-import { readdir, statfs, unlink } from "fs/promises";
+import { mkdir, readdir, statfs, unlink } from "fs/promises";
+import { homedir } from "os";
 import { join } from "path";
 import { promisify } from "util";
 
 const pExecFile = promisify(execFile);
+
+/**
+ * Where downloads go when the setting is blank.
+ *
+ * Deliberately outside the vault: the vault is in iCloud, and a 700MB video
+ * inside it would sync to every device and eat the quota. Computed here rather
+ * than in the settings defaults because `os.homedir()` cannot be reached at
+ * module load on mobile.
+ */
+export function defaultDownloadFolder(): string {
+  return join(homedir(), "Movies", "YT Free");
+}
+
+/** `mkdir -p`, so `main.ts` does not need its own `fs/promises` import. */
+export async function ensureDir(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true });
+}
+
+/** Delete one file. Same reason as `ensureDir`. */
+export async function removeFile(path: string): Promise<void> {
+  await unlink(path);
+}
 
 /** Same PATH problem as yt-dlp: Electron does not inherit a login shell's PATH. */
 const FFMPEG_CANDIDATES = [

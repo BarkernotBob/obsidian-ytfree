@@ -1,22 +1,15 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
-
-const pExecFile = promisify(execFile);
-
 /**
- * Obsidian's Electron process does not inherit a login shell's PATH, so a bare
- * "yt-dlp" lookup fails even when it works in Terminal. Probe the known install
- * locations directly.
+ * Everything about a resolved stream that does not care how it was resolved.
+ *
+ * This file exists because of the mobile split. Desktop resolves with yt-dlp
+ * (`child_process`) and mobile resolves with InnerTube (`requestUrl`), but the
+ * player, the cache, and the URL parsing are identical either way — and they
+ * used to live in `resolver.ts`, whose `child_process` import throws at module
+ * load on iOS. Nothing in here may import a Node builtin or `obsidian`.
  */
-const CANDIDATE_PATHS = [
-  "/opt/homebrew/bin/yt-dlp",
-  "/usr/local/bin/yt-dlp",
-  "/usr/bin/yt-dlp",
-  "/opt/local/bin/yt-dlp",
-];
 
 /** Treat a URL as expired this far ahead of its stated expiry. */
-const EXPIRY_SAFETY_MARGIN_MS = 10 * 60 * 1000;
+export const EXPIRY_SAFETY_MARGIN_MS = 10 * 60 * 1000;
 
 /** Used only when a URL carries no parseable expiry at all. */
 const FALLBACK_LIFETIME_MS = 60 * 60 * 1000;
@@ -29,10 +22,11 @@ const FALLBACK_LIFETIME_MS = 60 * 60 * 1000;
  * waits on each. The android_vr client answers in ~4s but only offers the 360p
  * progressive format. Neither is acceptable alone, so the player loads "fast"
  * first and upgrades to "quality" in the background.
+ *
+ * Mobile only ever answers "fast": InnerTube's single muxed format is 360p, and
+ * everything above it needs MSE (issue 005).
  */
 export type ResolveMode = "fast" | "quality";
-
-const FAST_CLIENT_ARGS = ["--extractor-args", "youtube:player_client=android_vr"];
 
 export interface ResolvedStream {
   url: string;
@@ -41,6 +35,15 @@ export interface ResolvedStream {
   /** Epoch ms, already reduced by the safety margin. */
   expiresAt: number;
 }
+
+/**
+ * How a player asks for a stream. The player never learns which platform it is
+ * on — it gets one of these and that is the whole contract.
+ */
+export type StreamProvider = (
+  mode: ResolveMode,
+  forceRefresh: boolean,
+) => Promise<ResolvedStream>;
 
 export class YtDlpMissingError extends Error {
   constructor() {
@@ -110,80 +113,13 @@ export function parseExpiry(url: string): number {
   return Date.now() + FALLBACK_LIFETIME_MS;
 }
 
-export async function findYtDlp(configuredPath: string): Promise<string> {
-  const candidates = configuredPath
-    ? [configuredPath, ...CANDIDATE_PATHS]
-    : CANDIDATE_PATHS;
-
-  for (const path of candidates) {
-    try {
-      await pExecFile(path, ["--version"], { timeout: 10_000 });
-      return path;
-    } catch {
-      // try the next candidate
-    }
-  }
-  throw new YtDlpMissingError();
-}
-
-export async function getVersion(ytDlpPath: string): Promise<string> {
-  const { stdout } = await pExecFile(ytDlpPath, ["--version"], { timeout: 10_000 });
-  return stdout.trim();
-}
-
-/**
- * Resolve a video ID to a single playable stream URL.
- *
- * The format selector deliberately asks for a pre-muxed format ("b") so yt-dlp
- * returns exactly one URL. Asking for the best video+audio would return two
- * that need ffmpeg to merge, which we do not require.
- */
-export async function resolveStream(
-  videoId: string,
-  ytDlpPath: string,
-  mode: ResolveMode,
-): Promise<ResolvedStream> {
-  // "fast" pins the one client that answers quickly; it only has 360p, so ask
-  // for that directly rather than waiting on an HLS lookup that will not exist.
-  const selector = mode === "quality" ? "b[protocol^=m3u8]/18/b" : "18/b";
-  const clientArgs = mode === "fast" ? FAST_CLIENT_ARGS : [];
-
-  let stdout: string;
-  try {
-    const result = await pExecFile(
-      ytDlpPath,
-      [
-        "--no-warnings",
-        "--no-playlist",
-        ...clientArgs,
-        "-f",
-        selector,
-        "-g",
-        `https://www.youtube.com/watch?v=${videoId}`,
-      ],
-      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
-    );
-    stdout = result.stdout;
-  } catch (err: unknown) {
-    const e = err as { stderr?: string; message?: string };
-    const detail = (e.stderr || e.message || "unknown error").trim();
-    throw new ResolveError(detail);
-  }
-
-  const url = stdout.trim().split("\n").filter(Boolean).pop();
-  if (!url) throw new ResolveError("yt-dlp returned no stream URL");
-
-  return {
-    url,
-    isHls: url.includes(".m3u8") || url.includes("/hls_playlist/"),
-    mode,
-    expiresAt: parseExpiry(url) - EXPIRY_SAFETY_MARGIN_MS,
-  };
-}
-
 /**
  * In-memory only. Nothing here is ever written to a note or to disk — that is
  * what makes a note still play a year after it was written.
+ *
+ * On mobile that rule hardens into a requirement: googlevideo URLs are
+ * IP-locked, so a URL resolved on the Mac and synced through the vault would
+ * 403 on cellular. The cache is per-process for exactly that reason.
  */
 export class StreamCache {
   private entries = new Map<string, ResolvedStream>();

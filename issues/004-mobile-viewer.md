@@ -263,4 +263,81 @@ desktop and syncing the note stays the workflow.
 
 ## Manual test (for BarkernotBob)
 
-_Written when the issue is completed, per the repo convention._
+Two halves. Part A takes five minutes on the Mac and proves nothing broke. Part B is the
+actual point of the issue and needs your iPhone.
+
+**Nothing in this issue has been tried on a real iPhone.** It builds, the parser is tested
+against real captured responses, and the bundle is verified to contain no Node code that runs
+at startup — but whether iOS actually plays a googlevideo URL is unknown until step B4.
+
+### Part A — desktop, nothing regressed
+
+1. Quit Obsidian on the Mac completely (⌘Q — not just closing the window) and reopen it.
+2. Open any Watch Later note that has a YouTube link in its properties. The player should
+   appear at the top of the note exactly as it did before, and start playing.
+3. Play it for a few seconds. No ads.
+4. Click a timestamp in the transcript or the "Most replayed" list. The video should jump to
+   that moment. **Watch the text around the timestamp as you click it — nothing on screen
+   should move, even slightly.**
+5. Open the command palette (⌘P) and type "YT Free". You should still see "Download this
+   video for offline", "Delete the local copy of this video", and "Fetch transcript and
+   most-replayed moments".
+6. Run "Download this video for offline" on a short video and let it finish. It should
+   download and then play from the local copy, same as before.
+7. Open Settings → Community plugins → YT Free. You should see the yt-dlp path, "Upgrade to
+   high quality", the "Offline downloads" section with its folder and ffmpeg boxes — all of
+   it, unchanged.
+
+If any step in Part A behaves differently than it used to, stop and say so — that is a
+regression, and it matters more than anything in Part B.
+
+### Part B — iPhone, the new part
+
+1. On the Mac, open the Files app or Finder and confirm the vault has finished syncing to
+   iCloud. On the iPhone, open Obsidian and let the vault sync.
+2. iPhone → Settings (gear) → Community plugins. **YT Free should now be in the list at
+   all** — before this change it was hidden on mobile. Turn it on.
+   - If it does not appear, force-close Obsidian (swipe it away from the app switcher),
+     reopen, and look again. Plugin files sometimes arrive a minute late.
+3. Open a Watch Later note — the same one you used in Part A. You should see a black video
+   box docked at the top of the note with the video's thumbnail and a ▶ button, and the note
+   text below it. The box should be there immediately; nothing should pop in a moment later
+   and shove the text down.
+4. **Tap the ▶ button.** After a second or two of "Resolving stream…", the video should start
+   playing inside that box — not fullscreen, not in the YouTube app, and **with no ads**.
+   - This is the step everything else rests on. If it fails, note exactly what the box says
+     and stop; the rest of Part B will not tell us anything new.
+5. Scroll the note while the video plays. The video should stay put at the top and the text
+   should scroll underneath it.
+6. Tap a timestamp in the transcript. The video should jump to that moment. **Again: watch
+   the text as you tap — nothing should shift.**
+7. Scroll down to a timestamp far down the note and tap it. If you had closed the player, it
+   should mount and seek to that moment on its own.
+8. Rotate the phone to landscape and back. Nothing should break; the box should resize
+   cleanly.
+9. Try the native controls: pause, scrub, then swipe up to the home screen and check that the
+   Control Center / lock screen shows the video as playable audio. AirPlay and
+   picture-in-picture should both be offered by iOS's own player controls.
+10. Tap "Close" on the player. The video should disappear and the note text should move up to
+    fill the space in one step — no leftover gap, no flicker. Scroll around; it should not
+    come back on its own. Navigate to another note and back — it should reappear.
+11. Open the command palette on the phone (swipe down from the middle of the screen, or the
+    ⌘ button) and type "YT Free". You should **not** see "Download this video for offline",
+    "Delete the local copy", or "Fetch transcript and most-replayed moments" — those need
+    yt-dlp, which does not exist on iOS.
+12. iPhone → Settings → YT Free. The yt-dlp path, "Upgrade to high quality" and the whole
+    "Offline downloads" section should be **absent**, replaced by a short note explaining
+    what this device can do.
+13. Turn on airplane mode, open a note whose video has not been played yet, and tap ▶. You
+    should get a clear message about not reaching YouTube, an "Open in YouTube" button, and a
+    "Try again" button. Turn airplane mode off and tap "Try again" — it should play.
+14. Find an age-restricted video (or any video that says "Sign in to confirm your age" on
+    the web), put its link in a note's properties, open it on the phone and tap ▶. You should
+    get a message saying it needs a signed-in account, plus "Open in YouTube" — and **no**
+    "Try again", because trying again would fail identically.
+
+### What to report back
+
+For each step that failed: the step number, what you saw instead, and — if the phone showed
+any text in the video box — that text word for word. The wording is chosen per failure kind,
+so it says which of the four things went wrong.

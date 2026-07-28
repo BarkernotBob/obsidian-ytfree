@@ -1,0 +1,19 @@
+{
+  "playabilityStatus": {
+    "status": "OK"
+  },
+  "streamingData": {
+    "adaptiveFormats": [
+      {
+        "itag": 313,
+        "mimeType": "video/webm; codecs=\"vp09.00.50.08\"",
+        "qualityLabel": "2160p",
+        "url": "https://rr2---sn-8xgp1vo-p5ie.googlevideo.com/videoplayback?expire=1785279062&ei=9t1oapK6O6bpybgPnf6MqAg&ip=REDACTED&id=o-AHjytG8dHhPRFYL8Ygmk5AGjGLm0apdwX8glFukir-rX&itag=313&source=youtube&requiressl=yes&xpc=EgVo2aDSNQ%3D%3D&cps=1235&met=1785257462%2C&mh=7c&mm=31%2C26&mn=sn-8xgp1vo-p5ie%2Csn-a5m7lnld&ms=au%2Conr&mv=m&mvi=2&pl=24&rms=au%2Cau&pcm2=yes&initcwndbps=542500&bui=AZFlqhOOYT9VwO7zTjl1OjcXax_OvbzmurjAqFJrCHjsWBgB5W7pOfqw5l3NcX2PORrf0fOXEebaNcwS&spc=SQ-umgFc42lqY59Zgves3Oke5BCx0dHRea6XWW7Aq_F4w1ZTY2w_ri7imjnJUSSGl5Y&vprv=1&svpuc=1&mime=video%2Fwebm&rqh=1&gir=yes&clen=358608461&dur=213.040&lmt=1766963492248817&mt=1785257125&fvip=2&keepalive=yes&fexp=51565115%2C51992868&c=IOS&txp=5532534&sparams=expire%2Cei%2Cip%2Cid%2Citag%2Csource%2Crequiressl%2Cxpc%2Cpcm2%2Cbui%2Cspc%2Cvprv%2Csvpuc%2Cmime%2Crqh%2Cgir%2Cclen%2Cdur%2Clmt&sig=AE0s2JYwRgIhAMSdT3sGBdOgfnoit8Tyd3SLZM8IPG032lP-p6N919eTAiEAzkqapkQLUoT7yfrbM5fYk9Mw8hyAPTn8P8o46jRE2_Q%3D&lsparams=cps%2Cmet%2Cmh%2Cmm%2Cmn%2Cms%2Cmv%2Cmvi%2Cpl%2Crms%2Cinitcwndbps&lsig=APaTxxMwRgIhAKyDQHr9mylC-9cOLYpJmbekFZXzTFUkU3s4SclfIHfpAiEA0aMp0c3ih7tMSFN0BepZFu8sQnyLhoV-jycBVs0pkww%3D"
+      }
+    ],
+    "hlsManifestUrl": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1785279062/ei/9t1oapK6O6bpybgPnf6MqAg/ip/REDACTED/id/750c38c3d5a05dc4/source/youtube/requiressl/yes/xpc/EgVo2aDSNQ%3D%3D/playback_host/rr2---sn-8xgp1vo-p5ie.googlevideo.com/cps/1235/met/1785257462%2C/mh/7c/mm/31%2C26/mn/sn-8xgp1vo-p5ie%2Csn-a5m7lnld/ms/au%2Conr/mv/m/mvi/2/pl/24/rms/au%2Cau/tx/51875302/txs/51875298%2C51875299%2C51875300%2C51875301%2C51875302/hfr/1/demuxed/1/tts_caps/1/maudio/1/pcm2/yes/initcwndbps/542500/bui/AZFlqhPa5ZdVNewtUfXBH2Ut_X3q98_euVlG7QUKO-7YpsHG3AtRa-Ll2pnSmUIaFAop48-w3mc96iwq/spc/SQ-umgFf42lqY59Zgves3Oke5BCx0dHRea6XWW7Aq_F4w1ZTY2w_ri7YmkvKKSRulwemVw/vprv/1/go/1/rqh/5/mt/1785257125/fvip/2/nvgoi/1/short_key/1/ncsapi/1/keepalive/yes/fexp/51565115%2C51992868/dover/13/itag/0/playlist_type/DVR/sparams/expire%2Cei%2Cip%2Cid%2Csource%2Crequiressl%2Cxpc%2Ctx%2Ctxs%2Chfr%2Cdemuxed%2Ctts_caps%2Cmaudio%2Cpcm2%2Cbui%2Cspc%2Cvprv%2Cgo%2Crqh%2Citag%2Cplaylist_type/sig/AE0s2JYwRgIhAIn89Ha05Vf6Pn3HDQ2hmkH-YQayyRQQlO9fKR6OssADAiEA03mfjiCGabDb5PE-VA5kFHzUH14lXdXGnoU5qx145JQ%3D/lsparams/playback_host%2Ccps%2Cmet%2Cmh%2Cmm%2Cmn%2Cms%2Cmv%2Cmvi%2Cpl%2Crms%2Cinitcwndbps/lsig/APaTxxMwRQIhAOcXGwrHWx_3jvcvQHrXs-iF4ca1gCk6IBEo6q9yo6iWAiA_h1_gEIQRcFdnDHtwJaQXvPnshCC6UWDOgxBrBhC_BQ%3D%3D/file/index.m3u8"
+  },
+  "videoDetails": {
+    "title": "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)"
+  }
+}

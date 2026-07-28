@@ -1,6 +1,80 @@
 # HANDOFF
 
-## Status — 2026-07-27 (latest): subscriptions hub built
+## Status — 2026-07-28 (latest): issue 004 built — mobile viewer
+
+Issue 004 is **built and installed**. 123 unit tests pass, build clean.
+**Awaiting the manual test** at the bottom of `issues/004-mobile-viewer.md`.
+
+**Say this plainly to BarkernotBob: none of the iOS behaviour has been run on a real
+iPhone.** What is actually verified is narrower than "it works on mobile":
+
+- the bundle contains **no Node builtin `require` that runs at load** (checked on
+  `main.js`, and now enforced by the build itself — see below);
+- the InnerTube parser is tested against **real captured responses**, not
+  hand-written JSON;
+- desktop still passes everything it passed before.
+
+What is *not* verified: whether `requestUrl`'s custom User-Agent reaches YouTube
+from iOS (risk 1 in the issue), and whether WKWebView will load a googlevideo URL
+into a `<video>` element (risk 2). Both are step B4 of the manual test. If B4
+fails, the whole approach is in question, not a detail of it.
+
+### The shape of the change
+
+Everything that touches Node moved under `src/desktop/` behind **one door**:
+`await import("./desktop")`, inside a `Platform.isDesktopApp` branch. esbuild
+keeps a dynamically-imported subgraph in a lazily-initialised closure, so the
+`require` calls happen on first use rather than at startup — which is the whole
+game, because on iOS a top-level `require("child_process")` throws *before*
+`onload`, so the plugin dies rather than degrading.
+
+- `src/stream.ts` — the platform-neutral core (`extractVideoId`, `parseExpiry`,
+  `StreamCache`, the `ResolvedStream` shape). Imports nothing.
+- `src/desktop/` — `resolver.ts` (yt-dlp), `download.ts`, `transcript-fetch.ts`,
+  `shorts-probe.ts`, and `index.ts` as the only entry point.
+- `src/mobile/innertube.ts` — the request. `src/mobile/player-response.ts` — the
+  parsing, split out purely so the tests can run it without `obsidian`.
+- `manifest.json` lost `isDesktopOnly`.
+
+### The build now enforces the rule that matters
+
+`esbuild.config.mjs` fails the production build if any Node builtin is required
+in the eager module body. This is the highest-value thing in the change: one
+ordinary top-level import in a file mobile loads pulls the whole desktop subgraph
+back into startup, the source diff looks completely innocent, and the only
+symptom is the plugin refusing to load on a phone you are not holding. Verified
+by deliberately introducing a leak — the build failed with the right message.
+
+### Four things worth knowing before touching this again
+
+- **Issue 004's list of Node imports was incomplete.** `src/subscriptions.ts`
+  also imported `https`, for the Shorts probe, and it sits directly on the mobile
+  load path. Mobile now leaves `isShort` null, which already meant "ask again
+  later". Do not trust a hand-written list of imports over the build guard.
+- **`DEFAULT_SETTINGS.downloadFolder` used to call `os.homedir()` at module
+  scope** — a Node call at load time, exactly the failure being fixed. It is now
+  `""`, meaning "the default", resolved lazily via `defaultDownloadFolder()`.
+- **Mobile defers the resolve until you tap.** The player mounts with its final
+  height reserved and a thumbnail poster; nothing is fetched until a tap on the
+  poster or on a timestamp. Opening a note should not cost a video.
+- **`player.primeForGesture()` exists for one iOS rule**: `play()` after an
+  `await` is refused as not user-initiated. Touching the element synchronously
+  inside the tap handler claims the gesture and survives the later `src` swap.
+  This is anticipated, not observed — if playback needs a second tap on the
+  device, this is the code to look at first.
+
+### Fixtures
+
+`tests/fixtures/*.json` are real captures, re-recordable with
+`node spikes/innertube/record.mjs`. The `ip=` parameter is redacted in both the
+query form and the `/ip/…` path form used by manifest URLs. The signed URLs
+expire in about six hours, which is fine — nothing in the tests fetches them.
+
+`node spikes/innertube/probe.mjs` remains the load-bearing measurement: green
+means InnerTube still hands out unciphered, playable URLs. Run it first if mobile
+playback ever stops working.
+
+## Status — 2026-07-27: subscriptions hub built
 
 Issue 003 is **built and installed**. 113 unit tests and 7 live smoke tests
 pass, build clean. **Awaiting the 18-step manual test** at the bottom of

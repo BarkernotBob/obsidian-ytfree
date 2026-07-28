@@ -1,13 +1,34 @@
 import Hls from "hls.js";
-import { ResolveMode, ResolvedStream } from "./resolver";
+// Type-only, and it has to stay that way. A value import of these names pulled
+// the whole resolver — and its `child_process` import — into every bundle that
+// touches the player, which is one of the two reasons the plugin could not load
+// on mobile.
+import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
 
-export type StreamProvider = (
-  mode: ResolveMode,
-  forceRefresh: boolean,
-) => Promise<ResolvedStream>;
+export type { StreamProvider };
 
 const MAX_CONSECUTIVE_RECOVERIES = 3;
 const RECOVERY_COOLDOWN_MS = 2000;
+
+export interface PlayerOptions {
+  /**
+   * Where the `<video>` goes, when it is not the container itself. Mobile docks
+   * the player in a fixed-aspect box that also holds the poster and the
+   * fallback, so the media has its own host.
+   */
+  mediaHost?: HTMLElement;
+  /**
+   * Drop the custom control row down to the timestamp button.
+   *
+   * The row exists to surface what Chromium hides in its overflow menu. iOS
+   * Safari's native controls already expose Picture-in-Picture, AirPlay and
+   * speed, so on a phone the row is duplication taking up a quarter of the
+   * screen.
+   */
+  minimalControls?: boolean;
+  /** Shown at the end of the control row. Mobile uses it to close the player. */
+  onClose?: () => void;
+}
 
 /**
  * Wraps a native <video> element and keeps it playing across stream-URL expiry.
@@ -45,8 +66,9 @@ export class YtFreePlayer {
     private onStatus: (message: string | null) => void,
     private onTimestamp?: (seconds: number) => void,
     private onDownload?: () => void,
+    private options: PlayerOptions = {},
   ) {
-    this.video = container.createEl("video", {
+    this.video = (options.mediaHost ?? container).createEl("video", {
       cls: "ytfree-video",
       attr: { controls: "", playsinline: "", preload: "metadata" },
     });
@@ -86,6 +108,20 @@ export class YtFreePlayer {
       });
       return el;
     };
+
+    // On mobile the native controls already do play/pause, skip, speed, PiP and
+    // AirPlay, so only the one control they cannot offer is kept.
+    if (this.options.minimalControls) {
+      if (this.onTimestamp) {
+        button("Timestamp", "Insert timestamp at cursor", () => {
+          this.onTimestamp?.(Math.floor(this.video.currentTime));
+        });
+      }
+      if (this.options.onClose) {
+        button("Close", "Close the player", () => this.options.onClose?.());
+      }
+      return;
+    }
 
     const playBtn = button("Play", "Play or pause", () => {
       if (this.video.paused) void this.video.play().catch(() => { /* ignore */ });
@@ -324,6 +360,47 @@ export class YtFreePlayer {
   seekTo(seconds: number): void {
     this.video.currentTime = seconds;
     void this.video.play().catch(() => { /* ignore */ });
+  }
+
+  /**
+   * Seek even if nothing has loaded yet.
+   *
+   * On mobile the player is mounted but deliberately not resolved until it is
+   * asked for, so a tapped timestamp routinely arrives before there is any
+   * media to seek. Setting `currentTime` on an element with no duration is
+   * silently dropped, which would look exactly like a broken link.
+   */
+  seekWhenReady(seconds: number): void {
+    if (this.destroyed) return;
+    if (this.video.readyState >= 1) {
+      this.seekTo(seconds);
+      return;
+    }
+    this.video.addEventListener("loadedmetadata", () => this.seekTo(seconds), { once: true });
+  }
+
+  /**
+   * Claim the user gesture before an `await` throws it away.
+   *
+   * iOS only lets a media element start playing if `load()` or `play()` was
+   * called during a real user interaction, and resolving a stream takes a
+   * network round trip — by the time a URL comes back, the tap is long over and
+   * `play()` is refused. Touching the element synchronously inside the tap
+   * handler marks it as user-activated, and that survives the later `src` swap.
+   */
+  primeForGesture(): void {
+    if (this.destroyed) return;
+    try {
+      this.video.load();
+    } catch {
+      // Nothing to load yet; the flag is what we were after.
+    }
+  }
+
+  /** Start playback. Rejection is normal and not worth reporting. */
+  play(): void {
+    if (this.destroyed) return;
+    void this.video.play().catch(() => { /* a gesture may still be required */ });
   }
 
   /**

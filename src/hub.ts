@@ -12,6 +12,7 @@ import {
   ItemView,
   Modal,
   Notice,
+  Platform,
   Setting,
   TFile,
   TFolder,
@@ -32,7 +33,6 @@ import {
   mergeItems,
   normalizeState,
   parseChannelFeed,
-  probeIsShort,
   relativeAge,
   sanitizeFileName,
   visibleItems,
@@ -163,10 +163,18 @@ export class SubscriptionsStore {
       const expired = expireItems(this.state.items, this.settings().expiryDays, now);
       this.state.items = expired.items;
 
-      const unprobed = this.state.items.filter((item) => item.isShort === null);
-      await mapLimit(unprobed, 5, async (item) => {
-        item.isShort = await probeIsShort(item.videoId);
-      });
+      // Telling a Short from a long-form video means reading a redirect status,
+      // which needs Node's `https` — so it only happens on desktop, and it is
+      // imported dynamically because that import throws at module load on iOS.
+      // Mobile leaves `isShort` null, which already means "ask again later";
+      // the next desktop poll fills it in and nothing is misclassified.
+      if (Platform.isDesktopApp) {
+        const { probeIsShort } = await import("./desktop/shorts-probe.ts");
+        const unprobed = this.state.items.filter((item) => item.isShort === null);
+        await mapLimit(unprobed, 5, async (item) => {
+          item.isShort = await probeIsShort(item.videoId);
+        });
+      }
 
       this.state.lastPolledAt = now.toISOString();
     } finally {
