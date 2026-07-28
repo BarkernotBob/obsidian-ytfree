@@ -1,5 +1,26 @@
 # HANDOFF
 
+## Status — 2026-07-28: timestamp clicks fixed in both views
+
+Timestamp links (`ytfree:` scheme) stopped seeking — Obsidian's own link
+handler claims them and shows a "trust this link?" prompt. Two-part fix:
+
+- **Reading view:** the document click listener now runs in the *capture*
+  phase, beating Obsidian's bubble-phase handler (was started in a prior
+  session, finished + committed now).
+- **Live Preview:** links there are CodeMirror spans, not `<a>` elements, so
+  the document listener never fired at all. New `Prec.highest` editor
+  `mousedown`/`click` handlers resolve the link from the document text
+  (`seekLinkAt` in `src/description.ts`, unit-tested). Mousedown arms the
+  seek while the pre-click selection is still known, so a link the user is
+  editing still takes plain clicks for cursor placement.
+
+No note changes needed — the stored link format is unchanged. 140 tests pass,
+installed to the vault; needs a plugin reload in Obsidian.
+
+Uncommitted in the tree: hub.ts/styles.css undo-grace removal from another
+session — left as found.
+
 ## Status — 2026-07-28 (latest): issue 006 built — sign in and account import
 
 **Built and installed. 137 unit tests pass, build clean. Awaiting the manual

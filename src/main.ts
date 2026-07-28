@@ -7,6 +7,7 @@ import {
   MarkdownRenderChild,
   MarkdownView,
   Notice,
+  editorLivePreviewField,
   Platform,
   Plugin,
   PluginSettingTab,
@@ -33,7 +34,7 @@ import {
   stampInsertOffset,
 } from "./capture";
 import type { DownloadHandle } from "./desktop/download.ts";
-import { findTimestamps } from "./description";
+import { findTimestamps, seekLinkAt } from "./description";
 import { formatTimestamp } from "./format";
 import {
   HUB_VIEW_TYPE,
@@ -138,7 +139,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   downloadFolder: "",
   ffmpegPath: "",
   subscriptionsPollMinutes: 60,
-  subscriptionsExpiryDays: 30,
+  subscriptionsExpiryDays: 0,
   subscriptionsIncludeShorts: false,
   watchLaterFolder: "Watch Later",
   // 12 hours, because yt-dlp's own documentation warns that recurring
@@ -205,6 +206,8 @@ export default class YtFreePlugin extends Plugin {
   /** Auto-fetches run one at a time, however many notes arrive at once. */
   private autoFetchChain: Promise<void> = Promise.resolve();
   private lastActiveVideoId: string | null = null;
+  /** Seek link under the mouse at mousedown, consumed by the matching click. */
+  private armedSeekLink: { videoId: string; seconds: number } | null = null;
   private ytDlpPath: string | null = null;
   private resumeTimer: number | null = null;
   private downloads = new Map<string, DownloadHandle>();
@@ -235,6 +238,21 @@ export default class YtFreePlugin extends Plugin {
         EditorView.inputHandler.of((view, from, to, text) =>
           this.handleInput(view, from, to, text),
         ),
+      ),
+      // Live Preview renders links as CodeMirror spans, not <a> elements, so
+      // the document-level capture handler above never sees those clicks —
+      // Obsidian's editor plugin resolves the URL from the document and hands
+      // `ytfree:` to the external-link path, which dead-ends in a "trust this
+      // link?" prompt. Intercept at the editor instead, resolving the link the
+      // same way it does: from the text under the click.
+      Prec.highest(
+        EditorView.domEventHandlers({
+          mousedown: (evt, view) => {
+            this.armedSeekLink = this.editorSeekLinkAt(evt, view, true);
+            return false;
+          },
+          click: (evt, view) => this.handleEditorClick(evt, view),
+        }),
       ),
     ]);
 
@@ -267,29 +285,31 @@ export default class YtFreePlugin extends Plugin {
     });
 
     // Timestamp links use a custom scheme, so intercept their clicks ourselves.
-    this.registerDomEvent(document, "click", (evt) => {
-      const target = (evt.target as HTMLElement)?.closest?.("a");
-      if (!target) return;
-      const href = target.getAttribute("href") ?? "";
-      if (!href.startsWith("ytfree:")) return;
+    // Capture phase: Obsidian's own link handler treats an unrecognized scheme
+    // as an external link, shows a "trust this link?" prompt, and on trust hands
+    // it to `shell.openExternal`, which no-ops since `ytfree:` isn't a
+    // registered OS protocol. That handler runs on bubble, so listening on
+    // `document` in the bubble phase (the original approach) loses the race —
+    // Obsidian's `stopPropagation()` fires first and we never see the click.
+    // Capture on `document` runs before any bubble-phase listener anywhere in
+    // the tree, so we get first refusal regardless of where Obsidian attaches.
+    this.registerDomEvent(
+      document,
+      "click",
+      (evt) => {
+        const target = (evt.target as HTMLElement)?.closest?.("a");
+        if (!target) return;
+        const href = target.getAttribute("href") ?? "";
+        if (!href.startsWith("ytfree:")) return;
 
-      evt.preventDefault();
-      evt.stopPropagation();
+        evt.preventDefault();
+        evt.stopPropagation();
 
-      const [, videoId, seconds] = href.split(":");
-      const entry = this.players.get(videoId);
-      if (!entry) {
-        new Notice("YT Free: that video is not open in this note.");
-        return;
-      }
-      this.lastActiveVideoId = videoId;
-
-      // Claim the tap now, synchronously. On mobile the player may still have
-      // to resolve a URL, and by the time that returns iOS no longer counts
-      // this as a user gesture — so the element has to be touched first.
-      entry.player.primeForGesture();
-      void this.seekEntry(entry, Number(seconds) || 0);
-    });
+        const [, videoId, seconds] = href.split(":");
+        this.followSeekLink(videoId, Number(seconds) || 0);
+      },
+      { capture: true },
+    );
 
     // Pinned player: driven entirely off frontmatter, so opening a Watch Later
     // note is the whole interaction. Re-synced on anything that can change which
@@ -1366,6 +1386,77 @@ export default class YtFreePlugin extends Plugin {
    * thing rather than just after it. Reading and replaying want different
    * answers, so they get different answers.
    */
+  /**
+   * Seek the named player, claiming the user gesture first. Shared by the
+   * Reading-view anchor handler and the Live Preview editor handler.
+   */
+  private followSeekLink(videoId: string, seconds: number): void {
+    const entry = this.players.get(videoId);
+    if (!entry) {
+      new Notice("YT Free: that video is not open in this note.");
+      return;
+    }
+    this.lastActiveVideoId = videoId;
+
+    // Claim the tap now, synchronously. On mobile the player may still have
+    // to resolve a URL, and by the time that returns iOS no longer counts
+    // this as a user gesture — so the element has to be touched first.
+    entry.player.primeForGesture();
+    void this.seekEntry(entry, seconds);
+  }
+
+  /**
+   * The seekable link under a mouse event in Live Preview, or null.
+   *
+   * Null in source mode, and null when the selection already touches the link
+   * — there Obsidian shows the raw markdown, and a click should place the
+   * cursor, not seek. This runs at mousedown, before CodeMirror moves the
+   * selection to the click, because "was the user editing this link?" is a
+   * question about the state before the click.
+   */
+  private editorSeekLinkAt(
+    evt: MouseEvent,
+    view: EditorView,
+    guardSelection: boolean,
+  ): { videoId: string; seconds: number } | null {
+    if (!view.state.field(editorLivePreviewField, false)) return null;
+    const pos = view.posAtCoords({ x: evt.clientX, y: evt.clientY });
+    if (pos === null) return null;
+
+    const line = view.state.doc.lineAt(pos);
+    const link = seekLinkAt(line.text, pos - line.from);
+    if (!link) return null;
+
+    if (guardSelection) {
+      const linkFrom = line.from + link.from;
+      const linkTo = line.from + link.to;
+      for (const range of view.state.selection.ranges) {
+        if (range.from <= linkTo && range.to >= linkFrom) return null;
+      }
+    }
+    return { videoId: link.videoId, seconds: link.seconds };
+  }
+
+  /** Timestamp clicks in Live Preview, armed by the matching mousedown. */
+  private handleEditorClick(evt: MouseEvent, view: EditorView): boolean {
+    const armed = this.armedSeekLink;
+    this.armedSeekLink = null;
+    if (!armed) return false;
+
+    // The click must still land on the same link — a drag that started on it
+    // is a text selection, not a click. No selection guard here: by click
+    // time CodeMirror may already have moved the cursor into the link.
+    const now = this.editorSeekLinkAt(evt, view, false);
+    if (!now || now.videoId !== armed.videoId || now.seconds !== armed.seconds) {
+      return false;
+    }
+
+    evt.preventDefault();
+    evt.stopPropagation();
+    this.followSeekLink(armed.videoId, armed.seconds);
+    return true;
+  }
+
   private timestampText(videoId: string, displaySeconds: number, seekSeconds: number): string {
     return this.settings.timestampFormat
       .replace("{ts}", formatTimestamp(displaySeconds))

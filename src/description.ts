@@ -79,3 +79,30 @@ export function linkifyTimestamps(text: string, videoId: string): string {
   }
   return out + text.slice(cursor);
 }
+
+/**
+ * The `ytfree:` markdown link in `line` whose full `[text](url)` span covers
+ * `offset`, or null.
+ *
+ * This is the Live Preview click path. There, links are CodeMirror spans with
+ * no `href` in the DOM, so the URL has to be recovered from the document text
+ * the same way Obsidian's own editor plugin does it.
+ */
+export function seekLinkAt(
+  line: string,
+  offset: number,
+): { videoId: string; seconds: number; from: number; to: number } | null {
+  const re = /\[[^\]\n]*\]\(ytfree:([A-Za-z0-9_-]+):(\d+)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line))) {
+    if (offset < m.index) return null;
+    if (offset > m.index + m[0].length) continue;
+    return {
+      videoId: m[1],
+      seconds: Number(m[2]),
+      from: m.index,
+      to: m.index + m[0].length,
+    };
+  }
+  return null;
+}

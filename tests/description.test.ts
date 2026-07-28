@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findTimestamps, linkifyTimestamps } from "../src/description.ts";
+import { findTimestamps, linkifyTimestamps, seekLinkAt } from "../src/description.ts";
 
 const ID = "dQw4w9WgXcQ";
 
@@ -61,4 +61,30 @@ test("linkifyTimestamps leaves an existing markdown link alone", () => {
   // Flow-capture stamps are already links; re-linking would nest brackets.
   const text = `[1:00](ytfree:${ID}:55) my own note`;
   assert.equal(linkifyTimestamps(text, ID), text);
+});
+
+test("seekLinkAt finds the link whose span covers the offset", () => {
+  const line = `note **[0:19](ytfree:${ID}:14)** and [2:15](ytfree:${ID}:135) later`;
+  const first = line.indexOf("[0:19]");
+  assert.deepEqual(seekLinkAt(line, first + 2), {
+    videoId: ID,
+    seconds: 14,
+    from: first,
+    to: first + `[0:19](ytfree:${ID}:14)`.length,
+  });
+  // Clicking the second link resolves the second target, not the first.
+  assert.equal(seekLinkAt(line, line.indexOf("[2:15]") + 1)?.seconds, 135);
+});
+
+test("seekLinkAt covers the whole [text](url) span, ends inclusive", () => {
+  const line = `[0:00](ytfree:${ID}:0)`;
+  assert.equal(seekLinkAt(line, 0)?.seconds, 0);
+  assert.equal(seekLinkAt(line, line.length)?.seconds, 0);
+});
+
+test("seekLinkAt returns null off the link and on non-ytfree links", () => {
+  const line = `pre [0:00](ytfree:${ID}:0) post [x](https://a.b)`;
+  assert.equal(seekLinkAt(line, 1), null);
+  assert.equal(seekLinkAt(line, line.length - 2), null);
+  assert.equal(seekLinkAt("no links here", 3), null);
 });
