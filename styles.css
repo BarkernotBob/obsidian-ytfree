@@ -175,8 +175,90 @@
   padding: 0 var(--file-margins, 16px);
 }
 
+/*
+ * The same control row as the desktop, at thumb size. iOS's native video
+ * controls look like they make this redundant, but they have no 10-second skip
+ * and no speed picker short of a long-press, and they vanish entirely once the
+ * video is playing — so the row stays, just bigger.
+ *
+ * Only the heights grow. Every fixed width from the desktop rules still
+ * applies, so Play/Pause and the download percentage cannot nudge their
+ * neighbours, and `wrap` means a narrow phone drops a button to a second line
+ * instead of squeezing the row.
+ */
 .ytfree-docked .ytfree-controls {
-  padding: 0 var(--file-margins, 16px);
+  padding: 6px var(--file-margins, 16px) 0;
+  gap: 8px;
+}
+
+.ytfree-docked .ytfree-btn,
+.ytfree-docked .ytfree-speed {
+  height: 38px;
+  line-height: 38px;
+  font-size: var(--font-ui-small);
+}
+
+/*
+ * Reopening a closed player.
+ *
+ * Closing is one tap; without this the video is gone until the note is closed
+ * and reopened. The bar takes the docked player's place in the flex column, so
+ * it clears the floating header the same way, and it is one line tall — closing
+ * the player still buys back the whole video box.
+ */
+.ytfree-reopen {
+  flex: 0 0 auto;
+  padding: var(--view-top-spacing-markdown, 0px) var(--file-margins, 16px) 6px;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ytfree-reopen ~ .markdown-source-view,
+.ytfree-reopen ~ .markdown-reading-view {
+  --view-top-spacing-markdown: var(--size-4-2, 8px);
+}
+
+.ytfree-reopen-button {
+  display: block;
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  font-size: var(--font-ui-small);
+  text-align: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+/*
+ * Obsidian fades the first pixels of .view-content on a phone with a floating
+ * header:
+ *
+ *   .is-phone.is-floating-nav … .view-content { mask-image: var(--view-top-fade-mask) }
+ *
+ * A mask forces the whole view into its own composited layer, and on iOS
+ * WebKit a <video> inside one is a known source of the layer drifting out of
+ * position and of black repaints over content that is being edited underneath.
+ * We already reserve space so the video never sits in the faded strip, so the
+ * mask buys us nothing here — drop it while a player is docked.
+ *
+ * Specificity 0,7,0 against Obsidian's 0,6,0; no !important needed.
+ */
+.is-phone.is-floating-nav
+  .mod-root
+  .workspace-leaf-content[data-type="markdown"]
+  .view-content.ytfree-has-docked {
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
+/* And give the video a layer of its own, so it is promoted deliberately rather
+   than by whatever it happens to be nested in. */
+.ytfree-docked .ytfree-media {
+  transform: translateZ(0);
 }
 
 /*
@@ -317,12 +399,31 @@
    all keep their space whether or not they are filled, so marking a video Kept
    moves nothing on screen. */
 
+/*
+ * Obsidian styles the view container at `.workspace-leaf-content .view-content`
+ * (0,2,0), which outranks a bare `.ytfree-hub` (0,1,0) — so the hub root was
+ * silently keeping Obsidian's padding and, worse, its `overflow: auto`. On a
+ * phone the view header is `position: fixed`, so a scrollable root meant the
+ * hub's own toolbar scrolled up underneath it and stayed there. Sizing is here
+ * too: `.view-content` is `height: calc(100% - …)`, and on a phone Obsidian
+ * adds `margin-top: var(--view-top-spacing)` to clear that fixed header — a
+ * fixed height plus a margin pushes the bottom of the list off the screen,
+ * whereas a flex item absorbs the margin.
+ *
+ * This is the shape Obsidian uses for its own container views (backlinks,
+ * outline, bases). Match it rather than fight it.
+ */
+.workspace-leaf-content[data-type="ytfree-hub"] .view-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  overflow: hidden;
+}
+
 .ytfree-hub {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  padding: 0;
-  overflow: hidden;
 }
 
 .ytfree-hub-header {

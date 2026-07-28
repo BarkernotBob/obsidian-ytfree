@@ -17,15 +17,6 @@ export interface PlayerOptions {
    * fallback, so the media has its own host.
    */
   mediaHost?: HTMLElement;
-  /**
-   * Drop the custom control row down to the timestamp button.
-   *
-   * The row exists to surface what Chromium hides in its overflow menu. iOS
-   * Safari's native controls already expose Picture-in-Picture, AirPlay and
-   * speed, so on a phone the row is duplication taking up a quarter of the
-   * screen.
-   */
-  minimalControls?: boolean;
   /** Shown at the end of the control row. Mobile uses it to close the player. */
   onClose?: () => void;
 }
@@ -93,6 +84,11 @@ export class YtFreePlayer {
    * overflow ("...") menu. This row surfaces them, plus skip and timestamp,
    * without replacing the native scrubber and volume, which work well.
    *
+   * The same row is built on mobile. It was originally dropped there on the
+   * theory that iOS's native controls already offered all of it — they do not
+   * offer 10-second skip or a speed picker without a long detour, and reaching
+   * PiP means an overlay button that appears only while playing.
+   *
    * Every control has a fixed size and no layout-affecting state change, so
    * pressing one never moves its neighbours or the note content around it.
    */
@@ -108,20 +104,6 @@ export class YtFreePlayer {
       });
       return el;
     };
-
-    // On mobile the native controls already do play/pause, skip, speed, PiP and
-    // AirPlay, so only the one control they cannot offer is kept.
-    if (this.options.minimalControls) {
-      if (this.onTimestamp) {
-        button("Timestamp", "Insert timestamp at cursor", () => {
-          this.onTimestamp?.(Math.floor(this.video.currentTime));
-        });
-      }
-      if (this.options.onClose) {
-        button("Close", "Close the player", () => this.options.onClose?.());
-      }
-      return;
-    }
 
     const playBtn = button("Play", "Play or pause", () => {
       if (this.video.paused) void this.video.play().catch(() => { /* ignore */ });
@@ -154,14 +136,17 @@ export class YtFreePlayer {
     });
 
     button("Fullscreen", "Fullscreen", () => {
-      if (document.fullscreenElement) void document.exitFullscreen();
-      else void this.video.requestFullscreen().catch(() => { /* ignore */ });
+      void this.toggleFullscreen();
     });
 
     if (this.onTimestamp) {
       button("Timestamp", "Insert timestamp at cursor", () => {
         this.onTimestamp?.(Math.floor(this.video.currentTime));
       });
+    }
+
+    if (this.options.onClose) {
+      button("Close", "Close the player", () => this.options.onClose?.());
     }
 
     if (this.onDownload) {
@@ -189,14 +174,75 @@ export class YtFreePlayer {
     }
   }
 
+  /** Say something for a few seconds, then go quiet again. */
+  private flashStatus(message: string): void {
+    this.onStatus(message);
+    window.setTimeout(() => this.onStatus(null), 4000);
+  }
+
+  /**
+   * Picture-in-Picture, on both engines.
+   *
+   * iOS implements none of the standard API on a `<video>` — no
+   * `requestPictureInPicture`, no `document.pictureInPictureElement`. It has
+   * WebKit's presentation-mode API instead, which does the same job.
+   */
   private async togglePip(): Promise<void> {
+    const el = this.video as HTMLVideoElement & {
+      webkitSetPresentationMode?: (mode: string) => void;
+      webkitSupportsPresentationMode?: (mode: string) => boolean;
+      webkitPresentationMode?: string;
+    };
     try {
-      if (document.pictureInPictureElement) await document.exitPictureInPicture();
-      else await this.video.requestPictureInPicture();
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        return;
+      }
+      if (typeof this.video.requestPictureInPicture === "function") {
+        await this.video.requestPictureInPicture();
+        return;
+      }
     } catch {
-      this.onStatus("Picture-in-Picture is unavailable for this video.");
-      window.setTimeout(() => this.onStatus(null), 4000);
+      // Standard API present but refused — fall through to WebKit's.
     }
+
+    if (el.webkitSupportsPresentationMode?.("picture-in-picture")) {
+      el.webkitSetPresentationMode?.(
+        el.webkitPresentationMode === "picture-in-picture" ? "inline" : "picture-in-picture",
+      );
+      return;
+    }
+    this.flashStatus("Picture-in-Picture is unavailable for this video.");
+  }
+
+  /**
+   * Fullscreen, on both engines.
+   *
+   * An iPhone has no element-level Fullscreen API at all — only the video's own
+   * `webkitEnterFullscreen`, and that one refuses until there is loaded media
+   * to show, which is why the fallback message says so rather than failing
+   * silently.
+   */
+  private async toggleFullscreen(): Promise<void> {
+    const el = this.video as HTMLVideoElement & {
+      webkitEnterFullscreen?: () => void;
+      webkitSupportsFullscreen?: boolean;
+    };
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        return;
+      }
+      if (typeof this.video.requestFullscreen === "function") {
+        await this.video.requestFullscreen();
+        return;
+      }
+    } catch {
+      // Same as above: fall through rather than dead-end.
+    }
+
+    if (el.webkitSupportsFullscreen) el.webkitEnterFullscreen?.();
+    else this.flashStatus("Fullscreen is not available until the video is playing.");
   }
 
   /**

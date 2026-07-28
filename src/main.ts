@@ -115,6 +115,27 @@ interface YtFreeSettings {
 /** Frontmatter key holding the path to a downloaded copy. */
 export const LOCAL_MEDIA_KEY = "local_media";
 
+/**
+ * How far a finger may move and still count as a tap, in CSS pixels. A finger
+ * is never as still as a mouse, so zero tolerance would make every timestamp
+ * link a coin flip; anything past this is a scroll or a text selection.
+ */
+const TAP_SLOP_PX = 10;
+
+/** The rendered timestamp link an event landed on, or null. */
+function seekAnchorFor(target: EventTarget | null): HTMLAnchorElement | null {
+  const anchor = (target as HTMLElement | null)?.closest?.("a");
+  if (!anchor) return null;
+  return anchor.getAttribute("href")?.startsWith("ytfree:") ? anchor : null;
+}
+
+function withinTapSlop(origin: { x: number; y: number }, touch: Touch): boolean {
+  return (
+    Math.abs(touch.clientX - origin.x) <= TAP_SLOP_PX &&
+    Math.abs(touch.clientY - origin.y) <= TAP_SLOP_PX
+  );
+}
+
 const DEFAULT_SETTINGS: YtFreeSettings = {
   ytDlpPath: "",
   upgradeToHighQuality: true,
@@ -194,6 +215,8 @@ export default class YtFreePlugin extends Plugin {
   private collapsed = new Map<MarkdownView, string>();
   /** Notes whose docked player the reader closed by hand, per view. */
   private dismissed = new Map<MarkdownView, string>();
+  /** The "Show video" bar standing in for a closed player, per view. */
+  private reopened = new Map<MarkdownView, HTMLElement>();
   /**
    * The second a timestamp asked for, per video, kept only until the stream
    * resolves. If it never does, the "Open in YouTube" fallback needs it to land
@@ -208,6 +231,10 @@ export default class YtFreePlugin extends Plugin {
   private lastActiveVideoId: string | null = null;
   /** Seek link under the mouse at mousedown, consumed by the matching click. */
   private armedSeekLink: { videoId: string; seconds: number } | null = null;
+  /** Where a touch started, so a scroll can be told from a tap. */
+  private touchOrigin: { x: number; y: number } | null = null;
+  /** Reading-view seek anchor under a touchstart, consumed by its touchend. */
+  private armedSeekAnchor: HTMLAnchorElement | null = null;
   private ytDlpPath: string | null = null;
   private resumeTimer: number | null = null;
   private downloads = new Map<string, DownloadHandle>();
@@ -252,6 +279,37 @@ export default class YtFreePlugin extends Plugin {
             return false;
           },
           click: (evt, view) => this.handleEditorClick(evt, view),
+          // A phone never gets as far as the pair above. iOS does synthesize
+          // mouse events, but Obsidian's mobile link handling runs on the touch
+          // sequence, so the link is claimed before `mousedown` is dispatched.
+          // Arming on touchstart and firing on touchend gets there first, and
+          // the preventDefault suppresses the synthetic click that follows, so
+          // the seek cannot run twice.
+          touchstart: (evt, view) => {
+            const touch = evt.touches[0];
+            this.touchOrigin = touch ? { x: touch.clientX, y: touch.clientY } : null;
+            this.armedSeekLink = touch ? this.editorSeekLinkAt(touch, view, true) : null;
+            return false;
+          },
+          touchend: (evt, view) => {
+            const armed = this.armedSeekLink;
+            const origin = this.touchOrigin;
+            this.armedSeekLink = null;
+            this.touchOrigin = null;
+            if (!armed || !origin) return false;
+
+            const touch = evt.changedTouches[0];
+            // A drag is a scroll or a selection, not a tap on a link.
+            if (!touch || !withinTapSlop(origin, touch)) return false;
+            const now = this.editorSeekLinkAt(touch, view, false);
+            if (!now || now.videoId !== armed.videoId || now.seconds !== armed.seconds) {
+              return false;
+            }
+
+            evt.preventDefault();
+            this.followSeekLink(armed.videoId, armed.seconds);
+            return true;
+          },
         }),
       ),
     ]);
@@ -297,15 +355,52 @@ export default class YtFreePlugin extends Plugin {
       document,
       "click",
       (evt) => {
-        const target = (evt.target as HTMLElement)?.closest?.("a");
-        if (!target) return;
-        const href = target.getAttribute("href") ?? "";
-        if (!href.startsWith("ytfree:")) return;
+        const anchor = seekAnchorFor(evt.target);
+        if (!anchor) return;
 
         evt.preventDefault();
         evt.stopPropagation();
 
-        const [, videoId, seconds] = href.split(":");
+        const [, videoId, seconds] = (anchor.getAttribute("href") ?? "").split(":");
+        this.followSeekLink(videoId, Number(seconds) || 0);
+      },
+      { capture: true },
+    );
+
+    // …and the same anchor on a phone, where Obsidian resolves the link from
+    // the touch sequence and the click above arrives too late to matter. Same
+    // arm-then-fire shape as the editor handler, for the same reason.
+    this.registerDomEvent(
+      document,
+      "touchstart",
+      (evt) => {
+        const touch = evt.touches[0];
+        const anchor = seekAnchorFor(evt.target);
+        this.touchOrigin = touch && anchor ? { x: touch.clientX, y: touch.clientY } : null;
+        this.armedSeekAnchor = touch ? anchor : null;
+      },
+      { capture: true, passive: true },
+    );
+    this.registerDomEvent(
+      document,
+      "touchend",
+      (evt) => {
+        const armed = this.armedSeekAnchor;
+        const origin = this.touchOrigin;
+        this.armedSeekAnchor = null;
+        this.touchOrigin = null;
+        if (!armed || !origin) return;
+
+        const touch = evt.changedTouches[0];
+        if (!touch || !withinTapSlop(origin, touch)) return;
+        if (seekAnchorFor(document.elementFromPoint(touch.clientX, touch.clientY)) !== armed) {
+          return;
+        }
+
+        evt.preventDefault();
+        evt.stopPropagation();
+
+        const [, videoId, seconds] = (armed.getAttribute("href") ?? "").split(":");
         this.followSeekLink(videoId, Number(seconds) || 0);
       },
       { capture: true },
@@ -727,6 +822,7 @@ export default class YtFreePlugin extends Plugin {
     for (const handle of this.downloads.values()) handle.cancel();
     this.downloads.clear();
     for (const view of [...this.pinned.keys()]) this.unmountPinned(view);
+    for (const view of [...this.reopened.keys()]) this.syncReopenBar(view, null);
     for (const entry of this.players.values()) entry.player.destroy();
     this.players.clear();
     this.cache.clear();
@@ -783,9 +879,13 @@ export default class YtFreePlugin extends Plugin {
       if (this.dismissed.has(view) && this.dismissed.get(view) !== path) {
         this.dismissed.delete(view);
       }
-      const wanted =
-        this.dismissed.get(view) === path ? null : this.pinnedVideoIdFor(path);
+      const asked = this.pinnedVideoIdFor(path);
+      const closed = this.dismissed.get(view) === path;
+      const wanted = closed ? null : asked;
       const current = this.pinned.get(view);
+
+      // A closed player leaves a way back, and only then.
+      this.syncReopenBar(view, closed ? asked : null);
 
       // Keyed off "this note has a video", not off the player, so it still
       // applies when the pinned player is switched off.
@@ -808,6 +908,9 @@ export default class YtFreePlugin extends Plugin {
     }
     for (const view of [...this.dismissed.keys()]) {
       if (!open.has(view)) this.dismissed.delete(view);
+    }
+    for (const view of [...this.reopened.keys()]) {
+      if (!open.has(view)) this.syncReopenBar(view, null);
     }
   }
 
@@ -1256,6 +1359,10 @@ export default class YtFreePlugin extends Plugin {
       wrapper.style.setProperty("--ytfree-pinned-height", `${this.settings.pinnedHeightVh}vh`);
     }
     view.contentEl.prepend(wrapper);
+    // Marks the view for the CSS that has to override Obsidian's own — see the
+    // `.ytfree-has-docked` rules in styles.css. A class beats `:has()` here
+    // because it is exact and it is removed the moment the player goes.
+    if (mobile) view.contentEl.addClass("ytfree-has-docked");
 
     const record: PinnedEntry = { videoId, wrapper, entry: null };
     this.pinned.set(view, record);
@@ -1281,6 +1388,41 @@ export default class YtFreePlugin extends Plugin {
       if (this.players.get(record.videoId) === record.entry) this.players.delete(record.videoId);
     }
     record.wrapper.remove();
+    view.contentEl.removeClass("ytfree-has-docked");
+  }
+
+  /**
+   * What a closed player leaves behind: a one-line bar that opens it again.
+   *
+   * Closing used to remove the only route back — the player is driven off
+   * frontmatter, so nothing in the note offers to bring it back and the
+   * dismissal survives navigating away and returning. A slim bar costs one line
+   * of the space that closing just reclaimed, and it is the only thing on
+   * screen that knows the note has a video at all.
+   */
+  private syncReopenBar(view: MarkdownView, videoId: string | null): void {
+    const current = this.reopened.get(view);
+    if (!videoId) {
+      current?.remove();
+      this.reopened.delete(view);
+      return;
+    }
+    if (current?.isConnected) return;
+
+    const bar = createDiv({ cls: "ytfree-wrapper ytfree-reopen" });
+    const button = bar.createEl("button", {
+      cls: "ytfree-reopen-button",
+      text: "▶  Show video",
+      attr: { type: "button" },
+    });
+    button.addEventListener("click", () => {
+      this.dismissed.delete(view);
+      bar.remove();
+      this.reopened.delete(view);
+      this.syncPinnedPlayers();
+    });
+    view.contentEl.prepend(bar);
+    this.reopened.set(view, bar);
   }
 
   // ---------------------------------------------------------------- capture
@@ -1415,12 +1557,12 @@ export default class YtFreePlugin extends Plugin {
    * question about the state before the click.
    */
   private editorSeekLinkAt(
-    evt: MouseEvent,
+    at: { clientX: number; clientY: number },
     view: EditorView,
     guardSelection: boolean,
   ): { videoId: string; seconds: number } | null {
     if (!view.state.field(editorLivePreviewField, false)) return null;
-    const pos = view.posAtCoords({ x: evt.clientX, y: evt.clientY });
+    const pos = view.posAtCoords({ x: at.clientX, y: at.clientY });
     if (pos === null) return null;
 
     const line = view.state.doc.lineAt(pos);
@@ -1590,7 +1732,10 @@ export default class YtFreePlugin extends Plugin {
       wrapper,
       provider,
       setStatus,
-      (seconds) => this.insertTimestampFromButton(videoId, seconds),
+      // No timestamp button on a phone: stamps arrive through flow capture as
+      // you type, and reaching for a button means the keyboard is already up
+      // and the note is already where the cursor is.
+      mobile ? undefined : (seconds) => this.insertTimestampFromButton(videoId, seconds),
       // Downloading needs yt-dlp, so the button is desktop-only. A note file is
       // also required — there is nowhere to record the path without one.
       !mobile && noteFile instanceof TFile
@@ -1598,7 +1743,6 @@ export default class YtFreePlugin extends Plugin {
         : undefined,
       {
         mediaHost: media,
-        minimalControls: mobile,
         onClose: mobile ? () => this.closePlayerFor(videoId) : undefined,
       },
     );
@@ -1832,6 +1976,9 @@ export default class YtFreePlugin extends Plugin {
       const path = view.file?.path;
       if (path) this.dismissed.set(view, path);
       this.unmountPinned(view);
+      // Puts the "Show video" bar in the space that just opened up, in the same
+      // step — the reader never sees a note with no way back to its video.
+      this.syncPinnedPlayers();
       return;
     }
   }

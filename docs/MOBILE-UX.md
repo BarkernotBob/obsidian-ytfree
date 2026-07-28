@@ -127,7 +127,96 @@ is `0px` and the header is in normal flow — nothing to clear, nothing changes.
 
 ---
 
-## 3. Watch Later note — the title
+### The hub root must not scroll
+
+Obsidian styles the view container at `.workspace-leaf-content .view-content`
+(specificity 0,2,0). A bare `.ytfree-hub` is 0,1,0, so the hub root was quietly
+keeping Obsidian's `padding` **and its `overflow: auto`** — our own declarations
+never applied. On a phone the view header is `position: fixed`, so a scrollable
+root meant the hub's own toolbar scrolled up underneath the header and stayed
+there until the view was rebuilt.
+
+The same rule set fixes the height. `.view-content` is
+`height: calc(100% - var(--header-height))`, and on a phone Obsidian adds
+`margin-top: var(--view-top-spacing)` to clear the floating header. A fixed
+height plus a margin pushes the bottom of the list off the screen; a flex item
+absorbs the margin instead. So the hub root is now
+`flex: 1 1 auto; min-height: 0; height: auto; padding: 0; overflow: hidden`
+under `.workspace-leaf-content[data-type="ytfree-hub"] .view-content` — the same
+shape Obsidian uses for its own container views (backlinks, outline, bases).
+Only `.ytfree-hub-list` scrolls.
+
+---
+
+## 3. The docked player — controls, closing, and the fade mask
+
+### The control row is the desktop's, at thumb size
+
+Issue 004 dropped the control row on mobile, reasoning that iOS's native video
+controls already expose PiP, AirPlay and speed. They don't, in practice: there
+is no 10-second skip, no speed picker short of a long-press, and the whole
+overlay disappears once playback starts. So the phone gets the same row as the
+desktop — only the heights grow (28px → 38px). Every fixed width from the
+desktop rules still applies, so Play/Pause and a ticking download percentage
+still cannot nudge their neighbours, and the row wraps rather than squeezing.
+
+No timestamp button: on a phone the note is right there and the command palette
+has "Insert timestamp at cursor". Fullscreen and PiP fall back to WebKit's
+`webkitEnterFullscreen` / `webkitSetPresentationMode` where the standard APIs
+are missing, and say so in the status line when neither exists.
+
+### Closing is reversible
+
+Closing the player used to be one-way — the video was gone until the note was
+closed and reopened. A slim one-line "▶ Show video" bar now takes the docked
+player's place in the flex column, clearing the floating header the same way it
+did. Closing still buys back the whole video box.
+
+### The fade mask has to go while a video is docked
+
+Obsidian fades the first pixels of a markdown view on a phone with a floating
+header:
+
+```css
+.is-phone.is-floating-nav … [data-type="markdown"] .view-content {
+  mask-image: var(--view-top-fade-mask);
+}
+```
+
+A mask forces the view into its own composited layer. **Hypothesis, not
+reproduced on device:** a `<video>` inside such a layer is a known source, on
+iOS WebKit, of the layer drifting out of position and of black repaints over
+content being edited underneath — which matches both "the video slightly scrolls
+out of focus" and "the note background turns black while typing". We already
+reserve space so the video never sits in the faded strip, so the mask buys
+nothing here. `mountPinned` adds a `ytfree-has-docked` class to `.view-content`,
+and a 0,7,0 selector (against Obsidian's 0,6,0) sets `mask-image: none` while a
+player is docked. The video also gets `transform: translateZ(0)` so it is
+promoted to its own layer deliberately.
+
+If the black-background or drift symptoms survive this, the mask was not the
+cause and the next step is instrumentation on device, not another CSS guess.
+
+### Timestamp links on a phone
+
+This was a bug, not an iOS limitation. Both handlers were mouse-only: a
+`mousedown`-arms / `click`-fires pair inside CodeMirror for Live Preview, and a
+capture-phase `click` on `document` for Reading view. iOS does synthesize mouse
+events, but Obsidian's mobile link handling runs on the *touch* sequence and
+claims the link first, so neither handler ever fired.
+
+Both paths now have a `touchstart`/`touchend` twin with the same arm-then-fire
+shape:
+
+- arm on `touchstart` (the link under the finger, plus where the finger landed);
+- on `touchend`, bail if the finger moved more than 10px (that's a scroll or a
+  selection, not a tap) or if it lifted over a different link;
+- otherwise `preventDefault()`, which suppresses the synthetic click, so the
+  seek cannot fire twice.
+
+---
+
+## 4. Watch Later note — the title
 
 The note is opened from the hub with the video title as its filename and `title`
 frontmatter, so the title shows in Obsidian's own header and inline title. No
@@ -182,5 +271,41 @@ stylesheet, not observed. Steps 3 and 6 are the ones that prove it.
 16. Tap "Close" on the player. The note text should move up to fill the space in
     one step, and the top of the note should still clear the floating header.
 
-**What to report:** the step number, and what you saw instead. For 13 and 16 a
-screenshot is worth more than a description.
+**The second round (buttons, timestamps, reopening):**
+
+17. Back in the hub, scroll the video list up and down hard, then let go. **The
+    bar at the top (`New · All channels` and the sync button) must stay put** —
+    it should never slide up under Obsidian's back arrow / note title.
+18. Open a Watch Later note again. Under the video you should now see the same
+    button row the Mac has: Play, −10, +10, a speed dropdown, PiP, Fullscreen,
+    Download, Open in YouTube, Close. **No timestamp button** — that's on
+    purpose.
+19. Tap each of −10 and +10 while the video plays. The position should move; no
+    button should change size and nothing should shift sideways.
+20. Tap PiP, then Fullscreen. If iOS refuses one of them you should get a short
+    message in the status line above the buttons — not silence, and not a
+    layout change.
+21. **Timestamps.** Play a few seconds in, then type a note line so a `[0:14]`
+    timestamp is inserted. Tap that timestamp. **The video should jump to that
+    point.** Try it both while editing the note and in reading view (⋯ → Reading
+    view).
+22. Now scroll the note by starting the drag *on top of* a timestamp link. It
+    should scroll normally and **must not** seek.
+23. **Typing.** Write two or three lines of notes under the video and keep
+    typing for ten seconds or so. **The background behind your text must stay
+    the normal note background** — if it goes black, stop and report it with the
+    step number.
+24. While typing, keep an eye on the video at the top. **It must not drift,
+    shift, or half-scroll out of view.** If it does, note whether it happened
+    while the keyboard was opening.
+25. Tap "Close" on the player. A single slim bar reading **▶ Show video** should
+    appear where the video was.
+26. Tap that bar. The video should come back, in the same place, with the same
+    button row.
+27. Leave the note, come back to it. Whatever state you left it in (video shown
+    or the ▶ bar) is fine — but there must never be *neither*.
+
+**What to report:** the step number, and what you saw instead. For 13, 16, 17,
+23 and 24 a screenshot is worth more than a description. Steps 23 and 24 are the
+ones I am least sure about — the fix there is reasoned from Obsidian's CSS and a
+known iOS WebKit behaviour, not something I have reproduced.

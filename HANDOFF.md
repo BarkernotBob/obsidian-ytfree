@@ -1,6 +1,51 @@
 # HANDOFF
 
-## Status — 2026-07-28 (latest): mobile menu structure + docked player offset
+## Status — 2026-07-28 (latest): mobile round 2 — controls, touch links, reopen
+
+Built and installed. 140 tests pass, build clean. **Not yet run on an iPhone** —
+manual test steps 17–27 in [docs/MOBILE-UX.md](docs/MOBILE-UX.md) cover this
+round.
+
+BarkernotBob's six items from the first phone session:
+
+1. **Full control row on mobile.** `minimalControls` is gone; the phone gets the
+   desktop row (minus the timestamp button) at 38px instead of 28px. Issue 004's
+   reasoning — "iOS's native controls already expose PiP, AirPlay and speed" —
+   did not survive contact: no 10-second skip, no speed picker, and the overlay
+   vanishes during playback. PiP/Fullscreen now fall back to
+   `webkitSetPresentationMode` / `webkitEnterFullscreen`, with a status-line
+   message when neither API exists.
+2. **Timestamp links — a bug, not an iOS limitation.** Both handlers were
+   mouse-only, and Obsidian's mobile link handling claims the link on the touch
+   sequence before the synthesized mouse events arrive. Added `touchstart`/
+   `touchend` twins to both the CodeMirror handler (Live Preview) and the
+   document capture listener (Reading view), with a 10px tap-slop guard and
+   `preventDefault()` so the seek cannot double-fire.
+3. **/5. Drifting video and black note background — hypothesis, unproven.**
+   Both symptoms point at `mask-image: var(--view-top-fade-mask)` on
+   `.view-content`, which forces a composited layer; a `<video>` inside one is a
+   known source of layer drift and black repaints on iOS WebKit. `mountPinned`
+   adds `ytfree-has-docked` to `.view-content`; a 0,7,0 selector kills the mask
+   while a player is docked, and `.ytfree-media` takes `translateZ(0)`. **Not
+   reproduced on device.** If the symptoms survive, the mask was not the cause —
+   instrument on device rather than guessing again.
+4. **Closing is reversible.** A slim "▶ Show video" bar (`syncReopenBar`) takes
+   the player's place in the flex column and restores it on tap.
+6. **Hub top bar no longer scrolls under the header.** Real cause, and it was a
+   specificity bug: `.workspace-leaf-content .view-content` (0,2,0) outranks
+   `.ytfree-hub` (0,1,0), so our `padding: 0; overflow: hidden` never applied and
+   the whole hub root was scrollable under a `position: fixed` header. Moved to
+   `.workspace-leaf-content[data-type="ytfree-hub"] .view-content`, and made it a
+   flex item (`flex: 1 1 auto; min-height: 0; height: auto`) so Obsidian's
+   phone `margin-top` comes out of the height instead of pushing the bottom of
+   the list off screen.
+
+### Next step
+
+Run steps 17–27 on the iPhone. 21 (timestamps seek), 23 (background stays) and
+24 (video doesn't drift) are the ones that decide whether the reasoning held.
+
+## Status — 2026-07-28: mobile menu structure + docked player offset
 
 Built and installed. 140 tests pass, build clean. **Not yet run on an iPhone** —
 the manual test is at the bottom of [docs/MOBILE-UX.md](docs/MOBILE-UX.md).
