@@ -286,6 +286,18 @@ export class HubView extends ItemView {
   /** Cards on screen right now, so a click can update one in place. */
   private cards = new Map<string, HTMLElement>();
 
+  /**
+   * A phone gets a different menu, not a narrower one. See docs/MOBILE-UX.md:
+   * the filters and the channel list collapse behind a single disclosure whose
+   * label is the current selection, and any selection closes it again.
+   */
+  private readonly phone = Platform.isPhone;
+  private menuEl: HTMLElement | null = null;
+  private scrimEl: HTMLElement | null = null;
+  private menuButtonEl: HTMLElement | null = null;
+  private menuLabelEl: HTMLElement | null = null;
+  private menuOpen = false;
+
   constructor(
     leaf: WorkspaceLeaf,
     private store: SubscriptionsStore,
@@ -313,6 +325,7 @@ export class HubView extends ItemView {
     this.unsubscribe = this.store.onChange(() => {
       this.renderStatus();
       this.renderChannels();
+      this.renderMenuLabel();
     });
     this.build();
     this.renderAll();
@@ -327,26 +340,14 @@ export class HubView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("ytfree-hub");
+    root.toggleClass("is-phone", this.phone);
 
     const header = root.createDiv({ cls: "ytfree-hub-header" });
-    const filters = header.createDiv({ cls: "ytfree-hub-filters" });
-    const options: Array<[HubFilter, string]> = [
-      ["new", "New"],
-      ["all", "All"],
-      ["kept", "Kept"],
-    ];
-    for (const [value, label] of options) {
-      const button = filters.createEl("button", { text: label, cls: "ytfree-hub-filter" });
-      button.toggleClass("is-active", this.filter === value);
-      button.addEventListener("click", () => {
-        this.filter = value;
-        for (const el of Array.from(filters.children)) {
-          el.toggleClass("is-active", el === button);
-        }
-        this.renderList();
-        this.renderStatus();
-      });
-    }
+
+    // Phone: the filters move into the collapsible menu and the header carries
+    // only the disclosure that says what is currently selected.
+    if (this.phone) this.buildDisclosure(header);
+    else this.buildFilters(header);
 
     const actions = header.createDiv({ cls: "ytfree-hub-actions" });
     // The same thing the settings pane's "Sync now" runs, notices included, so
@@ -363,13 +364,102 @@ export class HubView extends ItemView {
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status" });
 
     const body = root.createDiv({ cls: "ytfree-hub-body" });
-    this.channelsEl = body.createDiv({ cls: "ytfree-hub-channels" });
+    if (this.phone) this.buildPhoneBody(body);
+    else {
+      this.channelsEl = body.createDiv({ cls: "ytfree-hub-channels" });
+      this.listEl = body.createDiv({ cls: "ytfree-hub-list" });
+    }
+  }
+
+  /** The three filter chips. Same markup either side; only the host differs. */
+  private buildFilters(host: HTMLElement): void {
+    const filters = host.createDiv({ cls: "ytfree-hub-filters" });
+    const options: Array<[HubFilter, string]> = [
+      ["new", "New"],
+      ["all", "All"],
+      ["kept", "Kept"],
+    ];
+    for (const [value, label] of options) {
+      const button = filters.createEl("button", { text: label, cls: "ytfree-hub-filter" });
+      button.toggleClass("is-active", this.filter === value);
+      button.addEventListener("click", () => {
+        this.filter = value;
+        for (const el of Array.from(filters.children)) {
+          el.toggleClass("is-active", el === button);
+        }
+        this.renderList();
+        this.renderStatus();
+        this.renderMenuLabel();
+        // A choice made is a menu finished with — that is the space it was
+        // borrowing, handed straight back to the list.
+        this.setMenuOpen(false);
+      });
+    }
+  }
+
+  /**
+   * The phone's single menu control. Its label is the current selection, so the
+   * closed state still says what you are looking at and the menu itself can
+   * stay out of the way.
+   */
+  private buildDisclosure(header: HTMLElement): void {
+    const button = header.createEl("button", {
+      cls: "ytfree-hub-select",
+      attr: { type: "button", "aria-expanded": "false" },
+    });
+    this.menuLabelEl = button.createSpan({ cls: "ytfree-hub-select-label" });
+    const chevron = button.createSpan({ cls: "ytfree-hub-select-chevron" });
+    setIcon(chevron, "chevron-down");
+    button.addEventListener("click", () => this.setMenuOpen(!this.menuOpen));
+    this.menuButtonEl = button;
+  }
+
+  /**
+   * List first, menu over the top of it.
+   *
+   * The menu is absolutely positioned and toggled with `visibility`, so opening
+   * or closing it cannot resize the list or move a single card. Its height is
+   * fixed whichever section you are reading, so it cannot resize itself either.
+   */
+  private buildPhoneBody(body: HTMLElement): void {
     this.listEl = body.createDiv({ cls: "ytfree-hub-list" });
+
+    this.scrimEl = body.createDiv({ cls: "ytfree-hub-scrim" });
+    this.scrimEl.addEventListener("click", () => this.setMenuOpen(false));
+
+    this.menuEl = body.createDiv({ cls: "ytfree-hub-menu" });
+    this.menuEl.createDiv({ cls: "ytfree-hub-menu-heading", text: "Show" });
+    this.buildFilters(this.menuEl);
+    this.menuEl.createDiv({ cls: "ytfree-hub-menu-heading", text: "Channels" });
+    this.channelsEl = this.menuEl.createDiv({ cls: "ytfree-hub-channels" });
+  }
+
+  private setMenuOpen(open: boolean): void {
+    if (!this.menuEl || !this.scrimEl) return;
+    this.menuOpen = open;
+    this.menuEl.toggleClass("is-open", open);
+    this.scrimEl.toggleClass("is-open", open);
+    this.menuButtonEl?.toggleClass("is-open", open);
+    this.menuButtonEl?.setAttribute("aria-expanded", String(open));
+    // Reopening starts at the top rather than wherever the channel list was
+    // left, which is what makes the filter chips reachable every time.
+    if (open) this.menuEl.scrollTop = 0;
+  }
+
+  /** What the collapsed menu says: the filter, then the channel. */
+  private renderMenuLabel(): void {
+    if (!this.menuLabelEl) return;
+    const filterLabel = this.filter === "new" ? "New" : this.filter === "kept" ? "Kept" : "All";
+    const channel = this.channelFilter
+      ? (this.store.state.channels.find((c) => c.id === this.channelFilter)?.title ?? "Channel")
+      : "All channels";
+    this.menuLabelEl.setText(`${filterLabel} · ${channel}`);
   }
 
   renderAll(): void {
     this.renderStatus();
     this.renderChannels();
+    this.renderMenuLabel();
     this.renderList();
   }
 
@@ -426,6 +516,8 @@ export class HubView extends ItemView {
     this.renderChannels();
     this.renderList();
     this.renderStatus();
+    this.renderMenuLabel();
+    this.setMenuOpen(false);
   }
 
   private currentItems(): HubItem[] {
@@ -470,6 +562,13 @@ export class HubView extends ItemView {
       img.alt = "";
     }
 
+    // A phone row has no width to spend on a marker column — the title is what
+    // that width is for. The badge sits on the thumbnail instead, absolutely
+    // positioned, so it still costs no layout when it appears.
+    const marker = this.phone
+      ? thumb.createDiv({ cls: "ytfree-hub-marker" })
+      : null;
+
     const meta = card.createDiv({ cls: "ytfree-hub-meta" });
     meta.createDiv({ cls: "ytfree-hub-title", text: item.title });
     const sub = meta.createDiv({ cls: "ytfree-hub-sub" });
@@ -483,8 +582,8 @@ export class HubView extends ItemView {
     card.toggleClass("is-watched", Boolean(item.watched));
 
     // Fixed-width column, filled or not, so marking an item Kept moves nothing.
-    const marker = card.createDiv({ cls: "ytfree-hub-marker" });
-    this.paintMarker(marker, item);
+    const stateMarker = marker ?? card.createDiv({ cls: "ytfree-hub-marker" });
+    this.paintMarker(stateMarker, item);
 
     const dismiss = card.createDiv({ cls: "ytfree-hub-dismiss" });
     const button = new ButtonComponent(dismiss)
@@ -504,7 +603,7 @@ export class HubView extends ItemView {
 
     card.addEventListener("click", () => {
       void this.store.openItem(item).then(
-        () => this.paintMarker(marker, item),
+        () => this.paintMarker(stateMarker, item),
         (err: unknown) => new Notice(`YT Free: could not create the note — ${String(err)}`),
       );
     });

@@ -121,8 +121,38 @@
  * the fallback notice all occupy exactly the same box. Nothing that happens
  * inside it moves the note text below.
  */
+/*
+ * Clearing Obsidian's own chrome.
+ *
+ * On a phone the view header (back, title, "…") is `position: fixed` and floats
+ * over the top of .view-content. Markdown views zero the spacing on the
+ * container and re-apply it *inside* the CodeMirror scroller:
+ *
+ *   .is-phone …[data-type="markdown"]        { --view-top-spacing: 0 }
+ *   .is-phone … .cm-scroller { padding-top: var(--view-top-spacing-markdown) }
+ *
+ * The docked player is prepended *before* that scroller, so it inherited no
+ * spacing at all and sat underneath the header — and inside the fade mask that
+ * dims the first pixels of .view-content. Reserving the same amount here puts
+ * the video below both, from the moment it mounts.
+ *
+ * Where the variable is undefined (floating nav off, tablet, desktop) this is
+ * 0px and the header is in normal flow — nothing to clear.
+ */
 .ytfree-docked {
-  padding: 0 0 4px;
+  padding: var(--view-top-spacing-markdown, 0px) 0 6px;
+  background: var(--background-primary);
+}
+
+/*
+ * …and the scroller must not reserve it a second time, or the note text would
+ * start a header's height below the video. Redefining the variable on the
+ * following view beats fighting Obsidian's longer selector, and it reverts on
+ * its own when the player is closed and this wrapper is removed.
+ */
+.ytfree-docked ~ .markdown-source-view,
+.ytfree-docked ~ .markdown-reading-view {
+  --view-top-spacing-markdown: var(--size-4-2, 8px);
 }
 
 .ytfree-media {
@@ -344,6 +374,10 @@
   justify-content: center;
 }
 
+.ytfree-hub-dismiss .ytfree-hub-icon-button {
+  padding: 0.45em;
+}
+
 .ytfree-hub-icon-button:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
@@ -500,6 +534,12 @@
   color: var(--text-muted);
 }
 
+.ytfree-hub-dismiss {
+  flex-basis: 2.6em;
+  height: 2.6em;
+  --icon-size: 20px;
+}
+
 .ytfree-hub-hint {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
@@ -514,6 +554,188 @@
   line-height: 1.6em;
   font-size: var(--font-ui-small);
   color: var(--text-muted);
+}
+
+/* ----------------------------------------------------------- hub: phone ---
+   A phone gets a different menu, not a narrower one. The 200px channel column
+   left a 390pt screen with no room for a title and pushed the card sideways
+   into a horizontal scroll; here the filters and the channels collapse behind
+   one disclosure, and any selection closes it again. See docs/MOBILE-UX.md. */
+
+.ytfree-hub.is-phone .ytfree-hub-header {
+  padding: 0.4em 0.6em;
+  gap: 0.4em;
+}
+
+/* Flexible with min-width:0, so a long channel name truncates instead of
+   pushing the sync button off the screen. */
+.ytfree-hub-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 40px;
+  padding: 0 0.7em;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-normal);
+  box-shadow: none;
+}
+
+.ytfree-hub-select-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Rotation only — no size or weight change, so opening the menu cannot
+   re-measure the bar it lives in. */
+.ytfree-hub-select-chevron {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  --icon-size: 16px;
+}
+
+.ytfree-hub-select.is-open .ytfree-hub-select-chevron {
+  transform: rotate(180deg);
+}
+
+.ytfree-hub.is-phone .ytfree-hub-body {
+  display: block;
+  position: relative;
+}
+
+.ytfree-hub.is-phone .ytfree-hub-list {
+  height: 100%;
+  padding: 0.3em 0.5em;
+}
+
+/* Both overlay the list rather than sitting in it, and both toggle with
+   visibility, so opening or closing the menu moves nothing underneath. */
+.ytfree-hub-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--background-primary);
+  opacity: 0.65;
+  visibility: hidden;
+}
+
+.ytfree-hub-scrim.is-open {
+  visibility: visible;
+}
+
+/* Fixed height whichever section you are reading; the content scrolls inside.
+   The panel can never resize under your thumb. */
+.ytfree-hub-menu {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 62%;
+  overflow-y: auto;
+  padding: 0 0.6em 0.8em;
+  box-sizing: border-box;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+  visibility: hidden;
+}
+
+.ytfree-hub-menu.is-open {
+  visibility: visible;
+}
+
+.ytfree-hub-menu-heading {
+  padding: 0.9em 0.2em 0.4em;
+  font-size: var(--font-ui-smaller);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Three equal chips on one row — never a horizontal scroller. */
+.ytfree-hub.is-phone .ytfree-hub-filters {
+  gap: 0.4em;
+}
+
+.ytfree-hub.is-phone .ytfree-hub-filter {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-hub.is-phone .ytfree-hub-channels {
+  flex: none;
+  padding: 0;
+  overflow: visible;
+  border-right: none;
+}
+
+/* A real touch target, and vertical — the channel list is the thing that used
+   to be a sideways-scrolling column. */
+.ytfree-hub.is-phone .ytfree-hub-channel {
+  height: 44px;
+  padding: 0 0.4em;
+  font-size: var(--font-ui-medium);
+}
+
+.ytfree-hub.is-phone .ytfree-hub-card {
+  height: 74px;
+  gap: 0.6em;
+  padding: 0 0.2em;
+}
+
+.ytfree-hub.is-phone .ytfree-hub-thumb {
+  position: relative;
+  flex: 0 0 104px;
+  width: 104px;
+  height: 58px;
+}
+
+/* Badge, not a column: absolutely positioned, so appearing costs no width and
+   marking an item Kept still moves nothing. */
+.ytfree-hub.is-phone .ytfree-hub-marker {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  --icon-size: 13px;
+}
+
+/* Nothing to show for a new item. Visibility, so the box is reserved anyway. */
+.ytfree-hub-marker:empty {
+  visibility: hidden;
+}
+
+.ytfree-hub.is-phone .ytfree-hub-title {
+  font-size: var(--font-ui-small);
+  line-height: 1.3;
+  max-height: 2.6em;
+}
+
+.ytfree-hub.is-phone .ytfree-hub-dismiss {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
 }
 
 /* ---------------------------------------------------------------- account */

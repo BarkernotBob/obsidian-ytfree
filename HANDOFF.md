@@ -1,5 +1,43 @@
 # HANDOFF
 
+## Status — 2026-07-28 (latest): mobile menu structure + docked player offset
+
+Built and installed. 140 tests pass, build clean. **Not yet run on an iPhone** —
+the manual test is at the bottom of [docs/MOBILE-UX.md](docs/MOBILE-UX.md).
+
+Three changes, all phone-only (`Platform.isPhone`); desktop and tablet untouched.
+
+1. **The hub's menu structure is now specified** — `docs/MOBILE-UX.md` is the
+   spec, with the ASCII layout and the seven rules it has to keep. The 200px
+   channel column is gone on a phone; filters and channels collapse behind one
+   disclosure whose label is the current selection (`New · All channels`), and
+   **any selection closes it**. The panel is an absolutely positioned overlay of
+   fixed height, so opening or closing it resizes nothing and moves no card.
+2. **The card gives the title its width back.** With the sidebar gone and the
+   state marker moved to a badge on the thumbnail, the title column goes from
+   effectively zero to ~210pt on a 390pt phone — two real lines.
+3. **The docked player clears Obsidian's floating header.** Root cause found in
+   Obsidian's own stylesheet, not guessed:
+
+   ```css
+   .is-phone.is-floating-nav              { --view-header-position: fixed }
+   .is-phone …[data-type="markdown"]      { --view-top-spacing: 0 }
+   .is-phone … .cm-scroller { padding-top: var(--view-top-spacing-markdown) }
+   ```
+
+   Markdown views zero the header spacing on the container and re-apply it
+   *inside* the CodeMirror scroller. The player is prepended *before* that
+   scroller, so it got none and sat under the fixed header. `.ytfree-docked` now
+   reserves `var(--view-top-spacing-markdown, 0px)` itself and redefines that
+   variable to 8px on the following view so the scroller does not reserve it
+   twice — no `!important`, and it reverts on its own when the player unmounts.
+
+### Next step
+
+Run the manual test in `docs/MOBILE-UX.md` on the iPhone. Steps 6 (title
+readable) and 13 (video clear of the header) are the two that decide whether the
+reasoning held.
+
 ## Status — 2026-07-28 (later): new-note ergonomics
 
 - `buildWatchLaterNote` and both templates no longer emit a blank line between
