@@ -1,6 +1,7 @@
 # v1 scope — Sign in to YouTube, import account data
 
-Issue 006. Gate required before build. Written 2026-07-27. **Not built. Not approved.**
+Issue 006. Written 2026-07-27. **Approved 2026-07-28. Gate spiked and passed.
+Not built.**
 
 **One sentence:** a Sign in button opens a YouTube login window inside Obsidian,
 and from then on the hub knows what you subscribe to, what is in your Watch
@@ -34,10 +35,37 @@ only, via OAuth" or "all three, via cookies." This scope takes the second.
 | The Data API cannot serve WL or history | Google's own revision history, 11 Aug 2016 deprecation |
 | Playback already sends no account cookies | `resolveStream` → signed googlevideo URL, played by `<video>`/hls.js. IP-locked, not account-linked |
 
-Unverified, to confirm at build time: whether Google's embedded-browser block
-("this browser or app may not be secure") triggers for an Electron
-`BrowserWindow` with a spoofed Chrome user agent. **This is the single biggest
-build risk and it should be spiked before anything else is written.**
+## The gate — spiked 2026-07-28, and it is clear
+
+Approved and spiked on `prototype/signin-spike`. The finding reverses the
+approach this document originally assumed.
+
+| Variant | Result |
+|---|---|
+| `BrowserWindow`, UA spoofed to Chrome 142, at `accounts.google.com/ServiceLogin` | **Blocked** — "couldn't sign you in / this browser or app may not be secure" |
+| `<webview>` tag in a Modal, **user agent untouched**, at `youtube.com` | **Signed in, first try** |
+
+Three rules for the build fall out of it:
+
+1. **Do not spoof the user agent.** It is the one change that demonstrably
+   produced a block. Electron's `Sec-CH-UA` client hints name Electron and omit
+   the high-entropy hints real Chrome sends (electron#34762), so a Chrome UA
+   string over those headers is a visible mismatch; the untouched default is at
+   least self-consistent. Media Extended — the existence proof that this works —
+   sets no user agent anywhere in its login path.
+2. **Do not add client-hint rewriting.** It was built and never needed. It only
+   exists to paper over a spoof we are not doing.
+3. **Use a `<webview>` in a Modal, and point it at `youtube.com`** — not a
+   `BrowserWindow`, and not at a sign-in URL. `ServiceLogin` is the endpoint
+   with the embedded-browser check bolted to it; the avatar menu on youtube.com
+   never goes near it. Two variables differed between the blocked run and the
+   passing one, so this is the safe reading rather than an isolated cause.
+
+Still unverified, and now the first thing the build must do: whether the session
+cookies can be read back out of the partition and whether **yt-dlp accepts
+them** for `:ytsubs`. The spike came down before those commands ran. Cheap to
+answer now that sign-in is solved, and if it fails the rest of this scope is
+dead — so it goes first, before any UI.
 
 ## The split, which is the whole point
 
@@ -56,11 +84,12 @@ on your phone or TV, so the hub can mark it as already seen.
 
 ### 1. Sign in
 - **Sign in to YouTube** button in settings, and a command.
-- Opens an Electron `BrowserWindow` on YouTube's login page, with its own
-  persistent session partition. You type your Google credentials into Google's
-  own page. The plugin does not read, log, intercept or store the password — it
-  waits for the window to land on a signed-in YouTube page and then reads the
-  session cookies out of the partition.
+- Opens a `<webview>` in a modal on `youtube.com`, with its own persistent
+  session partition and **the user agent left alone** — see the gate section
+  above for why both of those are load-bearing. You sign in from YouTube's own
+  avatar menu, typing into Google's own page. The plugin does not read, log,
+  intercept or store the password — it waits for the view to land on a signed-in
+  YouTube page and then reads the session cookies out of the partition.
 - Cookies are written in Netscape format to a file **outside the vault**,
   defaulting beside the download folder (`~/Library/Application Support/…`),
   mode `600`.
@@ -112,9 +141,10 @@ on your phone or TV, so the hub can mark it as already seen.
 
 ## Known hard limitations, and the risks (accept, or do not build)
 
-- **Google actively blocks sign-in from embedded browsers.** Defeating it means
-  presenting a convincing Chrome user agent, and Google changes the detection.
-  When it breaks, sign-in breaks — which is why the Takeout CSV import stays.
+- **Google blocks sign-in from embedded browsers, and we are inside one.** The
+  spike found a shape it does not block, not an exemption. Google changes this
+  detection, and when it changes, sign-in breaks — which is why the Takeout CSV
+  import stays and stays documented.
 - **A session cookie is not a scoped token.** Unlike OAuth, what gets stored is
   full, unscoped access to the Google account: anyone who obtains that file can
   act as you across every Google property until you sign out. This is why it

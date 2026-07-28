@@ -1,5 +1,77 @@
 # HANDOFF
 
+## Status — 2026-07-28: issue 006 approved, gate spiked and passed, not built
+
+Sign in to YouTube from inside Obsidian and import subscriptions, Watch Later
+and history. Scope is `docs/V1-SCOPE-ACCOUNT-IMPORT.md`, **approved 2026-07-28**.
+No implementation code exists yet.
+
+### Why this exists at all
+
+BarkernotBob asked for a hybrid: the account pulls **data** in, but playback stays
+anonymous so nothing watched in Obsidian is attributed to his YouTube account.
+He accepted that Obsidian views will not appear in his watch history, and
+accepted that members-only and age-restricted videos stay unplayable here.
+
+He explicitly refused `--cookies-from-browser`: **"I don't want you pulling from
+my browser at all. I want to be able to click to sign-in."** No reading of
+Chrome/Arc/Safari cookie stores, ever. That constraint is what forced an in-app
+sign-in window rather than the much easier browser-cookie route.
+
+### What is settled
+
+- **OAuth cannot do this.** `watchHistory` and `watchLater` were deprecated on
+  the channel resource in Aug 2016 and return literal `HL`/`WL`. The Data API
+  gives subscriptions and neither of the other two. Cookies are the only
+  mechanism that meets the request. Don't re-litigate this — it was researched.
+- **The gate is clear.** Spiked on `prototype/signin-spike`; findings are in
+  that branch's `prototypes/signin-spike/README.md`, which is worth reading
+  before writing the sign-in code.
+
+| Tried | Result |
+|---|---|
+| `BrowserWindow` + UA spoofed to Chrome 142, at `accounts.google.com/ServiceLogin` | **blocked** |
+| `<webview>` in a Modal, **UA untouched**, at `youtube.com` | **signed in, first try** |
+
+Three rules follow, and they are the reason the spike was worth running:
+
+1. **Never spoof the user agent.** It is the one change that produced a block.
+2. **No client-hint rewriting.** Built during the spike, never needed, deleted.
+3. **`<webview>` in a Modal, pointed at `youtube.com`** — sign in from the avatar
+   menu. Never navigate to `ServiceLogin`; that is where the check lives.
+   Media Extended's v3 `apps/app/src/login/modal.ts` is the reference shape.
+
+Remote module is `require("@electron/remote")`.
+
+### What is NOT settled — and it is step 1
+
+**Whether the session cookies can be read back out of the partition, and whether
+yt-dlp accepts them for `:ytsubs`.** The spike was removed before those commands
+ran. Do this before writing any UI: sign in, dump cookies to a Netscape file,
+run `yt-dlp --cookies FILE --flat-playlist --playlist-end 5 :ytsubs`. If it
+fails, the rest of the scope is dead and the Takeout CSV stays the only way in.
+
+### Standing constraints for this issue
+
+- The cookie file lives **outside the vault**, mode `600`. The vault is in
+  iCloud; a live Google session must not sync to two Macs and Apple's servers.
+- A captured session cookie is **unscoped full Google account access**, not a
+  scoped token. BarkernotBob was told this and accepted it.
+- yt-dlp warns that recurring authenticated requests can get an account flagged.
+  BarkernotBob was told this twice, chose to proceed, and it is recorded in the scope
+  so it is not rediscovered later as a bug. Mitigations are the 12h default and
+  stop-on-expiry. Do not silently increase the poll rate.
+- Cookies go on account-data calls **only**. Never on playback, stream
+  resolution, RSS polling, transcripts or downloads. That split is the feature.
+
+### Spike cleanup already done
+
+Vault plugin folder, the 59 MB Electron partition holding the live session, and
+the cookie directory are all deleted. `prototype/signin-spike` is pushed and
+stays as the record; it never merges. Note `.obsidian/plugins/ytfree-spike/`
+(the 004 mobile-iframe spike) was **left alone** — it belongs to 004 and was not
+mine to remove.
+
 ## Status — 2026-07-28 (latest): issue 004 built — mobile viewer
 
 Issue 004 is **built and installed**. 123 unit tests pass, build clean.
