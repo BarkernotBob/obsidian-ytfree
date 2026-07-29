@@ -728,6 +728,20 @@ export function deskSub(item: HubItem, now: Date): string {
  * the gap still reads as a fact rather than a bug.
  */
 export function phoneSub(item: HubItem, now: Date): string {
+  const { channel, trailing } = phoneSubParts(item, now);
+  return [channel, trailing].filter(Boolean).join(" · ");
+}
+
+/**
+ * The same two facts, kept apart.
+ *
+ * The card draws them as two elements rather than one string, because they have
+ * opposite jobs when the line is too narrow: the age is short, fixed and must
+ * never be the thing that gets cut, while a channel name can lose its last
+ * word and still be recognised. One string can only ellipsize from the right,
+ * which cuts precisely the wrong one.
+ */
+export function phoneSubParts(item: HubItem, now: Date): { channel: string; trailing: string } {
   const age = relativeAge(item.published, now);
   const origin =
     item.origin === "search"
@@ -735,7 +749,7 @@ export function phoneSub(item: HubItem, now: Date): string {
       : item.origin === "watchlater" || item.origin === "both"
         ? "Watch Later"
         : "";
-  return [item.channelTitle, age || origin].filter(Boolean).join(" · ");
+  return { channel: item.channelTitle, trailing: age || origin };
 }
 
 /**

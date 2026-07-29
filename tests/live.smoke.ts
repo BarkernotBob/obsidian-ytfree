@@ -148,3 +148,41 @@ test("the player still carries a description for a search-added item", async () 
     "no description on the player response — browse would add items with empty descriptions",
   );
 });
+
+/**
+ * The phone's transcript, live.
+ *
+ * There is no yt-dlp on iOS, so the captions have to come off the player
+ * response — and the two facts that makes possible are both YouTube's to
+ * withdraw: that the ANDROID client states the caption tracklist at all, and
+ * that its signed `baseUrl` still serves when `fmt` is overwritten. If either
+ * goes, phone notes go back to arriving without a transcript, and this is what
+ * notices.
+ */
+test("InnerTube still carries caption tracks that serve json3", async () => {
+  const { CLIENTS, PLAYER_URL, playerBody } = await import("../src/innertube-context.ts");
+  const { parseJson3, pickPlayerCaptionTrack } = await import("../src/transcript.ts");
+
+  const response = await fetch(PLAYER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": CLIENTS.android.ua },
+    body: JSON.stringify({
+      ...playerBody(VIDEO_ID),
+      context: { client: { ...CLIENTS.android.ctx, hl: "en", gl: "US" } },
+    }),
+  });
+  assert.equal(response.status, 200);
+
+  const track = pickPlayerCaptionTrack(await response.json(), "en");
+  assert.ok(track, "no English caption track on the player response");
+  assert.match(track.url, /[?&]fmt=json3(&|$)/);
+
+  // The signature covers `sparams`, and `fmt` is not in it — so overwriting the
+  // format must not invalidate the URL. That is the assumption being tested.
+  const captions = await fetch(track.url, { headers: { "User-Agent": CLIENTS.android.ua } });
+  assert.equal(captions.status, 200, "the timedtext URL was refused");
+
+  const cues = parseJson3(await captions.text());
+  assert.ok(cues.length > 10, `only ${cues.length} cues parsed — json3 was not served`);
+  assert.ok(cues.every((cue) => Number.isFinite(cue.seconds) && cue.text.length > 0));
+});

@@ -1,6 +1,62 @@
 # HANDOFF
 
-## Status — 2026-07-29 (latest): no blurb, a bigger ×, lists that say what they are
+## Status — 2026-07-29 (latest): resume, phone transcripts, a row you can hit
+
+Built and installed. 211 unit tests pass, build clean, live smoke 10/10.
+[issues/012](issues/012-resume-transcript-and-controls.md) is the issue and holds
+the manual test. Five asks from BarkernotBob.
+
+1. **The phone byline moved under the picture.** It had ~150pt in the title
+   column — card width minus a 112px thumbnail minus a 112px dismiss target —
+   and the age was what got cut. Full content width now (**269pt, measured**),
+   thumbnail down to 112×63, card 92px → **100px**, still seven a screen. Two
+   spans, not one string: `.ytfree-hub-sub-age` never ellipsizes,
+   `.ytfree-hub-sub-name` is the only thing that may. `phoneSub()` is now a
+   wrapper over the new `phoneSubParts()`. **Bug found on the way:** result cards
+   inherited the hub card's two-column grid and laid out against a dismiss track
+   they never have — single-track now, byline 269pt → 372pt, and this was
+   probably the clipping BarkernotBob was actually seeing.
+2. **Scroll room past the last card**: `88px + env(safe-area-inset-bottom)` of
+   bottom padding on the phone list, so Obsidian's floating toolbar stops
+   covering the last video.
+3. **Playback position is remembered** — new `src/progress.ts` (rules, pure,
+   13 tests) and `src/progress-store.ts` (`progress.json` beside
+   `subscriptions.json`, 4s debounce, flushed on unload). Keyed by **video**, not
+   note. Under 15s is not worth remembering; within max(20s, 3%) of the end
+   **clears** the entry, so a finished video reopens at 0:00. Reported every 5s
+   while playing and immediately on pause/seek/end/teardown — iOS can kill the
+   process without warning. Surfaced both ways: desktop flashes *"Picking up at
+   12:34"* in the status row it already reserves, the phone puts a
+   **`Resume 12:34`** badge on the poster. Deliberately **not** frontmatter — it
+   would rewrite a synced file every few seconds and edit under a live cursor.
+4. **Transcripts work on the phone.** BarkernotBob's premise was right:
+   `queueAutoFetch` returned early on mobile because the fetch shelled out to
+   yt-dlp. The phone reads `captionTracks` off the ANDROID player response and
+   forces `fmt=json3` — provable because the signature covers `sparams`, which
+   excludes `fmt` (`pickPlayerCaptionTrack`, 6 unit tests + a live smoke test).
+   **Most-replayed stays desktop-only**: the heatmap exists only in yt-dlp's info
+   JSON, and InnerTube's `next` endpoint is 10.5 MB with no `heatMarker`.
+   Re-running the command on the Mac fills it in.
+5. **The control row.** The "10" badges were corner-tucked, so a symmetrical
+   pair had its two numerals 40px apart on the outside edges — centred now, with
+   the chevrons shifted up 4px. Spacing was one flat 6px between all nine
+   targets; the between-group gap is now double the in-group gap, and the phone
+   **stops shrinking its buttons** (36pt/4pt → **40pt/8pt**), paid for out of the
+   speed picker. New `tools/controls-harness.mjs` measures it at 375/390/430/700:
+   `overflow: 0, smallestTarget: 40, smallestGap: 8, playOffCentre: 0,
+   badgeOffCentre: [0, 0]` at every width.
+
+`tools/phone-hub-harness.mjs` now renders a result card too and reports byline
+width and per-card clipping: `{cardHeight: 100, fullyVisible: 7, heights: [100],
+bylineWidth: 269, agesClipped: 0, channelsClipped: 0, durationsClipped: 0,
+resultHeights: [100], resultBylineWidth: 372, tailRoom: 88}`.
+
+**Next:** the manual test in issues/012 on the phone. Steps 5–7 (resume) and 8
+(a phone-made note gets a transcript) are the two that decide it.
+
+---
+
+## Status — 2026-07-29: no blurb, a bigger ×, lists that say what they are
 
 Built and installed. 192 unit tests pass, build clean.
 [issues/011](issues/011-card-trim-and-filter-names.md) is the issue and holds the

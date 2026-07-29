@@ -47,7 +47,16 @@
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 6px;
+  /*
+   * Two spacings, not one.
+   *
+   * Every control used to be 6px from every other, so the row read as one
+   * undivided run of nine targets and the button next to Play was as easy to
+   * hit as Play. The gap between the groups is now twice the gap inside them:
+   * the transport is a thing of its own with clear air either side, and the
+   * mis-taps that air prevents are exactly the ones that were happening.
+   */
+  gap: 16px;
   min-height: 56px;
   padding: 4px 8px;
   border-radius: var(--radius-m);
@@ -58,7 +67,7 @@
 .ytfree-controls-group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* The transport is the middle cell; the sides push outwards from it. */
@@ -174,18 +183,38 @@
   opacity: 0.45;
 }
 
-/* "10", in the corner of the skip buttons. Static and absolutely positioned —
-   a button that stated its own size would be a button that changed size. */
+/*
+ * "10", under the chevrons of the skip buttons.
+ *
+ * It was tucked into the bottom-right corner, which put the two buttons'
+ * numerals 40px apart on the outside edges of a symmetrical pair and read as
+ * two labels that had slipped. Centred instead: the strip spans the button's
+ * full width and centres its text, so the numeral sits on the button's own
+ * axis and the two mirror each other exactly.
+ *
+ * Still absolutely positioned and still static text — a button that stated its
+ * own size would be a button that changed size.
+ */
 .ytfree-btn-badge {
   position: absolute;
-  right: 4px;
-  bottom: 2px;
-  font-size: 9px;
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  font-size: 10px;
   line-height: 1;
   font-weight: var(--font-semibold);
+  text-align: center;
   color: inherit;
   opacity: 0.85;
   pointer-events: none;
+}
+
+/* And the chevrons move up by the height of the numeral, so the two share the
+   button instead of overlapping in the middle of it. A transform, so nothing
+   about the button's box changes. */
+.ytfree-controls .ytfree-btn-back > svg,
+.ytfree-controls .ytfree-btn-forward > svg {
+  transform: translateY(-4px);
 }
 
 /* Same pill as a button, and wide enough for "1.75×" so choosing a speed can
@@ -445,35 +474,48 @@
  *
  * A `1fr auto 1fr` grid whose side tracks cannot shrink below their contents
  * overflows rather than reflowing — which is the right failure, but it is
- * still a failure. Below 380pt everything comes down a size and the row fits
- * again, transport still centred, targets still over 36pt.
+ * still a failure. Below 460pt the row is measured rather than guessed at, and
+ * what it spends its width on has changed: the buttons used to come down to
+ * 36pt with 4pt between them, which is where the fat-fingering was. They keep
+ * their full 40pt here, the gaps get *wider* than the desktop's inner gap, and
+ * the width that pays for it comes off the speed picker and the group gaps.
+ *
+ * The budget, on the narrowest phone Obsidian runs on (375pt), docked, at
+ * 8pt margins: 375 − 16 − 12 padding = 347pt of content against 44 + 8 + 40
+ * (left) + 40 + 8 + 48 + 8 + 40 (transport) + 40 + 8 + 40 (right) + 2 × 8
+ * (group gaps) = 340pt. `tools/controls-harness.mjs` measures it rather than
+ * trusting this sum.
  */
 @media (max-width: 460px) {
   .ytfree-controls {
-    gap: 4px;
+    gap: 8px;
     padding: 4px 6px;
-    min-height: 52px;
+    min-height: 56px;
   }
 
   .ytfree-controls-group {
-    gap: 4px;
+    gap: 8px;
   }
 
+  /* Deliberately not smaller than the desktop's: this is the surface a thumb
+     uses, and 40pt is the floor a thumb is entitled to. */
   .ytfree-controls .ytfree-btn {
-    width: 36px;
-    height: 36px;
-    --icon-size: 18px;
+    width: 40px;
+    height: 40px;
+    --icon-size: 20px;
   }
 
   .ytfree-controls .ytfree-btn-play {
-    width: 44px;
-    height: 44px;
-    --icon-size: 22px;
+    width: 48px;
+    height: 48px;
+    --icon-size: 24px;
   }
 
+  /* The one control that gives up width instead: it is a picker you set once,
+     and "1.75×" still fits inside it. */
   .ytfree-controls .ytfree-speed {
-    width: 48px;
-    height: 36px;
+    width: 44px;
+    height: 40px;
   }
 
   .ytfree-docked .ytfree-controls,
@@ -590,6 +632,24 @@
   color: #fff;
   background: rgba(0, 0, 0, 0.55);
   border-radius: 50%;
+  pointer-events: none;
+}
+
+/*
+ * "Resume 12:34", bottom-left of the poster. Absolute like everything else on
+ * the poster, so a video with a saved position and one without are the same
+ * size, and pointer-events off so it can never eat the tap that starts playback.
+ */
+.ytfree-poster-resume {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 18px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
   pointer-events: none;
 }
 
@@ -1143,11 +1203,21 @@
   position: relative;
 }
 
-/* Full-bleed: the rows carry their own separators, and a separator that stops
-   short of the edge is what makes a list look unfinished. */
+/*
+ * Full-bleed: the rows carry their own separators, and a separator that stops
+ * short of the edge is what makes a list look unfinished.
+ *
+ * Except at the bottom, where Obsidian's own floating toolbar sits over the
+ * view and covered the last card however far you scrolled. The padding is
+ * scroll room, not a gap — it only exists once you are at the end of the list —
+ * and it clears the toolbar plus whatever the home indicator takes underneath
+ * it. Padding rather than a margin, so it scrolls with the content instead of
+ * shortening the scroller.
+ */
 .ytfree-hub.ytfree-phone .ytfree-hub-list {
   height: 100%;
-  padding: 0;
+  padding: 0 0 calc(88px + env(safe-area-inset-bottom, 0px)) 0;
+  box-sizing: border-box;
 }
 
 /* Both overlay the list rather than sitting in it, and both toggle with
@@ -1251,24 +1321,43 @@
 .ytfree-hub.ytfree-phone .ytfree-hub-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--ytfree-dismiss-width);
-  grid-template-rows: 72px;
+  grid-template-rows: var(--ytfree-card-body);
   align-items: start;
   column-gap: 0;
-  height: 92px;
+  height: calc(var(--ytfree-card-body) + 2 * var(--ytfree-card-pad-y));
   box-sizing: border-box;
-  padding: 10px 0 10px 0.6em;
+  padding: var(--ytfree-card-pad-y) 0 var(--ytfree-card-pad-y) 0.6em;
   border-radius: 0;
   border-bottom: 1px solid var(--background-modifier-border);
   overflow: hidden;
 }
 
-/* The content of a card: picture, then title and byline beside it. */
+/* A search result has nothing to dismiss, so its content gets the whole card.
+   Without this it inherited the two-column grid above and laid itself out
+   against a 112px track that nothing ever filled. */
+.ytfree-hub.ytfree-phone .ytfree-hub-card.ytfree-hub-result {
+  grid-template-columns: minmax(0, 1fr);
+  padding-right: 0.6em;
+}
+
+/*
+ * The content of a card: picture and title on one row, byline under both.
+ *
+ * The byline used to sit in the title column, where it had the card's width
+ * minus the picture minus the dismiss target — about 150pt — and "3 weeks ago"
+ * was routinely the half that got cut. Below the picture it has the full
+ * content width instead, and the picture gives up 16pt of its own to pay for
+ * the line. Fixed tracks throughout, so no title, badge or byline can make one
+ * card taller than the one above it.
+ */
 .ytfree-hub-row {
   grid-column: 1;
   grid-row: 1;
-  display: flex;
-  align-items: flex-start;
-  gap: 0.7em;
+  display: grid;
+  grid-template-columns: var(--ytfree-thumb-width) minmax(0, 1fr);
+  grid-template-rows: var(--ytfree-thumb-height) var(--ytfree-byline-height);
+  column-gap: 0.7em;
+  row-gap: var(--ytfree-byline-gap);
   min-width: 0;
   height: 100%;
 }
@@ -1287,6 +1376,23 @@
      `grid-template-columns` has to read the same number, and a custom property
      set on a child is invisible to its parent. */
   --ytfree-dismiss-width: 112px;
+  /*
+   * The card, in the four numbers everything else is derived from.
+   *
+   * 112×63 rather than 128×72: the byline moved out from beside the picture to
+   * underneath it, and the 16pt the picture gives up is most of what the new
+   * line costs. The card ends up 8pt taller than before and the picture is an
+   * eighth smaller — still the biggest thing on the row, which is the point of
+   * a thumbnail.
+   */
+  --ytfree-thumb-width: 112px;
+  --ytfree-thumb-height: 63px;
+  --ytfree-byline-height: 17px;
+  --ytfree-byline-gap: 4px;
+  --ytfree-card-pad-y: 8px;
+  --ytfree-card-body: calc(
+    var(--ytfree-thumb-height) + var(--ytfree-byline-gap) + var(--ytfree-byline-height)
+  );
 }
 
 .ytfree-hub.ytfree-phone .ytfree-hub-icon-button:focus,
@@ -1298,9 +1404,17 @@
 
 .ytfree-hub.ytfree-phone .ytfree-hub-thumb {
   position: relative;
-  flex: 0 0 128px;
-  width: 128px;
-  height: 72px;
+  grid-column: 1;
+  grid-row: 1;
+  flex: none;
+  width: var(--ytfree-thumb-width);
+  height: var(--ytfree-thumb-height);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-meta {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
 }
 
 /* Badge, not a column: absolutely positioned, so appearing costs no width and
@@ -1340,11 +1454,40 @@
   max-height: 3.9em;
 }
 
-/* Two segments, and they are the quiet half of the row — the title is what the
-   eye should land on. See `phoneSub` for what is on this line and why. */
+/*
+ * The byline, under the picture and across the whole card.
+ *
+ * Two segments, and they are the quiet half of the row — the title is what the
+ * eye should land on. See `phoneSubParts` for what is on this line and why.
+ *
+ * A fixed height rather than a line box that grows: the row's track is that
+ * height, and a byline that wrapped would be clipped by it rather than move
+ * anything. Nothing here can wrap in the first place — the age is a rigid track
+ * and the channel is the one element allowed to end in an ellipsis.
+ */
 .ytfree-hub.ytfree-phone .ytfree-hub-sub {
-  margin-top: 0.25em;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  margin-top: 0;
+  height: var(--ytfree-byline-height);
   color: var(--text-faint);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-sub-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Never shrinks and never wraps: how old something is is four or five
+   characters, and it is the fact that kept getting cut. */
+.ytfree-hub.ytfree-phone .ytfree-hub-sub-age {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /*
@@ -1374,7 +1517,7 @@
   align-self: stretch;
   /* Cancels the card's own padding, so the rule runs the full height of the
      row and meets the separators above and below it. */
-  margin: -10px 0;
+  margin: calc(-1 * var(--ytfree-card-pad-y)) 0;
   border-left: 1px solid var(--background-modifier-border);
 }
 

@@ -90,6 +90,75 @@ export function pickCaptionTrack(info: VideoInfo, language = "en"): CaptionTrack
   return null;
 }
 
+/** One entry of `captions.playerCaptionsTracklistRenderer.captionTracks`. */
+export interface InnertubeCaptionTrack {
+  baseUrl?: string;
+  languageCode?: string;
+  /** `"asr"` for speech recognition; absent for a track a human wrote. */
+  kind?: string;
+}
+
+export interface CaptionedPlayerResponse {
+  captions?: {
+    playerCaptionsTracklistRenderer?: { captionTracks?: InnertubeCaptionTrack[] };
+  };
+}
+
+/**
+ * The same choice, made from an InnerTube player response instead of yt-dlp's
+ * info JSON — which is what a phone has, since yt-dlp needs Node.
+ *
+ * Two differences from `pickCaptionTrack`, both in the data rather than the
+ * rule. YouTube states auto-generation as `kind: "asr"` here rather than by
+ * which dictionary the track came from, and it hands back a `baseUrl` whose
+ * `fmt` is whatever that client defaults to — `srv3` XML on ANDROID. The format
+ * is forced to `json3` so the parser downstream is the one file it already was.
+ */
+export function pickPlayerCaptionTrack(
+  response: CaptionedPlayerResponse,
+  language = "en",
+): CaptionTrack | null {
+  const tracks = response.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+  const usable = tracks.filter(
+    (t): t is InnertubeCaptionTrack & { baseUrl: string; languageCode: string } =>
+      typeof t.baseUrl === "string" && !!t.baseUrl && typeof t.languageCode === "string",
+  );
+
+  // Human-written first, then speech recognition — the same preference the
+  // desktop path applies by reading `subtitles` before `automatic_captions`.
+  for (const auto of [false, true]) {
+    const matching = usable.filter(
+      (t) =>
+        (t.kind === "asr") === auto &&
+        (t.languageCode === language || t.languageCode.startsWith(`${language}-`)),
+    );
+    // Exact match first, so `en` beats `en-GB` when the video has both.
+    matching.sort((a, b) =>
+      a.languageCode === language ? -1 : b.languageCode === language ? 1 : a.languageCode.localeCompare(b.languageCode),
+    );
+    const track = matching[0];
+    if (track) return { url: forceJson3(track.baseUrl), lang: track.languageCode, auto };
+  }
+  return null;
+}
+
+/**
+ * Ask a timedtext URL for json3.
+ *
+ * The signature covers `sparams`, and `fmt` is not in it — measured against
+ * both the ANDROID and IOS clients — so overwriting it keeps the URL valid.
+ */
+function forceJson3(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl);
+    url.searchParams.set("fmt", "json3");
+    return url.toString();
+  } catch {
+    // Not parseable as a URL: append rather than lose the track entirely.
+    return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}fmt=json3`;
+  }
+}
+
 // ------------------------------------------------------------------ parsing
 
 /**

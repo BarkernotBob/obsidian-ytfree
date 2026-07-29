@@ -43,7 +43,8 @@ import {
   ImportSubscriptionsModal,
   SubscriptionsStore,
 } from "./hub";
-import type { Cue } from "./transcript";
+import { ProgressStore } from "./progress-store";
+import type { CaptionTrack, Cue, VideoInfo } from "./transcript";
 import {
   groupCues,
   HEATMAP_ALIASES,
@@ -57,6 +58,7 @@ import {
   TRANSCRIPT_HEADING,
   upsertSection,
 } from "./transcript";
+import { fetchCaptionTrack } from "./innertube";
 import type { SectionName } from "./sections";
 import {
   SECTION_HEADINGS,
@@ -221,6 +223,20 @@ interface PlayerEntry {
 }
 
 /**
+ * What one transcript fetch came back with, whichever platform fetched it.
+ *
+ * The two sources differ in exactly one field: yt-dlp's info JSON states the
+ * replay heatmap, and the InnerTube player response does not. Everything after
+ * the harvest — grouping, peaks, rendering, the upsert — is the same code, so a
+ * note written on a phone is a note written the same way.
+ */
+interface CaptionHarvest {
+  track: CaptionTrack | null;
+  cues: Cue[];
+  heatmap: VideoInfo["heatmap"];
+}
+
+/**
  * One pinned player per open markdown view, mounted above the note body so it
  * stays put while the note scrolls under it.
  */
@@ -297,12 +313,16 @@ export default class YtFreePlugin extends Plugin {
   /** undefined = not probed yet; null = probed and absent. */
   private ffmpegPath: string | null | undefined = undefined;
   subscriptions!: SubscriptionsStore;
+  /** Where each video got to, so reopening a note does not start at 0:00. */
+  progress!: ProgressStore;
   /** Authenticated calls are serialized: never two account syncs at once. */
   private accountSyncing = false;
   private settingTab: YtFreeSettingTab | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
+    await this.progress.load();
     await this.setupSubscriptions();
     await this.setupAccount();
 
@@ -540,9 +560,9 @@ export default class YtFreePlugin extends Plugin {
       }),
     );
 
-    // Download and transcript both shell out to yt-dlp, which does not exist on
-    // a phone. Registering them anyway would put commands in mobile's palette
-    // that can only ever answer with an error.
+    // Downloading shells out to yt-dlp, which does not exist on a phone.
+    // Registering these anyway would put commands in mobile's palette that can
+    // only ever answer with an error.
     if (Platform.isDesktopApp) {
       this.addCommand({
         id: "download-video",
@@ -555,13 +575,18 @@ export default class YtFreePlugin extends Plugin {
         name: "Delete the local copy of this video",
         callback: () => void this.deleteLocalCopy(),
       });
-
-      this.addCommand({
-        id: "fetch-transcript",
-        name: "Fetch transcript and most-replayed moments",
-        callback: () => void this.fetchTranscriptForActiveNote(),
-      });
     }
+
+    // Transcript is on both now: the phone reads captions off the InnerTube
+    // player response, which needs no yt-dlp. Replay peaks are still desktop
+    // only — see `harvestWithInnertube` for why.
+    this.addCommand({
+      id: "fetch-transcript",
+      name: Platform.isDesktopApp
+        ? "Fetch transcript and most-replayed moments"
+        : "Fetch transcript",
+      callback: () => void this.fetchTranscriptForActiveNote(),
+    });
 
     this.addCommand({
       id: "toggle-pinned-player",
@@ -611,6 +636,11 @@ export default class YtFreePlugin extends Plugin {
 
   // ---------------------------------------------------------- subscriptions
 
+  /** This plugin's own folder — where the state files that are not settings live. */
+  private pluginDir(): string {
+    return this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+  }
+
   /**
    * The subscriptions hub (issue 003).
    *
@@ -619,7 +649,7 @@ export default class YtFreePlugin extends Plugin {
    * a poll lands.
    */
   private async setupSubscriptions(): Promise<void> {
-    const dir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+    const dir = this.pluginDir();
     this.subscriptions = new SubscriptionsStore(
       this.app,
       `${dir}/subscriptions.json`,
@@ -942,6 +972,9 @@ export default class YtFreePlugin extends Plugin {
     for (const entry of this.players.values()) entry.player.destroy();
     this.players.clear();
     this.cache.clear();
+    // After the players, not before: each `destroy` reports its final position,
+    // and this is the write that gets those positions onto disk.
+    void this.progress.flush();
   }
 
   // ---------------------------------------------------------------- pinned
@@ -1215,9 +1248,6 @@ export default class YtFreePlugin extends Plugin {
    * video does not exist yet. This fires again once it does.
    */
   private queueAutoFetch(file: TFile): void {
-    // No yt-dlp on a phone. A note clipped on mobile simply arrives without a
-    // transcript and picks one up the next time it is opened on the Mac.
-    if (!Platform.isDesktopApp) return;
     if (!this.settings.autoFetchTranscript) return;
     if (!this.createdThisSession.has(file.path)) return;
     if (this.autoFetchAttempted.has(file.path)) return;
@@ -1279,32 +1309,21 @@ export default class YtFreePlugin extends Plugin {
    * that has no captions, and telling those apart afterwards is guesswork.
    */
   private async fetchTranscriptInto(file: TFile, videoId: string, quiet: boolean): Promise<void> {
-    const { fetchVideoInfo, findYtDlp } = await desktop();
-
-    let ytDlpPath: string;
-    try {
-      ytDlpPath = this.ytDlpPath ?? (await findYtDlp(this.settings.ytDlpPath));
-      this.ytDlpPath = ytDlpPath;
-    } catch {
-      new Notice("YT Free: yt-dlp not found. Install it, or set its path in settings.");
-      return;
-    }
-
     const progress = new Notice("YT Free: fetching transcript…", 0);
     try {
-      const info = await fetchVideoInfo(ytDlpPath, videoId);
-      const track = pickCaptionTrack(info, this.settings.transcriptLanguage.trim() || "en");
-
-      let cues: Cue[] = [];
-      if (track) {
-        // The URL yt-dlp hands back is already signed and immediately valid, so
-        // it can be fetched directly — no second yt-dlp call, no temp file.
-        const response = await requestUrl({ url: track.url, throw: true });
-        cues = parseJson3(response.text);
+      const harvest = Platform.isDesktopApp
+        ? await this.harvestWithYtDlp(videoId)
+        : await this.harvestWithInnertube(videoId);
+      // Only the desktop path reports a missing yt-dlp, and it has already said
+      // so in a Notice of its own.
+      if (!harvest) {
+        progress.hide();
+        return;
       }
+      const { track, cues, heatmap } = harvest;
 
       const paragraphs = groupCues(cues, this.settings.transcriptIntervalSeconds);
-      const peaks = topPeaks(info.heatmap, this.settings.heatmapPeaks);
+      const peaks = topPeaks(heatmap, this.settings.heatmapPeaks);
 
       if (paragraphs.length === 0 && peaks.length === 0) {
         progress.hide();
@@ -1312,7 +1331,7 @@ export default class YtFreePlugin extends Plugin {
           new Notice(
             track
               ? "YT Free: captions were empty for this video."
-              : `YT Free: no ${this.settings.transcriptLanguage} captions and no heatmap for this video.`,
+              : `YT Free: no ${this.settings.transcriptLanguage} captions for this video.`,
             8000,
           );
         }
@@ -1349,6 +1368,62 @@ export default class YtFreePlugin extends Plugin {
       const detail = err instanceof Error ? err.message : String(err);
       new Notice(`YT Free: transcript failed — ${detail}`, 10000);
     }
+  }
+
+  /**
+   * The desktop harvest: yt-dlp's info JSON, which carries the caption
+   * tracklist and the replay heatmap in one call.
+   *
+   * Returns null — rather than throwing — for the one failure that is a setup
+   * problem instead of a fetch problem, because the Notice it needs is specific
+   * and there is nothing to retry.
+   */
+  private async harvestWithYtDlp(videoId: string): Promise<CaptionHarvest | null> {
+    const { fetchVideoInfo, findYtDlp } = await desktop();
+
+    let ytDlpPath: string;
+    try {
+      ytDlpPath = this.ytDlpPath ?? (await findYtDlp(this.settings.ytDlpPath));
+      this.ytDlpPath = ytDlpPath;
+    } catch {
+      new Notice("YT Free: yt-dlp not found. Install it, or set its path in settings.");
+      return null;
+    }
+
+    const info = await fetchVideoInfo(ytDlpPath, videoId);
+    const track = pickCaptionTrack(info, this.transcriptLanguage());
+    return { track, cues: await this.fetchCues(track), heatmap: info.heatmap };
+  }
+
+  /**
+   * The phone harvest: the InnerTube player response, which states the caption
+   * tracklist on the ANDROID client and hands back a signed, un-IP-locked
+   * timedtext URL.
+   *
+   * No replay peaks here, and that is a limit rather than an oversight: the
+   * heatmap lives in the `next` endpoint, whose response for an ordinary video
+   * measured over ten megabytes. A phone should not download that to label
+   * eight moments. Notes fetched on the Mac still get them, and re-running the
+   * command there fills them in for a note the phone made.
+   */
+  private async harvestWithInnertube(videoId: string): Promise<CaptionHarvest> {
+    const track = await fetchCaptionTrack(videoId, this.transcriptLanguage());
+    return { track, cues: await this.fetchCues(track), heatmap: undefined };
+  }
+
+  /**
+   * The caption file itself. Both platforms hand over a signed URL that is
+   * immediately valid, so this is one plain request either way — no second
+   * yt-dlp call and no temp file.
+   */
+  private async fetchCues(track: CaptionTrack | null): Promise<Cue[]> {
+    if (!track) return [];
+    const response = await requestUrl({ url: track.url, throw: true });
+    return parseJson3(response.text);
+  }
+
+  private transcriptLanguage(): string {
+    return this.settings.transcriptLanguage.trim() || "en";
   }
 
   // ------------------------------------------------------------ description
@@ -2012,6 +2087,11 @@ export default class YtFreePlugin extends Plugin {
           noteFile instanceof TFile
             ? (section) => this.jumpToSection(noteFile, section)
             : undefined,
+        // Where you got to last time, and where you are getting to now. Read
+        // through the store on each call rather than captured once, so a video
+        // open in two panes agrees with itself.
+        resumeAt: () => this.progress.resumeFor(videoId),
+        onProgress: (seconds, duration) => this.progress.record(videoId, seconds, duration),
       },
     );
     const entry: PlayerEntry = {
@@ -2039,6 +2119,7 @@ export default class YtFreePlugin extends Plugin {
         window.setTimeout(() => setStatus(null), 6000);
         void player.load(this.settings.upgradeToHighQuality).catch(() => undefined);
       });
+      this.announceResume(videoId, setStatus);
       return entry;
     }
 
@@ -2050,7 +2131,7 @@ export default class YtFreePlugin extends Plugin {
     setStatus("Resolving stream…");
     try {
       await player.load(this.settings.upgradeToHighQuality);
-      setStatus(null);
+      this.announceResume(videoId, setStatus);
       return entry;
     } catch (err) {
       player.destroy();
@@ -2070,6 +2151,24 @@ export default class YtFreePlugin extends Plugin {
       }
       return null;
     }
+  }
+
+  /**
+   * Say where a resumed video picked up from — then get out of the way.
+   *
+   * Silence would be worse than wrong: a video that opens at 12:34 with no
+   * explanation looks like a bug, and the first thing you would do is drag the
+   * scrubber back to the start to find out why. One line for six seconds in the
+   * status row that is already reserved costs no layout and answers it.
+   */
+  private announceResume(videoId: string, setStatus: (message: string | null) => void): void {
+    const seconds = this.progress.resumeFor(videoId);
+    if (seconds <= 0) {
+      setStatus(null);
+      return;
+    }
+    setStatus(`Picking up at ${formatTimestamp(seconds)}`);
+    window.setTimeout(() => setStatus(null), 6000);
   }
 
   /** yt-dlp, via the stream cache. Desktop only. */
@@ -2128,6 +2227,17 @@ export default class YtFreePlugin extends Plugin {
     const thumb = poster.createEl("img", { cls: "ytfree-poster-image", attr: { alt: "" } });
     thumb.src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
     poster.createDiv({ cls: "ytfree-poster-play", text: "▶" });
+
+    // The phone never shows the desktop's status line before you tap, so the
+    // resume point is written on the poster instead: you know before playing
+    // that this one starts part-way in, rather than being surprised by it.
+    const resumeAt = this.progress.resumeFor(videoId);
+    if (resumeAt > 0) {
+      poster.createDiv({
+        cls: "ytfree-poster-resume",
+        text: `Resume ${formatTimestamp(resumeAt)}`,
+      });
+    }
 
     let started: Promise<void> | null = null;
 
@@ -2536,8 +2646,9 @@ class YtFreeSettingTab extends PluginSettingTab {
         .setName("On this device")
         .setDesc(
           "Playback here resolves the stream in the plugin and plays it in a normal video element — ad-free, at 360p. " +
-            "Quality above 360p, downloading, and transcript fetching all need yt-dlp, which only exists on the desktop app. " +
-            "Fetch a transcript on the Mac and it syncs to this note like any other text.",
+            "Transcripts work here too, read straight off YouTube. " +
+            "Quality above 360p, downloading, and the most-replayed list all need yt-dlp, which only exists on the desktop app — " +
+            "open the note on the Mac and run the transcript command again to add the replay peaks.",
         );
     }
 
@@ -2771,7 +2882,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Fetch automatically for new notes")
       .setDesc(
-        "Notes created this session — from the template or the Web Clipper — get their transcript and replay peaks without being asked. Opening an older note never triggers it; use the command for those.",
+        "Notes created this session — from the template, the Web Clipper, or a tap in the hub — get their transcript without being asked, on the phone as well as the Mac. Replay peaks are added on the Mac only. Opening an older note never triggers it; use the command for those.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.autoFetchTranscript).onChange(async (value) => {

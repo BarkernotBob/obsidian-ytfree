@@ -44,8 +44,12 @@ const CHROME =
 const appCss = readFileSync(APP_CSS, "utf8");
 const pluginCss = readFileSync(path.join(HERE, "..", "styles.css"), "utf8");
 
-const card = (i) => `
-  <div class="ytfree-hub-card">
+// The longest channel name and the longest age in the vault's real data — the
+// byline is measured against its worst case, not its typical one.
+const CHANNELS = ["SmarterEveryDay", "Technology Connections Extra", "Practical Engineering"];
+const AGES = ["21 hours ago", "3 weeks ago", "11 months ago"];
+
+const row = (i) => `
     <div class="ytfree-hub-row">
       <div class="ytfree-hub-thumb">
         <img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="">
@@ -54,11 +58,20 @@ const card = (i) => `
       </div>
       <div class="ytfree-hub-meta">
         <div class="ytfree-hub-title">A reasonably long video title that runs onto a second line, number ${i}</div>
-        <div class="ytfree-hub-sub">SmarterEveryDay · 21 hours ago</div>
       </div>
-    </div>
+      <div class="ytfree-hub-sub">
+        <span class="ytfree-hub-sub-name">${CHANNELS[i % CHANNELS.length]}</span>
+        <span class="ytfree-hub-sub-age">· ${AGES[i % AGES.length]}</span>
+      </div>
+    </div>`;
+
+const card = (i) => `
+  <div class="ytfree-hub-card">${row(i)}
     <div class="ytfree-hub-dismiss"><button class="ytfree-hub-icon-button">×</button></div>
   </div>`;
+
+// A search result: same row, no dismiss column.
+const result = (i) => `<div class="ytfree-hub-card ytfree-hub-result">${row(i)}</div>`;
 
 const html = `<!doctype html>
 <html><head><meta charset="utf-8"><style>${appCss}</style><style>${pluginCss}</style>
@@ -74,7 +87,9 @@ const html = `<!doctype html>
         <div class="ytfree-hub-search"><input class="ytfree-hub-search-input" type="search"></div>
         <div class="ytfree-hub-status">264 videos</div>
         <div class="ytfree-hub-body">
-          <div class="ytfree-hub-list">${Array.from({ length: 12 }, (_, i) => card(i + 1)).join("")}</div>
+          <div class="ytfree-hub-list">${Array.from({ length: 12 }, (_, i) => card(i + 1)).join("")}
+            <div class="ytfree-hub-results">${Array.from({ length: 3 }, (_, i) => result(i)).join("")}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -86,8 +101,10 @@ const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
 await page.setContent(html);
 
 const measured = await page.evaluate(() => {
+  const clipped = (el) => el.scrollWidth > el.clientWidth + 1;
   const list = document.querySelector(".ytfree-hub-list");
-  const cards = [...document.querySelectorAll(".ytfree-hub-card")];
+  const cards = [...document.querySelectorAll(".ytfree-hub-card:not(.ytfree-hub-result)")];
+  const results = [...document.querySelectorAll(".ytfree-hub-result")];
   const listBox = list.getBoundingClientRect();
   const boxes = cards.map((c) => c.getBoundingClientRect());
   const first = boxes[0];
@@ -111,6 +128,31 @@ const measured = await page.evaluate(() => {
     dismissWidth: Math.round(dismiss.width),
     dismissFullHeight: Math.abs(dismiss.height - first.height) < 1.5,
     overflows: cards.some((c) => c.scrollWidth > c.clientWidth + 1),
+
+    // The point of the whole change: the byline runs the width of the card
+    // rather than the width of the title column, and the age is never the part
+    // that gets cut. Both are asked of every card, worst-case names included.
+    bylineWidth: Math.round(cards[0].querySelector(".ytfree-hub-sub").getBoundingClientRect().width),
+    agesClipped: cards.filter((c) => clipped(c.querySelector(".ytfree-hub-sub-age"))).length,
+    channelsClipped: cards.filter((c) => clipped(c.querySelector(".ytfree-hub-sub-name"))).length,
+    durationsClipped: cards.filter((c) => clipped(c.querySelector(".ytfree-hub-duration"))).length,
+
+    // A result card has no dismiss column, so its content is wider — and it
+    // must still be exactly as tall as a hub card.
+    resultHeights: [...new Set(results.map((r) => Math.round(r.getBoundingClientRect().height)))],
+    resultBylineWidth: Math.round(
+      results[0].querySelector(".ytfree-hub-sub").getBoundingClientRect().width,
+    ),
+    resultAgesClipped: results.filter((r) => clipped(r.querySelector(".ytfree-hub-sub-age"))).length,
+
+    // Scroll room past the last card, so Obsidian's floating toolbar cannot sit
+    // on top of it at the end of the list.
+    tailRoom: Math.round(
+      list.scrollHeight -
+        ([...cards, ...results].at(-1).getBoundingClientRect().bottom -
+          listBox.top +
+          list.scrollTop),
+    ),
   };
 });
 

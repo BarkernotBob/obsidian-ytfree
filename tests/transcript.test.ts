@@ -7,6 +7,7 @@ import {
   HEATMAP_HEADING,
   parseJson3,
   pickCaptionTrack,
+  pickPlayerCaptionTrack,
   renderHeatmap,
   renderTranscript,
   topPeaks,
@@ -57,6 +58,62 @@ test("pickCaptionTrack ignores tracks that are not json3, and unrelated language
   assert.equal(pickCaptionTrack({ subtitles: { en: [{ ext: "vtt", url: "v" }] } }), null);
   assert.equal(pickCaptionTrack({ subtitles: { fr: [{ ext: "json3", url: "f" }] } }), null);
   assert.equal(pickCaptionTrack({}), null);
+});
+
+// ------------------------------ track picking, from an InnerTube player response
+
+/** The shape YouTube actually returns, trimmed to the fields we read. */
+const player = (tracks: Array<{ baseUrl: string; languageCode: string; kind?: string }>) => ({
+  captions: { playerCaptionsTracklistRenderer: { captionTracks: tracks } },
+});
+
+test("pickPlayerCaptionTrack prefers a human track over the ASR one", () => {
+  const picked = pickPlayerCaptionTrack(
+    player([
+      { baseUrl: "https://x/api/timedtext?v=1&fmt=srv3", languageCode: "en", kind: "asr" },
+      { baseUrl: "https://x/api/timedtext?v=1", languageCode: "en" },
+    ]),
+  );
+  assert.equal(picked?.auto, false);
+  assert.equal(picked?.lang, "en");
+});
+
+test("pickPlayerCaptionTrack falls back to ASR when that is all there is", () => {
+  const picked = pickPlayerCaptionTrack(
+    player([{ baseUrl: "https://x/api/timedtext?v=1", languageCode: "en", kind: "asr" }]),
+  );
+  assert.equal(picked?.auto, true);
+});
+
+test("pickPlayerCaptionTrack forces json3, replacing the client's own fmt", () => {
+  // ANDROID hands back srv3 XML, which parseJson3 cannot read. This is the one
+  // thing that makes the phone path work at all.
+  const picked = pickPlayerCaptionTrack(
+    player([{ baseUrl: "https://www.youtube.com/api/timedtext?v=1&fmt=srv3&lang=en", languageCode: "en" }]),
+  );
+  assert.match(picked?.url ?? "", /[?&]fmt=json3(&|$)/);
+  assert.doesNotMatch(picked?.url ?? "", /fmt=srv3/);
+  assert.match(picked?.url ?? "", /lang=en/);
+});
+
+test("pickPlayerCaptionTrack takes the exact language code ahead of a regional one", () => {
+  const picked = pickPlayerCaptionTrack(
+    player([
+      { baseUrl: "https://x/regional", languageCode: "en-GB" },
+      { baseUrl: "https://x/exact", languageCode: "en" },
+    ]),
+  );
+  assert.match(picked?.url ?? "", /exact/);
+});
+
+test("pickPlayerCaptionTrack answers null for another language, or no captions", () => {
+  assert.equal(pickPlayerCaptionTrack(player([{ baseUrl: "https://x/fr", languageCode: "fr" }])), null);
+  assert.equal(pickPlayerCaptionTrack(player([])), null);
+  assert.equal(pickPlayerCaptionTrack({}), null);
+});
+
+test("pickPlayerCaptionTrack skips a track with no usable URL", () => {
+  assert.equal(pickPlayerCaptionTrack(player([{ baseUrl: "", languageCode: "en" }])), null);
 });
 
 // ------------------------------------------------------------------ parsing

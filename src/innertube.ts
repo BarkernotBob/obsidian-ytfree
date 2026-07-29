@@ -19,6 +19,8 @@ import { parseSearchResponse } from "./search.ts";
 import type { SearchPage } from "./search.ts";
 import { defaultFilters, encodeSearchParams } from "./search-params.ts";
 import type { SearchFilters } from "./search-params.ts";
+import { pickPlayerCaptionTrack } from "./transcript.ts";
+import type { CaptionedPlayerResponse, CaptionTrack } from "./transcript.ts";
 
 // The client identities live next door, in a file with no `obsidian` import, so
 // the live smoke test can send the same request this file sends.
@@ -124,4 +126,22 @@ export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> 
 /** The description alone, for callers that have a duration already. */
 export async function fetchDescription(videoId: string): Promise<string> {
   return (await fetchVideoDetails(videoId)).description;
+}
+
+/**
+ * The best caption track for a video, without yt-dlp.
+ *
+ * This is the phone's whole transcript story. The player response carries the
+ * caption tracklist on the ANDROID client — measured — and the signed
+ * `baseUrl` it hands back is not IP-locked, so `requestUrl` can fetch it
+ * straight afterwards. Throws `InnertubeError` on a failed request; answers
+ * null when the video simply has no captions in that language, because those
+ * are different facts and the caller says different things about them.
+ */
+export async function fetchCaptionTrack(
+  videoId: string,
+  language: string,
+): Promise<CaptionTrack | null> {
+  const response = await callInnertube(PLAYER_URL, "android", playerBody(videoId));
+  return pickPlayerCaptionTrack(response as CaptionedPlayerResponse, language);
 }

@@ -37,7 +37,22 @@ export interface PlayerOptions {
    * note with no video frontmatter has no sections to offer.
    */
   onJump?: (section: SectionName) => void;
+  /**
+   * Where this video got to last time, in seconds. Read at load time rather
+   * than at construction, because on mobile the player is mounted long before
+   * anything is resolved and the answer can change in between.
+   */
+  resumeAt?: () => number;
+  /**
+   * Where it has got to now. Called often — every few seconds of playback, on
+   * pause, on seek, and once on teardown — so the receiver is the one that
+   * decides what is worth writing down.
+   */
+  onProgress?: (seconds: number, duration: number) => void;
 }
+
+/** How often playback reports its position while it is running. */
+const PROGRESS_INTERVAL_MS = 5000;
 
 /**
  * Wraps a native <video> element and keeps it playing across stream-URL expiry.
@@ -71,6 +86,9 @@ export class YtFreePlayer {
   private collapseBtn: HTMLButtonElement | null = null;
   /** The lazy resolve, once asked for. Every later caller awaits the same one. */
   private loading: Promise<void> | null = null;
+  /** Throttle for the position reports — see `trackProgress`. */
+  private lastProgressAt = 0;
+  private reportProgress: (() => void) | null = null;
 
   constructor(
     private container: HTMLElement,
@@ -98,6 +116,39 @@ export class YtFreePlayer {
       this.pausedByTyping = false;
       this.started = true;
     });
+
+    this.trackProgress();
+  }
+
+  /**
+   * Report where playback has got to, often enough to survive being killed.
+   *
+   * Closing Obsidian on a phone is not a teardown you get told about — iOS can
+   * end the process outright — so waiting for `destroy()` would lose the last
+   * however-many minutes. `timeupdate` fires about four times a second, which
+   * is why it is throttled to one report every few seconds; `pause`, `ended`
+   * and `seeked` are reported immediately, because each is a moment the reader
+   * has just decided something about where they are.
+   */
+  private trackProgress(): void {
+    const report = (): void => {
+      const onProgress = this.options.onProgress;
+      if (!onProgress || this.destroyed) return;
+      // Nothing to report from a player nobody has started: the position is 0
+      // and reporting it would clear a real one recorded on another device.
+      if (!this.started) return;
+      this.lastProgressAt = Date.now();
+      onProgress(this.video.currentTime, this.video.duration);
+    };
+
+    this.video.addEventListener("timeupdate", () => {
+      if (Date.now() - this.lastProgressAt < PROGRESS_INTERVAL_MS) return;
+      report();
+    });
+    for (const event of ["pause", "ended", "seeked"]) {
+      this.video.addEventListener(event, report);
+    }
+    this.reportProgress = report;
   }
 
   /**
@@ -436,8 +487,18 @@ export class YtFreePlayer {
    */
   async load(upgradeToHighQuality: boolean): Promise<void> {
     const stream = await this.provider("fast", false);
-    this.attach(stream, 0, false);
+    // Where this video was left, if it was left anywhere. `attach` seeks once
+    // the media reports metadata, so this costs nothing when it is 0 and does
+    // not race a timestamp link tapped a moment later — that seek is registered
+    // afterwards and therefore lands last.
+    this.attach(stream, this.resumeSeconds(), false);
     if (upgradeToHighQuality) void this.upgrade();
+  }
+
+  /** The remembered position, guarded against a stored value that is not one. */
+  private resumeSeconds(): number {
+    const seconds = this.options.resumeAt?.() ?? 0;
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
   }
 
   /**
@@ -457,6 +518,17 @@ export class YtFreePlayer {
       onFail();
     };
     this.video.addEventListener("error", fail, { once: true });
+    // Same resume as a stream: the position is the video's, not the source's.
+    const resumeAt = this.resumeSeconds();
+    if (resumeAt > 0) {
+      this.video.addEventListener(
+        "loadedmetadata",
+        () => {
+          this.video.currentTime = resumeAt;
+        },
+        { once: true },
+      );
+    }
     this.video.src = url;
     this.video.load();
   }
@@ -687,6 +759,9 @@ export class YtFreePlayer {
   }
 
   destroy(): void {
+    // Before the flag, or the report refuses itself: closing the note is the
+    // most common way a session ends, and it is the position that matters most.
+    this.reportProgress?.();
     this.destroyed = true;
     this.teardownHls();
     this.video.removeAttribute("src");

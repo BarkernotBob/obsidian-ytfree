@@ -37,7 +37,7 @@ import {
   mergeItems,
   normalizeState,
   parseChannelFeed,
-  phoneSub,
+  phoneSubParts,
   relativeAge,
   restoreItem,
   sanitizeFileName,
@@ -1217,7 +1217,13 @@ export class HubView extends ItemView {
     if (!host) return;
     const card = host.createDiv({ cls: "ytfree-hub-card ytfree-hub-result" });
 
-    const thumb = card.createDiv({ cls: "ytfree-hub-thumb" });
+    // Same wrapper as a hub card on a phone, and for the same reason: the
+    // picture, the title and the byline are laid out against each other, not
+    // against the card. A result has no dismiss column, so the card's grid is a
+    // single track — see the stylesheet.
+    const row = this.phone ? card.createDiv({ cls: "ytfree-hub-row" }) : card;
+
+    const thumb = row.createDiv({ cls: "ytfree-hub-thumb" });
     if (result.thumbnail) {
       const img = thumb.createEl("img");
       img.src = result.thumbnail;
@@ -1233,18 +1239,22 @@ export class HubView extends ItemView {
     // thumbnail, because a phone row has no width to spend on a column.
     const badge = this.phone ? thumb.createDiv({ cls: "ytfree-hub-marker" }) : null;
 
-    const meta = card.createDiv({ cls: "ytfree-hub-meta" });
+    const meta = row.createDiv({ cls: "ytfree-hub-meta" });
     meta.createDiv({ cls: "ytfree-hub-title", text: result.title });
-    const sub = meta.createDiv({ cls: "ytfree-hub-sub" });
-    // A phone row gives the line about 180pt. Three segments do not fit in it,
-    // and the view count is the one you never decide on: the duration is
-    // already a badge on the thumbnail, and who made it and how old it is are
-    // what you scan a result by.
-    sub.setText(
-      [result.channelTitle, result.publishedText, this.phone ? "" : formatViews(result.views)]
-        .filter(Boolean)
-        .join(" · "),
-    );
+
+    // The view count is the segment a phone drops: the duration is already a
+    // badge on the thumbnail, and who made it and how old it is are what you
+    // scan a result by. Below the picture on a phone, beside it on a desktop.
+    if (this.phone) {
+      this.renderPhoneSub(row, result.channelTitle, result.publishedText);
+    } else {
+      meta.createDiv({
+        cls: "ytfree-hub-sub",
+        text: [result.channelTitle, result.publishedText, formatViews(result.views)]
+          .filter(Boolean)
+          .join(" · "),
+      });
+    }
 
     const marker = badge ?? card.createDiv({ cls: "ytfree-hub-marker" });
     this.paintResultMarker(marker, result.videoId);
@@ -1413,8 +1423,17 @@ export class HubView extends ItemView {
 
     const meta = row.createDiv({ cls: "ytfree-hub-meta" });
     meta.createDiv({ cls: "ytfree-hub-title", text: item.title });
-    const sub = meta.createDiv({ cls: "ytfree-hub-sub" });
-    sub.setText(this.phone ? phoneSub(item, now) : deskSub(item, now));
+
+    // The phone's byline hangs off the row, not off the title column: it sits
+    // under the thumbnail rather than beside it, so it gets the card's whole
+    // width instead of what the picture leaves over. That width is the fix for
+    // the clipped "3 weeks ago" — see the stylesheet.
+    if (this.phone) {
+      const { channel, trailing } = phoneSubParts(item, now);
+      this.renderPhoneSub(row, channel, trailing);
+    } else {
+      meta.createDiv({ cls: "ytfree-hub-sub", text: deskSub(item, now) });
+    }
     card.toggleClass("is-watched", Boolean(item.watched));
 
     // Fixed-width column, filled or not, so marking an item Kept moves nothing.
@@ -1442,6 +1461,25 @@ export class HubView extends ItemView {
         () => this.paintMarker(stateMarker, item),
         (err: unknown) => new Notice(`YT Free: could not create the note — ${String(err)}`),
       );
+    });
+  }
+
+  /**
+   * The phone byline: who made it, and when.
+   *
+   * Two spans, not one string. The channel is the only part allowed to
+   * ellipsize — it is the one you still recognise from its first two thirds —
+   * and the age is a fixed-width track beside it that nothing can eat into. A
+   * single joined string could only ever cut the end, which is the age.
+   */
+  private renderPhoneSub(host: HTMLElement, channel: string, trailing: string): void {
+    const sub = host.createDiv({ cls: "ytfree-hub-sub" });
+    sub.createSpan({ cls: "ytfree-hub-sub-name", text: channel });
+    // Created either way — an empty span reserves the same nothing — so an item
+    // with no date is the same row minus one fact.
+    sub.createSpan({
+      cls: "ytfree-hub-sub-age",
+      text: trailing ? (channel ? `· ${trailing}` : trailing) : "",
     });
   }
 
