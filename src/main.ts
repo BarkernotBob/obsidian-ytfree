@@ -45,7 +45,7 @@ import {
 } from "./hub";
 import { ProgressStore } from "./progress-store";
 import { SilenceStore } from "./silence-store";
-import { isStale, windowsFromCues } from "./silence";
+import { combineSilence, isStale, windowsFromCues } from "./silence";
 import type { SilenceMap, SilenceWindow } from "./silence";
 import type { CaptionTrack, Cue, VideoInfo } from "./transcript";
 import {
@@ -144,6 +144,17 @@ interface YtFreeSettings {
   silenceMinGap: number;
   /** silencedetect's noise floor in dBFS. Desktop, and only with ffmpeg. */
   silenceNoiseDb: number;
+  /**
+   * Compress everything with no *speech* in it, rather than only what is
+   * literally silent.
+   *
+   * The setting 015 did not have, and the one BarkernotBob asked for after using it:
+   * *"Musical interludes should still be cut … the idea is to let this get you
+   * straight to the content, cutting the fluff."* On, the two producers are
+   * unioned; off, ffmpeg's measurement wins where it has run, which is 015's
+   * behaviour and the answer for someone who wants the music left alone.
+   */
+  skipNonSpeech: boolean;
 }
 
 /** Frontmatter key holding the path to a downloaded copy. */
@@ -217,6 +228,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   silenceSpeed: 3,
   silenceMinGap: 0.5,
   silenceNoiseDb: -30,
+  skipNonSpeech: true,
 };
 
 /**
@@ -356,6 +368,8 @@ export default class YtFreePlugin extends Plugin {
   private silenceAttempted = new Set<string>();
   /** Running ffmpeg analyses, keyed by video, so a closing note can kill one. */
   private silenceJobs = new Map<string, { cancel: () => void }>();
+  /** Jobs we stopped, so a partial map is stored as partial. See `cancelSilence`. */
+  private silenceCancelled = new WeakSet<object>();
   /** Coalesces a slider drag into one recompute — see `refreshSmartSpeed`. */
   private silenceRefreshTimer: number | null = null;
   /** Authenticated calls are serialized: never two account syncs at once. */
@@ -2321,8 +2335,41 @@ export default class YtFreePlugin extends Plugin {
    * viewing of anything instant.
    */
   private applyStoredSilence(player: YtFreePlayer, videoId: string): void {
-    const map = this.silence.mapFor(videoId, this.settings.silenceMinGap);
-    if (map) player.setSilenceWindows(map.windows, map.source);
+    this.pushCombinedSilence(player, videoId);
+  }
+
+  /**
+   * Give the player the current best answer: both producers, reconciled.
+   *
+   * **This function is the fix for the bug BarkernotBob hit.** In 015 each producer
+   * called `setSilenceWindows` directly, and that call *replaces* the map — so
+   * the ffmpeg producer, which reports progressively, kept swapping a complete
+   * 362-window caption map for however few windows it had measured so far. At
+   * 4× playback the analysis never caught up, so the map on the player only ever
+   * described video that had already gone past: nothing compressed, and the time
+   * saved never moved. Now every update goes through `combineSilence`, where a
+   * partial ffmpeg map can only ever add.
+   *
+   * `live` is the analysis running right now; without it the stored maps answer,
+   * which is what a fresh mount and a phone both get.
+   */
+  private pushCombinedSilence(
+    player: YtFreePlayer,
+    videoId: string,
+    live?: { windows: SilenceWindow[]; analyzedTo: number },
+  ): void {
+    const minGap = this.settings.silenceMinGap;
+    const transcript = this.silence.mapFor(videoId, "transcript", minGap);
+    const stored = this.silence.mapFor(videoId, "ffmpeg", minGap);
+    const ffmpeg = live ?? (stored ? { windows: stored.windows, analyzedTo: stored.analyzedTo } : null);
+    if (!transcript && !ffmpeg) return;
+
+    const combined = combineSilence({
+      transcript,
+      ffmpeg: ffmpeg ? { windows: ffmpeg.windows, analyzedTo: ffmpeg.analyzedTo } : null,
+      skipNonSpeech: this.settings.skipNonSpeech,
+    });
+    if (combined.source) player.setSilenceWindows(combined.windows, combined.source);
   }
 
   /**
@@ -2348,7 +2395,7 @@ export default class YtFreePlugin extends Plugin {
     this.silenceAttempted.add(videoId);
 
     const minGap = this.settings.silenceMinGap;
-    const stored = this.silence.rawMapFor(videoId);
+    const stored = this.silence.rawMapFor(videoId, "transcript");
     const needsTranscript = !stored || isStale(stored, minGap);
 
     if (needsTranscript) {
@@ -2370,22 +2417,30 @@ export default class YtFreePlugin extends Plugin {
     await this.upgradeSilenceWithFfmpeg(player, videoId, sourcePath, minGap);
   }
 
-  /** Hand a fresh map to the player and to the file, in that order. */
+  /**
+   * Hand a fresh map to the file, then re-push the combination to the player.
+   *
+   * That order, and never `setSilenceWindows` directly: the player is given the
+   * *reconciled* answer or nothing, so one producer can never erase the other's
+   * work on the way in.
+   */
   private recordSilence(
     player: YtFreePlayer,
     videoId: string,
     source: SilenceMap["source"],
     minGap: number,
     windows: SilenceWindow[],
+    analyzedTo?: number,
   ): void {
-    player.setSilenceWindows(windows, source);
     this.silence.record({
       videoId,
       source,
       minGap,
       computedAt: new Date().toISOString(),
       windows,
+      ...(analyzedTo === undefined ? {} : { analyzedTo }),
     });
+    this.pushCombinedSilence(player, videoId);
   }
 
   /**
@@ -2423,10 +2478,13 @@ export default class YtFreePlugin extends Plugin {
    * simply leaves the transcript map in place. Nothing warns, nothing nags, and
    * nothing is missing that the user could have had for free.
    *
-   * Windows arrive in batches while the analysis streams, so a long video
-   * upgrades underneath a player that is already running. A local download, if
-   * there is one, is analysed instead of the network: no bandwidth, and far
-   * faster than realtime.
+   * **Chunked and parallel since 016**, and that is not an optimisation — it is
+   * what makes the producer useful at all. A single stream off googlevideo
+   * analyses at about 1.9× realtime because the connection is throttled, which
+   * is slower than the video is being watched at 4×; six chunks in parallel
+   * measured ~10×. Chunks are ordered outward from the playhead, so the minute
+   * being listened to is the first one measured. A local download, if there is
+   * one, is analysed instead of the network: no bandwidth, and no throttle.
    */
   private async upgradeSilenceWithFfmpeg(
     player: YtFreePlayer,
@@ -2435,11 +2493,12 @@ export default class YtFreePlugin extends Plugin {
     minGap: number,
   ): Promise<void> {
     if (!Platform.isDesktopApp) return;
-    const stored = this.silence.rawMapFor(videoId);
-    // Already measured, at a floor fine enough to answer. Nothing to gain.
-    if (stored?.source === "ffmpeg" && !isStale(stored, minGap)) return;
+    const stored = this.silence.rawMapFor(videoId, "ffmpeg");
+    // Already measured to the end, at a floor fine enough to answer.
+    if (stored && !isStale(stored, minGap) && stored.analyzedTo === undefined) return;
 
-    const { detectSilence, findFfmpeg, resolveAudioUrl, findYtDlp } = await desktop();
+    const { detectSilence, detectSilenceChunked, findFfmpeg, resolveAudioUrl, findYtDlp } =
+      await desktop();
     if (this.ffmpegPath === undefined) {
       this.ffmpegPath = await findFfmpeg(this.settings.ffmpegPath);
     }
@@ -2458,29 +2517,73 @@ export default class YtFreePlugin extends Plugin {
       return;
     }
 
-    // The windows accumulate here rather than in the store, so the file is
-    // written once with a complete map instead of a hundred times with a
-    // growing one — but the player is fed on every batch.
-    const windows: SilenceWindow[] = [];
-    const job = detectSilence({
+    // Chunking needs a length. The element knows it once metadata has loaded,
+    // which by first `play` it has; a video that will not say how long it is
+    // gets the old single-stream treatment rather than nothing.
+    const duration = Number.isFinite(player.video.duration) ? player.video.duration : 0;
+    if (duration <= 0) {
+      console.info("YT Free: Smart Speed analysing without chunking — no duration yet.");
+    }
+
+    // Windows accumulate here rather than in the store, so the file is written
+    // once with a complete map instead of a hundred times with a growing one —
+    // but the player is fed on every batch.
+    const windows: SilenceWindow[] = [...(stored?.windows ?? [])];
+    let frontier = stored?.analyzedTo ?? 0;
+    const feed = (): void => {
+      if (this.players.get(videoId)?.player === player) {
+        this.pushCombinedSilence(player, videoId, { windows: [...windows], analyzedTo: frontier });
+      }
+    };
+
+    console.info(
+      `YT Free: Smart Speed analysing ${videoId} with ffmpeg` +
+        (duration > 0 ? ` (${Math.round(duration)}s, from ${Math.round(frontier)}s)` : ""),
+    );
+
+    const shared = {
       ffmpegPath: this.ffmpegPath,
       input,
       noiseDb: this.settings.silenceNoiseDb,
       minGap,
-      onWindows: (batch) => {
+      onWindows: (batch: SilenceWindow[]) => {
         windows.push(...batch);
-        if (this.players.get(videoId)?.player === player) {
-          player.setSilenceWindows([...windows], "ffmpeg");
-        }
+        feed();
       },
-    });
+    };
+    const job =
+      duration > 0
+        ? detectSilenceChunked({
+            ...shared,
+            duration,
+            playheadSeconds: player.video.currentTime,
+            analyzedTo: frontier,
+            onProgress: (reached) => {
+              frontier = reached;
+              feed();
+            },
+          })
+        : detectSilence(shared);
     this.silenceJobs.set(videoId, job);
 
     try {
       await job.done;
-      // A completed analysis that found nothing is still an answer — a video
-      // with no pauses at all. Recording it stops every reopen re-running it.
-      this.recordSilence(player, videoId, "ffmpeg", minGap, windows);
+      // 015 recorded every finished job as complete — including one killed
+      // twenty seconds in, because a cancel resolves rather than throws. That
+      // stub then answered for the whole video forever. A cancelled job now
+      // stores how far it actually got, which also makes it resumable; only a
+      // job that ran to the end may claim the whole video.
+      const stopped = this.silenceCancelled.has(job);
+      if (!stopped || frontier > 0 || windows.length > 0) {
+        this.recordSilence(
+          player,
+          videoId,
+          "ffmpeg",
+          minGap,
+          windows,
+          stopped ? frontier : undefined,
+        );
+      }
     } catch (err) {
       // The transcript map is still in place and still working. This is the
       // enhancer failing, which by design costs the user nothing.
@@ -2494,6 +2597,9 @@ export default class YtFreePlugin extends Plugin {
   private cancelSilence(videoId: string): void {
     const job = this.silenceJobs.get(videoId);
     if (!job) return;
+    // Marked before the cancel, because `done` resolves on a cancel and the
+    // awaiting code has to be able to tell "finished" from "stopped".
+    this.silenceCancelled.add(job);
     job.cancel();
     this.silenceJobs.delete(videoId);
   }
@@ -2510,6 +2616,10 @@ export default class YtFreePlugin extends Plugin {
   refreshSmartSpeed(): void {
     for (const entry of this.players.values()) {
       entry.player.setSilenceSettings(this.settings.silenceMinGap, this.settings.silenceSpeed);
+      // "Skip non-speech" changes which windows exist, not just how they are
+      // filtered, so the combination is rebuilt. A running analysis re-feeds its
+      // own windows on the next batch.
+      this.pushCombinedSilence(entry.player, entry.videoId);
     }
     // A finer setting than a stored map was built with does need a producer to
     // run again, and the once-per-session guard would otherwise swallow it
@@ -3247,6 +3357,19 @@ class YtFreeSettingTab extends PluginSettingTab {
         toggle.setValue(this.plugin.settings.smartSpeed).onChange(async (value) => {
           this.plugin.settings.smartSpeed = value;
           await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Skip non-speech audio")
+      .setDesc(
+        "Compress anything nobody is talking over — musical intros, interludes, stings — and not only what is literally silent. On, the caption timing and the ffmpeg measurement are combined, so a stretch either one calls quiet gets compressed. Turn it off to leave music playing at normal speed, which needs ffmpeg to tell music from silence.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.skipNonSpeech).onChange(async (value) => {
+          this.plugin.settings.skipNonSpeech = value;
+          await this.plugin.saveSettings();
+          this.plugin.refreshSmartSpeed();
         }),
       );
 

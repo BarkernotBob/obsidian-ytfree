@@ -19,7 +19,7 @@ import {
   normalizeSilenceState,
   pruneSilenceMaps,
 } from "./silence.ts";
-import type { SilenceMap, SilenceState } from "./silence.ts";
+import type { SilenceMap, SilenceSource, SilenceState, VideoSilence } from "./silence.ts";
 
 /**
  * How long a change waits before it is written.
@@ -60,27 +60,35 @@ export class SilenceStore {
   }
 
   /**
-   * The map for this video, if there is one that can answer at `minGap`.
+   * One producer's map for this video, if it can answer at `minGap`.
    *
    * A map built with a coarser floor than the setting now asks for is not
    * returned: it does not contain the shorter pauses, so using it would quietly
    * ignore the setting the user just changed.
    */
-  mapFor(videoId: string, minGap: number): SilenceMap | null {
-    const map = this.state.maps[videoId];
+  mapFor(videoId: string, source: SilenceSource, minGap: number): SilenceMap | null {
+    const map = this.state.maps[videoId]?.sources[source];
     if (!map) return null;
     return isStale(map, minGap) ? null : map;
   }
 
-  /** Whatever is stored, stale or not — for deciding what to recompute. */
-  rawMapFor(videoId: string): SilenceMap | null {
+  /** Whatever is stored for a producer, stale or not — for deciding what to recompute. */
+  rawMapFor(videoId: string, source: SilenceSource): SilenceMap | null {
+    return this.state.maps[videoId]?.sources[source] ?? null;
+  }
+
+  /** Everything stored about a video. */
+  entryFor(videoId: string): VideoSilence | null {
     return this.state.maps[videoId] ?? null;
   }
 
   /** Note a map. A map no better than the one already held costs nothing. */
   record(map: SilenceMap): void {
     if (!mergeSilenceMaps(this.state, [map])) return;
-    this.queued.set(map.videoId, map);
+    // Keyed by producer as well as video: since 016 a video has a caption map
+    // *and* an ffmpeg map, and keying on the video alone would drop whichever
+    // landed first from the pending write.
+    this.queued.set(`${map.videoId}:${map.source}`, map);
     this.schedule();
   }
 

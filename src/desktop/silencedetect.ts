@@ -14,8 +14,8 @@
  */
 
 import { spawn } from "child_process";
-import { createSilencedetectStream } from "../silence.ts";
-import type { SilenceWindow } from "../silence.ts";
+import { createSilencedetectStream, mergeWindows, offsetWindows, planChunks } from "../silence.ts";
+import type { SilenceChunk, SilenceWindow } from "../silence.ts";
 
 export interface SilenceDetectOptions {
   ffmpegPath: string;
@@ -25,6 +25,18 @@ export interface SilenceDetectOptions {
   noiseDb: number;
   /** Minimum silence length in seconds. The user's setting, unchanged. */
   minGap: number;
+  /**
+   * Analyse only `[from, to)` of the input, and report in whole-video time.
+   *
+   * `-ss` goes **before** `-i`, which makes it an input seek: on an http input
+   * ffmpeg issues a range request and pays for that chunk's bytes alone. The
+   * catch, and it is the one mistake in this file that would produce a
+   * completely plausible wrong map, is that silencedetect then reports
+   * timestamps **relative to the seek point** — so every window is shifted back
+   * by `from` before it leaves here.
+   */
+  from?: number;
+  to?: number;
   /**
    * Called as windows are detected, not once at the end. silencedetect reports
    * progressively and an audio-only stream analyses far faster than realtime,
@@ -52,12 +64,15 @@ export interface SilenceDetectHandle {
  * analysis rather than a download.
  */
 export function detectSilence(opts: SilenceDetectOptions): SilenceDetectHandle {
+  const from = opts.from && opts.from > 0 ? opts.from : 0;
   const args = [
     "-hide_banner",
     "-nostdin",
     "-nostats",
+    ...(from ? ["-ss", String(from)] : []),
     "-i",
     opts.input,
+    ...(opts.to !== undefined ? ["-t", String(Math.max(0, opts.to - from))] : []),
     "-vn",
     "-af",
     `silencedetect=noise=${opts.noiseDb}dB:d=${opts.minGap}`,
@@ -65,6 +80,9 @@ export function detectSilence(opts: SilenceDetectOptions): SilenceDetectHandle {
     "null",
     "-",
   ];
+  const report = (windows: SilenceWindow[]): void => {
+    if (windows.length) opts.onWindows(from ? offsetWindows(windows, from) : windows);
+  };
 
   const child = spawn(opts.ffmpegPath, args, { stdio: ["ignore", "ignore", "pipe"] });
   const stream = createSilencedetectStream();
@@ -77,8 +95,7 @@ export function detectSilence(opts: SilenceDetectOptions): SilenceDetectHandle {
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
       tail = (tail + chunk).slice(-4000);
-      const windows = stream.push(chunk);
-      if (windows.length) opts.onWindows(windows);
+      report(stream.push(chunk));
     });
 
     child.on("error", (err) => {
@@ -88,7 +105,7 @@ export function detectSilence(opts: SilenceDetectOptions): SilenceDetectHandle {
 
     child.on("close", (code) => {
       const rest = stream.flush();
-      if (rest.length && !cancelled) opts.onWindows(rest);
+      if (!cancelled) report(rest);
       if (cancelled || code === 0) resolve();
       else reject(new Error(`ffmpeg exited ${code}: ${tail.trim().split("\n").slice(-3).join(" ")}`));
     });
@@ -106,6 +123,125 @@ export function detectSilence(opts: SilenceDetectOptions): SilenceDetectHandle {
       } catch {
         // Already gone.
       }
+    },
+    done,
+  };
+}
+
+/**
+ * How far from the start the analysis is unbroken.
+ *
+ * A run that finished chunks 4, 5 and 6 first has analysed nine minutes and can
+ * still only claim a frontier of zero — which is the honest answer, and the one
+ * that makes a resume correct.
+ */
+function contiguousFrontier(covered: SilenceWindow[], duration: number): number {
+  const merged = mergeWindows(covered);
+  const first = merged[0];
+  if (!first || first.start > SILENCE_CHUNK_OVERLAP) return 0;
+  return Math.min(duration, first.end);
+}
+
+/** How many chunks are analysed at once. See `detectSilenceChunked`. */
+export const SILENCE_WORKERS = 6;
+/** Seconds of video per chunk, and how much each one overreaches into the next. */
+export const SILENCE_CHUNK_SECONDS = 60;
+export const SILENCE_CHUNK_OVERLAP = 3;
+
+export interface ChunkedSilenceOptions extends Omit<SilenceDetectOptions, "from" | "to"> {
+  /** Whole-video duration in seconds. Without it there is nothing to divide. */
+  duration: number;
+  /** Where playback is, so the work starts where it is needed. */
+  playheadSeconds: number;
+  /** Already analysed from 0 to here; those chunks are skipped. */
+  analyzedTo?: number;
+  workers?: number;
+  /**
+   * Called after each chunk with the **contiguous** frontier: the second up to
+   * which everything has been analysed.
+   *
+   * Contiguous and not "seconds covered", because chunks are done playhead-first
+   * and so the covered region is full of holes early on. Only a prefix can be
+   * stored as `analyzedTo` and resumed from, and only a prefix can be spliced
+   * against the caption map without claiming ffmpeg knows about a stretch it has
+   * not reached.
+   */
+  onProgress?: (frontierSeconds: number, totalSeconds: number) => void;
+}
+
+/**
+ * The same analysis, run as a pool of chunks instead of one long stream.
+ *
+ * This exists because of a measurement, not a hunch: googlevideo throttles a
+ * single connection to about 1.9× realtime, which is *slower than BarkernotBob
+ * watches* — so 015's one-stream analysis could never catch the playhead, and
+ * the feature looked dead. Six connections against the same file measured ~10×
+ * (360 s of audio in 37 s). The throttle is per connection.
+ *
+ * Failures are per chunk and are swallowed: five chunks of a map is a better
+ * answer than none, and Smart Speed is never allowed to be load-bearing. The
+ * whole job rejects only if every chunk failed, which is what an unusable input
+ * looks like.
+ */
+export function detectSilenceChunked(opts: ChunkedSilenceOptions): SilenceDetectHandle {
+  const chunks = planChunks(
+    opts.duration,
+    opts.playheadSeconds,
+    SILENCE_CHUNK_SECONDS,
+    SILENCE_CHUNK_OVERLAP,
+  ).filter((chunk) => chunk.end > (opts.analyzedTo ?? 0));
+
+  let cancelled = false;
+  const running = new Set<SilenceDetectHandle>();
+  // Every stretch known to be analysed, this run and any previous one. Kept as
+  // ranges rather than a number because the chunks do not finish in order.
+  const covered: SilenceWindow[] = opts.analyzedTo ? [{ start: 0, end: opts.analyzedTo }] : [];
+  let failures = 0;
+
+  const runChunk = async (chunk: SilenceChunk): Promise<void> => {
+    if (cancelled) return;
+    const job = detectSilence({
+      ffmpegPath: opts.ffmpegPath,
+      input: opts.input,
+      noiseDb: opts.noiseDb,
+      minGap: opts.minGap,
+      from: chunk.start,
+      to: chunk.end,
+      onWindows: opts.onWindows,
+    });
+    running.add(job);
+    try {
+      await job.done;
+      covered.push({ start: chunk.start, end: chunk.end });
+      opts.onProgress?.(contiguousFrontier(covered, opts.duration), opts.duration);
+    } catch (err) {
+      failures++;
+      console.error(`YT Free: silence chunk ${chunk.start}–${chunk.end}s failed.`, err);
+    } finally {
+      running.delete(job);
+    }
+  };
+
+  const done = (async () => {
+    const queue = [...chunks];
+    const workers = Math.max(1, opts.workers ?? SILENCE_WORKERS);
+    await Promise.all(
+      Array.from({ length: Math.min(workers, queue.length) }, async () => {
+        for (let chunk = queue.shift(); chunk && !cancelled; chunk = queue.shift()) {
+          await runChunk(chunk);
+        }
+      }),
+    );
+    if (!cancelled && chunks.length > 0 && failures === chunks.length) {
+      throw new Error(`ffmpeg failed on all ${chunks.length} chunks`);
+    }
+  })();
+
+  return {
+    cancel(): void {
+      if (cancelled) return;
+      cancelled = true;
+      for (const job of running) job.cancel();
     },
     done,
   };

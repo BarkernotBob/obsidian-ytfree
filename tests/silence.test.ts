@@ -1,10 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  combineSilence,
   compressibleWindows,
   createSilencedetectStream,
   emptySilenceState,
   isBetterMap,
+  mergeWindows,
+  offsetWindows,
+  planChunks,
+  spliceAtFrontier,
+  unionWindows,
   isStale,
   LEAD_IN_SECONDS,
   LEAD_OUT_SECONDS,
@@ -182,11 +188,24 @@ test("float noise in a stored setting does not make a map stale", () => {
 
 // ---------------------------------------------------------------- the merge
 
-test("ffmpeg beats transcript regardless of age", () => {
-  const older = map({ source: "ffmpeg", computedAt: "2020-01-01T00:00:00.000Z" });
-  const newer = map({ source: "transcript", computedAt: "2026-07-29T12:00:00.000Z" });
-  assert.equal(isBetterMap(older, newer), true);
-  assert.equal(isBetterMap(newer, older), false);
+test("the two producers never compete for one slot", () => {
+  // 015 ranked ffmpeg above transcript and kept one map per video. 016 keeps
+  // both, because they answer different questions and playback wants the union
+  // — so a cross-source comparison is never an upgrade, in either direction.
+  const ffmpeg = map({ source: "ffmpeg", computedAt: "2020-01-01T00:00:00.000Z" });
+  const transcript = map({ source: "transcript", computedAt: "2026-07-29T12:00:00.000Z" });
+  assert.equal(isBetterMap(ffmpeg, transcript), false);
+  assert.equal(isBetterMap(transcript, ffmpeg), false);
+});
+
+test("a complete map beats a partial one, and a longer partial beats a shorter", () => {
+  // The 015 bug this exists to stop: a note closed twenty seconds in stored a
+  // twenty-second map that then answered for the whole video forever.
+  const complete = map({ source: "ffmpeg" });
+  const partial = map({ source: "ffmpeg", analyzedTo: 20, computedAt: "2026-07-30T00:00:00.000Z" });
+  assert.equal(isBetterMap(partial, complete), false);
+  assert.equal(isBetterMap(complete, partial), true);
+  assert.equal(isBetterMap(map({ source: "ffmpeg", analyzedTo: 300 }), partial), true);
 });
 
 test("within one source, a finer floor beats a coarser one", () => {
@@ -221,10 +240,9 @@ test("a merge that changes nothing reports no change", () => {
 test("pruning drops the oldest and keeps the cap", () => {
   const state = emptySilenceState();
   for (let i = 0; i < 5; i++) {
-    state.maps[`v${i}`] = map({
-      videoId: `v${i}`,
-      computedAt: `2026-07-0${i + 1}T00:00:00.000Z`,
-    });
+    mergeSilenceMaps(state, [
+      map({ videoId: `v${i}`, computedAt: `2026-07-0${i + 1}T00:00:00.000Z` }),
+    ]);
   }
   assert.equal(pruneSilenceMaps(state, 3), true);
   assert.deepEqual(Object.keys(state.maps).sort(), ["v2", "v3", "v4"]);
@@ -257,7 +275,7 @@ test("windows that are not windows are dropped, and the rest are sorted", () => 
       }),
     },
   });
-  assert.deepEqual(state.maps[ID].windows, [
+  assert.deepEqual(state.maps[ID].sources.transcript?.windows, [
     { start: 1, end: 2 },
     { start: 10, end: 12 },
   ]);
@@ -363,3 +381,149 @@ test("captions and their pauses, end to end", () => {
     { start: 2 + LEAD_IN_SECONDS, end: 5 - LEAD_OUT_SECONDS },
   ]);
 });
+
+// ------------------------------------------------- 016: the union of two maps
+
+test("overlapping and touching windows become one", () => {
+  assert.deepEqual(
+    mergeWindows([
+      { start: 10, end: 14 },
+      { start: 12, end: 16 },
+      { start: 16.02, end: 18 },
+      { start: 30, end: 31 },
+    ]),
+    [
+      { start: 10, end: 18 },
+      { start: 30, end: 31 },
+    ],
+  );
+});
+
+test("a window swallowed by the one before it does not shorten it", () => {
+  assert.deepEqual(
+    mergeWindows([
+      { start: 10, end: 20 },
+      { start: 12, end: 14 },
+    ]),
+    [{ start: 10, end: 20 }],
+  );
+});
+
+test("the union takes everything either producer calls quiet", () => {
+  // The musical interlude BarkernotBob wants skipped: captions say nobody speaks
+  // between 30 and 60, ffmpeg hears music there and reports nothing.
+  const transcript = [{ start: 30, end: 60 }];
+  const ffmpeg = [{ start: 5, end: 6 }];
+  assert.deepEqual(unionWindows(transcript, ffmpeg), [
+    { start: 5, end: 6 },
+    { start: 30, end: 60 },
+  ]);
+});
+
+test("an ffmpeg map that has only reached a minute cannot erase the caption map", () => {
+  // The 015 bug, as a regression test. At 4x playback the analysis trailed the
+  // playhead, and every batch replaced a complete map with a shorter one.
+  const transcript = map({ windows: [{ start: 600, end: 604 }] });
+  const combined = combineSilence({
+    transcript,
+    ffmpeg: { windows: [{ start: 12, end: 13 }], analyzedTo: 60 },
+    skipNonSpeech: true,
+  });
+  assert.deepEqual(combined.windows, [
+    { start: 12, end: 13 },
+    { start: 600, end: 604 },
+  ]);
+});
+
+test("with non-speech skipping off, ffmpeg rules only as far as it has looked", () => {
+  const transcript = map({
+    windows: [
+      { start: 30, end: 60 },
+      { start: 600, end: 604 },
+    ],
+  });
+  const combined = combineSilence({
+    transcript,
+    ffmpeg: { windows: [{ start: 12, end: 13 }], analyzedTo: 120 },
+    skipNonSpeech: false,
+  });
+  // 30–60 is music: measured, loud, and dropped. 600–604 is past the frontier,
+  // so the caption map still answers for it.
+  assert.deepEqual(combined.windows, [
+    { start: 12, end: 13 },
+    { start: 600, end: 604 },
+  ]);
+});
+
+test("a caption window straddling the frontier is cut at it, not dropped", () => {
+  assert.deepEqual(spliceAtFrontier([], [{ start: 100, end: 140 }], 120), [
+    { start: 120, end: 140 },
+  ]);
+});
+
+test("no map at all is not a map with no windows", () => {
+  assert.deepEqual(combineSilence({ skipNonSpeech: true }), { windows: [], source: null });
+});
+
+// --------------------------------------------------- 016: chunking the work
+
+test("chunks start at the playhead and wrap around to the beginning", () => {
+  const chunks = planChunks(300, 125, 60, 3);
+  assert.deepEqual(
+    chunks.map((c) => c.start),
+    [120, 180, 240, 0, 60],
+  );
+});
+
+test("every chunk overreaches the next, so a pause on a boundary is seen whole", () => {
+  const [first] = planChunks(300, 0, 60, 3);
+  assert.deepEqual(first, { start: 0, end: 63 });
+});
+
+test("the last chunk stops at the end of the video", () => {
+  const chunks = planChunks(130, 0, 60, 3);
+  assert.equal(chunks[chunks.length - 1].end, 130);
+});
+
+test("a video with no known duration plans no chunks", () => {
+  assert.deepEqual(planChunks(0, 0, 60, 3), []);
+  assert.deepEqual(planChunks(Number.NaN, 0, 60, 3), []);
+});
+
+test("a chunk's windows are shifted into whole-video time", () => {
+  // silencedetect reports relative to the seek point. Measured 2026-07-29: a
+  // chunk seeked to 300 s reported its first silence at 12.15.
+  assert.deepEqual(offsetWindows([{ start: 12.15, end: 13.2 }], 300), [
+    { start: 312.15, end: 313.2 },
+  ]);
+});
+
+// ------------------------------------------------------- 016: the v2 schema
+
+test("a v1 file migrates into the source it names, losing nothing", () => {
+  const state = normalizeSilenceState({
+    version: 1,
+    maps: { [ID]: { source: "ffmpeg", computedAt: "2026-07-29T12:00:00.000Z", minGap: 0.5, windows: [{ start: 1, end: 2 }] } },
+  });
+  assert.deepEqual(state.maps[ID].sources.ffmpeg?.windows, [{ start: 1, end: 2 }]);
+  assert.equal(state.maps[ID].sources.transcript, undefined);
+});
+
+test("both producers' maps live side by side for one video", () => {
+  const state = emptySilenceState();
+  mergeSilenceMaps(state, [map({ source: "transcript" }), map({ source: "ffmpeg" })]);
+  assert.deepEqual(Object.keys(state.maps[ID].sources).sort(), ["ffmpeg", "transcript"]);
+});
+
+test("a partial map survives a round trip through the file", () => {
+  const state = normalizeSilenceState(
+    JSON.parse(JSON.stringify(reMerged(map({ source: "ffmpeg", analyzedTo: 240 })))),
+  );
+  assert.equal(state.maps[ID].sources.ffmpeg?.analyzedTo, 240);
+});
+
+function reMerged(...maps: SilenceMap[]) {
+  const state = emptySilenceState();
+  mergeSilenceMaps(state, maps);
+  return state;
+}

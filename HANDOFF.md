@@ -1,6 +1,53 @@
 # HANDOFF
 
-## Status — 2026-07-29 (latest): Smart Speed built, not yet tested on a device
+## Status — 2026-07-29 (latest): Smart Speed round two — union, chunks, ffmpeg installed
+
+[issues/016](issues/016-smart-speed-round-two.md) is built and installed. **297 unit tests
+pass, build clean.** ffmpeg 8.1.2 is now installed on this Mac
+(`/opt/homebrew/bin/ffmpeg`, the first entry in `FFMPEG_CANDIDATES`, so auto-detect finds
+it with no setting). Three things from BarkernotBob's first real session with 015, and they
+turned out to be one change.
+
+**1. He wants music skipped, which inverts 015's premise.** 015 sold ffmpeg on being able
+to tell an interlude from a pause. BarkernotBob: *"Musical interludes should still be cut …
+the idea is to let this get you straight to the content."* So the producers no longer
+compete — caption timing answers "nobody is speaking", ffmpeg answers "nothing is
+audible", and playback compresses the **union**. New setting **Skip non-speech audio**,
+default on; off restores 015's behaviour. Say this plainly: with it on, **ffmpeg adds
+much less than 015 claimed** on a captioned video. Its real value is now uncaptioned
+videos and pauses inside a cue's own span.
+
+**2. "Nothing is skipped with ffmpeg on" was a real bug, and the cause was the design.**
+`setSilenceWindows` *replaces* the map, and the ffmpeg producer called it on every batch
+with only what it had measured. A streamed googlevideo analysis runs at **1.9× realtime**
+(measured: 300 s in 154 s, 1 % CPU — the connection is throttled, not the decoder), and
+BarkernotBob watches at 4×, so the map only ever described video that had already played. The
+complete 362-window caption map was being swapped out for it, batch by batch. Everything
+now goes through `combineSilence`, where a partial ffmpeg map can only ever *add*.
+
+**3. The fix for the speed is that the throttle is per connection.** Six parallel chunks
+measured **~10×** against 1.9× for one stream. `detectSilenceChunked` runs a pool of six,
+60 s chunks with 3 s overlap, ordered **outward from the playhead**. Two traps, both
+handled and both tested: silencedetect reports timestamps **relative to `-ss`** (a wrong
+offset yields a completely plausible wrong map — `spikes/silence-chunks/run.mjs` is the
+end-to-end check, and matched 27/27 windows against a single-stream run), and a pause on
+a chunk boundary would be split into two sub-threshold halves without the overlap.
+
+**Also:** `silence-maps.json` is **version 2** — one entry per video holding a map per
+source, each with its own `minGap`/`computedAt` and, for ffmpeg, `analyzedTo`. v1 files
+migrate on read and lose nothing, which matters because the phone will keep writing v1
+until it syncs. `analyzedTo` also fixes a 015 bug found while reading: a cancel *resolves*
+`done`, so a note closed twenty seconds in recorded its stub as a complete map and
+answered for that video forever. And `LEAD_OUT_SECONDS` 0.1 → 0.25, for BarkernotBob's *"it
+slightly cuts into the speaking right before it slows back down."*
+
+**Next:** the manual test in [issues/016](issues/016-smart-speed-round-two.md). Step 8 is
+the one that decides everything — it is a console line proving ffmpeg is reached at all.
+No ffmpeg map has *ever* been written on this machine, so it is still possible the
+producer is failing before it starts and the caption map has been doing all the work.
+015's own manual test, and 012–014's, are still outstanding.
+
+## Previous — 2026-07-29: Smart Speed built, not yet tested on a device
 
 [issues/015](issues/015-smart-speed.md) is **code-complete**. **281 unit tests
 pass, `tsc` clean, build clean** (including the mobile eager-`require` guard).

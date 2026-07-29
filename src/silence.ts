@@ -22,13 +22,20 @@ export interface SilenceWindow {
 }
 
 /**
- * Which producer made a map. Ranked: an ffmpeg map is measured from the audio
- * itself and beats a map inferred from caption timing, always.
+ * Which producer made a map.
+ *
+ * **Not ranked any more, and that is issue 016's central change.** 015 held that
+ * ffmpeg strictly beat caption timing, because measured audio can tell a musical
+ * interlude from a pause. BarkernotBob's answer was that an interlude is fluff and
+ * fluff is what Smart Speed is for, so the two producers now answer *different*
+ * questions — "nobody is speaking" and "nothing is audible" — and playback
+ * compresses the union of them. Neither replaces the other, so both are stored.
  */
 export type SilenceSource = "transcript" | "ffmpeg";
 
-const SOURCE_RANK: Record<SilenceSource, number> = { transcript: 0, ffmpeg: 1 };
+export const SILENCE_SOURCES: SilenceSource[] = ["transcript", "ffmpeg"];
 
+/** One producer's answer for one video. */
 export interface SilenceMap {
   videoId: string;
   source: SilenceSource;
@@ -43,12 +50,28 @@ export interface SilenceMap {
    * lowering it past this number makes the map stale — see `isStale`.
    */
   minGap: number;
+  /**
+   * How far into the video this producer actually got, in seconds. `undefined`
+   * means "all of it".
+   *
+   * Only ffmpeg sets it, and it exists because 015 recorded a killed analysis as
+   * if it had finished: closing the note after twenty seconds stored a
+   * twenty-second map that then outranked everything for good. A partial map is
+   * a useful thing to keep — it is resumable — but only if it says so.
+   */
+  analyzedTo?: number;
   windows: SilenceWindow[];
 }
 
+/** Everything known about one video: at most one map per producer. */
+export interface VideoSilence {
+  videoId: string;
+  sources: Partial<Record<SilenceSource, SilenceMap>>;
+}
+
 export interface SilenceState {
-  version: 1;
-  maps: Record<string, SilenceMap>;
+  version: 2;
+  maps: Record<string, VideoSilence>;
 }
 
 /**
@@ -62,7 +85,14 @@ export interface SilenceState {
  * the ear is — a late release is much more audible than a late start.
  */
 export const LEAD_IN_SECONDS = 0.15;
-export const LEAD_OUT_SECONDS = 0.1;
+/**
+ * 0.1 s in 015, and BarkernotBob heard it: *"it sometimes slightly cuts into the
+ * speaking with the speed up right before it slows back down."* A caption cue's
+ * stated start is only good to a few hundred milliseconds, and under 016's union
+ * those loose caption boundaries are kept on purpose, so the margin has to cover
+ * them rather than the tighter ones ffmpeg reports.
+ */
+export const LEAD_OUT_SECONDS = 0.25;
 
 /** Past this many videos, the least recently computed maps are dropped. */
 export const MAX_SILENCE_MAPS = 200;
@@ -77,7 +107,7 @@ export const MAX_SILENCE_MAPS = 200;
 const EPSILON = 1e-6;
 
 export function emptySilenceState(): SilenceState {
-  return { version: 1, maps: {} };
+  return { version: 2, maps: {} };
 }
 
 /**
@@ -95,10 +125,37 @@ export function normalizeSilenceState(raw: unknown): SilenceState {
   if (!maps || typeof maps !== "object") return state;
 
   for (const [videoId, value] of Object.entries(maps as Record<string, unknown>)) {
-    const map = normalizeMap(videoId, value);
-    if (map) state.maps[videoId] = map;
+    const entry = normalizeEntry(videoId, value);
+    if (entry) state.maps[videoId] = entry;
   }
   return state;
+}
+
+/**
+ * One video's entry, from either schema.
+ *
+ * A v1 entry *is* a map — `{source, minGap, windows}` — so it migrates by being
+ * dropped into the slot it names. Nothing is lost and nothing is recomputed,
+ * which matters because the other device may still be running v1 and writing
+ * that shape into the same iCloud file for days.
+ */
+function normalizeEntry(videoId: string, value: unknown): VideoSilence | null {
+  const raw = value as { sources?: unknown; source?: unknown } | null;
+  if (!raw || typeof raw !== "object") return null;
+
+  const entry: VideoSilence = { videoId, sources: {} };
+
+  if (raw.sources && typeof raw.sources === "object") {
+    for (const source of SILENCE_SOURCES) {
+      const map = normalizeMap(videoId, (raw.sources as Record<string, unknown>)[source]);
+      if (map && map.source === source) entry.sources[source] = map;
+    }
+  } else {
+    const map = normalizeMap(videoId, raw);
+    if (map) entry.sources[map.source] = map;
+  }
+
+  return Object.keys(entry.sources).length > 0 ? entry : null;
 }
 
 function normalizeMap(videoId: string, value: unknown): SilenceMap | null {
@@ -109,13 +166,17 @@ function normalizeMap(videoId: string, value: unknown): SilenceMap | null {
   if (typeof raw.minGap !== "number" || !Number.isFinite(raw.minGap)) return null;
   if (!Array.isArray(raw.windows)) return null;
 
-  return {
+  const map: SilenceMap = {
     videoId,
     source: raw.source,
     computedAt: raw.computedAt,
     minGap: raw.minGap,
     windows: sortWindows(raw.windows.filter(isWindow)),
   };
+  if (typeof raw.analyzedTo === "number" && Number.isFinite(raw.analyzedTo)) {
+    map.analyzedTo = Math.max(0, raw.analyzedTo);
+  }
+  return map;
 }
 
 function isWindow(value: unknown): value is SilenceWindow {
@@ -215,6 +276,164 @@ export function compressibleWindows(
 }
 
 /**
+ * Windows that touch or overlap become one window.
+ *
+ * `JOIN_SECONDS` of slack rather than exact adjacency, because the two places
+ * this is used both produce boundaries that *should* be the same instant and are
+ * not: a pause straddling two analysis chunks comes back as two windows meeting
+ * at the chunk edge, and a caption gap and an ffmpeg silence describing the same
+ * pause disagree by a few tens of milliseconds. Leaving a 30 ms island of normal
+ * speed between two compressed stretches would be audible as a stutter and would
+ * save nothing.
+ */
+const JOIN_SECONDS = 0.05;
+
+export function mergeWindows(windows: SilenceWindow[]): SilenceWindow[] {
+  const sorted = sortWindows(windows.filter(isWindow));
+  const out: SilenceWindow[] = [];
+  for (const window of sorted) {
+    const last = out[out.length - 1];
+    if (last && window.start <= last.end + JOIN_SECONDS) {
+      if (window.end > last.end) last.end = window.end;
+      continue;
+    }
+    out.push({ start: window.start, end: window.end });
+  }
+  return out;
+}
+
+/**
+ * Everything either producer calls quiet.
+ *
+ * The union is the whole of 016: caption timing answers "nobody is speaking" and
+ * ffmpeg answers "nothing is audible", and BarkernotBob wants both skipped — a musical
+ * interlude is silent to one and loud to the other, and it is still fluff. It
+ * also makes an in-progress ffmpeg map safe by construction, which is what 015
+ * got wrong: a partial map can only add windows here, never take the caption
+ * map's away.
+ */
+export function unionWindows(...lists: SilenceWindow[][]): SilenceWindow[] {
+  return mergeWindows(lists.flat());
+}
+
+/**
+ * `primary` where it has looked, `fallback` beyond that.
+ *
+ * The other half of the new setting: with "skip non-speech" off, ffmpeg is
+ * authoritative — a quiet interlude it has measured as loud must *not* be
+ * compressed just because the captions had nothing to say there. But it is only
+ * authoritative where it has actually run, so past `analyzedTo` the caption map
+ * still applies. A fallback window straddling the frontier is cut at it rather
+ * than dropped, so there is no unskippable seam.
+ */
+export function spliceAtFrontier(
+  primary: SilenceWindow[],
+  fallback: SilenceWindow[],
+  frontier: number,
+): SilenceWindow[] {
+  const kept: SilenceWindow[] = [];
+  for (const window of primary) {
+    if (window.start >= frontier) continue;
+    kept.push({ start: window.start, end: Math.min(window.end, frontier) });
+  }
+  for (const window of fallback) {
+    if (window.end <= frontier) continue;
+    kept.push({ start: Math.max(window.start, frontier), end: window.end });
+  }
+  return mergeWindows(kept);
+}
+
+/** What playback should compress, and which producer to credit for it. */
+export interface CombinedSilence {
+  windows: SilenceWindow[];
+  source: SilenceSource | null;
+}
+
+/**
+ * The one place the two producers are reconciled — the decision `player.ts` used
+ * to make by accident, by keeping whichever map arrived last.
+ *
+ * With `skipNonSpeech` on (the default, and BarkernotBob's ask) it is the union:
+ * everything either producer calls quiet. Off, it is 015's rule — ffmpeg's
+ * measurement wins where it has run, captions cover the rest — and that is the
+ * setting to reach for if a video's music starts getting eaten.
+ *
+ * Either way an ffmpeg analysis that is still running can only improve the
+ * answer, which is the property 015 lacked and BarkernotBob hit within a minute.
+ */
+export function combineSilence(opts: {
+  transcript?: SilenceMap | null;
+  ffmpeg?: { windows: SilenceWindow[]; analyzedTo?: number } | null;
+  skipNonSpeech: boolean;
+}): CombinedSilence {
+  const transcript = opts.transcript?.windows ?? [];
+  const ffmpeg = opts.ffmpeg?.windows ?? [];
+  const haveFfmpeg = !!opts.ffmpeg;
+
+  if (!haveFfmpeg) {
+    return {
+      windows: mergeWindows(transcript),
+      source: opts.transcript ? "transcript" : null,
+    };
+  }
+  if (opts.skipNonSpeech) {
+    return { windows: unionWindows(transcript, ffmpeg), source: "ffmpeg" };
+  }
+  const frontier = opts.ffmpeg?.analyzedTo ?? Number.POSITIVE_INFINITY;
+  return { windows: spliceAtFrontier(ffmpeg, transcript, frontier), source: "ffmpeg" };
+}
+
+/** Shift a chunk's windows into whole-video time. See `planChunks`. */
+export function offsetWindows(windows: SilenceWindow[], delta: number): SilenceWindow[] {
+  if (!delta) return [...windows];
+  return windows.map((w) => ({ start: Math.max(0, w.start + delta), end: w.end + delta }));
+}
+
+/** One unit of work for the ffmpeg producer: `[start, end)` of the video. */
+export interface SilenceChunk {
+  start: number;
+  end: number;
+}
+
+/**
+ * Split a video into analysis chunks, nearest the playhead first.
+ *
+ * Three things are load-bearing here, and all three are measurements rather than
+ * taste (2026-07-29, real audio URL):
+ *
+ * - **Chunks exist at all** because googlevideo throttles *per connection*. One
+ *   stream analyses at 1.9× realtime — slower than BarkernotBob watches — while six
+ *   parallel chunks manage ~10×. This is the fix for "nothing is skipped": the
+ *   map could never get ahead of the playhead.
+ * - **`from` orders the work outward from where playback is**, so the minute
+ *   being watched is analysed first and the credits last. Chunks before `from`
+ *   are not dropped — a rewind should not hit a hole — they go to the back.
+ * - **`overlap`** because silencedetect only reports a silence it sees both ends
+ *   of. A pause lying across a chunk boundary would otherwise come back as two
+ *   halves, each possibly under the user's threshold, and vanish. Overlapping
+ *   makes some pause wholly visible to one chunk or the other, and `mergeWindows`
+ *   glues the duplicates back together.
+ */
+export function planChunks(
+  duration: number,
+  from: number,
+  chunkSeconds: number,
+  overlap: number,
+): SilenceChunk[] {
+  if (!Number.isFinite(duration) || duration <= 0) return [];
+  const size = Math.max(1, chunkSeconds);
+  const pad = Math.max(0, overlap);
+  const count = Math.ceil(duration / size);
+  const chunks: SilenceChunk[] = [];
+  for (let i = 0; i < count; i++) {
+    chunks.push({ start: i * size, end: Math.min(duration, (i + 1) * size + pad) });
+  }
+
+  const start = Math.min(count - 1, Math.max(0, Math.floor(Math.max(0, from) / size)));
+  return [...chunks.slice(start), ...chunks.slice(0, start)];
+}
+
+/**
  * Is `seconds` inside one of these windows? Binary search, because this is
  * called once per animation frame against a map that can hold a few thousand
  * windows for a long video.
@@ -277,22 +496,28 @@ export function isStale(map: SilenceMap, minGap: number): boolean {
 }
 
 /**
- * Should `incoming` replace `existing`?
+ * Should `incoming` replace `existing`, within the one source's slot?
  *
- * ffmpeg beats transcript regardless of age — it is measured rather than
- * inferred, and a stale measurement is still a measurement. Within one source,
- * a finer floor beats a coarser one (it strictly contains it), and only then
- * does recency decide.
+ * Cross-source ranking is gone with 015's premise — the two producers no longer
+ * compete for one slot, so this only ever compares like with like. A finer floor
+ * beats a coarser one (it strictly contains it); then **more of the video
+ * analysed** beats less, which is what stops a note closed after twenty seconds
+ * from replacing a complete map with its own stub; then recency decides.
  */
 export function isBetterMap(incoming: SilenceMap, existing: SilenceMap | undefined): boolean {
   if (!existing) return true;
-  if (SOURCE_RANK[incoming.source] !== SOURCE_RANK[existing.source]) {
-    return SOURCE_RANK[incoming.source] > SOURCE_RANK[existing.source];
-  }
+  if (incoming.source !== existing.source) return false;
   if (Math.abs(incoming.minGap - existing.minGap) > EPSILON) {
     return incoming.minGap < existing.minGap;
   }
+  const reach = analyzedReach(incoming) - analyzedReach(existing);
+  if (Math.abs(reach) > EPSILON) return reach > 0;
   return incoming.computedAt > existing.computedAt;
+}
+
+/** How far a map claims to have looked. A complete map reaches everywhere. */
+function analyzedReach(map: SilenceMap): number {
+  return map.analyzedTo ?? Number.POSITIVE_INFINITY;
 }
 
 /**
@@ -301,17 +526,29 @@ export function isBetterMap(incoming: SilenceMap, existing: SilenceMap | undefin
  * This is a merge and not an assignment for the reason issue 014 cost a day of
  * hidden videos coming back: the file is written by a Mac and an iPhone against
  * the same iCloud folder, so the last writer holding a whole-file snapshot
- * silently deletes whatever the other one added. Re-read, union by video ID,
- * let `isBetterMap` arbitrate — then write.
+ * silently deletes whatever the other one added. Re-read, union by video ID and
+ * then by source, let `isBetterMap` arbitrate — then write. Merging per source
+ * is what lets the Mac's ffmpeg map and the phone's caption map coexist for the
+ * same video instead of overwriting each other on every sync.
  */
 export function mergeSilenceMaps(state: SilenceState, incoming: SilenceMap[]): boolean {
   let changed = false;
   for (const map of incoming) {
-    if (!isBetterMap(map, state.maps[map.videoId])) continue;
-    state.maps[map.videoId] = map;
+    const entry = (state.maps[map.videoId] ??= { videoId: map.videoId, sources: {} });
+    if (!isBetterMap(map, entry.sources[map.source])) continue;
+    entry.sources[map.source] = map;
     changed = true;
   }
   return changed;
+}
+
+/** The most recent thing known about a video, for pruning. */
+function entryComputedAt(entry: VideoSilence): string {
+  let latest = "";
+  for (const map of Object.values(entry.sources)) {
+    if (map && map.computedAt > latest) latest = map.computedAt;
+  }
+  return latest;
 }
 
 /**
@@ -322,7 +559,7 @@ export function pruneSilenceMaps(state: SilenceState, max = MAX_SILENCE_MAPS): b
   const ids = Object.keys(state.maps);
   if (ids.length <= max) return false;
   const doomed = ids
-    .sort((a, b) => state.maps[a].computedAt.localeCompare(state.maps[b].computedAt))
+    .sort((a, b) => entryComputedAt(state.maps[a]).localeCompare(entryComputedAt(state.maps[b])))
     .slice(0, ids.length - max);
   for (const id of doomed) delete state.maps[id];
   return true;
