@@ -17,6 +17,7 @@ import {
   TRANSCRIPT_ALIASES,
   TRANSCRIPT_HEADING,
   upsertSection,
+  ensureFooter,
 } from "../src/transcript.ts";
 
 const ID = "h0EGCnBjTVk";
@@ -436,4 +437,26 @@ test("upsertSection with an anchor it cannot find falls back to appending", () =
 
 test("upsertSection with an empty body on a note that never had the section is a no-op", () => {
   assert.equal(upsertSection(NOTE, HEATMAP_HEADING, ""), NOTE);
+});
+
+// ------------------------------------------------------------------- footer
+
+test("ensureFooter ends the note with a rule and two blank lines", () => {
+  const out = ensureFooter(upsertSection(NOTE, TRANSCRIPT_HEADING, "**[0:00](x)** hello"));
+  assert.ok(out.endsWith("hello\n\n---\n\n\n"), JSON.stringify(out.slice(-30)));
+});
+
+test("ensureFooter does not stack a second rule on a re-fetch", () => {
+  const once = ensureFooter(upsertSection(NOTE, TRANSCRIPT_HEADING, "old body"));
+  const twice = ensureFooter(upsertSection(once, TRANSCRIPT_HEADING, "new body"));
+  // The fixture has frontmatter rules of its own; what matters is that a
+  // second pass added none.
+  assert.equal(twice.match(/^---$/gm)?.length, once.match(/^---$/gm)?.length);
+  assert.ok(twice.endsWith("new body\n\n---\n\n\n"));
+});
+
+test("ensureFooter leaves the note's own content alone", () => {
+  const out = ensureFooter(NOTE);
+  assert.match(out, /# Notes\n\nmy own note/);
+  assert.match(out, /# Video Description\n0:00 something/);
 });

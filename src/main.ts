@@ -54,6 +54,7 @@ import {
   pickCaptionTrack,
   renderHeatmap,
   renderTranscript,
+  ensureFooter,
   topPeaks,
   TRANSCRIPT_ALIASES,
   TRANSCRIPT_HEADING,
@@ -1331,13 +1332,15 @@ export default class YtFreePlugin extends Plugin {
 
     const cues = parseTranscriptCues(content);
     await this.app.vault.process(file, (current) =>
-      upsertSection(
-        current,
-        HEATMAP_HEADING,
-        renderHeatmap(peaks, cues, videoId),
-        HEATMAP_ALIASES,
-        // Above the transcript, which is where a fresh fetch would have put it.
-        TRANSCRIPT_ALIASES,
+      ensureFooter(
+        upsertSection(
+          current,
+          HEATMAP_HEADING,
+          renderHeatmap(peaks, cues, videoId),
+          HEATMAP_ALIASES,
+          // Above the transcript, which is where a fresh fetch would have put it.
+          TRANSCRIPT_ALIASES,
+        ),
       ),
     );
     new Notice(`YT Free: added ${peaks.length} replay peaks.`);
@@ -1419,7 +1422,8 @@ export default class YtFreePlugin extends Plugin {
           renderTranscript(paragraphs, videoId, track),
           TRANSCRIPT_ALIASES,
         );
-        return next;
+        // Last, so nothing collapses the blank lines it just wrote.
+        return ensureFooter(next);
       });
 
       progress.hide();

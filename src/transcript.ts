@@ -390,6 +390,22 @@ export function parseTranscriptCues(content: string): Cue[] {
 }
 
 /**
+ * Close a note off: a rule under the last section, then two blank lines.
+ *
+ * The transcript is the last thing in the file and it ends mid-sentence, so
+ * there is nothing telling the eye the note is over — and nowhere to type when
+ * you come back to it. The rule says "end", the blank lines are the landing
+ * space.
+ *
+ * Idempotent: an existing footer is stripped before the new one goes on, so a
+ * re-fetch never stacks a second rule under the first.
+ */
+export function ensureFooter(content: string): string {
+  const body = content.replace(/(?:\s*\n\s*(?:---|\*\*\*|___)\s*)*\s*$/, "");
+  return `${body}\n\n---\n\n\n`;
+}
+
+/**
  * Replace a top-level section by heading, or append it when absent.
  *
  * The section runs to the next heading, so a fetch never disturbs the Notes you

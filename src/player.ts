@@ -743,8 +743,17 @@ export class YtFreePlayer {
     return !this.video.paused && !this.video.ended;
   }
 
+  /**
+   * Is there a real position to stamp?
+   *
+   * `started` alone was too strict: a note reopened at its resume position sits
+   * paused at, say, 14:20 having fired no `play` event this session, so the
+   * first note you typed got no timestamp at all. A non-zero `currentTime` is
+   * the same fact by another route — the video is somewhere — and 0 still means
+   * "untouched", which is the one case the guard exists for.
+   */
   get hasPlayed(): boolean {
-    return this.started;
+    return this.started || this.video.currentTime > 0;
   }
 
   get currentTime(): number {
