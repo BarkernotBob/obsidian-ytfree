@@ -24,7 +24,6 @@ import {
 import type { HubFilter, HubItem, SubscriptionsState } from "./subscriptions";
 import {
   buildWatchLaterNote,
-  cardBlurb,
   deskSub,
   emptyState,
   extractChannelIdFromHtml,
@@ -65,7 +64,7 @@ export interface HubSettings {
   expiryDays: number;
   includeShorts: boolean;
   watchLaterFolder: string;
-  /** Keep videos the account says were already watched in the New list. */
+  /** Keep videos the account says were already watched in the Inbox. */
   showWatched: boolean;
 }
 
@@ -366,7 +365,7 @@ export class SubscriptionsStore {
   }
 
   /**
-   * Put a hidden video back in the New list.
+   * Put a hidden video back in the Inbox.
    *
    * The description was dropped when it was hidden, so it is fetched again —
    * one player call, in the background, exactly like adding from search. The
@@ -391,10 +390,40 @@ export class SubscriptionsStore {
 }
 
 /**
+ * The four lists, in the order they are offered.
+ *
+ * A video is in exactly one of three states — undecided, kept (you opened it),
+ * hidden (you turned it down) — and the first three chips are those states.
+ * Everything is the union of the first two, and exists for one reason: it is
+ * the only list where a video you already watched on YouTube still appears, and
+ * the only place a search across both kept and undecided is one search.
+ */
+const FILTER_LABELS: ReadonlyArray<readonly [HubFilter, string]> = [
+  ["new", "Inbox"],
+  ["kept", "Kept"],
+  ["hidden", "Hidden"],
+  ["all", "Everything"],
+];
+
+/**
+ * What each list contains, said in a sentence rather than implied by a word.
+ *
+ * This is the fix for "what is the difference between New and All": the
+ * difference is one clause, and a chip has no room for a clause, so the status
+ * line under the chips carries it.
+ */
+const FILTER_RULES: Record<HubFilter, string> = {
+  new: "not opened, not hidden",
+  kept: "opened — a note exists",
+  hidden: "you removed these",
+  all: "inbox + kept, including already-watched",
+};
+
+/**
  * The hub view.
  *
  * Redraws are explicit and never triggered by a click on an item. Clicking a
- * video in the New list makes it Kept, which under the filter would remove it
+ * video in the Inbox makes it Kept, which under the filter would remove it
  * from the list and pull everything below it upward — so instead the card stays
  * where it is and only its marker changes. The list re-filters on the next
  * refresh, poll, or filter change.
@@ -618,17 +647,26 @@ export class HubView extends ItemView {
     });
   }
 
-  /** The filter chips. Same markup either side; only the host differs. */
+  /**
+   * The filter chips. Same markup either side; only the host differs.
+   *
+   * The labels are the three things that can have happened to a video, not four
+   * adjectives: **Inbox** is what you have not decided about, **Kept** is what
+   * you opened, **Hidden** is what you turned down, and **Everything** is the
+   * first two in one list. "New" and "All" described the same list to anyone
+   * who had not read `visibleItems` — they differ only by Kept items and by
+   * ones YouTube says you already watched, which is not a difference two
+   * one-word labels can carry. Each chip states its own rule underneath — see
+   * `filterRule`.
+   */
   private buildFilters(host: HTMLElement): void {
     const filters = host.createDiv({ cls: "ytfree-hub-filters" });
-    const options: Array<[HubFilter, string]> = [
-      ["new", "New"],
-      ["all", "All"],
-      ["kept", "Kept"],
-      ["hidden", "Hidden"],
-    ];
-    for (const [value, label] of options) {
-      const button = filters.createEl("button", { text: label, cls: "ytfree-hub-filter" });
+    for (const [value, label] of FILTER_LABELS) {
+      const button = filters.createEl("button", {
+        text: label,
+        cls: "ytfree-hub-filter",
+        attr: { title: FILTER_RULES[value] },
+      });
       button.toggleClass("is-active", this.filter === value);
       button.addEventListener("click", () => {
         this.filter = value;
@@ -823,14 +861,7 @@ export class HubView extends ItemView {
   /** What the collapsed menu says: the filter, then the channel. */
   private renderMenuLabel(): void {
     if (!this.menuLabelEl) return;
-    const filterLabel =
-      this.filter === "new"
-        ? "New"
-        : this.filter === "kept"
-          ? "Kept"
-          : this.filter === "hidden"
-            ? "Hidden"
-            : "All";
+    const filterLabel = FILTER_LABELS.find(([value]) => value === this.filter)?.[1] ?? "Inbox";
     const channel = this.channelFilter
       ? (this.store.state.channels.find((c) => c.id === this.channelFilter)?.title ?? "Channel")
       : "All channels";
@@ -856,17 +887,16 @@ export class HubView extends ItemView {
     const parts: string[] = [];
     if (this.store.polling) parts.push("Checking channels…");
     else if (channels.length === 0) parts.push("No channels yet — import your subscriptions.");
-    else if (this.filter === "hidden") {
-      const hidden = this.store.state.items.filter((item) => item.state === "dismissed").length;
-      parts.push(
-        this.itemQuery
-          ? `${shown} of ${hidden} hidden videos`
-          : `${hidden} hidden video${hidden === 1 ? "" : "s"} · put one back with the arrow`,
-      );
-    } else if (this.itemQuery) {
+    else if (this.itemQuery) {
       parts.push(`${shown} match${shown === 1 ? "" : "es"} for “${this.itemQuery}”`);
     } else {
-      parts.push(`${shown} of ${items.length} videos · ${channels.length} channels`);
+      // The count, then the rule that produced it. Which list you are on and
+      // what it means are the same question, so they get the same line — and
+      // the count is of this list, not of the hub, which is what made "42 of
+      // 264 videos" read as an arbitrary slice.
+      const noun = shown === 1 ? "video" : "videos";
+      parts.push(`${shown} ${noun} · ${FILTER_RULES[this.filter]}`);
+      if (this.filter === "hidden" && shown > 0) parts.push("put one back with the arrow");
     }
     if (lastPolledAt && !this.store.polling && this.filter !== "hidden") {
       parts.push(`checked ${relativeAge(lastPolledAt, new Date())}`);
@@ -1288,7 +1318,7 @@ export class HubView extends ItemView {
     }
     return this.store.state.channels.length === 0
       ? "Run “YT Free: Import YouTube subscriptions” to get started."
-      : "Nothing here. Try the All filter, or check for new videos.";
+      : "Nothing here. Try Everything, or check for new videos.";
   }
 
   /**
@@ -1325,7 +1355,7 @@ export class HubView extends ItemView {
           new Notice(`YT Free: could not restore that video — ${String(err)}`);
         });
         // It is no longer hidden, so it no longer belongs in this list. Same
-        // as removing one from the New list: the row you acted on goes, and
+        // as removing one from the Inbox: the row you acted on goes, and
         // nothing else is redrawn.
         row.remove();
         this.cards.delete(item.videoId);
@@ -1340,8 +1370,9 @@ export class HubView extends ItemView {
    *
    * The two platforms build different cards out of the same parts. A desktop
    * card is a row: thumbnail, title, one line of facts, a marker column and a
-   * dismiss column, 90px tall. A phone card is that row with the description
-   * underneath it and everything a size larger — see `renderPhoneCard`.
+   * dismiss column, 90px tall. A phone card is the same row a size larger — a
+   * 128×72 thumbnail with the length on it, two lines of title, and
+   * `channel · age` — beside a dismiss column wide enough to hit with a thumb.
    */
   private renderCard(item: HubItem, now: Date): void {
     const list = this.listEl;
@@ -1349,8 +1380,8 @@ export class HubView extends ItemView {
     const card = list.createDiv({ cls: "ytfree-hub-card" });
     this.cards.set(item.videoId, card);
 
-    // The phone's card has a row inside it and the description under that, so
-    // its parts hang off a wrapper rather than off the card itself.
+    // The phone's card is a grid — content in one column, the dismiss target in
+    // the other — so the content hangs off a wrapper rather than off the card.
     const row = this.phone ? card.createDiv({ cls: "ytfree-hub-row" }) : card;
 
     const thumb = row.createDiv({ cls: "ytfree-hub-thumb" });
@@ -1389,14 +1420,6 @@ export class HubView extends ItemView {
     // Fixed-width column, filled or not, so marking an item Kept moves nothing.
     const stateMarker = marker ?? row.createDiv({ cls: "ytfree-hub-marker" });
     this.paintMarker(stateMarker, item);
-
-    // What the video is about, under the row and across the whole card. Three
-    // lines, clamped, and the element exists whether or not there is anything
-    // in it — a card with no description is the same height as the one above
-    // it, which is the only way a list of them scans.
-    if (this.phone) {
-      card.createDiv({ cls: "ytfree-hub-desc", text: cardBlurb(item.description) });
-    }
 
     const dismiss = (this.phone ? card : row).createDiv({ cls: "ytfree-hub-dismiss" });
     const button = new ButtonComponent(dismiss)

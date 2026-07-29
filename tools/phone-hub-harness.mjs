@@ -44,9 +44,6 @@ const CHROME =
 const appCss = readFileSync(APP_CSS, "utf8");
 const pluginCss = readFileSync(path.join(HERE, "..", "styles.css"), "utf8");
 
-const BLURB =
-  "A long-format explanation of the thing in the title, written the way a channel writes them, which is to say at some length and without much regard for where a phone would like to stop reading.";
-
 const card = (i) => `
   <div class="ytfree-hub-card">
     <div class="ytfree-hub-row">
@@ -60,7 +57,6 @@ const card = (i) => `
         <div class="ytfree-hub-sub">SmarterEveryDay · 21 hours ago</div>
       </div>
     </div>
-    <div class="ytfree-hub-desc">${BLURB}</div>
     <div class="ytfree-hub-dismiss"><button class="ytfree-hub-icon-button">×</button></div>
   </div>`;
 
@@ -95,7 +91,8 @@ const measured = await page.evaluate(() => {
   const listBox = list.getBoundingClientRect();
   const boxes = cards.map((c) => c.getBoundingClientRect());
   const first = boxes[0];
-  const desc = cards[0].querySelector(".ytfree-hub-desc").getBoundingClientRect();
+  const title = cards[0].querySelector(".ytfree-hub-title");
+  const titleBox = title.getBoundingClientRect();
   const dismiss = cards[0].querySelector(".ytfree-hub-dismiss").getBoundingClientRect();
   return {
     listHeight: Math.round(listBox.height),
@@ -105,8 +102,13 @@ const measured = await page.evaluate(() => {
     partlyVisible: boxes.filter((b) => b.top < listBox.bottom - 0.5).length,
     // Every card the same height is the no-reflow requirement, measured.
     heights: [...new Set(boxes.map((b) => Math.round(b.height)))],
-    descLines: Math.round(desc.height / parseFloat(getComputedStyle(cards[0].querySelector(".ytfree-hub-desc")).lineHeight)),
-    descClipped: cards[0].querySelector(".ytfree-hub-desc").scrollHeight > desc.height + 1,
+    // The width the dismiss column took is width the title did not get, so it
+    // is measured rather than assumed: how wide the title runs, and how many
+    // characters of it survive two lines at this font.
+    titleWidth: Math.round(titleBox.width),
+    titleLines: Math.round(titleBox.height / parseFloat(getComputedStyle(title).lineHeight)),
+    titleClipped: title.scrollHeight > titleBox.height + 1,
+    dismissWidth: Math.round(dismiss.width),
     dismissFullHeight: Math.abs(dismiss.height - first.height) < 1.5,
     overflows: cards.some((c) => c.scrollWidth > c.clientWidth + 1),
   };

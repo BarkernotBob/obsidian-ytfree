@@ -2470,7 +2470,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Show watched videos in New")
       .setDesc(
-        "Off by default: a video you already watched on your phone or TV drops out of the New list. It stays in All and Kept either way.",
+        "Off by default: a video you already watched on your phone or TV drops out of the Inbox. It stays in Everything and Kept either way.",
       )
       .addToggle((toggle) =>
         toggle.setValue(plugin.settings.accountShowWatched).onChange(async (value) => {

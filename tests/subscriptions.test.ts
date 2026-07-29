@@ -4,7 +4,6 @@ import type { HubItem } from "../src/subscriptions.ts";
 import {
   HIDDEN_LIMIT,
   buildWatchLaterNote,
-  cardBlurb,
   deskSub,
   formatDuration,
   expireItems,
@@ -500,31 +499,6 @@ test("a duration written by search parses back to seconds", () => {
   assert.equal(parseDurationText("0:45"), 45);
   assert.equal(parseDurationText("LIVE"), null);
   assert.equal(parseDurationText(""), null);
-});
-
-test("the card blurb is prose, with the navigation left out of it", () => {
-  const description = [
-    "Get 20% off at https://example.com/offer",
-    "",
-    "This is what the video is actually about.",
-    "",
-    "0:00 Intro",
-    "1:30 The good part",
-    "https://twitter.com/someone",
-    "#shorts #cars",
-  ].join("\n");
-  assert.equal(
-    cardBlurb(description),
-    "Get 20% off at https://example.com/offer This is what the video is actually about.",
-  );
-});
-
-test("a long blurb is cut on a word, with an ellipsis", () => {
-  const blurb = cardBlurb(`${"word ".repeat(60)}end`, 40);
-  assert.ok(blurb.length <= 41, blurb);
-  assert.match(blurb, /…$/);
-  assert.doesNotMatch(blurb, /wor…$/);
-  assert.equal(cardBlurb("", 40), "");
 });
 
 test("the desktop's second line spells out every flag the item carries", () => {

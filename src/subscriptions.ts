@@ -769,38 +769,6 @@ export function parseDurationText(text: string): number | null {
   return seconds > 0 ? seconds : null;
 }
 
-/**
- * A description, flattened to something a two-line clamp can hold.
- *
- * A YouTube description is mostly not prose: chapter lists, affiliate links,
- * social handles and a wall of hashtags, laid out over forty lines. The first
- * couple of sentences are the part that tells you what the video is, so the
- * lines that are plainly not that — a bare URL, a chapter stamp, a hashtag run
- * — are dropped rather than truncated into.
- *
- * Cut to `maxChars` so a card never carries five kilobytes of text into the DOM
- * for two lines of it to be visible. The CSS clamp is what the reader sees; this
- * is what stops a list of two hundred cards being built out of whole
- * descriptions.
- */
-export function cardBlurb(description: string, maxChars = 220): string {
-  const lines = description
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => {
-      if (!line) return false;
-      if (/^https?:\/\/\S+$/.test(line)) return false;
-      // "0:00 Intro" and friends: a chapter list is navigation, not a summary.
-      if (/^\(?\d{1,2}:\d{2}(:\d{2})?\)?\b/.test(line)) return false;
-      if (/^#\S+(\s+#\S+)*$/.test(line)) return false;
-      return true;
-    });
-
-  const text = lines.join(" ").replace(/\s+/g, " ").trim();
-  if (text.length <= maxChars) return text;
-  return `${text.slice(0, maxChars).replace(/\s+\S*$/, "")}…`;
-}
-
 /** "1.2M views" — a raw seven-digit number is harder to read at a glance. */
 export function formatViews(views: number | null): string {
   if (views === null || !Number.isFinite(views)) return "";

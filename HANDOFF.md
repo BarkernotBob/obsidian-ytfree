@@ -1,6 +1,50 @@
 # HANDOFF
 
-## Status — 2026-07-29 (latest): hub cards, a designed control bar, note sections
+## Status — 2026-07-29 (latest): no blurb, a bigger ×, lists that say what they are
+
+Built and installed. 192 unit tests pass, build clean.
+[issues/011](issues/011-card-trim-and-filter-names.md) is the issue and holds the
+manual test. Three asks from BarkernotBob, all phone, all in the hub — and two of them
+undo parts of 010, which is the point: 010 guessed what a card should carry.
+
+1. **The description is off the card.** A YouTube description is written to sell
+   the video; `cardBlurb` could drop the chapter list and the link farm but not
+   the marketing, so three lines of it was three lines of a channel talking about
+   itself. Card is 92px again, ~7 to a screen. The 128×72 thumbnail, the length
+   badge and a readable title — the parts of 010 that worked — stay.
+   `cardBlurb()` is deleted, not left unused.
+2. **The × column is 112px, doubled.** That width comes out of the title, and it
+   was measured against **200 real titles from the live hub**, not eyeballed:
+   56px → 24% of titles cut off, 112px → 58%. Not acceptable, and the fix was
+   already lying around — the row is as tall as the 72px thumbnail and a two-line
+   title plus byline used 49 of it. **The phone title takes three lines now**,
+   which puts cut-off back to **25%**. If it still reads clipped, 80px is the
+   next number to try (163px title, 14% cut off).
+3. **New/All are Inbox · Kept · Hidden · Everything.** BarkernotBob's read was correct
+   — New *is* "everything not kept and not hidden" — and All differed by two
+   clauses nothing on screen could show: it also holds Kept items, and it shows
+   ones YouTube says you already watched. So the first three chips are the three
+   states a video can be in, Everything is named as the union it is, and the
+   **status line now states the current list's rule** in place of `42 of 264
+   videos` (`221 videos · not opened, not hidden`). Same sentence as a desktop
+   tooltip. `FILTER_LABELS`/`FILTER_RULES` in `src/hub.ts` are the one place to
+   edit any of this.
+
+**Everything was kept, not deleted**, against the "one menu would do" reading:
+it is the only list where an already-watched video appears and the only place one
+search covers kept and undecided at once. Four lines to remove if neither lands.
+
+`tools/phone-hub-harness.mjs` reports `titleWidth`/`titleLines`/`titleClipped`
+and `dismissWidth` now instead of the description numbers. Measured after the
+change: `{cardHeight: 92, fullyVisible: 7, heights: [92], titleWidth: 131,
+titleLines: 3, dismissWidth: 112, dismissFullHeight: true, overflows: false}`.
+
+**Next:** the manual test in issues/011 on the phone. Step 2 (long titles still
+read) and step 7 (Inbox vs Everything is now obvious) are the two that decide it.
+
+---
+
+## Status — 2026-07-29: hub cards, a designed control bar, note sections
 
 Built and installed. 194 unit tests pass, build clean.
 [issues/010](issues/010-cards-controls-sections.md) is the issue and holds the

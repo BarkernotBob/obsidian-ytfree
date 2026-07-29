@@ -1233,27 +1233,28 @@
  * add a pixel to the row.
  */
 /*
- * Four to a screen, not seven.
+ * One row of picture and facts, and nothing else.
  *
- * At 76px a row was a thumbnail, a title and eight words of grey — enough to
- * recognise a video you already knew about and nothing at all for one you
- * didn't, which is the entire job of a subscriptions list. 148px buys the
- * three lines of description that answer "what is this", and four rows plus a
- * sliver of the fifth on a 390×844 phone, which is the right number: enough to
- * compare, and it still shows there is more below.
+ * The card carried three clamped lines of description for exactly one round.
+ * It was the wrong thing to buy height with: a channel's description is
+ * marketing copy and a link farm, and three lines of it is three lines of
+ * marketing copy — you read the title and the channel and decide. So the
+ * description is gone and the card is the height of its picture. The 128×72
+ * thumbnail, the length badge and the two-line title stay: those were the part
+ * that worked.
  *
- * A grid, because the delete column spans both rows of content. Fixed height
- * and fixed row tracks, so no title, blurb or badge can make one card taller
- * than the one above it.
+ * Still a grid rather than a flex row, because the delete column has to fill
+ * the card's whole height and the content column has to be the one that
+ * shrinks. Fixed height and a fixed row track, so no title or badge can make
+ * one card taller than the one above it.
  */
 .ytfree-hub.ytfree-phone .ytfree-hub-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 56px;
-  grid-template-rows: 72px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) var(--ytfree-dismiss-width);
+  grid-template-rows: 72px;
   align-items: start;
   column-gap: 0;
-  row-gap: 6px;
-  height: 148px;
+  height: 92px;
   box-sizing: border-box;
   padding: 10px 0 10px 0.6em;
   border-radius: 0;
@@ -1261,7 +1262,7 @@
   overflow: hidden;
 }
 
-/* The top line of a card: picture, then title and byline beside it. */
+/* The content of a card: picture, then title and byline beside it. */
 .ytfree-hub-row {
   grid-column: 1;
   grid-row: 1;
@@ -1270,27 +1271,6 @@
   gap: 0.7em;
   min-width: 0;
   height: 100%;
-}
-
-/*
- * What the video is about, in the space under the picture.
- *
- * Three lines, clamped: `cardBlurb` has already thrown out the chapter list,
- * the bare links and the hashtags, so what is left is prose and the first
- * three lines of it are the summary YouTube never gives you in a feed.
- */
-.ytfree-hub-desc {
-  grid-column: 1;
-  grid-row: 2;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  min-width: 0;
-  padding-right: 0.6em;
-  font-size: var(--font-ui-smaller);
-  line-height: 1.35;
-  color: var(--text-muted);
 }
 
 /*
@@ -1303,6 +1283,10 @@
  */
 .ytfree-hub.ytfree-phone {
   -webkit-tap-highlight-color: transparent;
+  /* Declared on the root, not on the column that uses it: the card's
+     `grid-template-columns` has to read the same number, and a custom property
+     set on a child is invisible to its parent. */
+  --ytfree-dismiss-width: 112px;
 }
 
 .ytfree-hub.ytfree-phone .ytfree-hub-icon-button:focus,
@@ -1339,10 +1323,21 @@
   visibility: hidden;
 }
 
+/*
+ * Three lines on a phone, where the desktop gets two.
+ *
+ * The 112px dismiss column comes out of this element's width, and measured
+ * against 200 real hub titles it took the share that get cut off from 24% to
+ * 58%. The height it needs to make that back is already there and unused: the
+ * row is as tall as the 72px thumbnail beside it, and a two-line title plus a
+ * byline only fills 49 of those. Three lines puts the cut-off share back to
+ * 25% — the wider target costs no legibility, it spends slack.
+ */
 .ytfree-hub.ytfree-phone .ytfree-hub-title {
   font-size: var(--font-ui-small);
   line-height: 1.3;
-  max-height: 2.6em;
+  -webkit-line-clamp: 3;
+  max-height: 3.9em;
 }
 
 /* Two segments, and they are the quiet half of the row — the title is what the
@@ -1364,15 +1359,17 @@
  * one below — a line that stops short of both is the giveaway that this was a
  * desktop card with a button dropped into the corner.
  *
- * 56px rather than the fifth of the screen it used to be: still a target twice
- * the size of the icon in it, and the ~16px it gives back go to the title,
- * which is the column that was actually short.
+ * 112px, doubled from 56 at BarkernotBob's ask. It is a quarter of the screen, and
+ * the width comes out of the title, which now gets about 18 characters a line
+ * against 25 before — the trade to reverse first if titles start reading
+ * clipped. One variable, because the card's grid and this column have to state
+ * the same number.
  */
 .ytfree-hub.ytfree-phone .ytfree-hub-dismiss {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1;
   flex: none;
-  width: 56px;
+  width: var(--ytfree-dismiss-width);
   height: auto;
   align-self: stretch;
   /* Cancels the card's own padding, so the rule runs the full height of the
