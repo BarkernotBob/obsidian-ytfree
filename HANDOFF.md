@@ -1,6 +1,53 @@
 # HANDOFF
 
-## Status — 2026-07-29 (latest): most-replayed on the phone, and backfilled
+## Status — 2026-07-29 (latest): hidden videos stopped coming back
+
+Built and installed. **240 unit tests pass, build clean.**
+[issues/014](issues/014-hidden-videos-came-back.md) is the issue and holds the
+manual test, which needs both devices.
+
+BarkernotBob hid a batch of videos on the phone and they reappeared. **Cause:**
+`subscriptions.json` is one blob synced by iCloud, read once at plugin load and
+written back **whole** on every save — so the last device to save won the entire
+file. The Mac polls every few minutes from a snapshot loaded when its Obsidian
+started; that save erased the phone's hides, and iCloud carried the erasure
+back. Not caused by 012 or 013 — no code there touches item state — but this
+week's two-device testing is what made a latent bug routine.
+
+**Not recoverable.** The state file is gitignored (`.obsidian/plugins/*/*`) and
+there are no local Time Machine snapshots. The 7 surviving tombstones all
+predate `dismissedAt`, which is itself the evidence. Those hides have to be
+made again once.
+
+**The fix — a save is a merge, not an overwrite:**
+
+- `HubItem.decidedAt`, stamped by `hideItem` / `keepItem` / `restoreItem`.
+- `mergeStates(mine, theirs)` in `subscriptions.ts` — pure. Newer decision wins
+  per video; facts (description, duration, `isShort`, earlier `seenAt`) are
+  pooled from both sides; a tombstone never gets its description back; on a tie
+  a decision beats no decision and Kept beats Dismissed.
+- `save()` re-reads the file and merges into it. One extra read per save.
+- `refreshFromDisk()` — stat, read only if moved — on hub open and before every
+  poll, so a long-running window stops merging against a stale copy.
+- `removeChannel` leaves a `removedChannels` tombstone, or a union would hand a
+  removed channel straight back.
+- **`SubscriptionsStore.live(item)`**: a merge rebuilds item objects, so a card
+  rendered earlier holds an orphan. Every mutation resolves by video ID first —
+  `hide`, `restore`, `openItem`, `backfillDurations`. This hazard came *from*
+  the fix; without it the fix would have dropped clicks.
+
+**The guarantee BarkernotBob asked for:** `tests/merge.test.ts`, 20 scenario-shaped
+regression tests ("the Mac's stale poll cannot un-hide what the phone just
+hid"), **and `install.sh` now runs `npm run check` instead of `npm run build`**
+— nothing reaches the vault unless the suite passes. The tests are only worth
+anything because they now run on every install.
+
+**Next:** the both-devices manual test in issues/014. Steps 4 and 6 are the ones
+that used to fail. The 012 and 013 manual tests are still outstanding.
+
+---
+
+## Status — 2026-07-29: most-replayed on the phone, and backfilled
 
 Built and installed. **220 unit tests pass, build clean, live smoke 11/11.**
 [issues/013](issues/013-heatmap-on-the-phone.md) is the issue and holds the

@@ -7,7 +7,10 @@ VAULT="${YTFREE_VAULT:-$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documen
 DEST="$VAULT/.obsidian/plugins/ytfree"
 
 cd "$(dirname "$0")"
-npm run build
+# check, not build: the tests run before anything reaches the vault. The state
+# file is shared with a phone, and a change that quietly breaks the merge would
+# otherwise be discovered by hidden videos coming back — see tests/merge.test.ts.
+npm run check
 
 mkdir -p "$DEST"
 cp main.js manifest.json styles.css "$DEST/"

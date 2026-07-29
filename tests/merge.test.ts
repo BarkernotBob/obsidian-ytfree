@@ -1,0 +1,285 @@
+/**
+ * Regression suite for the bug that lost hidden videos.
+ *
+ * `subscriptions.json` is one JSON blob, synced by iCloud, held in memory by
+ * every device that has Obsidian open. Before `mergeStates` a save wrote that
+ * memory over the whole file, so the last device to save won everything: videos
+ * hidden on the phone came back the moment the Mac's poll saved a snapshot
+ * taken before the phone touched it.
+ *
+ * These tests are the guarantee that it does not happen again. Anything that
+ * changes how state is written should have to break a test here first — so the
+ * cases are written as scenarios ("the Mac polls with a stale copy") rather
+ * than as unit assertions about fields.
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import type { HubItem, SubscriptionsState } from "../src/subscriptions.ts";
+import {
+  emptyState,
+  hideItem,
+  keepItem,
+  mergeStates,
+  normalizeState,
+  restoreItem,
+} from "../src/subscriptions.ts";
+
+const CHANNEL = "UC6107grRI4m0o2-emgoDnAA";
+
+function item(videoId: string, over: Partial<HubItem> = {}): HubItem {
+  return {
+    videoId,
+    channelId: CHANNEL,
+    channelTitle: "A channel",
+    title: `Video ${videoId}`,
+    published: "2026-07-01T00:00:00.000Z",
+    thumbnail: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+    description: "words",
+    views: 100,
+    isShort: false,
+    state: "new",
+    seenAt: "2026-07-01T00:00:00.000Z",
+    origin: "feed",
+    ...over,
+  };
+}
+
+function state(items: HubItem[], over: Partial<SubscriptionsState> = {}): SubscriptionsState {
+  return {
+    ...emptyState(),
+    channels: [{ id: CHANNEL, title: "A channel", addedAt: "2026-06-01T00:00:00.000Z", error: null }],
+    items,
+    ...over,
+  };
+}
+
+/** A deep copy, because a device's memory is not the other device's memory. */
+const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+const find = (merged: SubscriptionsState, videoId: string): HubItem =>
+  merged.items.find((i) => i.videoId === videoId)!;
+
+// ------------------------------------------------------- the reported bug
+
+test("the Mac's stale poll cannot un-hide what the phone just hid", () => {
+  // Both devices start from the same file.
+  const shared = state(["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"].map((id) => item(id)));
+  const mac = copy(shared);
+  const phone = copy(shared);
+
+  // The phone hides all three. The Mac never hears about it — its Obsidian has
+  // been open since this morning.
+  for (const it of phone.items) hideItem(it, new Date("2026-07-29T12:00:00Z"));
+
+  // The Mac now polls and saves. `save()` merges into what is on disk, which is
+  // the phone's file.
+  const written = mergeStates(mac, phone);
+
+  assert.equal(written.items.filter((i) => i.state === "dismissed").length, 3);
+  assert.ok(
+    written.items.every((i) => i.state === "dismissed"),
+    "a hide made on the other device must survive this device's save",
+  );
+});
+
+test("and the phone does not un-hide what the Mac hid, either — it is symmetric", () => {
+  const shared = state([item("aaaaaaaaaaa")]);
+  const mac = copy(shared);
+  const phone = copy(shared);
+  hideItem(mac.items[0], new Date("2026-07-29T12:00:00Z"));
+
+  assert.equal(find(mergeStates(phone, mac), "aaaaaaaaaaa").state, "dismissed");
+  assert.equal(find(mergeStates(mac, phone), "aaaaaaaaaaa").state, "dismissed");
+});
+
+test("a hide survives any number of merges with a device that never learned of it", () => {
+  const phone = state([item("aaaaaaaaaaa")]);
+  hideItem(phone.items[0], new Date("2026-07-29T12:00:00Z"));
+  const stale = state([item("aaaaaaaaaaa")]);
+
+  let disk = copy(phone);
+  for (let i = 0; i < 5; i++) disk = mergeStates(copy(stale), disk);
+  assert.equal(find(disk, "aaaaaaaaaaa").state, "dismissed");
+});
+
+// ------------------------------------------------------ decisions vs facts
+
+test("the newer decision wins: putting a video back beats an older removal", () => {
+  const hidden = state([item("aaaaaaaaaaa")]);
+  hideItem(hidden.items[0], new Date("2026-07-29T10:00:00Z"));
+
+  const restored = copy(hidden);
+  restoreItem(restored.items[0], new Date("2026-07-29T11:00:00Z"));
+
+  assert.equal(find(mergeStates(hidden, restored), "aaaaaaaaaaa").state, "new");
+  assert.equal(find(mergeStates(restored, hidden), "aaaaaaaaaaa").state, "new");
+});
+
+test("and an older restore does not beat a newer removal", () => {
+  const restored = state([item("aaaaaaaaaaa")]);
+  restoreItem(restored.items[0], new Date("2026-07-29T10:00:00Z"));
+
+  const hidden = copy(restored);
+  hideItem(hidden.items[0], new Date("2026-07-29T11:00:00Z"));
+
+  assert.equal(find(mergeStates(restored, hidden), "aaaaaaaaaaa").state, "dismissed");
+});
+
+test("a tombstone written before decidedAt existed still beats an undecided copy", () => {
+  // The seven such items in the real vault: state dismissed, no timestamps.
+  const legacy = state([item("aaaaaaaaaaa", { state: "dismissed", description: "", thumbnail: "" })]);
+  const fresh = state([item("aaaaaaaaaaa")]);
+
+  assert.equal(find(mergeStates(fresh, legacy), "aaaaaaaaaaa").state, "dismissed");
+  assert.equal(find(mergeStates(legacy, fresh), "aaaaaaaaaaa").state, "dismissed");
+});
+
+test("dismissedAt alone is enough to date a decision", () => {
+  const old = state([
+    item("aaaaaaaaaaa", { state: "dismissed", dismissedAt: "2026-07-01T00:00:00.000Z" }),
+  ]);
+  const newer = state([item("aaaaaaaaaaa")]);
+  restoreItem(newer.items[0], new Date("2026-07-29T00:00:00Z"));
+  assert.equal(find(mergeStates(old, newer), "aaaaaaaaaaa").state, "new");
+});
+
+test("Kept wins a tie, because a Kept item has a note behind it", () => {
+  const kept = state([item("aaaaaaaaaaa", { state: "kept", notePath: "Watch Later/x.md" })]);
+  const dismissed = state([item("aaaaaaaaaaa", { state: "dismissed" })]);
+  const merged = find(mergeStates(dismissed, kept), "aaaaaaaaaaa");
+  assert.equal(merged.state, "kept");
+  assert.equal(merged.notePath, "Watch Later/x.md");
+});
+
+test("opening a video on one device marks it Kept on the other", () => {
+  const phone = state([item("aaaaaaaaaaa")]);
+  const mac = copy(phone);
+  keepItem(mac.items[0], "Watch Later/x.md", new Date("2026-07-29T12:00:00Z"));
+
+  const merged = find(mergeStates(phone, mac), "aaaaaaaaaaa");
+  assert.equal(merged.state, "kept");
+  assert.equal(merged.notePath, "Watch Later/x.md");
+});
+
+test("facts are pooled even when the decision comes from one side", () => {
+  // The Mac's poll backfilled a duration and a Shorts probe; the phone hid it
+  // later. Both are true, and the merge should not have to choose.
+  const mac = state([item("aaaaaaaaaaa", { durationSeconds: 640, isShort: false })]);
+  const phone = state([item("aaaaaaaaaaa", { durationSeconds: undefined, isShort: null })]);
+  hideItem(phone.items[0], new Date("2026-07-29T12:00:00Z"));
+
+  const merged = find(mergeStates(mac, phone), "aaaaaaaaaaa");
+  assert.equal(merged.state, "dismissed");
+  assert.equal(merged.durationSeconds, 640);
+  assert.equal(merged.isShort, false);
+});
+
+test("a merge never hands a description back to a tombstone", () => {
+  // hideItem drops the description on purpose — the hidden list is the one list
+  // that only grows. A merge that restored it would undo that on every save.
+  const mac = state([item("aaaaaaaaaaa", { description: "a few kilobytes" })]);
+  const phone = copy(mac);
+  hideItem(phone.items[0], new Date("2026-07-29T12:00:00Z"));
+
+  const merged = find(mergeStates(mac, phone), "aaaaaaaaaaa");
+  assert.equal(merged.description, "");
+  assert.equal(merged.thumbnail, "");
+});
+
+test("the earlier sighting is kept, and a two-source item stays 'both'", () => {
+  const a = state([item("aaaaaaaaaaa", { seenAt: "2026-07-05T00:00:00.000Z", origin: "feed" })]);
+  const b = state([
+    item("aaaaaaaaaaa", { seenAt: "2026-07-01T00:00:00.000Z", origin: "watchlater" }),
+  ]);
+  const merged = find(mergeStates(a, b), "aaaaaaaaaaa");
+  assert.equal(merged.seenAt, "2026-07-01T00:00:00.000Z");
+  assert.equal(merged.origin, "both");
+});
+
+// ------------------------------------------------------------ what is there
+
+test("an item only one device has ever seen is not dropped", () => {
+  const mac = state([item("aaaaaaaaaaa")]);
+  const phone = state([item("bbbbbbbbbbb")]);
+  const merged = mergeStates(mac, phone);
+  assert.deepEqual(merged.items.map((i) => i.videoId).sort(), ["aaaaaaaaaaa", "bbbbbbbbbbb"]);
+});
+
+test("merging a file against itself changes nothing", () => {
+  const one = state([item("aaaaaaaaaaa"), item("bbbbbbbbbbb", { state: "dismissed" })]);
+  assert.deepEqual(mergeStates(copy(one), copy(one)), one);
+});
+
+test("the newest poll time wins, and no poll at all is tolerated", () => {
+  const a = state([], { lastPolledAt: "2026-07-29T10:00:00.000Z" });
+  const b = state([], { lastPolledAt: "2026-07-29T11:00:00.000Z" });
+  assert.equal(mergeStates(a, b).lastPolledAt, "2026-07-29T11:00:00.000Z");
+  assert.equal(mergeStates(state([]), state([])).lastPolledAt, null);
+});
+
+// ---------------------------------------------------------------- channels
+
+test("a channel added on one device arrives on the other", () => {
+  const other = "UCXuqSBlHAE6Xw-yeJA0Tunw";
+  const mac = state([]);
+  const phone = state([], {
+    channels: [
+      ...state([]).channels,
+      { id: other, title: "Another", addedAt: "2026-07-29T00:00:00.000Z", error: null },
+    ],
+  });
+  assert.equal(mergeStates(mac, phone).channels.length, 2);
+});
+
+test("a channel removed on one device stays removed after a merge", () => {
+  const phone = state([item("aaaaaaaaaaa")], {
+    channels: [],
+    items: [],
+    removedChannels: [{ id: CHANNEL, at: "2026-07-29T12:00:00.000Z" }],
+  });
+  const mac = state([item("aaaaaaaaaaa")]);
+
+  const merged = mergeStates(mac, phone);
+  assert.deepEqual(merged.channels, [], "the channel came back");
+  assert.deepEqual(merged.items, [], "its videos came back with it");
+});
+
+test("removing a channel does not take a note you already made with it", () => {
+  const kept = item("aaaaaaaaaaa", { state: "kept", notePath: "Watch Later/x.md" });
+  const phone = state([], {
+    channels: [],
+    items: [],
+    removedChannels: [{ id: CHANNEL, at: "2026-07-29T12:00:00.000Z" }],
+  });
+  const merged = mergeStates(state([kept]), phone);
+  assert.equal(merged.items.length, 1);
+  assert.equal(merged.items[0].state, "kept");
+});
+
+test("adding a channel back after removing it sticks", () => {
+  const mac = state([], {
+    channels: [{ id: CHANNEL, title: "A channel", addedAt: "2026-07-29T13:00:00.000Z", error: null }],
+  });
+  const phone = state([], {
+    channels: [],
+    removedChannels: [{ id: CHANNEL, at: "2026-07-29T12:00:00.000Z" }],
+  });
+  assert.equal(mergeStates(mac, phone).channels.length, 1);
+});
+
+// ------------------------------------------------------------- round trip
+
+test("a decision survives the trip through JSON and normalizeState", () => {
+  const phone = state([item("aaaaaaaaaaa")], {
+    removedChannels: [{ id: "UCXuqSBlHAE6Xw-yeJA0Tunw", at: "2026-07-29T12:00:00.000Z" }],
+  });
+  hideItem(phone.items[0], new Date("2026-07-29T12:00:00Z"));
+
+  const reread = normalizeState(JSON.parse(JSON.stringify(phone)));
+  assert.equal(reread.items[0].decidedAt, "2026-07-29T12:00:00.000Z");
+  assert.equal(reread.removedChannels?.length, 1);
+
+  // And the reread copy still wins against a device that never saw the hide.
+  assert.equal(find(mergeStates(state([item("aaaaaaaaaaa")]), reread), "aaaaaaaaaaa").state,
+    "dismissed");
+});

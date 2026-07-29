@@ -78,6 +78,17 @@ export interface HubItem {
    * and it is what decides which tombstone falls off the end of the cap.
    */
   dismissedAt?: string;
+  /**
+   * ISO time you last decided something about this video — hid it, kept it or
+   * put it back. Absent means nobody has decided anything.
+   *
+   * This is the field that makes two devices safe. The state file is one JSON
+   * blob synced by iCloud, so before this existed the last device to write it
+   * won outright: hide six videos on the phone, and the Mac's next poll — built
+   * from the snapshot it loaded at startup — put all six back. With a stamp per
+   * item, `mergeStates` can take the newer decision instead of the newer file.
+   */
+  decidedAt?: string;
 }
 
 /** A channel feed, your Watch Later list, both, or a search you ran. */
@@ -88,10 +99,16 @@ export interface SubscriptionsState {
   channels: Channel[];
   items: HubItem[];
   lastPolledAt: string | null;
+  /**
+   * Channels you removed, and when. A merge unions two channel lists, so
+   * without this a channel removed on the phone would be handed straight back
+   * by the Mac's copy — the same bug the item stamps fix, one level up.
+   */
+  removedChannels?: Array<{ id: string; at: string }>;
 }
 
 export function emptyState(): SubscriptionsState {
-  return { version: 1, channels: [], items: [], lastPolledAt: null };
+  return { version: 1, channels: [], items: [], lastPolledAt: null, removedChannels: [] };
 }
 
 /**
@@ -113,7 +130,159 @@ export function normalizeState(raw: unknown): SubscriptionsState {
     );
   }
   state.lastPolledAt = typeof data.lastPolledAt === "string" ? data.lastPolledAt : null;
+  if (Array.isArray(data.removedChannels)) {
+    state.removedChannels = data.removedChannels.filter(
+      (r): r is { id: string; at: string } =>
+        Boolean(r) && typeof r.id === "string" && typeof r.at === "string",
+    );
+  }
   return state;
+}
+
+// -------------------------------------------------------------------- merge
+
+/**
+ * When this item was last decided about, as a number. Falls back to
+ * `dismissedAt` so the tombstones written before `decidedAt` existed still
+ * carry their own time, and to 0 for an item nobody has touched.
+ */
+function decisionTime(item: HubItem): number {
+  return Date.parse(item.decidedAt ?? item.dismissedAt ?? "") || 0;
+}
+
+/**
+ * Which state wins when the clocks say nothing — two undecided items, or two
+ * legacy records with no stamp at all. A decision beats no decision, and Kept
+ * beats Dismissed because a Kept item has a note file behind it.
+ */
+const DECISION_RANK: Record<ItemState, number> = { kept: 3, dismissed: 2, new: 1 };
+
+function mergeOrigin(a: ItemOrigin | undefined, b: ItemOrigin | undefined): ItemOrigin | undefined {
+  if (a === b) return a;
+  if (!a) return b;
+  if (!b) return a;
+  if (a === "search" || b === "search") return a === "search" ? a : b;
+  return "both";
+}
+
+/**
+ * One video, as two devices see it.
+ *
+ * The decision — the state, and everything that hangs off it — comes from
+ * whichever side decided last. Everything else is a *fact* about the video
+ * rather than a choice about it, so it is taken from whichever side happens to
+ * know it: a description the phone never fetched, a duration only a desktop
+ * poll backfills, the earlier of the two sighting times.
+ *
+ * The one exception is a tombstone. `hideItem` drops the description and
+ * thumbnail on purpose, so a hidden winner must not have them handed back by
+ * the losing copy — that would undo the compaction on every merge.
+ */
+function mergeItem(mine: HubItem, theirs: HubItem): HubItem {
+  const a = decisionTime(mine);
+  const b = decisionTime(theirs);
+  const mineWins =
+    a !== b ? a > b : DECISION_RANK[mine.state] >= DECISION_RANK[theirs.state];
+  const winner = mineWins ? mine : theirs;
+  const loser = mineWins ? theirs : mine;
+
+  const merged: HubItem = { ...winner };
+  if (merged.state !== "dismissed") {
+    if (!merged.description) merged.description = loser.description;
+    if (!merged.thumbnail) merged.thumbnail = loser.thumbnail;
+  }
+  // Guarded rather than assigned: writing `undefined` in would add the key to
+  // an item that never had it, and "not asked yet" is a state the backfill
+  // reads. See `durationSeconds` on `HubItem`.
+  if (merged.durationSeconds === undefined && loser.durationSeconds !== undefined) {
+    merged.durationSeconds = loser.durationSeconds;
+  }
+  if (merged.isShort === null) merged.isShort = loser.isShort;
+  if (merged.views === null) merged.views = loser.views;
+  if (!merged.published) merged.published = loser.published;
+  if (!merged.notePath && loser.notePath) merged.notePath = loser.notePath;
+  if (merged.watched === undefined && loser.watched !== undefined) merged.watched = loser.watched;
+  if (loser.seenAt && (!merged.seenAt || loser.seenAt < merged.seenAt)) merged.seenAt = loser.seenAt;
+  merged.origin = mergeOrigin(mine.origin, theirs.origin);
+  return merged;
+}
+
+/**
+ * Two copies of the state file, reconciled.
+ *
+ * `subscriptions.json` is one blob synced by iCloud, and both this Mac and the
+ * phone hold their own copy of it in memory for as long as Obsidian is open.
+ * Writing that copy out wholesale means the last device to save wins the whole
+ * file — which is exactly how six videos hidden on the phone came back: the
+ * Mac's next poll rewrote the file from a snapshot taken before the phone had
+ * touched it.
+ *
+ * So a save is a merge now, not an overwrite. `mine` is what this device
+ * believes; `theirs` is what is on disk this instant. Per item and per channel,
+ * the newer decision wins — and the file is only ever the union of two devices'
+ * decisions, never one device's snapshot.
+ *
+ * Pure, and the thing the regression tests point at. If a future change breaks
+ * hidden videos again, it breaks a test here first.
+ */
+export function mergeStates(
+  mine: SubscriptionsState,
+  theirs: SubscriptionsState,
+): SubscriptionsState {
+  // Channel removals first: they decide which items are still wanted.
+  const removals = new Map<string, string>();
+  for (const list of [theirs.removedChannels ?? [], mine.removedChannels ?? []]) {
+    for (const entry of list) {
+      const seen = removals.get(entry.id);
+      if (!seen || entry.at > seen) removals.set(entry.id, entry.at);
+    }
+  }
+
+  const channels = new Map<string, Channel>();
+  for (const channel of [...theirs.channels, ...mine.channels]) {
+    const existing = channels.get(channel.id);
+    // Mine second, so a fresher title and a fresher error win; the earlier
+    // `addedAt` is the true one either way.
+    channels.set(channel.id, {
+      ...channel,
+      addedAt:
+        existing?.addedAt && existing.addedAt < channel.addedAt ? existing.addedAt : channel.addedAt,
+    });
+  }
+  // A removal only counts against a channel that was not added back afterwards.
+  for (const [id, at] of removals) {
+    const channel = channels.get(id);
+    if (channel && !(channel.addedAt > at)) channels.delete(id);
+  }
+
+  const theirsById = new Map(theirs.items.map((item) => [item.videoId, item]));
+  const items: HubItem[] = [];
+  for (const item of mine.items) {
+    const other = theirsById.get(item.videoId);
+    theirsById.delete(item.videoId);
+    items.push(other ? mergeItem(item, other) : item);
+  }
+  // Anything only the other device has ever seen. Appended rather than sorted
+  // in: every list in the hub sorts itself, so file order is not a promise.
+  items.push(...theirsById.values());
+
+  const kept = items.filter((item) => {
+    const removedAt = removals.get(item.channelId);
+    if (!removedAt) return true;
+    // Removing a channel removes what you had not kept — but not a decision you
+    // made about one of its videos after removing it.
+    if (item.state === "kept") return true;
+    return new Date(decisionTime(item)).toISOString() > removedAt;
+  });
+
+  const polled = [mine.lastPolledAt, theirs.lastPolledAt].filter(Boolean).sort();
+  return {
+    version: 1,
+    channels: [...channels.values()],
+    items: kept,
+    lastPolledAt: polled.length ? polled[polled.length - 1] : null,
+    removedChannels: [...removals].map(([id, at]) => ({ id, at })),
+  };
 }
 
 const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/;
@@ -465,17 +634,28 @@ export function thumbnailUrl(videoId: string): string {
 export function hideItem(item: HubItem, now: Date): void {
   item.state = "dismissed";
   item.dismissedAt = now.toISOString();
+  item.decidedAt = now.toISOString();
   item.description = "";
   item.thumbnail = "";
+}
+
+/** Mark an item Kept — you opened it — at a time a merge can compare. */
+export function keepItem(item: HubItem, notePath: string, now: Date): void {
+  item.state = "kept";
+  item.notePath = notePath;
+  item.decidedAt = now.toISOString();
 }
 
 /**
  * Bring a hidden video back as if it were newly seen. The description it lost
  * on the way in is the caller's problem — see `hideItem`.
  */
-export function restoreItem(item: HubItem): void {
+export function restoreItem(item: HubItem, now = new Date()): void {
   item.state = "new";
   delete item.dismissedAt;
+  // Stamped like any other decision: putting something back is a decision, and
+  // it has to be able to beat the removal it undoes on another device.
+  item.decidedAt = now.toISOString();
   if (!item.thumbnail) item.thumbnail = thumbnailUrl(item.videoId);
 }
 

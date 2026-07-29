@@ -28,6 +28,8 @@ import {
   emptyState,
   extractChannelIdFromHtml,
   hideItem,
+  keepItem,
+  mergeStates,
   parseChannelInput,
   parseSubscriptionsCsv,
   expireItems,
@@ -97,6 +99,8 @@ export class SubscriptionsStore {
   /** Bumped on every change so open views can redraw without being told what. */
   private listeners = new Set<() => void>();
   private saving: Promise<void> = Promise.resolve();
+  /** mtime of the last state file we read or wrote — see `refreshFromDisk`. */
+  private diskTime = 0;
 
   constructor(
     private app: App,
@@ -114,22 +118,75 @@ export class SubscriptionsStore {
   }
 
   async load(): Promise<void> {
+    const disk = await this.readDisk();
+    if (disk) this.state = disk;
+    await this.noteDiskTime();
+  }
+
+  /** What is in the file this instant, or null if there is nothing readable. */
+  private async readDisk(): Promise<SubscriptionsState | null> {
     try {
-      if (await this.app.vault.adapter.exists(this.statePath)) {
-        this.state = normalizeState(JSON.parse(await this.app.vault.adapter.read(this.statePath)));
-      }
+      if (!(await this.app.vault.adapter.exists(this.statePath))) return null;
+      return normalizeState(JSON.parse(await this.app.vault.adapter.read(this.statePath)));
     } catch (err) {
-      console.error("YT Free: subscriptions state unreadable, starting empty.", err);
-      this.state = emptyState();
+      // Starting empty is right at load and wrong at save — a half-synced file
+      // must never be treated as "the other device decided nothing".
+      console.error("YT Free: subscriptions state unreadable.", err);
+      return null;
     }
   }
 
-  /** Serialized: a poll and a click can both finish inside the same tick. */
+  private async noteDiskTime(): Promise<void> {
+    this.diskTime = (await this.app.vault.adapter.stat(this.statePath))?.mtime ?? 0;
+  }
+
+  /**
+   * Write the state — by merging into what is on disk, never by replacing it.
+   *
+   * The file is synced by iCloud and both devices hold it open, so a plain
+   * write means the last device to save wins the entire file. That is how
+   * videos hidden on the phone came back: the Mac's poll rewrote the file from
+   * the snapshot it loaded hours earlier. Re-reading here costs one file read
+   * per save and makes the file the union of both devices' decisions instead.
+   *
+   * Serialized: a poll and a click can both finish inside the same tick, and
+   * two merges must not interleave with each other's reads.
+   */
   save(): Promise<void> {
     this.saving = this.saving
-      .then(() => this.app.vault.adapter.write(this.statePath, JSON.stringify(this.state)))
+      .then(async () => {
+        const disk = await this.readDisk();
+        if (disk) this.state = mergeStates(this.state, disk);
+        await this.app.vault.adapter.write(this.statePath, JSON.stringify(this.state));
+        await this.noteDiskTime();
+        if (disk) this.emit();
+      })
       .catch((err) => console.error("YT Free: could not write subscriptions state.", err));
     return this.saving;
+  }
+
+  /**
+   * Pick up decisions made on the other device, without waiting for a save.
+   *
+   * A stat, and a read only when the file has actually moved — cheap enough to
+   * call on every hub open and every poll tick. Without it a Mac left open all
+   * day would keep showing videos the phone hid hours ago, and would keep
+   * merging against a copy of the file that gets staler by the hour.
+   */
+  async refreshFromDisk(): Promise<void> {
+    let mtime: number;
+    try {
+      mtime = (await this.app.vault.adapter.stat(this.statePath))?.mtime ?? 0;
+    } catch {
+      return;
+    }
+    if (mtime === this.diskTime) return;
+    this.diskTime = mtime;
+
+    const disk = await this.readDisk();
+    if (!disk) return;
+    this.state = mergeStates(this.state, disk);
+    this.emit();
   }
 
   // ------------------------------------------------------------- channels
@@ -161,6 +218,13 @@ export class SubscriptionsStore {
     this.state.items = this.state.items.filter(
       (item) => item.channelId !== channelId || item.state === "kept",
     );
+    // A tombstone, for the same reason a hidden video gets one: without it the
+    // other device's copy hands the channel and its videos straight back on the
+    // next merge.
+    this.state.removedChannels = [
+      ...(this.state.removedChannels ?? []).filter((r) => r.id !== channelId),
+      { id: channelId, at: new Date().toISOString() },
+    ];
     this.emit();
     void this.save();
   }
@@ -169,6 +233,9 @@ export class SubscriptionsStore {
 
   async poll(): Promise<void> {
     if (this.polling) return;
+    // Before anything: a poll ends in a save, and a save built on a stale copy
+    // of the file is what used to undo the other device's decisions.
+    await this.refreshFromDisk();
     if (this.state.channels.length === 0) return;
     this.polling = true;
     this.emit();
@@ -241,11 +308,15 @@ export class SubscriptionsStore {
 
     await mapLimit(pending, 4, async (item) => {
       const details = await fetchVideoDetails(item.videoId);
-      item.durationSeconds = details.durationSeconds;
+      // Re-looked-up after the round trip: a click elsewhere can save — and so
+      // merge — while these are in flight. See `live`.
+      const target = this.live(item);
+      if (target.state === "dismissed") return;
+      target.durationSeconds = details.durationSeconds;
       // Free, and it is the thing the hub exists to hold on to: a Watch Later
       // item arrives without one, and a feed item whose video has since fallen
       // out of the 15-entry window can never get one anywhere else.
-      if (!item.description && details.description) item.description = details.description;
+      if (!target.description && details.description) target.description = details.description;
     });
   }
 
@@ -328,8 +399,7 @@ export class SubscriptionsStore {
       created = true;
     }
 
-    item.state = "kept";
-    item.notePath = path;
+    keepItem(this.live(item), path, new Date());
     this.emit();
     void this.save();
 
@@ -359,9 +429,29 @@ export class SubscriptionsStore {
    * from a later poll, and what stops a search offering it to you again.
    */
   hide(item: HubItem): void {
-    hideItem(item, new Date());
+    hideItem(this.live(item), new Date());
     this.emit();
     void this.save();
+  }
+
+  /**
+   * The item in the current state with this video's ID — which is not always
+   * the object the caller is holding.
+   *
+   * A merge rebuilds the items it reconciled, so a card rendered before the
+   * last merge closes over an object that is no longer in `state.items`.
+   * Mutating that orphan would drop the click on the floor, which is the exact
+   * failure `mergeStates` exists to prevent. Identity is the video ID, never
+   * the reference.
+   *
+   * An item that has vanished entirely — its channel was removed elsewhere —
+   * is put back rather than silently ignored: you clicked it, so it is real.
+   */
+  private live(item: HubItem): HubItem {
+    const found = this.state.items.find((i) => i.videoId === item.videoId);
+    if (found) return found;
+    this.state.items.push(item);
+    return item;
   }
 
   /**
@@ -373,17 +463,21 @@ export class SubscriptionsStore {
    * not a broken one.
    */
   async restore(item: HubItem): Promise<void> {
-    restoreItem(item);
+    const live = this.live(item);
+    restoreItem(live);
     this.emit();
     void this.save();
 
-    if (item.description) return;
-    const details = await fetchVideoDetails(item.videoId);
-    // Re-checked: a click during the round trip could have hidden it again, and
-    // writing a description onto a tombstone would undo the compaction.
-    if (details.description && item.state !== "dismissed") {
-      item.description = details.description;
-      if (item.durationSeconds === undefined) item.durationSeconds = details.durationSeconds;
+    if (live.description) return;
+    const details = await fetchVideoDetails(live.videoId);
+    // Re-looked-up, not reused: that save merged, so the object above may have
+    // been replaced while the round trip was in flight. Re-checked too — a
+    // click during the round trip could have hidden it again, and writing a
+    // description onto a tombstone would undo the compaction.
+    const now = this.live(live);
+    if (details.description && now.state !== "dismissed") {
+      now.description = details.description;
+      if (now.durationSeconds === undefined) now.durationSeconds = details.durationSeconds;
       void this.save();
     }
   }
@@ -521,6 +615,9 @@ export class HubView extends ItemView {
     });
     this.build();
     this.renderAll();
+    // The phone may have hidden something since this window last looked. Cheap
+    // — a stat — and it redraws itself through `onChange` if anything moved.
+    void this.store.refreshFromDisk();
   }
 
   async onClose(): Promise<void> {
