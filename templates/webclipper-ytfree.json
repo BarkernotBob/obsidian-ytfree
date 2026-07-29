@@ -4,7 +4,7 @@
   "behavior": "create",
   "noteNameFormat": "{{title|safe_name}}",
   "path": "Videos",
-  "noteContentFormat": "## Notes\n\n## Description\n{{schema:@VideoObject:description}}\n",
+  "noteContentFormat": "# Notes\n\n\n# Video Description\n{{schema:@VideoObject:description}}\n",
   "properties": [
     {
       "name": "title",

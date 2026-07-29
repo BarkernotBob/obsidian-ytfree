@@ -87,21 +87,41 @@ export async function searchYouTube(
   return parseSearchResponse(await callInnertube(SEARCH_URL, "android", body));
 }
 
+/** What one player call is worth to the hub: the two facts a feed lacks. */
+export interface VideoDetails {
+  description: string;
+  /** Seconds, or null when the video would not answer. */
+  durationSeconds: number | null;
+}
+
 /**
- * The description of one video, for an item being added from search.
+ * The description and length of one video.
  *
- * Search does not carry a description on any client, and the hub's whole
- * premise is that the description is cached before it can go stale — so this is
- * the one extra round trip per add. It answers "" rather than throwing when the
- * video is private, age-gated or gone: an item with no description is still
- * worth adding, and the add is what the click asked for.
+ * Search carries no description on any client and a channel feed carries no
+ * duration on any day, and the hub's whole premise is that both are cached
+ * before they can go stale — so this is the one extra round trip, and it is the
+ * same call either fact comes from. It answers empty rather than throwing when
+ * the video is private, age-gated or gone: an item with neither is still worth
+ * having, and it is the caller's job to decide what to do about that.
  */
-export async function fetchDescription(videoId: string): Promise<string> {
+export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> {
   try {
     const response = await callInnertube(PLAYER_URL, "android", playerBody(videoId));
-    const details = (response as { videoDetails?: { shortDescription?: unknown } }).videoDetails;
-    return typeof details?.shortDescription === "string" ? details.shortDescription : "";
+    const details = (response as {
+      videoDetails?: { shortDescription?: unknown; lengthSeconds?: unknown };
+    }).videoDetails;
+    // `lengthSeconds` is a *string* of digits in every player response measured.
+    const length = Number(details?.lengthSeconds);
+    return {
+      description: typeof details?.shortDescription === "string" ? details.shortDescription : "",
+      durationSeconds: Number.isFinite(length) && length > 0 ? length : null,
+    };
   } catch {
-    return "";
+    return { description: "", durationSeconds: null };
   }
+}
+
+/** The description alone, for callers that have a duration already. */
+export async function fetchDescription(videoId: string): Promise<string> {
+  return (await fetchVideoDetails(videoId)).description;
 }

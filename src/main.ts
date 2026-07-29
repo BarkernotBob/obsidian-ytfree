@@ -46,15 +46,24 @@ import {
 import type { Cue } from "./transcript";
 import {
   groupCues,
+  HEATMAP_ALIASES,
   HEATMAP_HEADING,
   parseJson3,
   pickCaptionTrack,
   renderHeatmap,
   renderTranscript,
   topPeaks,
+  TRANSCRIPT_ALIASES,
   TRANSCRIPT_HEADING,
   upsertSection,
 } from "./transcript";
+import type { SectionName } from "./sections";
+import {
+  SECTION_HEADINGS,
+  foldableRanges,
+  headingLine,
+  normaliseHeadings,
+} from "./sections";
 import { YtFreePlayer } from "./player";
 import {
   extractVideoId,
@@ -92,6 +101,7 @@ interface YtFreeSettings {
   pinnedHeightVh: number;
   pinnedFrontmatterKeys: string;
   collapseProperties: boolean;
+  collapseSections: boolean;
   linkifyTimestamps: boolean;
   transcriptLanguage: string;
   transcriptIntervalSeconds: number;
@@ -148,6 +158,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   pinnedHeightVh: 40,
   pinnedFrontmatterKeys: "media_link, url",
   collapseProperties: true,
+  collapseSections: true,
   linkifyTimestamps: true,
   transcriptLanguage: "en",
   transcriptIntervalSeconds: 60,
@@ -219,6 +230,28 @@ interface PinnedEntry {
   entry: PlayerEntry | null;
 }
 
+/**
+ * Obsidian's per-file fold record, as it stores it and as both editing modes
+ * apply it. None of this is in the public typings — `currentMode.applyFoldInfo`
+ * and `app.foldManager` are internals — so every use of it is behind a `try`
+ * and degrades to leaving the note exactly as the user left it.
+ */
+interface FoldInfo {
+  folds: Array<{ from: number; to: number }>;
+  /** Total line count when the folds were taken; Obsidian discards a stale record. */
+  lines: number;
+}
+
+interface FoldableMode {
+  getFoldInfo?: () => FoldInfo | null;
+  applyFoldInfo?: (info: FoldInfo) => void;
+  applyScroll?: (line: number) => void;
+}
+
+function foldableMode(view: MarkdownView): FoldableMode {
+  return view.currentMode as unknown as FoldableMode;
+}
+
 export default class YtFreePlugin extends Plugin {
   settings: YtFreeSettings = DEFAULT_SETTINGS;
   private cache = new StreamCache();
@@ -226,6 +259,8 @@ export default class YtFreePlugin extends Plugin {
   private pinned = new Map<MarkdownView, PinnedEntry>();
   /** Last note whose properties we collapsed in a given view, so we do it once. */
   private collapsed = new Map<MarkdownView, string>();
+  /** Same, for the default section folds — see applyDefaultFolds. */
+  private folded = new Map<MarkdownView, string>();
   /** Scroll listeners pinning a docked view at the top — see holdDockedLayout. */
   private dockGuards = new Map<MarkdownView, () => void>();
   /**
@@ -539,8 +574,39 @@ export default class YtFreePlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: "normalise-headings",
+      name: "Rename this note's sections to Video Description / Video Transcript",
+      callback: () => void this.normaliseHeadingsInActiveNote(),
+    });
+
     this.settingTab = new YtFreeSettingTab(this.app, this);
     this.addSettingTab(this.settingTab);
+  }
+
+  /**
+   * Bring an older note's headings up to the current names.
+   *
+   * Notes written before this rename carry `## Notes`, `## Description` and
+   * `## Transcript`, and every part of the plugin that looks for a section
+   * still accepts those — so this is opt-in, one note at a time, rather than a
+   * migration that rewrites fifty files the first time the plugin loads.
+   */
+  private async normaliseHeadingsInActiveNote(): Promise<void> {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const file = view?.file;
+    if (!file) {
+      new Notice("YT Free: open the note first.");
+      return;
+    }
+
+    let changed = false;
+    await this.app.vault.process(file, (content) => {
+      const next = normaliseHeadings(content);
+      changed = next !== content;
+      return next;
+    });
+    new Notice(changed ? "YT Free: headings updated." : "YT Free: headings already current.");
   }
 
   // ---------------------------------------------------------- subscriptions
@@ -929,8 +995,13 @@ export default class YtFreePlugin extends Plugin {
 
       // Keyed off "this note has a video", not off the player, so it still
       // applies when the pinned player is switched off.
-      if (path && this.videoIdForNote(path)) this.collapseProperties(view, path);
-      else if (path && this.collapsed.get(view) !== path) this.collapsed.delete(view);
+      if (path && this.videoIdForNote(path)) {
+        this.collapseProperties(view, path);
+        this.applyDefaultFolds(view, path);
+      } else if (path) {
+        if (this.collapsed.get(view) !== path) this.collapsed.delete(view);
+        if (this.folded.get(view) !== path) this.folded.delete(view);
+      }
 
       // `isConnected` catches the case where Obsidian rebuilt the view's DOM
       // under us — same video, but our node is no longer in the document.
@@ -945,6 +1016,9 @@ export default class YtFreePlugin extends Plugin {
     }
     for (const view of [...this.collapsed.keys()]) {
       if (!open.has(view)) this.collapsed.delete(view);
+    }
+    for (const view of [...this.folded.keys()]) {
+      if (!open.has(view)) this.folded.delete(view);
     }
   }
 
@@ -986,6 +1060,143 @@ export default class YtFreePlugin extends Plugin {
       if (!container.hasClass("is-collapsed")) container.addClass("is-collapsed");
     };
     attempt();
+  }
+
+  // ---------------------------------------------------------------- sections
+
+  /** The open markdown view showing `path`, if one is. */
+  private viewForPath(path: string): MarkdownView | null {
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof MarkdownView && view.file?.path === path) return view;
+    }
+    return null;
+  }
+
+  /** Read the view's folds, or null when this Obsidian won't say. */
+  private foldsOf(view: MarkdownView): FoldInfo | null {
+    try {
+      return foldableMode(view).getFoldInfo?.() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Apply folds to the view and record them against the file.
+   *
+   * Both halves matter: the first is what the reader sees now, the second is
+   * what Obsidian restores when the note is reopened. Saving without applying
+   * would make the change appear only on the second visit.
+   */
+  private setFolds(view: MarkdownView, info: FoldInfo): void {
+    try {
+      foldableMode(view).applyFoldInfo?.(info);
+    } catch {
+      /* older or newer Obsidian: leave the note alone */
+    }
+    try {
+      const manager = (this.app as unknown as {
+        foldManager?: { save?: (file: TFile, info: FoldInfo) => void };
+      }).foldManager;
+      if (view.file) manager?.save?.(view.file, info);
+    } catch {
+      /* the record is a convenience, not a requirement */
+    }
+  }
+
+  /**
+   * Open a video note with Notes showing and everything below it folded away.
+   *
+   * A finished note is mostly transcript — several thousand words of it — and
+   * the description runs to a wall of links, so a note opened flat starts with
+   * the one section you wrote in it pushed off the bottom of the screen. The
+   * fold is the default state, not a lock: unfold a section and it stays
+   * unfolded for as long as the note is open, because this runs once per file
+   * per view, exactly like `collapseProperties`.
+   */
+  private applyDefaultFolds(view: MarkdownView, path: string): void {
+    if (!this.settings.collapseSections) return;
+    if (this.folded.get(view) === path) return;
+
+    let attempts = 0;
+    const attempt = (): void => {
+      if (view.file?.path !== path) return;
+
+      // The document arrives after the view does. An empty editor here means
+      // "not loaded yet", not "empty note" — the note has frontmatter at least.
+      let content = "";
+      try {
+        content = view.editor?.getValue() ?? "";
+      } catch {
+        content = "";
+      }
+      if (!content.trim()) {
+        if (++attempts < 20) window.setTimeout(attempt, 100);
+        return;
+      }
+
+      this.folded.set(view, path);
+      const ranges = foldableRanges(content, [
+        SECTION_HEADINGS.description,
+        SECTION_HEADINGS.transcript,
+        HEATMAP_ALIASES,
+      ]);
+      if (ranges.length === 0) return;
+      this.setFolds(view, { folds: ranges, lines: content.split("\n").length });
+    };
+    attempt();
+  }
+
+  /**
+   * Scroll the note to one of its sections, unfolding it on the way.
+   *
+   * Jumping to a folded heading would otherwise land you on a heading with
+   * nothing under it, which reads as a broken link — so the fold covering the
+   * target is dropped first, and only that one: the other sections stay as the
+   * reader left them.
+   */
+  private jumpToSection(file: TFile, section: SectionName): void {
+    const view = this.viewForPath(file.path);
+    if (!view) return;
+
+    let content = "";
+    try {
+      content = view.editor?.getValue() ?? "";
+    } catch {
+      content = "";
+    }
+    const line = headingLine(content, SECTION_HEADINGS[section]);
+    if (line < 0) {
+      new Notice(`YT Free: this note has no ${SECTION_HEADINGS[section][0]} section.`);
+      return;
+    }
+
+    const folds = this.foldsOf(view);
+    if (folds) {
+      const kept = folds.folds.filter((fold) => fold.from !== line);
+      if (kept.length !== folds.folds.length) this.setFolds(view, { ...folds, folds: kept });
+    }
+
+    // Once the unfold has been laid out, or the scroll lands at the old height.
+    window.setTimeout(() => {
+      try {
+        foldableMode(view).applyScroll?.(line);
+      } catch {
+        /* nothing to do but leave the reader where they were */
+      }
+      // Tapping Notes is how you start writing, so put the cursor where the
+      // typing goes. Only there: a cursor parked in the transcript would send
+      // the next thing you type into someone else's words.
+      if (section === "notes" && view.getMode() === "source") {
+        try {
+          view.editor.setCursor({ line: line + 1, ch: 0 });
+          view.editor.focus();
+        } catch {
+          /* reading mode, or no editor: the scroll was the point anyway */
+        }
+      }
+    }, 0);
   }
 
   // -------------------------------------------------------- transcript auto
@@ -1111,11 +1322,19 @@ export default class YtFreePlugin extends Plugin {
       await this.app.vault.process(file, (content) => {
         // Heatmap first: it is the short list you scan, and the transcript is
         // the long thing you scroll past everything else to reach.
-        let next = upsertSection(content, HEATMAP_HEADING, renderHeatmap(peaks, cues, videoId));
+        // Aliases, so a note still carrying the old `## Transcript` has that
+        // section replaced rather than a second one appended beneath it.
+        let next = upsertSection(
+          content,
+          HEATMAP_HEADING,
+          renderHeatmap(peaks, cues, videoId),
+          HEATMAP_ALIASES,
+        );
         next = upsertSection(
           next,
           TRANSCRIPT_HEADING,
           renderTranscript(paragraphs, videoId, track),
+          TRANSCRIPT_ALIASES,
         );
         return next;
       });
@@ -1787,10 +2006,12 @@ export default class YtFreePlugin extends Plugin {
         ensureLoaded: mobile
           ? () => this.players.get(videoId)?.activate?.() ?? Promise.resolve()
           : undefined,
-        // Symbols on a phone, words on the desktop. A phone row has no width
-        // for seven text buttons, and a thumb aims at a shape faster than it
-        // reads a word.
-        layout: mobile ? "icons" : "labels",
+        // Only where there is a note to jump around in. A fenced block rendered
+        // outside a file — a preview, an export — has no sections.
+        onJump:
+          noteFile instanceof TFile
+            ? (section) => this.jumpToSection(noteFile, section)
+            : undefined,
       },
     );
     const entry: PlayerEntry = {
@@ -2517,6 +2738,18 @@ class YtFreeSettingTab extends PluginSettingTab {
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.collapseProperties).onChange(async (value) => {
           this.plugin.settings.collapseProperties = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Collapse description and transcript")
+      .setDesc(
+        "Open a video note with Notes showing and the description, transcript and most-replayed sections folded. Unfolding one sticks until you open another note.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.collapseSections).onChange(async (value) => {
+          this.plugin.settings.collapseSections = value;
           await this.plugin.saveSettings();
         }),
       );

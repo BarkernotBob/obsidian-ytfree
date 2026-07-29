@@ -24,6 +24,7 @@ import {
 import type { HubFilter, HubItem, SubscriptionsState } from "./subscriptions";
 import {
   buildWatchLaterNote,
+  cardBlurb,
   deskSub,
   emptyState,
   extractChannelIdFromHtml,
@@ -32,6 +33,7 @@ import {
   parseSubscriptionsCsv,
   expireItems,
   feedUrl,
+  formatDuration,
   formatViews,
   mergeItems,
   normalizeState,
@@ -43,7 +45,8 @@ import {
   searchResultToItem,
   visibleItems,
 } from "./subscriptions";
-import { fetchDescription, searchYouTube } from "./innertube";
+import { NOTES_HEADING } from "./sections";
+import { fetchVideoDetails, searchYouTube } from "./innertube";
 import type { SearchPage, SearchResult } from "./search";
 import {
   DURATION_OPTIONS,
@@ -65,6 +68,18 @@ export interface HubSettings {
   /** Keep videos the account says were already watched in the New list. */
   showWatched: boolean;
 }
+
+/**
+ * How many durations one poll will go and fetch.
+ *
+ * A channel feed states no duration, so every feed item needs a player call to
+ * learn one — and a fresh import is hundreds of items. Capped rather than
+ * batched into oblivion: the newest items are done first, a poll costs a
+ * bounded number of requests, and a backlog fills itself in over the next few
+ * polls without anyone waiting for it. A card with no duration yet is a card
+ * with an empty badge, which is a reserved box either way.
+ */
+const DURATION_BACKFILL_PER_POLL = 40;
 
 /** Run `worker` over `items`, at most `limit` in flight. */
 async function mapLimit<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
@@ -195,12 +210,44 @@ export class SubscriptionsStore {
         });
       }
 
+      await this.backfillDurations();
+
       this.state.lastPolledAt = now.toISOString();
     } finally {
       this.polling = false;
       this.emit();
       await this.save();
     }
+  }
+
+  /**
+   * Learn how long the videos are, a bounded number of them at a time.
+   *
+   * Unlike the Shorts probe this runs on the phone too, because it has to: the
+   * card that shows a duration is the phone's card, and a phone that only ever
+   * read durations written by a Mac would show none at all on a video it added
+   * itself. It is the same player call the plugin already makes to play
+   * anything, so it is not a new kind of cost — only a bounded amount of it.
+   *
+   * Newest first, and hidden items never: a tombstone is a line of text with no
+   * thumbnail to put a badge on. A refusal is recorded as `null` so a private
+   * or deleted video is asked once rather than on every poll forever.
+   */
+  private async backfillDurations(): Promise<void> {
+    const pending = this.state.items
+      .filter((item) => item.state !== "dismissed" && item.durationSeconds === undefined)
+      .sort((a, b) => (Date.parse(b.published) || 0) - (Date.parse(a.published) || 0))
+      .slice(0, DURATION_BACKFILL_PER_POLL);
+    if (pending.length === 0) return;
+
+    await mapLimit(pending, 4, async (item) => {
+      const details = await fetchVideoDetails(item.videoId);
+      item.durationSeconds = details.durationSeconds;
+      // Free, and it is the thing the hub exists to hold on to: a Watch Later
+      // item arrives without one, and a feed item whose video has since fallen
+      // out of the 15-entry window can never get one anywhere else.
+      if (!item.description && details.description) item.description = details.description;
+    });
   }
 
   // --------------------------------------------------------------- search
@@ -220,11 +267,13 @@ export class SubscriptionsStore {
    */
   async addSearchResult(result: SearchResult): Promise<"added" | "exists"> {
     if (this.hasItem(result.videoId)) return "exists";
-    const description = await fetchDescription(result.videoId);
+    const details = await fetchVideoDetails(result.videoId);
     // Checked again: the fetch is a round trip, and a poll or a second click
     // can land inside it. Never a duplicate.
     if (this.hasItem(result.videoId)) return "exists";
-    this.state.items.push(searchResultToItem(result, description, new Date()));
+    this.state.items.push(
+      searchResultToItem(result, details.description, new Date(), details.durationSeconds),
+    );
     this.emit();
     void this.save();
     return "added";
@@ -293,7 +342,7 @@ export class SubscriptionsStore {
       if (created && leaf.view instanceof MarkdownView) {
         const editor = leaf.view.editor;
         for (let i = 0; i < editor.lineCount(); i++) {
-          if (editor.getLine(i) === "## Notes") {
+          if (editor.getLine(i) === NOTES_HEADING) {
             editor.setCursor({ line: i + 1, ch: 0 });
             editor.focus();
             break;
@@ -330,11 +379,12 @@ export class SubscriptionsStore {
     void this.save();
 
     if (item.description) return;
-    const description = await fetchDescription(item.videoId);
+    const details = await fetchVideoDetails(item.videoId);
     // Re-checked: a click during the round trip could have hidden it again, and
     // writing a description onto a tombstone would undo the compaction.
-    if (description && item.state !== "dismissed") {
-      item.description = description;
+    if (details.description && item.state !== "dismissed") {
+      item.description = details.description;
+      if (item.durationSeconds === undefined) item.durationSeconds = details.durationSeconds;
       void this.save();
     }
   }
@@ -1285,13 +1335,25 @@ export class HubView extends ItemView {
     restore.buttonEl.addClass("ytfree-hub-icon-button");
   }
 
+  /**
+   * One video in the list.
+   *
+   * The two platforms build different cards out of the same parts. A desktop
+   * card is a row: thumbnail, title, one line of facts, a marker column and a
+   * dismiss column, 90px tall. A phone card is that row with the description
+   * underneath it and everything a size larger — see `renderPhoneCard`.
+   */
   private renderCard(item: HubItem, now: Date): void {
     const list = this.listEl;
     if (!list) return;
     const card = list.createDiv({ cls: "ytfree-hub-card" });
     this.cards.set(item.videoId, card);
 
-    const thumb = card.createDiv({ cls: "ytfree-hub-thumb" });
+    // The phone's card has a row inside it and the description under that, so
+    // its parts hang off a wrapper rather than off the card itself.
+    const row = this.phone ? card.createDiv({ cls: "ytfree-hub-row" }) : card;
+
+    const thumb = row.createDiv({ cls: "ytfree-hub-thumb" });
     if (item.thumbnail) {
       const img = thumb.createEl("img");
       img.src = item.thumbnail;
@@ -1299,12 +1361,16 @@ export class HubView extends ItemView {
       img.alt = "";
     }
 
-    // Shown, not spelled: on a phone "Short" takes the corner of the thumbnail
-    // that a search result gives its duration, rather than a fourth segment on
-    // a line that already has too many. Created either way, so a normal video
-    // leaves the thumbnail exactly the same size.
+    // Bottom-right of the thumbnail, exactly where a search result puts its
+    // own: how long it runs, and "Short" only when there is no length to state
+    // — a 45-second video says 0:45, which is the same fact more precisely.
+    // Created either way, so a video with neither leaves the card as it is.
     if (this.phone) {
-      thumb.createSpan({ cls: "ytfree-hub-duration", text: item.isShort ? "Short" : "" });
+      const length = formatDuration(item.durationSeconds);
+      thumb.createSpan({
+        cls: "ytfree-hub-duration",
+        text: length || (item.isShort ? "Short" : ""),
+      });
     }
 
     // A phone row has no width to spend on a marker column — the title is what
@@ -1314,17 +1380,25 @@ export class HubView extends ItemView {
       ? thumb.createDiv({ cls: "ytfree-hub-marker" })
       : null;
 
-    const meta = card.createDiv({ cls: "ytfree-hub-meta" });
+    const meta = row.createDiv({ cls: "ytfree-hub-meta" });
     meta.createDiv({ cls: "ytfree-hub-title", text: item.title });
     const sub = meta.createDiv({ cls: "ytfree-hub-sub" });
     sub.setText(this.phone ? phoneSub(item, now) : deskSub(item, now));
     card.toggleClass("is-watched", Boolean(item.watched));
 
     // Fixed-width column, filled or not, so marking an item Kept moves nothing.
-    const stateMarker = marker ?? card.createDiv({ cls: "ytfree-hub-marker" });
+    const stateMarker = marker ?? row.createDiv({ cls: "ytfree-hub-marker" });
     this.paintMarker(stateMarker, item);
 
-    const dismiss = card.createDiv({ cls: "ytfree-hub-dismiss" });
+    // What the video is about, under the row and across the whole card. Three
+    // lines, clamped, and the element exists whether or not there is anything
+    // in it — a card with no description is the same height as the one above
+    // it, which is the only way a list of them scans.
+    if (this.phone) {
+      card.createDiv({ cls: "ytfree-hub-desc", text: cardBlurb(item.description) });
+    }
+
+    const dismiss = (this.phone ? card : row).createDiv({ cls: "ytfree-hub-dismiss" });
     const button = new ButtonComponent(dismiss)
       .setIcon("x")
       .setTooltip("Hide — find it again under Hidden")

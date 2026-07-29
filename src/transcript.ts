@@ -7,9 +7,15 @@
 
 import { formatTimestamp } from "./format.ts";
 
-/** Headings the fetch owns outright: rewritten wholesale on every run. */
-export const TRANSCRIPT_HEADING = "## Transcript";
-export const HEATMAP_HEADING = "## Most replayed";
+// Headings the fetch owns outright: rewritten wholesale on every run. They live
+// in `sections.ts` with the rest of a note's structure and are re-exported here
+// so callers that only care about the transcript keep their one import.
+export {
+  HEATMAP_ALIASES,
+  HEATMAP_HEADING,
+  TRANSCRIPT_ALIASES,
+  TRANSCRIPT_HEADING,
+} from "./sections.ts";
 
 // ------------------------------------------------------------------ shapes
 
@@ -227,14 +233,25 @@ export function renderHeatmap(peaks: Peak[], cues: Cue[], videoId: string): stri
 /**
  * Replace a top-level section by heading, or append it when absent.
  *
- * The section runs to the next `## ` heading, so a fetch never disturbs the
- * Notes you wrote or the Description above it — and running it twice replaces
- * rather than duplicates. An empty `body` deletes the section, which is how a
- * video with no heatmap avoids leaving an empty heading behind.
+ * The section runs to the next heading, so a fetch never disturbs the Notes you
+ * wrote or the description above it — and running it twice replaces rather than
+ * duplicates. An empty `body` deletes the section, which is how a video with no
+ * heatmap avoids leaving an empty heading behind.
+ *
+ * `aliases` is what stops the rename from level two to level one turning every
+ * re-fetch into a duplicate section: a note still carrying `## Transcript` is
+ * found by its old name and comes back with the new one. It defaults to the
+ * heading itself, so a caller with nothing to migrate passes nothing.
  */
-export function upsertSection(content: string, heading: string, body: string): string {
+export function upsertSection(
+  content: string,
+  heading: string,
+  body: string,
+  aliases: string[] = [heading],
+): string {
   const lines = content.split("\n");
-  const start = lines.findIndex((line) => line.trim() === heading);
+  const wanted = new Set([heading, ...aliases]);
+  const start = lines.findIndex((line) => wanted.has(line.trim()));
 
   if (start === -1) {
     if (!body) return content;
@@ -244,7 +261,9 @@ export function upsertSection(content: string, heading: string, body: string): s
 
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
-    if (/^##\s/.test(lines[i])) {
+    // Level one or two: the sections are level one now and were level two
+    // before, and a note in either state has to stop at the right place.
+    if (/^#{1,2}\s/.test(lines[i])) {
       end = i;
       break;
     }

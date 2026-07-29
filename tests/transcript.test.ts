@@ -10,6 +10,7 @@ import {
   renderHeatmap,
   renderTranscript,
   topPeaks,
+  TRANSCRIPT_ALIASES,
   TRANSCRIPT_HEADING,
   upsertSection,
 } from "../src/transcript.ts";
@@ -192,27 +193,54 @@ const NOTE = `---
 title: "A video"
 ---
 
+# Notes
+
+my own note
+
+# Video Description
+0:00 something
+`;
+
+/** A note written before the headings were renamed and promoted to level one. */
+const OLD_NOTE = `---
+title: "A video"
+---
+
 ## Notes
 
 my own note
 
 ## Description
 0:00 something
+
+## Transcript
+stale words
 `;
 
 test("upsertSection appends a new section without touching what is above it", () => {
   const out = upsertSection(NOTE, TRANSCRIPT_HEADING, "**[0:00](x)** hello");
-  assert.match(out, /## Notes\n\nmy own note/);
-  assert.match(out, /## Description\n0:00 something/);
-  assert.match(out, /## Transcript\n\*\*\[0:00\]\(x\)\*\* hello/);
+  assert.match(out, /# Notes\n\nmy own note/);
+  assert.match(out, /# Video Description\n0:00 something/);
+  assert.match(out, /# Video Transcript\n\*\*\[0:00\]\(x\)\*\* hello/);
 });
 
 test("upsertSection replaces rather than duplicates on a second run", () => {
   const once = upsertSection(NOTE, TRANSCRIPT_HEADING, "old body");
   const twice = upsertSection(once, TRANSCRIPT_HEADING, "new body");
-  assert.equal(twice.match(/## Transcript/g)?.length, 1);
-  assert.match(twice, /## Transcript\nnew body/);
+  assert.equal(twice.match(/# Video Transcript/g)?.length, 1);
+  assert.match(twice, /# Video Transcript\nnew body/);
   assert.doesNotMatch(twice, /old body/);
+});
+
+test("upsertSection finds the old heading and leaves the new one in its place", () => {
+  const out = upsertSection(OLD_NOTE, TRANSCRIPT_HEADING, "fresh words", TRANSCRIPT_ALIASES);
+  assert.doesNotMatch(out, /## Transcript/);
+  assert.doesNotMatch(out, /stale words/);
+  assert.equal(out.match(/Transcript/g)?.length, 1);
+  assert.match(out, /# Video Transcript\nfresh words/);
+  // The sections it does not own are left exactly as they were.
+  assert.match(out, /## Notes\n\nmy own note/);
+  assert.match(out, /## Description\n0:00 something/);
 });
 
 test("upsertSection stops at the next heading, leaving later sections intact", () => {
@@ -222,16 +250,23 @@ test("upsertSection stops at the next heading, leaving later sections intact", (
     "words",
   );
   const replaced = upsertSection(withBoth, HEATMAP_HEADING, "- different peak");
-  assert.match(replaced, /## Most replayed\n- different peak/);
-  assert.match(replaced, /## Transcript\nwords/);
+  assert.match(replaced, /# Most replayed\n- different peak/);
+  assert.match(replaced, /# Video Transcript\nwords/);
   assert.doesNotMatch(replaced, /- peak\n/);
+});
+
+test("upsertSection stops at a level-two heading in a note that still has them", () => {
+  const out = upsertSection(OLD_NOTE, HEATMAP_HEADING, "- peak");
+  const replaced = upsertSection(out, HEATMAP_HEADING, "- other peak");
+  assert.match(replaced, /# Most replayed\n- other peak/);
+  assert.match(replaced, /## Transcript\nstale words/);
 });
 
 test("upsertSection with an empty body removes the section instead of leaving a bare heading", () => {
   const withSection = upsertSection(NOTE, HEATMAP_HEADING, "- peak");
   const removed = upsertSection(withSection, HEATMAP_HEADING, "");
   assert.doesNotMatch(removed, /Most replayed/);
-  assert.match(removed, /## Description/);
+  assert.match(removed, /# Video Description/);
 });
 
 test("upsertSection with an empty body on a note that never had the section is a no-op", () => {

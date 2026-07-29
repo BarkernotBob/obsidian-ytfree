@@ -1,5 +1,6 @@
 import Hls from "hls.js";
 import { setIcon } from "obsidian";
+import type { SectionName } from "./sections.ts";
 // Type-only, and it has to stay that way. A value import of these names pulled
 // the whole resolver — and its `child_process` import — into every bundle that
 // touches the player, which is one of the two reasons the plugin could not load
@@ -31,14 +32,11 @@ export interface PlayerOptions {
    */
   ensureLoaded?: () => Promise<void>;
   /**
-   * How the control row is drawn. "labels" is the desktop's row of text
-   * buttons. "icons" is the phone's: the same controls, as symbols, with the
-   * transport centred on the screen and the rest either side of it.
-   *
-   * Same buttons, same order of construction, same fixed sizes — only the
-   * contents of each button and the shape of the row change.
+   * Jump the note to one of its own sections. Draws the second row of the
+   * control bar; absent, there is no second row at all — a fenced block in a
+   * note with no video frontmatter has no sections to offer.
    */
-  layout?: "labels" | "icons";
+  onJump?: (section: SectionName) => void;
 }
 
 /**
@@ -103,42 +101,38 @@ export class YtFreePlayer {
   }
 
   /**
-   * Chromium hides Picture-in-Picture and playback speed behind the native
-   * overflow ("...") menu. This row surfaces them, plus skip and timestamp,
-   * without replacing the native scrubber and volume, which work well.
+   * The control bar.
    *
-   * The same row is built on mobile. It was originally dropped there on the
-   * theory that iOS's native controls already offered all of it — they do not
-   * offer 10-second skip or a speed picker without a long detour, and reaching
-   * PiP means an overlay button that appears only while playing.
+   * Chromium hides Picture-in-Picture and playback speed behind the native
+   * overflow ("...") menu, and iOS's native controls have no 10-second skip, no
+   * speed picker short of a long-press, and vanish once the video is playing —
+   * so both platforms need a bar of our own alongside the native scrubber.
+   *
+   * It is one design now, not two. The desktop used to get a left-packed row of
+   * seven text buttons of seven different widths, which read as a debug panel
+   * next to the phone's; the phone got symbols on a grid. The grid is the one
+   * that was right, so it is what both get: a single surface, `1fr auto 1fr`,
+   * with the transport in the middle cell so Play is centred on the *player*
+   * rather than on whatever happens to sit beside it. Every control is the same
+   * square, in the same colour, at the same spacing, except the one you reach
+   * for most — Play, which is round, larger and in the accent colour.
+   *
+   * Under it, when the note has sections to go to, a second row of three named
+   * links. They are text, not symbols, because there is no icon for "the
+   * transcript" and a control that navigates somewhere should say where.
    *
    * Every control has a fixed size and no layout-affecting state change, so
    * pressing one never moves its neighbours or the note content around it.
    */
   private buildControls(): void {
-    const icons = this.options.layout === "icons";
     const bar = this.container.createDiv({ cls: "ytfree-controls" });
-    bar.toggleClass("ytfree-controls-icons", icons);
 
-    /*
-     * Three cells on a phone, one row on the desktop.
-     *
-     * The phone's row is a `1fr auto 1fr` grid, so the transport sits in the
-     * middle cell and is centred on the *screen* rather than on whatever
-     * happens to be beside it — the reason the row read as thrown together was
-     * that seven differently-sized boxes were left-packed against the margin.
-     * Construction order below is unchanged, so the desktop row is the same row
-     * it has always been; on a phone the cell decides where each control lands
-     * and CSS `order` puts Play between the two skips.
-     */
-    const groups = icons
-      ? {
-          left: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side" }),
-          mid: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-transport" }),
-          right: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side" }),
-        }
-      : null;
-    const host = (side: "left" | "mid" | "right"): HTMLElement => groups?.[side] ?? bar;
+    const groups = {
+      left: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side" }),
+      mid: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-transport" }),
+      right: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side" }),
+    };
+    const host = (side: "left" | "mid" | "right"): HTMLElement => groups[side];
 
     const button = (
       side: "left" | "mid" | "right",
@@ -182,7 +176,7 @@ export class YtFreePlayer {
     forward.addClass("ytfree-btn-forward");
     // A double chevron says "skip", not "skip how far". The numeral is a static
     // corner badge inside a fixed-size button, so it costs no layout.
-    if (icons) for (const el of [back, forward]) el.createSpan({ cls: "ytfree-btn-badge", text: "10" });
+    for (const el of [back, forward]) el.createSpan({ cls: "ytfree-btn-badge", text: "10" });
 
     const speed = host("left").createEl("select", {
       cls: "ytfree-speed",
@@ -227,22 +221,58 @@ export class YtFreePlayer {
     }
 
     if (this.onDownload) {
-      // Fixed width, and only ever a text swap inside it: "Download" → "12%" →
-      // "Downloaded". The row cannot reflow while a download runs.
+      // The one button whose contents change to something that is not an icon:
+      // a running download reads "12%" inside the same square. Fixed size, so
+      // the row cannot reflow while it ticks.
       this.downloadBtn = button("right", "Download", "download", "Download this video for offline", () => {
         this.onDownload?.();
       });
       this.downloadBtn.addClass("ytfree-btn-download");
     }
+
+    this.buildSectionLinks();
   }
 
   /**
-   * Fill a control: a symbol where the row is symbols, the word where it is
-   * words.
+   * Notes, Video Description, Video Transcript — where the note's own headings
+   * are, one tap away.
    *
-   * The fallback is not decoration. `setIcon` with a name this Obsidian build
-   * does not know leaves the element empty, and an empty button is a control
-   * nobody can use — so an icon that did not render becomes its label instead.
+   * A phone note with a docked player and a transcript in it is thousands of
+   * lines long, and the only way to the description was to scroll past the
+   * notes. Text rather than symbols, equal widths, and the same surface as the
+   * bar above them so the two rows read as one control.
+   */
+  private buildSectionLinks(): void {
+    const jump = this.options.onJump;
+    if (!jump) return;
+
+    const row = this.container.createDiv({ cls: "ytfree-sections" });
+    const links: Array<[SectionName, string]> = [
+      ["notes", "Notes"],
+      ["description", "Description"],
+      ["transcript", "Transcript"],
+    ];
+    for (const [section, label] of links) {
+      const el = row.createEl("button", {
+        cls: "ytfree-section-link",
+        text: label,
+        attr: { title: `Go to ${label}`, "aria-label": `Go to ${label}` },
+      });
+      el.type = "button";
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        jump(section);
+      });
+    }
+  }
+
+  /**
+   * Fill a control with its symbol.
+   *
+   * The label fallback is not decoration. `setIcon` with a name this Obsidian
+   * build does not know leaves the element empty, and an empty button is a
+   * control nobody can use — so an icon that did not render becomes its word
+   * instead, and the button grows to hold it rather than sitting there blank.
    */
   private paint(el: HTMLButtonElement, label: string, icon: string, title?: string): void {
     if (title) {
@@ -251,14 +281,12 @@ export class YtFreePlayer {
     }
     const badge = el.querySelector(".ytfree-btn-badge");
     el.empty();
-    if (this.options.layout === "icons") {
-      setIcon(el, icon);
-      if (el.firstElementChild) {
-        if (badge) el.appendChild(badge);
-        return;
-      }
+    el.removeClass("ytfree-btn-text");
+    setIcon(el, icon);
+    if (!el.firstElementChild) {
+      el.setText(label);
+      el.addClass("ytfree-btn-text");
     }
-    el.setText(label);
     if (badge) el.appendChild(badge);
   }
 
@@ -302,18 +330,29 @@ export class YtFreePlayer {
     );
   }
 
-  /** Progress feedback on the Download button itself. */
+  /**
+   * Progress feedback on the Download button itself.
+   *
+   * Running, it is the percentage in place of the icon — inside the same square,
+   * at a size "100%" fits in. Done, it is a tick: the button has nothing left to
+   * do and a tick says so without needing to be read.
+   */
   setDownloadState(state: "idle" | "running" | "done", percent?: number): void {
-    if (!this.downloadBtn) return;
+    const el = this.downloadBtn;
+    if (!el) return;
+    el.toggleClass("is-progress", state === "running");
     if (state === "running") {
-      this.downloadBtn.setText(percent === undefined ? "…" : `${Math.round(percent)}%`);
-      this.downloadBtn.disabled = true;
+      el.empty();
+      el.setText(percent === undefined ? "…" : `${Math.round(percent)}%`);
+      el.setAttribute("title", "Downloading…");
+      el.setAttribute("aria-label", "Downloading…");
+      el.disabled = true;
     } else if (state === "done") {
-      this.downloadBtn.setText("Downloaded");
-      this.downloadBtn.disabled = true;
+      this.paint(el, "Downloaded", "check", "Downloaded for offline");
+      el.disabled = true;
     } else {
-      this.downloadBtn.setText("Download");
-      this.downloadBtn.disabled = false;
+      this.paint(el, "Download", "download", "Download this video for offline");
+      el.disabled = false;
     }
   }
 

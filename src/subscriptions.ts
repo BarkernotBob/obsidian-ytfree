@@ -12,6 +12,7 @@
  */
 
 import { linkifyTimestamps } from "./description.ts";
+import { DESCRIPTION_HEADING, NOTES_HEADING } from "./sections.ts";
 import type { SearchResult } from "./search.ts";
 
 /** A channel we poll. */
@@ -44,6 +45,17 @@ export interface HubItem {
    */
   description: string;
   views: number | null;
+  /**
+   * How long the video runs, in seconds.
+   *
+   * A channel feed carries no duration at all, so this is `undefined` on
+   * everything written before the phone card started showing one and stays
+   * `undefined` until a poll backfills it (see `backfillDurations` in
+   * `hub.ts`). `null` means "asked, and YouTube would not say" — a private or
+   * removed video — which is a different fact from "not asked yet" and stops
+   * the backfill retrying it forever.
+   */
+  durationSeconds?: number | null;
   /** null until the Shorts probe has run. */
   isShort: boolean | null;
   state: ItemState;
@@ -391,6 +403,7 @@ export function searchResultToItem(
   result: SearchResult,
   description: string,
   now: Date,
+  durationSeconds?: number | null,
 ): HubItem {
   return {
     videoId: result.videoId,
@@ -401,6 +414,10 @@ export function searchResultToItem(
     thumbnail: result.thumbnail,
     description,
     views: result.views,
+    // The player's own `lengthSeconds` when the caller has it, and search's
+    // "55:31" when it does not. A search item is the one kind that arrives with
+    // a duration already attached, so it never needs the backfill.
+    durationSeconds: durationSeconds ?? parseDurationText(result.duration),
     isShort: null,
     state: "new",
     seenAt: now.toISOString(),
@@ -607,6 +624,16 @@ function isoDate(value: string): string {
  * The note a click produces — the same shape `8.Watch_Later_Template.md` makes,
  * built from cached feed data instead of a watch-page scrape.
  *
+ * Every heading is level one. They are the note's only structure — Notes, the
+ * description, the transcript — and a level-two heading with nothing above it
+ * is a heading pretending to belong to a section that does not exist. It also
+ * makes the outline, the fold defaults and the player's section buttons all
+ * agree about what the top level of this note is.
+ *
+ * "Video Description" and "Video Transcript" rather than the bare words: a note
+ * has notes and a description of its own in its frontmatter, and the two are
+ * worth telling apart at a glance in the outline.
+ *
  * `length` is written empty on purpose. The feed carries no duration, and
  * shelling out to yt-dlp for it would put a multi-second stall in front of a
  * click that should feel instant.
@@ -627,9 +654,13 @@ export function buildWatchLaterNote(item: HubItem, now: Date): string {
     `media_link: ${url}`,
     "length: ",
     "---",
-    "## Notes",
+    NOTES_HEADING,
+    // Two blank lines, not one. The cursor lands on the first and the second is
+    // the gap between what you are writing and the heading under it, so a note
+    // taken in one line does not sit flush against the description.
     "",
-    "## Description",
+    "",
+    DESCRIPTION_HEADING,
     // Real markdown links, written at creation time: the plugin also linkifies
     // at render time, but a link in the file survives the plugin being off.
     item.description
@@ -705,6 +736,69 @@ export function phoneSub(item: HubItem, now: Date): string {
         ? "Watch Later"
         : "";
   return [item.channelTitle, age || origin].filter(Boolean).join(" · ");
+}
+
+/**
+ * "12:34", or "1:02:03" once there is an hour in it.
+ *
+ * Empty for anything that is not a real length, which includes both states a
+ * `HubItem` can be in before a duration is known: never asked, and asked and
+ * refused. The badge that draws this is hidden when it is empty, so a card
+ * whose duration has not landed yet is the same card, minus one fact.
+ */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return "";
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`;
+}
+
+/** The inverse, for search's "55:31" — the one place a duration arrives as text. */
+export function parseDurationText(text: string): number | null {
+  const parts = text.trim().split(":");
+  if (parts.length < 2 || parts.length > 3) return null;
+  let seconds = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part.trim())) return null;
+    seconds = seconds * 60 + Number(part);
+  }
+  return seconds > 0 ? seconds : null;
+}
+
+/**
+ * A description, flattened to something a two-line clamp can hold.
+ *
+ * A YouTube description is mostly not prose: chapter lists, affiliate links,
+ * social handles and a wall of hashtags, laid out over forty lines. The first
+ * couple of sentences are the part that tells you what the video is, so the
+ * lines that are plainly not that — a bare URL, a chapter stamp, a hashtag run
+ * — are dropped rather than truncated into.
+ *
+ * Cut to `maxChars` so a card never carries five kilobytes of text into the DOM
+ * for two lines of it to be visible. The CSS clamp is what the reader sees; this
+ * is what stops a list of two hundred cards being built out of whole
+ * descriptions.
+ */
+export function cardBlurb(description: string, maxChars = 220): string {
+  const lines = description
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      if (/^https?:\/\/\S+$/.test(line)) return false;
+      // "0:00 Intro" and friends: a chapter list is navigation, not a summary.
+      if (/^\(?\d{1,2}:\d{2}(:\d{2})?\)?\b/.test(line)) return false;
+      if (/^#\S+(\s+#\S+)*$/.test(line)) return false;
+      return true;
+    });
+
+  const text = lines.join(" ").replace(/\s+/g, " ").trim();
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars).replace(/\s+\S*$/, "")}…`;
 }
 
 /** "1.2M views" — a raw seven-digit number is harder to read at a glance. */

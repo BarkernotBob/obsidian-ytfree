@@ -29,33 +29,85 @@
 }
 
 /*
- * Surfaces the controls Chromium buries in its "..." overflow menu.
- * Fixed heights and widths throughout: pressing any button must not resize it
- * or shift anything around it.
+ * The control bar: one surface, one row, transport in the middle.
+ *
+ * Surfaces the controls Chromium buries in its "..." overflow menu, and it is
+ * one design on both platforms now. The desktop used to get a left-packed row
+ * of seven text buttons of seven different widths — it worked and read as a
+ * debug panel. A `1fr auto 1fr` grid instead: Play and the two skips are
+ * centred on the *player*, not on whatever happens to sit beside them, and the
+ * speed picker and secondary controls take the two edges. The middle cell is
+ * `auto`, so it stays centred whatever the sides hold.
+ *
+ * Fixed heights and widths throughout, and every state change is a swap of the
+ * symbol inside a box that does not move: pressing any control here must not
+ * resize it or shift anything around it.
  */
 .ytfree-controls {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 6px;
-  min-height: 32px;
+  min-height: 56px;
+  padding: 4px 8px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  box-sizing: border-box;
 }
 
-.ytfree-btn {
-  height: 28px;
-  min-width: 64px;
-  padding: 0 10px;
-  font-size: var(--font-ui-smaller);
-  line-height: 28px;
-  text-align: center;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  background: var(--interactive-normal);
-  color: var(--text-normal);
+.ytfree-controls-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The transport is the middle cell; the sides push outwards from it. */
+.ytfree-controls-side:first-child {
+  justify-content: flex-start;
+}
+
+.ytfree-controls-side:last-child {
+  justify-content: flex-end;
+}
+
+/* Construction order puts Play first, because Play is the button the rest of
+   this file talks about; the order it is *drawn* in belongs here. */
+.ytfree-controls-transport .ytfree-btn-back {
+  order: 1;
+}
+
+.ytfree-controls-transport .ytfree-btn-play {
+  order: 2;
+}
+
+.ytfree-controls-transport .ytfree-btn-forward {
+  order: 3;
+}
+
+/*
+ * One square per control, one size for all of them, no borders. Uniformity is
+ * the whole point: seven identical shapes read as a control bar, seven
+ * different ones read as leftovers.
+ */
+.ytfree-controls .ytfree-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
-  /* Fixed border and weight so hover/active never change the box size. */
-  font-weight: var(--font-normal);
+  box-shadow: none;
   box-sizing: border-box;
+  /* Fixed weight so no state change can re-measure a label. */
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-normal);
+  --icon-size: 20px;
 }
 
 /*
@@ -67,43 +119,138 @@
  * Every hover rule in this file is gated the same way, for the same reason.
  */
 @media (hover: hover) and (pointer: fine) {
-  .ytfree-btn:hover {
-    background: var(--interactive-hover);
+  .ytfree-controls .ytfree-btn:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
   }
 }
 
-/* Widest label this button ever shows is "Pause"; pin it so the Play/Pause
-   swap cannot nudge the buttons beside it. */
-.ytfree-btn-play {
-  width: 72px;
-}
-
-/* Widest label is "Downloaded"; pinning the width means download progress
-   ticking through "12%" cannot nudge the row. */
-.ytfree-btn-download {
-  width: 96px;
-}
-
-/* "Collapse" ↔ "Show video". Same reason: the button that changes the layout
-   below it must not change its own. */
-.ytfree-btn-collapse {
-  width: 104px;
-}
-
-.ytfree-btn:disabled {
-  cursor: default;
-  color: var(--text-muted);
-}
-
-.ytfree-speed {
-  height: 28px;
-  width: 72px;
-  font-size: var(--font-ui-smaller);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  background: var(--interactive-normal);
+/* Colour, not size: an active state that grew or gained a border would move
+   the controls beside it. */
+.ytfree-controls .ytfree-btn:active {
   color: var(--text-normal);
+}
+
+/* The one control that is not the same as the others, because it is the one
+   you reach for: bigger, round, and in the accent colour. */
+.ytfree-controls .ytfree-btn-play {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  --icon-size: 24px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-controls .ytfree-btn-play:hover {
+    background: var(--interactive-accent-hover);
+    color: var(--text-on-accent);
+  }
+}
+
+.ytfree-controls .ytfree-btn-play:active {
+  color: var(--text-on-accent);
+}
+
+/* An icon this Obsidian build did not have fell back to its word — see
+   `paint()`. The box grows sideways to hold it, once, at build time. */
+.ytfree-controls .ytfree-btn-text {
+  width: auto;
+  min-width: 40px;
+  padding: 0 10px;
+}
+
+/* A running download is a percentage in place of the icon, inside the same
+   square: "100%" at this size fits with room to spare. */
+.ytfree-controls .ytfree-btn-download.is-progress {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-normal);
+}
+
+.ytfree-controls .ytfree-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* "10", in the corner of the skip buttons. Static and absolutely positioned —
+   a button that stated its own size would be a button that changed size. */
+.ytfree-btn-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  font-size: 9px;
+  line-height: 1;
+  font-weight: var(--font-semibold);
+  color: inherit;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* Same pill as a button, and wide enough for "1.75×" so choosing a speed can
+   never re-measure the row. `text-align-last` is what centres the closed state
+   of a select in WebKit. */
+.ytfree-controls .ytfree-speed {
+  width: 52px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  text-align: center;
+  text-align-last: center;
+  box-shadow: none;
   box-sizing: border-box;
+}
+
+/*
+ * Notes · Description · Transcript — the note's own headings, one tap away.
+ *
+ * Its own surface under the control bar, in the wrapper's 4px gap. Three equal
+ * columns rather than three widths, because they are one control with three
+ * destinations and equal thirds are what says so.
+ */
+.ytfree-sections {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  box-sizing: border-box;
+}
+
+.ytfree-sections .ytfree-section-link {
+  height: 32px;
+  padding: 0 4px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-normal);
+  line-height: 32px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-sections .ytfree-section-link:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+.ytfree-sections .ytfree-section-link:active {
+  color: var(--text-normal);
 }
 
 /*
@@ -280,117 +427,17 @@
  * Every box has a fixed size, and every state change is a swap of the symbol
  * inside one. Pressing anything here still moves nothing.
  */
-.ytfree-controls-icons {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 6px;
-  min-height: 48px;
-}
-
 /*
- * Docked, the row spans the screen and takes an inset of its own.
+ * Docked, the two rows span the screen and take an inset of their own.
  *
- * Not `var(--file-margins)`: that variable is a *pair*, so it turned this into
- * a four-value shorthand — the row was flush against the left edge and carried
- * 24px of dead space underneath it, which is most of what stood between the
- * controls and the note. 12px, because the three groups need the width: at
- * the note's own 24px inset the row no longer fits a 375pt screen.
+ * Margin rather than padding, because the rows are surfaces now: padding would
+ * put the inset *inside* the grey and leave it running edge to edge. 12px,
+ * because the three groups need the width — at the note's own 24px inset the
+ * row no longer fits a 375pt screen.
  */
-.ytfree-docked .ytfree-controls {
-  padding: 6px 12px 0;
-}
-
-.ytfree-controls-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* The transport is the middle cell; the sides push outwards from it. */
-.ytfree-controls-side:first-child {
-  justify-content: flex-start;
-}
-
-.ytfree-controls-side:last-child {
-  justify-content: flex-end;
-}
-
-/* Construction order is the desktop's — Play is built before the skips so the
-   desktop row is unchanged — so the phone's order is set here instead. */
-.ytfree-controls-transport .ytfree-btn-back {
-  order: 1;
-}
-
-.ytfree-controls-transport .ytfree-btn-play {
-  order: 2;
-}
-
-.ytfree-controls-transport .ytfree-btn-forward {
-  order: 3;
-}
-
-/* One square per control, one size for all of them, no borders. Uniformity is
-   the whole point: seven identical shapes read as a control bar, seven
-   different ones read as leftovers. */
-.ytfree-controls-icons .ytfree-btn {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  min-width: 0;
-  height: 40px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-m);
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-  --icon-size: 20px;
-}
-
-/* The one control that is not the same as the others, because it is the one
-   you reach for: bigger, round, and in the accent colour. */
-.ytfree-controls-icons .ytfree-btn-play {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-  --icon-size: 24px;
-}
-
-/* "10", in the corner of the skip buttons. Static and absolutely positioned —
-   a button that stated its own size would be a button that changed size. */
-.ytfree-btn-badge {
-  position: absolute;
-  right: 4px;
-  bottom: 2px;
-  font-size: 9px;
-  line-height: 1;
-  font-weight: var(--font-semibold);
-  color: var(--text-muted);
-  pointer-events: none;
-}
-
-/* Same pill as a button, and wide enough for "1.75×" so choosing a speed can
-   never re-measure the row. `text-align-last` is what centres the closed state
-   of a select in WebKit. */
-.ytfree-controls-icons .ytfree-speed {
-  width: 52px;
-  height: 40px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-m);
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-  font-size: var(--font-ui-small);
-  text-align: center;
-  text-align-last: center;
-}
-
-.ytfree-controls-icons .ytfree-btn:disabled {
-  opacity: 0.45;
+.ytfree-docked .ytfree-controls,
+.ytfree-docked .ytfree-sections {
+  margin: 4px 12px 0;
 }
 
 /*
@@ -401,30 +448,37 @@
  * still a failure. Below 380pt everything comes down a size and the row fits
  * again, transport still centred, targets still over 36pt.
  */
-@media (max-width: 380px) {
-  .ytfree-controls-icons {
+@media (max-width: 460px) {
+  .ytfree-controls {
     gap: 4px;
+    padding: 4px 6px;
+    min-height: 52px;
   }
 
   .ytfree-controls-group {
     gap: 4px;
   }
 
-  .ytfree-controls-icons .ytfree-btn {
+  .ytfree-controls .ytfree-btn {
     width: 36px;
     height: 36px;
     --icon-size: 18px;
   }
 
-  .ytfree-controls-icons .ytfree-btn-play {
+  .ytfree-controls .ytfree-btn-play {
     width: 44px;
     height: 44px;
     --icon-size: 22px;
   }
 
-  .ytfree-controls-icons .ytfree-speed {
+  .ytfree-controls .ytfree-speed {
     width: 48px;
     height: 36px;
+  }
+
+  .ytfree-docked .ytfree-controls,
+  .ytfree-docked .ytfree-sections {
+    margin-inline: 8px;
   }
 }
 
@@ -697,7 +751,7 @@
   color: var(--text-normal);
 }
 
-.ytfree-hub-icon-button {
+.ytfree-hub .ytfree-hub-icon-button {
   background: transparent;
   border: none;
   box-shadow: none;
@@ -714,7 +768,7 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .ytfree-hub-icon-button:hover {
+  .ytfree-hub .ytfree-hub-icon-button:hover {
     color: var(--text-normal);
     background: var(--background-modifier-hover);
   }
@@ -1178,13 +1232,65 @@
  * rule something to meet at both ends. Border-box, so adding the line does not
  * add a pixel to the row.
  */
+/*
+ * Four to a screen, not seven.
+ *
+ * At 76px a row was a thumbnail, a title and eight words of grey — enough to
+ * recognise a video you already knew about and nothing at all for one you
+ * didn't, which is the entire job of a subscriptions list. 148px buys the
+ * three lines of description that answer "what is this", and four rows plus a
+ * sliver of the fifth on a 390×844 phone, which is the right number: enough to
+ * compare, and it still shows there is more below.
+ *
+ * A grid, because the delete column spans both rows of content. Fixed height
+ * and fixed row tracks, so no title, blurb or badge can make one card taller
+ * than the one above it.
+ */
 .ytfree-hub.ytfree-phone .ytfree-hub-card {
-  height: 76px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px;
+  grid-template-rows: 72px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 0;
+  row-gap: 6px;
+  height: 148px;
   box-sizing: border-box;
-  gap: 0.7em;
-  padding: 0 0 0 0.6em;
+  padding: 10px 0 10px 0.6em;
   border-radius: 0;
   border-bottom: 1px solid var(--background-modifier-border);
+  overflow: hidden;
+}
+
+/* The top line of a card: picture, then title and byline beside it. */
+.ytfree-hub-row {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7em;
+  min-width: 0;
+  height: 100%;
+}
+
+/*
+ * What the video is about, in the space under the picture.
+ *
+ * Three lines, clamped: `cardBlurb` has already thrown out the chapter list,
+ * the bare links and the hashtags, so what is left is prose and the first
+ * three lines of it are the summary YouTube never gives you in a feed.
+ */
+.ytfree-hub-desc {
+  grid-column: 1;
+  grid-row: 2;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-width: 0;
+  padding-right: 0.6em;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.35;
+  color: var(--text-muted);
 }
 
 /*
@@ -1208,9 +1314,9 @@
 
 .ytfree-hub.ytfree-phone .ytfree-hub-thumb {
   position: relative;
-  flex: 0 0 104px;
-  width: 104px;
-  height: 58px;
+  flex: 0 0 128px;
+  width: 128px;
+  height: 72px;
 }
 
 /* Badge, not a column: absolutely positioned, so appearing costs no width and
@@ -1263,10 +1369,15 @@
  * which is the column that was actually short.
  */
 .ytfree-hub.ytfree-phone .ytfree-hub-dismiss {
-  flex: 0 0 56px;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  flex: none;
   width: 56px;
   height: auto;
   align-self: stretch;
+  /* Cancels the card's own padding, so the rule runs the full height of the
+     row and meets the separators above and below it. */
+  margin: -10px 0;
   border-left: 1px solid var(--background-modifier-border);
 }
 

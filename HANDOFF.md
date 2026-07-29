@@ -1,6 +1,67 @@
 # HANDOFF
 
-## Status — 2026-07-28 (latest): mobile polish — space, tap states, controls, rows
+## Status — 2026-07-29 (latest): hub cards, a designed control bar, note sections
+
+Built and installed. 194 unit tests pass, build clean.
+[issues/010](issues/010-cards-controls-sections.md) is the issue and holds the
+manual test. Seven asks from BarkernotBob, one change set.
+
+1. **Four cards a screen, not seven.** The phone card is a 148px grid — thumb +
+   title + `channel · age` on row one, three clamped lines of description on row
+   two, delete column spanning both. Measured with the new
+   `tools/phone-hub-harness.mjs` at 390×844: **4 fully visible, a 5th partly,
+   every card exactly 148px**. Video length is the badge on the thumbnail, and it
+   is the one fact that needed new data — **a channel RSS feed carries no
+   duration**, so `HubItem.durationSeconds` is backfilled from the InnerTube
+   player endpoint at poll time (newest first, 40/poll, 4 at a time;
+   `undefined` = never asked, `null` = asked and refused). The card blurb is
+   `cardBlurb()`, not the raw description: bare-URL, chapter-stamp and
+   hashtag-only lines dropped, cut on a word boundary at 220 chars.
+2. **The control bar was rendering as Obsidian's default buttons and nobody
+   could see it from the source.** `button:not(.clickable-icon)` is (0,1,1) and
+   beats any single-class rule — grey slabs, inset highlight, drop shadow, and
+   an accent Play that came out a dark circle. The old code only won because it
+   happened to use a two-class selector. Every button rule is scoped now
+   (`.ytfree-controls .ytfree-btn`, `.ytfree-sections .ytfree-section-link`,
+   `.ytfree-hub .ytfree-hub-icon-button` — the hub had been losing silently in
+   shipped builds). **Found by screenshotting the headless render, not by
+   reading.**
+3. **The bar overflowed every current iPhone.** The compact step was gated at
+   `max-width: 380px`; 390/393/402/430 all got the 40px sizes and ran off the
+   edge. Breakpoint is 460px. Re-measured: no overflow at 375/390/430/900, Play
+   within 1px of centre except the 375pt SE (8px left).
+4. **One design on both platforms** — `1fr auto 1fr`, transport centred, 40px
+   flat squares, Play 48px round in the accent. Desktop's left-packed row of
+   seven differently-sized word buttons is gone.
+5. **Notes · Description · Transcript**, a second row of three equal pills that
+   jump to the note's headings. The jump unfolds *that* section only; Notes also
+   parks the cursor (the other two deliberately don't — a cursor in the
+   transcript sends your next keystroke into someone else's words).
+6. **Headings are level 1, "Video Description" / "Video Transcript", two blank
+   lines under Notes, and a note opens with everything but Notes folded**
+   (`applyDefaultFolds`, once per file per view, like `collapseProperties`; off
+   via **Collapse description and transcript**).
+
+**Nothing rewrites an existing note.** ~50 notes carry `## Notes` /
+`## Description` / `## Transcript`; `src/sections.ts` is now the single source
+of truth for headings and every lookup accepts the old spellings, so buttons,
+folds and transcript re-fetch all work on them unrewritten. The opt-in half is
+the command **"Rename this note's sections…"**, one note at a time.
+
+Fold control uses undocumented internals — `currentMode.getFoldInfo/
+applyFoldInfo/applyScroll` and `app.foldManager.save` — each in its own
+try/catch. If a future Obsidian renames one, folds stop working; nothing throws.
+
+**Also edited, and they live in the vault repo, not this one:**
+`Templates/8.Watch_Later_Template.md` and `System Templates/Obsidian Clipper -
+Watch Later (YT Free).json`. Re-import the clipper JSON before testing item E.
+
+**Next:** the manual test in issues/010, phone half first. Section A step 1 (four
+cards) and section D step 16 (opens folded) are the two that decide it.
+
+---
+
+## Status — 2026-07-28: mobile polish — space, tap states, controls, rows
 
 Built and installed. 179 unit tests pass, build clean.
 [issues/009](issues/009-mobile-polish.md) is the issue and holds the manual
