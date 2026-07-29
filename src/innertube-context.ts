@@ -10,6 +10,8 @@
 
 export const PLAYER_URL = "https://www.youtube.com/youtubei/v1/player";
 export const SEARCH_URL = "https://www.youtube.com/youtubei/v1/search";
+/** The watch page's data, and the only place the replay heatmap exists. */
+export const NEXT_URL = "https://www.youtube.com/youtubei/v1/next";
 
 export interface ClientProfile {
   ctx: Record<string, string | number>;
@@ -22,8 +24,14 @@ export interface ClientProfile {
  * with no auth and no API key. IOS is only consulted for its HLS manifest,
  * which showed up on 1 of 10 videos and is treated as a bonus rather than a
  * path worth designing for.
+ *
+ * WEB is consulted for exactly one thing — the replay heatmap — because it is
+ * the only client that answers with one. Measured on the `next` endpoint:
+ * WEB 1.0 MB with 100 markers, ANDROID 13 MB and IOS 11 MB with the same 100,
+ * and MWEB, TVHTML5, ANDROID_VR and WEB_EMBEDDED_PLAYER with none at all. So
+ * the client that carries it is also the cheapest one that could.
  */
-export const CLIENTS: Record<"android" | "ios", ClientProfile> = {
+export const CLIENTS: Record<"android" | "ios" | "web", ClientProfile> = {
   android: {
     ctx: {
       clientName: "ANDROID",
@@ -43,6 +51,15 @@ export const CLIENTS: Record<"android" | "ios", ClientProfile> = {
       osVersion: "18.3.2.22D82",
     },
     ua: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+  },
+  web: {
+    ctx: { clientName: "WEB", clientVersion: "2.20250101.00.00" },
+    // A desktop browser's, on the phone too: this identity is the reason the
+    // response carries a heatmap, and pairing it with an iPhone UA is how you
+    // get MWEB's answer instead — which has none.
+    ua:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) " +
+      "Chrome/131.0.0.0 Safari/537.36",
   },
 };
 

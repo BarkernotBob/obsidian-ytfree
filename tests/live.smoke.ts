@@ -186,3 +186,34 @@ test("InnerTube still carries caption tracks that serve json3", async () => {
   assert.ok(cues.length > 10, `only ${cues.length} cues parsed — json3 was not served`);
   assert.ok(cues.every((cue) => Number.isFinite(cue.seconds) && cue.text.length > 0));
 });
+
+/**
+ * The phone's other half of a transcript fetch, and the more fragile one: the
+ * heatmap exists on exactly one client at one endpoint, buried in a
+ * `frameworkUpdates` mutation. Both the client identity and the burial place
+ * are undocumented, so this is the test that notices when either moves.
+ */
+test("the WEB next endpoint still carries a replay heatmap", async () => {
+  const { CLIENTS, NEXT_URL } = await import("../src/innertube-context.ts");
+  const { parseHeatmapMarkers } = await import("../src/transcript.ts");
+
+  const response = await fetch(NEXT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": CLIENTS.web.ua },
+    body: JSON.stringify({
+      videoId: VIDEO_ID,
+      context: { client: { ...CLIENTS.web.ctx, hl: "en", gl: "US" } },
+    }),
+  });
+  assert.equal(response.status, 200);
+
+  const buckets = parseHeatmapMarkers(await response.json());
+  assert.ok(buckets.length > 50, `only ${buckets.length} heatmap buckets — expected ~100`);
+  assert.ok(
+    buckets.every((b) => b.start_time! >= 0 && b.value! >= 0 && b.end_time! > b.start_time!),
+    "a bucket had a nonsense time or value",
+  );
+  // The peaks are the point: an all-equal heatmap would parse and mean nothing.
+  const values = buckets.map((b) => b.value!);
+  assert.ok(Math.max(...values) > Math.min(...values), "heatmap is flat");
+});

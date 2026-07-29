@@ -81,11 +81,11 @@ auto-generated, exact language over regional.
 
 Auto-fetch, the command and the setting are no longer desktop-only.
 
-**One stated limitation:** most-replayed moments stay desktop-only. The heatmap
-only exists in yt-dlp's info JSON; InnerTube's `next` endpoint carries no
-`heatMarker` and is 10.5 MB besides. A note made on the phone gets a transcript
-and no heatmap; re-running the command on the Mac fills the heatmap in. The
-command is named for what it does on each platform.
+**A limitation stated here that turned out not to be one:** this issue shipped
+saying most-replayed moments were desktop-only, on the basis that the heatmap
+lives only in yt-dlp's info JSON. That was wrong — it was looked for under the
+wrong key. It is in InnerTube's `next` response, on the WEB client, under
+`frameworkUpdates`. [013](013-heatmap-on-the-phone.md) does it.
 
 ## 5. The control row
 
@@ -147,7 +147,7 @@ Phone first. Force-download the vault and fully relaunch Obsidian.
 8. Create a **new video note on the phone** (open something from the hub you
    have not opened before). Within a few seconds you should get a
    "fetching transcript…" notice and a **Video Transcript** section in the note.
-   There will be no "most replayed" section — that is expected on the phone.
+   (Since [013](013-heatmap-on-the-phone.md), a **Most replayed** section too.)
 9. Look at the control row. The **10s** on the back and forward buttons should
    sit centred under the chevrons and mirror each other exactly.
 10. Tap the buttons either side of Play a few times without aiming carefully.
@@ -162,4 +162,7 @@ Then on the Mac:
     `.obsidian/plugins/ytfree/progress.json`, which is not instant — so treat
     cross-device resume as a bonus, not as part of this test.)
 12. Run **Fetch transcript and most-replayed moments** on the note from step 8.
-    The heatmap section should appear alongside the transcript.
+    The heatmap section should appear alongside the transcript. (Since
+    [013](013-heatmap-on-the-phone.md) the phone has already written it, and
+    simply opening the note backfills an older one — so this step is now a
+    check that re-running is still safe rather than the only way to get it.)

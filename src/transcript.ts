@@ -142,6 +142,67 @@ export function pickPlayerCaptionTrack(
   return null;
 }
 
+/** One `markers` entry of a `MARKER_TYPE_HEATMAP` markers list. */
+export interface InnertubeMarker {
+  /** Milliseconds, as a string of digits in every response measured. */
+  startMillis?: string | number;
+  durationMillis?: string | number;
+  /** 0–1, and exactly the number yt-dlp calls `value`. */
+  intensityScoreNormalized?: number;
+}
+
+export interface HeatmapResponse {
+  frameworkUpdates?: {
+    entityBatchUpdate?: {
+      mutations?: Array<{
+        payload?: {
+          macroMarkersListEntity?: {
+            markersList?: { markerType?: string; markers?: InnertubeMarker[] };
+          };
+        };
+      }>;
+    };
+  };
+}
+
+/**
+ * The replay heatmap, out of an InnerTube `next` response.
+ *
+ * The same hundred buckets yt-dlp reports, reached without yt-dlp — which is
+ * what puts most-replayed moments on the phone. They are not in the player
+ * response at all: they arrive as an *entity mutation* on the watch page's
+ * data, alongside whatever else the page was told to update, which is why this
+ * has to walk a path rather than read a field.
+ *
+ * Returned in yt-dlp's own shape (`start_time`/`end_time`/`value`, seconds) so
+ * everything downstream — `topPeaks`, `renderHeatmap` — is the one code path it
+ * already was. Empty for a video with no heatmap, which is most videos under a
+ * few hundred thousand views.
+ */
+export function parseHeatmapMarkers(response: HeatmapResponse): VideoInfo["heatmap"] {
+  const mutations = response.frameworkUpdates?.entityBatchUpdate?.mutations ?? [];
+  const markers = mutations
+    .map((m) => m.payload?.macroMarkersListEntity?.markersList)
+    .find((list) => list?.markerType === "MARKER_TYPE_HEATMAP")?.markers;
+  if (!markers) return [];
+
+  const buckets: NonNullable<VideoInfo["heatmap"]> = [];
+  for (const marker of markers) {
+    const start = Number(marker.startMillis);
+    const duration = Number(marker.durationMillis);
+    const value = marker.intensityScoreNormalized;
+    // A bucket with no start or no intensity is not a weaker bucket, it is a
+    // shape we do not recognise — dropped rather than guessed at.
+    if (!Number.isFinite(start) || typeof value !== "number" || !Number.isFinite(value)) continue;
+    buckets.push({
+      start_time: start / 1000,
+      end_time: (start + (Number.isFinite(duration) ? duration : 0)) / 1000,
+      value,
+    });
+  }
+  return buckets;
+}
+
 /**
  * Ask a timedtext URL for json3.
  *
@@ -299,6 +360,35 @@ export function renderHeatmap(peaks: Peak[], cues: Cue[], videoId: string): stri
     .join("\n");
 }
 
+/** `**[12:34](ytfree:ID:754)** the words` — one line of a rendered transcript. */
+const RENDERED_CUE_RE = /^\*\*\[[^\]]*\]\(ytfree:[^:)]+:(\d+)\)\*\*\s*(.*)$/;
+
+/**
+ * Read a rendered transcript back out of a note, as cues.
+ *
+ * For the backfill case: a note written before the heatmap worked on that
+ * platform already has the transcript, and re-downloading a caption file to
+ * label eight peaks would be paying twice for words that are sitting in the
+ * file. Granularity is the paragraph interval rather than the caption line,
+ * which is a label of a few seconds' slack — invisible next to a peak bucket
+ * that is ten seconds wide anyway.
+ *
+ * Anything that is not a transcript line is skipped, so the source italic, the
+ * headings and any prose a person added in the section are all ignored.
+ */
+export function parseTranscriptCues(content: string): Cue[] {
+  const cues: Cue[] = [];
+  for (const line of content.split("\n")) {
+    const match = RENDERED_CUE_RE.exec(line.trim());
+    if (!match) continue;
+    const seconds = Number(match[1]);
+    if (!Number.isFinite(seconds)) continue;
+    const text = match[2].trim();
+    if (text) cues.push({ seconds, text });
+  }
+  return cues;
+}
+
 /**
  * Replace a top-level section by heading, or append it when absent.
  *
@@ -317,6 +407,7 @@ export function upsertSection(
   heading: string,
   body: string,
   aliases: string[] = [heading],
+  anchor: string[] = [],
 ): string {
   const lines = content.split("\n");
   const wanted = new Set([heading, ...aliases]);
@@ -324,6 +415,22 @@ export function upsertSection(
 
   if (start === -1) {
     if (!body) return content;
+    // `anchor` is for the section that has to land *above* something rather
+    // than at the end: a heatmap backfilled into a note that already has a
+    // transcript belongs before it, not five thousand words below it.
+    const anchored = anchor.length
+      ? lines.findIndex((line) => anchor.includes(line.trim()))
+      : -1;
+    if (anchored !== -1) {
+      const merged = [
+        ...lines.slice(0, anchored),
+        heading,
+        body,
+        "",
+        ...lines.slice(anchored),
+      ].join("\n");
+      return merged.replace(/\n{3,}/g, "\n\n");
+    }
     const trimmed = content.replace(/\s+$/, "");
     return `${trimmed}\n\n${heading}\n${body}\n`;
   }

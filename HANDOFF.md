@@ -1,6 +1,44 @@
 # HANDOFF
 
-## Status — 2026-07-29 (latest): resume, phone transcripts, a row you can hit
+## Status — 2026-07-29 (latest): most-replayed on the phone, and backfilled
+
+Built and installed. **220 unit tests pass, build clean, live smoke 11/11.**
+[issues/013](issues/013-heatmap-on-the-phone.md) is the issue and holds the
+manual test. BarkernotBob asked for the top moments on mobile *or* an automatic
+backfill with no command; this is both.
+
+- **012's stated limitation was wrong and is retracted.** The heatmap is not
+  yt-dlp-only. It is in InnerTube's `next` response under
+  `frameworkUpdates.entityBatchUpdate.mutations[].payload.macroMarkersListEntity.markersList`
+  where `markerType === "MARKER_TYPE_HEATMAP"` — I had looked for `heatMarker`,
+  the old renderer name. Probed live: **WEB is the only client that answers**
+  (1.0 MB / 100 markers; ANDROID 13 MB and IOS 11 MB for the same 100; MWEB,
+  TVHTML5, ANDROID_VR, WEB_EMBEDDED_PLAYER none; the `player` endpoint none on
+  any client). 1 MB decompressed is **67,204 bytes on the wire**, measured, once
+  per note — which is the number to judge it by on a phone.
+- **New:** `CLIENTS.web` + `NEXT_URL` (`innertube-context.ts`),
+  `fetchHeatmap()` (`innertube.ts`), `parseHeatmapMarkers()` and
+  `parseTranscriptCues()` (`transcript.ts`), an `anchor` argument on
+  `upsertSection`, `queueHeatmapBackfill`/`backfillHeatmap` (`main.ts`).
+- **The fetch:** `harvestWithInnertube` runs captions and heatmap in parallel
+  and swallows a heatmap failure — peaks are the garnish, the transcript is the
+  meal. The command is one name on both platforms again.
+- **The backfill:** on `file-open`, a video note with a transcript and no
+  most-replayed section gets one request and, if there are peaks, the section —
+  above the transcript, labelled from the note's own transcript rather than a
+  second caption download. Silent otherwise. "Already checked" is in memory
+  only, so an obscure video costs one 67 KB request per session you open it;
+  the alternative was churn in a synced file.
+- The UA is part of the identity: a WEB context with an iPhone UA gets MWEB's
+  answer, which has no heatmap. Both live together in `CLIENTS.web`.
+
+**Next:** the manual test in issues/013 — steps 1–2 (a phone note gets peaks by
+itself) and 4–5 (an old note backfills once, then stays quiet) are the deciding
+ones. The 012 manual test is still outstanding too.
+
+---
+
+## Status — 2026-07-29: resume, phone transcripts, a row you can hit
 
 Built and installed. 211 unit tests pass, build clean, live smoke 10/10.
 [issues/012](issues/012-resume-transcript-and-controls.md) is the issue and holds
@@ -34,9 +72,8 @@ the manual test. Five asks from BarkernotBob.
    yt-dlp. The phone reads `captionTracks` off the ANDROID player response and
    forces `fmt=json3` — provable because the signature covers `sparams`, which
    excludes `fmt` (`pickPlayerCaptionTrack`, 6 unit tests + a live smoke test).
-   **Most-replayed stays desktop-only**: the heatmap exists only in yt-dlp's info
-   JSON, and InnerTube's `next` endpoint is 10.5 MB with no `heatMarker`.
-   Re-running the command on the Mac fills it in.
+   (This entry also claimed **most-replayed stays desktop-only** — wrong, and
+   retracted the same day. See the 013 entry above.)
 5. **The control row.** The "10" badges were corner-tucked, so a symmetrical
    pair had its two numerals 40px apart on the outside edges — centred now, with
    the chevrons shifted up 4px. Spacing was one flat 6px between all nine

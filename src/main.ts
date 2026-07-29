@@ -50,6 +50,7 @@ import {
   HEATMAP_ALIASES,
   HEATMAP_HEADING,
   parseJson3,
+  parseTranscriptCues,
   pickCaptionTrack,
   renderHeatmap,
   renderTranscript,
@@ -58,7 +59,7 @@ import {
   TRANSCRIPT_HEADING,
   upsertSection,
 } from "./transcript";
-import { fetchCaptionTrack } from "./innertube";
+import { fetchCaptionTrack, fetchHeatmap } from "./innertube";
 import type { SectionName } from "./sections";
 import {
   SECTION_HEADINGS,
@@ -288,6 +289,8 @@ export default class YtFreePlugin extends Plugin {
   /** Notes created since startup — the only ones eligible for an auto-fetch. */
   private createdThisSession = new Set<string>();
   private autoFetchAttempted = new Set<string>();
+  /** Notes whose missing heatmap has already been chased this session. */
+  private backfillAttempted = new Set<string>();
   /** Auto-fetches run one at a time, however many notes arrive at once. */
   private autoFetchChain: Promise<void> = Promise.resolve();
   private lastActiveVideoId: string | null = null;
@@ -521,7 +524,10 @@ export default class YtFreePlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("file-open", (file) => {
         this.syncPinnedPlayers();
-        if (file) this.queueAutoFetch(file);
+        if (file) {
+          this.queueAutoFetch(file);
+          this.queueHeatmapBackfill(file);
+        }
       }),
     );
     this.registerEvent(
@@ -557,6 +563,9 @@ export default class YtFreePlugin extends Plugin {
         if (this.autoFetchAttempted.delete(oldPath) && file instanceof TFile) {
           this.autoFetchAttempted.add(file.path);
         }
+        if (this.backfillAttempted.delete(oldPath) && file instanceof TFile) {
+          this.backfillAttempted.add(file.path);
+        }
       }),
     );
 
@@ -577,14 +586,12 @@ export default class YtFreePlugin extends Plugin {
       });
     }
 
-    // Transcript is on both now: the phone reads captions off the InnerTube
-    // player response, which needs no yt-dlp. Replay peaks are still desktop
-    // only — see `harvestWithInnertube` for why.
+    // Both platforms now, and both halves: the phone reads captions off the
+    // InnerTube player response and the heatmap off `next`, neither of which
+    // needs yt-dlp. One name, because it does the same thing everywhere.
     this.addCommand({
       id: "fetch-transcript",
-      name: Platform.isDesktopApp
-        ? "Fetch transcript and most-replayed moments"
-        : "Fetch transcript",
+      name: "Fetch transcript and most-replayed moments",
       callback: () => void this.fetchTranscriptForActiveNote(),
     });
 
@@ -1279,6 +1286,63 @@ export default class YtFreePlugin extends Plugin {
     await this.fetchTranscriptInto(file, videoId, true);
   }
 
+  /**
+   * Fill in the most-replayed list on a note that has a transcript and no
+   * heatmap — silently, on open, with no command to remember.
+   *
+   * This exists for the notes the phone made while the heatmap was desktop
+   * only. It is not the auto-fetch: it never touches the transcript, it costs
+   * one request, and it says nothing unless it has something to add. Peaks are
+   * labelled from the transcript already in the note rather than from a second
+   * caption download — see `parseTranscriptCues`.
+   *
+   * Attempted once per note per session. A video with no heatmap — which is
+   * most videos — therefore gets one wasted request per session in which you
+   * open its note, and that is the price of not writing a "we checked" marker
+   * into a file that syncs.
+   */
+  private queueHeatmapBackfill(file: TFile): void {
+    if (!this.settings.autoFetchTranscript) return;
+    if (this.backfillAttempted.has(file.path)) return;
+
+    const videoId = this.videoIdForNote(file.path);
+    if (!videoId) return;
+
+    this.backfillAttempted.add(file.path);
+    this.autoFetchChain = this.autoFetchChain
+      .then(() => this.backfillHeatmap(file, videoId))
+      .catch(() => undefined);
+  }
+
+  private async backfillHeatmap(file: TFile, videoId: string): Promise<void> {
+    if (!(this.app.vault.getAbstractFileByPath(file.path) instanceof TFile)) return;
+
+    const content = await this.app.vault.cachedRead(file);
+    // Both conditions matter: no transcript means the auto-fetch is the right
+    // path and it writes both sections itself, and an existing heatmap — even
+    // an empty one under an old heading — means this note has been asked
+    // already.
+    if (!TRANSCRIPT_ALIASES.some((heading) => content.includes(heading))) return;
+    if (HEATMAP_ALIASES.some((heading) => content.includes(heading))) return;
+
+    const heatmap = await fetchHeatmap(videoId).catch(() => [] as VideoInfo["heatmap"]);
+    const peaks = topPeaks(heatmap, this.settings.heatmapPeaks);
+    if (peaks.length === 0) return;
+
+    const cues = parseTranscriptCues(content);
+    await this.app.vault.process(file, (current) =>
+      upsertSection(
+        current,
+        HEATMAP_HEADING,
+        renderHeatmap(peaks, cues, videoId),
+        HEATMAP_ALIASES,
+        // Above the transcript, which is where a fresh fetch would have put it.
+        TRANSCRIPT_ALIASES,
+      ),
+    );
+    new Notice(`YT Free: added ${peaks.length} replay peaks.`);
+  }
+
   // ------------------------------------------------------------- transcript
 
   /**
@@ -1398,17 +1462,20 @@ export default class YtFreePlugin extends Plugin {
   /**
    * The phone harvest: the InnerTube player response, which states the caption
    * tracklist on the ANDROID client and hands back a signed, un-IP-locked
-   * timedtext URL.
+   * timedtext URL, plus the `next` response on the WEB client, which is the
+   * only place the replay heatmap exists.
    *
-   * No replay peaks here, and that is a limit rather than an oversight: the
-   * heatmap lives in the `next` endpoint, whose response for an ordinary video
-   * measured over ten megabytes. A phone should not download that to label
-   * eight moments. Notes fetched on the Mac still get them, and re-running the
-   * command there fills them in for a note the phone made.
+   * Two calls in parallel because they are independent, and the heatmap's
+   * failure is swallowed on purpose: replay peaks are the garnish and the
+   * transcript is the meal, so a `next` endpoint that changes shape or answers
+   * 4xx must cost the note nothing more than its heatmap.
    */
   private async harvestWithInnertube(videoId: string): Promise<CaptionHarvest> {
-    const track = await fetchCaptionTrack(videoId, this.transcriptLanguage());
-    return { track, cues: await this.fetchCues(track), heatmap: undefined };
+    const [track, heatmap] = await Promise.all([
+      fetchCaptionTrack(videoId, this.transcriptLanguage()),
+      fetchHeatmap(videoId).catch(() => [] as VideoInfo["heatmap"]),
+    ]);
+    return { track, cues: await this.fetchCues(track), heatmap };
   }
 
   /**
@@ -2646,9 +2713,8 @@ class YtFreeSettingTab extends PluginSettingTab {
         .setName("On this device")
         .setDesc(
           "Playback here resolves the stream in the plugin and plays it in a normal video element — ad-free, at 360p. " +
-            "Transcripts work here too, read straight off YouTube. " +
-            "Quality above 360p, downloading, and the most-replayed list all need yt-dlp, which only exists on the desktop app — " +
-            "open the note on the Mac and run the transcript command again to add the replay peaks.",
+            "Transcripts and most-replayed moments both work here, read straight off YouTube. " +
+            "Quality above 360p and downloading need yt-dlp, which only exists on the desktop app.",
         );
     }
 

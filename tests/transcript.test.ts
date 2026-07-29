@@ -4,8 +4,11 @@ import type { Cue } from "../src/transcript.ts";
 import {
   cueTextAt,
   groupCues,
+  HEATMAP_ALIASES,
   HEATMAP_HEADING,
+  parseHeatmapMarkers,
   parseJson3,
+  parseTranscriptCues,
   pickCaptionTrack,
   pickPlayerCaptionTrack,
   renderHeatmap,
@@ -244,6 +247,92 @@ test("renderHeatmap still lists a peak when there is no transcript to label it",
   assert.equal(renderHeatmap([{ seconds: 60, value: 1 }], [], ID), "- **[1:00](ytfree:h0EGCnBjTVk:60)**");
 });
 
+// ---------------------------------------------------------- innertube heatmap
+
+/** The shape measured on the WEB `next` response, trimmed to what is read. */
+const nextResponse = (markers: Array<Record<string, unknown>>, markerType = "MARKER_TYPE_HEATMAP") => ({
+  frameworkUpdates: {
+    entityBatchUpdate: {
+      mutations: [
+        { payload: { macroMarkersListEntity: { markersList: { markerType, markers } } } },
+      ],
+    },
+  },
+});
+
+test("parseHeatmapMarkers reads YouTube's millisecond strings as yt-dlp-shaped buckets", () => {
+  const buckets = parseHeatmapMarkers(
+    nextResponse([
+      { startMillis: "0", durationMillis: "9370", intensityScoreNormalized: 0.4 },
+      { startMillis: "121810", durationMillis: "9370", intensityScoreNormalized: 1 },
+    ]),
+  );
+  assert.deepEqual(buckets, [
+    { start_time: 0, end_time: 9.37, value: 0.4 },
+    { start_time: 121.81, end_time: 131.18, value: 1 },
+  ]);
+});
+
+test("parseHeatmapMarkers ignores a mutation that is not the heatmap", () => {
+  assert.deepEqual(
+    parseHeatmapMarkers(
+      nextResponse([{ startMillis: "0", intensityScoreNormalized: 1 }], "MARKER_TYPE_CHAPTERS"),
+    ),
+    [],
+  );
+});
+
+test("parseHeatmapMarkers answers empty for a video with no heatmap at all", () => {
+  assert.deepEqual(parseHeatmapMarkers({}), []);
+  assert.deepEqual(parseHeatmapMarkers({ frameworkUpdates: { entityBatchUpdate: {} } }), []);
+});
+
+test("parseHeatmapMarkers skips a marker missing its start or its value", () => {
+  const buckets = parseHeatmapMarkers(
+    nextResponse([
+      { durationMillis: "1000", intensityScoreNormalized: 1 },
+      { startMillis: "1000", durationMillis: "1000" },
+      { startMillis: "2000", durationMillis: "1000", intensityScoreNormalized: 0.5 },
+    ]),
+  );
+  assert.deepEqual(buckets, [{ start_time: 2, end_time: 3, value: 0.5 }]);
+});
+
+// ------------------------------------------------------- transcript readback
+
+test("parseTranscriptCues reads a rendered transcript back out of a note", () => {
+  const note = [
+    "# Video Transcript",
+    "",
+    "_Auto-generated captions (en), 2 sections._",
+    "",
+    `**[0:00](ytfree:${ID}:0)** first words here`,
+    "",
+    `**[0:30](ytfree:${ID}:30)** second words here`,
+    "",
+  ].join("\n");
+  assert.deepEqual(parseTranscriptCues(note), [
+    { seconds: 0, text: "first words here" },
+    { seconds: 30, text: "second words here" },
+  ]);
+});
+
+test("parseTranscriptCues ignores prose, headings and hand-written timestamp links", () => {
+  const note = [
+    "# Notes",
+    `- [12:00](ytfree:${ID}:720) a note I wrote`,
+    "# Video Transcript",
+    `**[1:00](ytfree:${ID}:60)** real cue`,
+    `**[2:00](ytfree:${ID}:120)**`,
+    "",
+  ].join("\n");
+  assert.deepEqual(parseTranscriptCues(note), [{ seconds: 60, text: "real cue" }]);
+});
+
+test("parseTranscriptCues on a note with no transcript is empty, not a throw", () => {
+  assert.deepEqual(parseTranscriptCues(NOTE), []);
+});
+
 // ----------------------------------------------------------------- upsert
 
 const NOTE = `---
@@ -324,6 +413,25 @@ test("upsertSection with an empty body removes the section instead of leaving a 
   const removed = upsertSection(withSection, HEATMAP_HEADING, "");
   assert.doesNotMatch(removed, /Most replayed/);
   assert.match(removed, /# Video Description/);
+});
+
+test("upsertSection puts an anchored section above the one it names", () => {
+  const withTranscript = upsertSection(NOTE, TRANSCRIPT_HEADING, "words");
+  const out = upsertSection(
+    withTranscript,
+    HEATMAP_HEADING,
+    "- peak",
+    HEATMAP_ALIASES,
+    TRANSCRIPT_ALIASES,
+  );
+  assert.ok(out.indexOf(HEATMAP_HEADING) < out.indexOf(TRANSCRIPT_HEADING));
+  assert.match(out, /# Most replayed\n- peak/);
+  assert.match(out, /# Video Transcript\nwords/);
+});
+
+test("upsertSection with an anchor it cannot find falls back to appending", () => {
+  const out = upsertSection(NOTE, HEATMAP_HEADING, "- peak", HEATMAP_ALIASES, TRANSCRIPT_ALIASES);
+  assert.match(out, /# Video Description\n0:00 something\n\n# Most replayed\n- peak/);
 });
 
 test("upsertSection with an empty body on a note that never had the section is a no-op", () => {

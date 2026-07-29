@@ -14,13 +14,18 @@
  */
 
 import { requestUrl } from "obsidian";
-import { CLIENTS, PLAYER_URL, SEARCH_URL, playerBody } from "./innertube-context.ts";
+import { CLIENTS, NEXT_URL, PLAYER_URL, SEARCH_URL, playerBody } from "./innertube-context.ts";
 import { parseSearchResponse } from "./search.ts";
 import type { SearchPage } from "./search.ts";
 import { defaultFilters, encodeSearchParams } from "./search-params.ts";
 import type { SearchFilters } from "./search-params.ts";
-import { pickPlayerCaptionTrack } from "./transcript.ts";
-import type { CaptionedPlayerResponse, CaptionTrack } from "./transcript.ts";
+import { parseHeatmapMarkers, pickPlayerCaptionTrack } from "./transcript.ts";
+import type {
+  CaptionedPlayerResponse,
+  CaptionTrack,
+  HeatmapResponse,
+  VideoInfo,
+} from "./transcript.ts";
 
 // The client identities live next door, in a file with no `obsidian` import, so
 // the live smoke test can send the same request this file sends.
@@ -144,4 +149,21 @@ export async function fetchCaptionTrack(
 ): Promise<CaptionTrack | null> {
   const response = await callInnertube(PLAYER_URL, "android", playerBody(videoId));
   return pickPlayerCaptionTrack(response as CaptionedPlayerResponse, language);
+}
+
+/**
+ * The replay heatmap for a video, without yt-dlp.
+ *
+ * The `next` endpoint on the WEB client, which is the only combination that
+ * answers with one — see `CLIENTS`. It is a 1 MB response for a hundred
+ * numbers, which sounds indefensible and is not: gzipped it is **67 KB on the
+ * wire**, measured, and it is fetched once per note rather than once per view.
+ * That is the number to judge it by on a phone.
+ *
+ * Answers `[]` for a video with no heatmap — most videos have none — so the
+ * caller has one shape to handle rather than three.
+ */
+export async function fetchHeatmap(videoId: string): Promise<VideoInfo["heatmap"]> {
+  const response = await callInnertube(NEXT_URL, "web", { videoId });
+  return parseHeatmapMarkers(response as HeatmapResponse);
 }
