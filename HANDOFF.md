@@ -1,6 +1,17 @@
 # HANDOFF
 
-## Status — 2026-07-29 (latest): hidden videos stopped coming back
+## Status — 2026-07-29 (latest): Smart Speed scoped; hidden-videos fix awaiting test
+
+**New:** [issues/015](issues/015-smart-speed.md) — Smart Speed (Overcast-style
+pause compression) is scoped and approved for build, doc at
+[docs/V1-SCOPE-SMART-SPEED.md](docs/V1-SCOPE-SMART-SPEED.md). Hard constraint:
+works with zero dependencies (caption-gap maps, both platforms); ffmpeg only
+*upgrades* accuracy when found. Web Audio real-time route measured closed
+(googlevideo CORS is origin-whitelisted). Exact next step: build order in the
+issue file, starting with the apply layer in `player.ts`. The issues/README
+index also got its missing 010–014 rows.
+
+## Previous — 2026-07-29: hidden videos stopped coming back
 
 Built and installed. **240 unit tests pass, build clean.**
 [issues/014](issues/014-hidden-videos-came-back.md) is the issue and holds the
