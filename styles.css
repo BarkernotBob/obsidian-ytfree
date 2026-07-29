@@ -750,6 +750,75 @@
   }
 }
 
+/* The two header buttons on the hub screen, as one group. Fixed by content,
+   so the filter chips beside them keep the same room whatever is selected. */
+.ytfree-hub-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
+  flex: 0 0 auto;
+}
+
+/* Takes the space the filter chips have on the hub screen, so the back arrow
+   sits where the chips start and the header is the same height either side. */
+.ytfree-hub-screen-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+}
+
+/* YouTube's filters, as a fixed four-column grid. A grid rather than a wrapping
+   flex row because the column count then cannot change with the text inside the
+   selects — a bar that reflowed when you chose "Creative Commons" would move the
+   results underneath it, which is the one thing a filter must never do. */
+.ytfree-hub-filterbar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4em;
+  padding: 0.4em 0.7em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+
+.ytfree-hub-filterbar-select {
+  min-width: 0;
+  height: 32px;
+  box-sizing: border-box;
+  font-size: var(--font-ui-small);
+}
+
+/* Two hosts, both plain: the answer and the related material below it. They
+   exist so an appended page lands in the right half without the other moving. */
+.ytfree-hub-results {
+  display: flex;
+  flex-direction: column;
+}
+
+.ytfree-hub-results-heading {
+  padding: 1em 0.6em 0.4em;
+  font-size: var(--font-ui-smaller);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* A hidden video stores no thumbnail — see `hideItem` — so its row is text and
+   a way back, at a height that says so rather than leaving a 128px hole. */
+.ytfree-hub-hidden-row {
+  height: 56px;
+  cursor: default;
+}
+
+.ytfree-hub-hidden-row .ytfree-hub-title {
+  -webkit-line-clamp: 1;
+  max-height: 1.4em;
+  font-size: var(--font-ui-small);
+}
+
 /* The label swaps to "Loading…" on click; the width must not follow it. */
 .ytfree-hub-more {
   display: block;
@@ -960,6 +1029,31 @@
 .ytfree-hub.ytfree-phone .ytfree-hub-search-input {
   height: 40px;
   font-size: 16px;
+}
+
+/* Two by two, not four across: four selects on a 390pt screen leaves each one
+   about 80pt wide, which truncates every label to its first word. Two rows of
+   two, and the grid has the same shape whatever is chosen. */
+.ytfree-hub.ytfree-phone .ytfree-hub-filterbar {
+  grid-template-columns: repeat(2, 1fr);
+  padding: 0.4em 0.5em;
+}
+
+/* 16px, for the same reason as the search box: a smaller font in a control iOS
+   focuses is a zoom nothing ever takes back. */
+.ytfree-hub.ytfree-phone .ytfree-hub-filterbar-select {
+  height: 40px;
+  font-size: 16px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-screen-title {
+  font-size: var(--font-ui-small);
+}
+
+/* Taller than the desktop row: the restore button is the only target on it and
+   a 56px row on a phone is a line of text you have to aim at. */
+.ytfree-hub.ytfree-phone .ytfree-hub-hidden-row {
+  height: 64px;
 }
 
 /* On a phone the marker is a badge on a dark circle, so the accent colour the

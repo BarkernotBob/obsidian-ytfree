@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { HubItem } from "../src/subscriptions.ts";
 import {
+  HIDDEN_LIMIT,
   buildWatchLaterNote,
   expireItems,
   extractChannelIdFromHtml,
   feedUrl,
   formatViews,
+  hiddenItems,
+  hideItem,
+  hubItemMatches,
   mergeChannels,
   mergeItems,
   normalizeState,
@@ -14,8 +18,10 @@ import {
   parseChannelInput,
   parseSubscriptionsCsv,
   relativeAge,
+  restoreItem,
   sanitizeFileName,
   searchResultToItem,
+  thumbnailUrl,
   visibleItems,
 } from "../src/subscriptions.ts";
 
@@ -235,9 +241,16 @@ test("New expires on age, Kept never does", () => {
   assert.deepEqual(items.map((i) => i.videoId), ["bbbbbbbbbbb"]);
 });
 
-test("Dismissed expires immediately, whatever its age", () => {
-  const { items } = expireItems([item({ state: "dismissed" })], 30, NOW);
-  assert.deepEqual(items, []);
+test("a hidden video survives expiry, whatever its age", () => {
+  // It used to be deleted here, which is why there was no way back from a
+  // removal. The tombstone is what makes Hidden a list and not a wish.
+  const { items, removed } = expireItems(
+    [item({ state: "dismissed", published: "2020-01-01T00:00:00Z" })],
+    30,
+    NOW,
+  );
+  assert.equal(removed, 0);
+  assert.equal(items.length, 1);
 });
 
 test("expiry of zero days is off, not instant", () => {
@@ -265,9 +278,85 @@ test("a searched-for item outlives a feed item of the same age", () => {
   assert.deepEqual(items.map((i) => i.videoId), ["bbbbbbbbbbb"]);
 });
 
-test("dismissing a search item still removes it", () => {
-  const { items } = expireItems([item({ origin: "search", state: "dismissed" })], 30, NOW);
-  assert.deepEqual(items, []);
+// -------------------------------------------------------------------- hidden
+
+test("hiding a video strips what costs storage and keeps what identifies it", () => {
+  const hidden = item({ description: "x".repeat(5000), thumbnail: "https://i3.ytimg.com/vi/x/hqdefault.jpg" });
+  hideItem(hidden, NOW);
+  assert.equal(hidden.state, "dismissed");
+  assert.equal(hidden.dismissedAt, NOW.toISOString());
+  assert.equal(hidden.description, "");
+  assert.equal(hidden.thumbnail, "");
+  // Title and channel survive, because a text-only Hidden row is made of them.
+  assert.equal(hidden.title, "A video");
+  assert.equal(hidden.channelTitle, "SmarterEveryDay");
+});
+
+test("restoring puts the video back in New with a thumbnail again", () => {
+  const restored = item();
+  hideItem(restored, NOW);
+  restoreItem(restored);
+  assert.equal(restored.state, "new");
+  assert.equal(restored.dismissedAt, undefined);
+  // Derived from the ID, so hiding never has to store a URL to give one back.
+  assert.equal(restored.thumbnail, thumbnailUrl(restored.videoId));
+});
+
+test("Hidden is newest-hidden first, not newest-published first", () => {
+  const older = item({ videoId: "aaaaaaaaaaa", published: "2026-07-26T00:00:00Z" });
+  const newer = item({ videoId: "bbbbbbbbbbb", published: "2026-07-20T00:00:00Z" });
+  hideItem(older, new Date("2026-07-01T00:00:00Z"));
+  hideItem(newer, new Date("2026-07-25T00:00:00Z"));
+  assert.deepEqual(hiddenItems([older, newer]).map((i) => i.videoId), ["bbbbbbbbbbb", "aaaaaaaaaaa"]);
+});
+
+test("Hidden holds the newest HIDDEN_LIMIT and drops the oldest", () => {
+  const many = Array.from({ length: HIDDEN_LIMIT + 10 }, (_, i) => {
+    const one = item({ videoId: `v${String(i).padStart(10, "0")}` });
+    // Index 0 hidden longest ago, so indexes 0..9 are the ones to lose.
+    hideItem(one, new Date(Date.UTC(2026, 0, 1) + i * 60_000));
+    return one;
+  });
+  const { items } = expireItems(many, 30, NOW);
+  assert.equal(items.length, HIDDEN_LIMIT);
+  assert.equal(items.some((i) => i.videoId === "v0000000000"), false);
+  assert.equal(items.some((i) => i.videoId === "v0000000009"), false);
+  assert.equal(items.some((i) => i.videoId === "v0000000010"), true);
+});
+
+test("the Hidden view lists hidden videos and nothing else", () => {
+  const kept = item({ videoId: "aaaaaaaaaaa", state: "kept" });
+  const gone = item({ videoId: "bbbbbbbbbbb" });
+  hideItem(gone, NOW);
+  const visible = visibleItems([kept, gone], { filter: "hidden", channelId: null, includeShorts: false });
+  assert.deepEqual(visible.map((i) => i.videoId), ["bbbbbbbbbbb"]);
+});
+
+// --------------------------------------------------------------- item filter
+
+test("the item filter matches title or channel, and demands every word", () => {
+  const one = item({ title: "Rocket engine teardown", channelTitle: "SmarterEveryDay" });
+  assert.equal(hubItemMatches(one, "rocket"), true);
+  assert.equal(hubItemMatches(one, "smartereveryday"), true);
+  // Words may land in different fields, but all of them have to land.
+  assert.equal(hubItemMatches(one, "rocket everyday"), true);
+  assert.equal(hubItemMatches(one, "rocket submarine"), false);
+  // An empty query is not a filter.
+  assert.equal(hubItemMatches(one, "   "), true);
+});
+
+test("the item filter narrows the list it is pointed at", () => {
+  const items = [
+    item({ videoId: "aaaaaaaaaaa", title: "Rocket engine teardown" }),
+    item({ videoId: "bbbbbbbbbbb", title: "Sourdough, explained" }),
+  ];
+  const visible = visibleItems(items, {
+    filter: "new",
+    channelId: null,
+    includeShorts: false,
+    query: "rocket",
+  });
+  assert.deepEqual(visible.map((i) => i.videoId), ["aaaaaaaaaaa"]);
 });
 
 // -------------------------------------------------------------------- search

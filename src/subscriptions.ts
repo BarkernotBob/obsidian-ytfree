@@ -58,6 +58,14 @@ export interface HubItem {
   origin?: ItemOrigin;
   /** Seen on another device, per the account's watch history. Never written to. */
   watched?: boolean;
+  /**
+   * ISO time this item was hidden, set only on a Dismissed item.
+   *
+   * It is what the Hidden list sorts by — a hidden video's publish date is
+   * beside the point, "the one I just removed" is what you are looking for —
+   * and it is what decides which tombstone falls off the end of the cap.
+   */
+  dismissedAt?: string;
 }
 
 /** A channel feed, your Watch Later list, both, or a search you ran. */
@@ -400,8 +408,69 @@ export function searchResultToItem(
   };
 }
 
+// -------------------------------------------------------------------- hidden
+
 /**
- * Drop New items past their sell-by date, and Dismissed items immediately.
+ * How many hidden videos are remembered. Oldest removal falls off first.
+ *
+ * A tombstone exists to stop a video you have already turned down coming back
+ * at you — from a feed, and from a search. That job needs a list, not an
+ * archive, so it is capped: at roughly 150 bytes each (see `hideItem`) this is
+ * about 75 KB, on a phone, forever. A tombstone that falls off the end just
+ * means the video may be offered again, which is the correct failure.
+ */
+export const HIDDEN_LIMIT = 500;
+
+/**
+ * The thumbnail for a video ID, without asking anyone.
+ *
+ * This is what makes dropping a hidden item's thumbnail free: the URL is
+ * derivable, so nothing is lost by not storing it. `mqdefault` is the 320px
+ * size a hub card draws, matching `pickThumbnail`.
+ */
+export function thumbnailUrl(videoId: string): string {
+  return `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+}
+
+/**
+ * Hide a video: mark it Dismissed and strip it to a tombstone.
+ *
+ * The description is the only field in a `HubItem` with real size in it — a few
+ * kilobytes each, and the hidden list is the one list that only ever grows — so
+ * it goes, and the thumbnail URL with it since `thumbnailUrl` can rebuild one.
+ * What is left is the identity, the title and when you hid it: enough to draw a
+ * text row, and enough to recognise the video if you come looking for it.
+ *
+ * The description is not recoverable from anywhere but YouTube, which is why
+ * `restoreItem`'s caller re-fetches it. That is the accepted cost of a hidden
+ * list that does not grow without bound — see `issues/008-browse-round-two.md`.
+ */
+export function hideItem(item: HubItem, now: Date): void {
+  item.state = "dismissed";
+  item.dismissedAt = now.toISOString();
+  item.description = "";
+  item.thumbnail = "";
+}
+
+/**
+ * Bring a hidden video back as if it were newly seen. The description it lost
+ * on the way in is the caller's problem — see `hideItem`.
+ */
+export function restoreItem(item: HubItem): void {
+  item.state = "new";
+  delete item.dismissedAt;
+  if (!item.thumbnail) item.thumbnail = thumbnailUrl(item.videoId);
+}
+
+/** Newest removal first — the Hidden list's own order. */
+export function hiddenItems(items: HubItem[]): HubItem[] {
+  return items
+    .filter((item) => item.state === "dismissed")
+    .sort((a, b) => (Date.parse(b.dismissedAt ?? "") || 0) - (Date.parse(a.dismissedAt ?? "") || 0));
+}
+
+/**
+ * Drop New items past their sell-by date, and trim the hidden list to its cap.
  *
  * Age is measured from the publish date, not from when we first saw it. That
  * makes a fresh import trim itself to the last N days instead of dumping every
@@ -414,25 +483,41 @@ export function searchResultToItem(
  * Neither is anything you searched for. A feed item arrived because a channel
  * published it; a search item is there because you went looking for it by name,
  * and a list you built on purpose does not evaporate on a timer.
+ *
+ * Dismissed items used to be deleted here on the next poll, which is why there
+ * was no way back from a removal and no Hidden list to have one in. They now
+ * survive as tombstones and are bounded by `HIDDEN_LIMIT` instead of by age: a
+ * removal you made a year ago is exactly as good a reason not to show you the
+ * video as one you made this morning.
  */
 export function expireItems(
   items: HubItem[],
   days: number,
   now: Date,
 ): { items: HubItem[]; removed: number } {
-  if (days <= 0) return { items, removed: 0 };
   const cutoff = now.getTime() - days * 86_400_000;
-  const kept = items.filter((item) => {
+  const survivors = items.filter((item) => {
     if (item.state === "kept") return true;
-    if (item.state === "dismissed") return false;
+    if (item.state === "dismissed") return true;
+    if (days <= 0) return true;
     if (item.origin === "search") return true;
     const published = Date.parse(item.published);
     return Number.isFinite(published) ? published >= cutoff : true;
   });
-  return { items: kept, removed: items.length - kept.length };
+
+  // The cap, applied to the tombstones only. Sorted by when they were hidden,
+  // so what falls off is what you turned down longest ago.
+  const hidden = hiddenItems(survivors);
+  if (hidden.length > HIDDEN_LIMIT) {
+    const doomed = new Set(hidden.slice(HIDDEN_LIMIT).map((item) => item.videoId));
+    const kept = survivors.filter((item) => !doomed.has(item.videoId));
+    return { items: kept, removed: items.length - kept.length };
+  }
+
+  return { items: survivors, removed: items.length - survivors.length };
 }
 
-export type HubFilter = "new" | "all" | "kept";
+export type HubFilter = "new" | "all" | "kept" | "hidden";
 
 /**
  * What the hub shows, newest first, after the filters have had their say.
@@ -450,20 +535,50 @@ export function visibleItems(
     channelId: string | null;
     includeShorts: boolean;
     showWatched?: boolean;
+    /** The hub's own search box: free text over title and channel. */
+    query?: string;
   },
 ): HubItem[] {
-  return items
-    .filter((item) => {
-      if (options.channelId && item.channelId !== options.channelId) return false;
-      if (!options.includeShorts && item.isShort === true) return false;
-      if (options.filter === "new") {
-        if (item.watched && !options.showWatched) return false;
-        return item.state === "new";
-      }
-      if (options.filter === "kept") return item.state === "kept";
-      return item.state !== "dismissed";
-    })
-    .sort((a, b) => (Date.parse(b.published) || 0) - (Date.parse(a.published) || 0));
+  const matching = items.filter((item) => {
+    if (options.channelId && item.channelId !== options.channelId) return false;
+    if (!options.includeShorts && item.isShort === true) return false;
+    if (!hubItemMatches(item, options.query ?? "")) return false;
+    if (options.filter === "hidden") return item.state === "dismissed";
+    if (options.filter === "new") {
+      if (item.watched && !options.showWatched) return false;
+      return item.state === "new";
+    }
+    if (options.filter === "kept") return item.state === "kept";
+    return item.state !== "dismissed";
+  });
+
+  // Hidden is ordered by when you hid it, not by when the video came out. The
+  // question you bring to that list is "what did I just remove", and half of
+  // them have no publish date to sort by anyway.
+  if (options.filter === "hidden") return hiddenItems(matching);
+
+  return matching.sort(
+    (a, b) => (Date.parse(b.published) || 0) - (Date.parse(a.published) || 0),
+  );
+}
+
+/**
+ * Does this item match what was typed into the hub's box?
+ *
+ * Title and channel, nothing else. Not the description: it is cached in full,
+ * so matching it would turn "smarter" into every video that ever linked to that
+ * channel, and the box is for finding a video you can already half-remember.
+ *
+ * Every whitespace-separated term has to match, in any order and anywhere —
+ * "veritasium black" finds the one you mean without you recalling the title.
+ * An empty query matches everything, which is what makes the box's default
+ * state cost nothing.
+ */
+export function hubItemMatches(item: HubItem, query: string): boolean {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const haystack = `${item.title} ${item.channelTitle}`.toLowerCase();
+  return terms.every((term) => haystack.includes(term));
 }
 
 // ---------------------------------------------------------------------- note

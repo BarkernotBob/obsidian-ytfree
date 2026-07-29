@@ -1,6 +1,54 @@
 # HANDOFF
 
-## Status — 2026-07-28 (latest): browse — search YouTube from inside the hub
+## Status — 2026-07-28 (latest): browse round two — filters, Hidden, two boxes
+
+Built and installed. 176 unit tests pass, build clean.
+[issues/008](issues/008-browse-round-two.md) is the issue and holds the manual
+test. Four asks from BarkernotBob, one change set.
+
+1. **YouTube's filters are YouTube's, sent as its own protobuf.** The filter
+   panel is one opaque base64url `params` field, so `src/search-params.ts`
+   encodes it: upload date, duration, sort and one feature, with type pinned to
+   `video` on every search. It is pure and has no `obsidian` import, so
+   `spikes/search-filters/` sends exactly what the plugin sends — which mattered,
+   because **a wrong `params` is ignored rather than rejected**, so the only
+   proof is asserting on the content of the results. Measured live: duration,
+   upload date, type and the feature bools all apply, and **filters survive
+   paging on the continuation token alone**.
+2. **Sort looked random and half of it was our bug.** A search response holds
+   *several* item sections and only the first is the answer; the rest are
+   "related to your search" and no sort touches them. `src/search.ts` was
+   flattening all of them. Results now carry `secondary`, and the related ones
+   draw under their own heading below the answer. The other half is not ours:
+   YouTube injects a couple of promoted videos into the sorted section and they
+   are **structurally identical** to real results — same renderer, same fields,
+   no badge. Measured, documented in the issue, not papered over.
+3. **A removal is now a tombstone, not a delete.** `expireItems` used to drop
+   Dismissed items on the next poll, so there was no way back. `hideItem`
+   compacts instead: description and thumbnail dropped (~150 bytes left), and the
+   Hidden list draws as text rows with no `<img>`, so opening it costs no image
+   fetches. Nothing is lost that cannot be recovered — a thumbnail URL is
+   derivable from the ID and `restore()` re-fetches the description with the one
+   player call an add already makes. Capped at 500, oldest hidden first.
+4. **Two boxes, two jobs.** The hub's box filters the list in front of you —
+   instant, local, title and channel, no network — and works on the Hidden list,
+   which is where it is actually needed. Searching YouTube is its own screen
+   behind the header's YouTube button, with its own box, filters and results;
+   coming back restores the hub exactly.
+5. **Search never offers a video you have already dealt with.** Filtering happens
+   when a page *lands*, not when a card is drawn, so a result added while you are
+   looking at it stays put with its tick — the no-reflow rule from 007. If a
+   whole page is filtered away the next is fetched automatically, up to four.
+
+### Next step
+
+The manual test in
+[issues/008](issues/008-browse-round-two.md#manual-test-for-barkernotbob), desktop then
+phone. Section C step 12 is the one that decides whether the protobuf is right;
+section E step 24 (hidden survives a restart) is the one that decides whether the
+tombstone is. Not visually reviewed — offered, not run.
+
+## Status — 2026-07-28: browse — search YouTube from inside the hub
 
 Built and installed. 159 unit tests pass, build clean, and all 9 live smoke tests
 pass including two new ones. [issues/007](issues/007-browse-search.md) is the

@@ -61,6 +61,41 @@ test("every result states a duration", () => {
   assert.equal(undated.length, 0, `${undated.length} results with no duration`);
 });
 
+// ------------------------------------------------------------------ sections
+
+test("only the first video-bearing section is the answer to the search", () => {
+  // The fixture has three of them. Flattening all three is what made "sort by
+  // upload date" look random: the later sections are YouTube's own "related to
+  // your search", and they are not sorted by anything we asked for.
+  const page = parseSearchResponse(firstPage);
+  const primary = page.results.filter((result) => !result.secondary);
+  const secondary = page.results.filter((result) => result.secondary);
+  assert.ok(primary.length > 0);
+  assert.ok(secondary.length > 0, "fixture has no second section to mark");
+  // Primary comes first, so the list can be drawn in order under one heading.
+  assert.equal(page.results.slice(0, primary.length).every((r) => !r.secondary), true);
+});
+
+test("a single-section response marks nothing secondary", () => {
+  const page = parseSearchResponse({
+    contents: {
+      sectionListRenderer: {
+        contents: [
+          { itemSectionRenderer: { contents: [{ someHeaderRenderer: {} }] } },
+          {
+            itemSectionRenderer: {
+              contents: [{ compactVideoRenderer: { videoId: "vS6HEes8daw" } }],
+            },
+          },
+        ],
+      },
+    },
+  });
+  // A section with no videos in it is not the first section — it is furniture.
+  assert.equal(page.results.length, 1);
+  assert.equal(page.results[0].secondary, false);
+});
+
 // ------------------------------------------------------------------ refusals
 
 test("nothing from a recommendation shelf reaches the results", () => {

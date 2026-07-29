@@ -26,6 +26,7 @@ import {
   buildWatchLaterNote,
   emptyState,
   extractChannelIdFromHtml,
+  hideItem,
   parseChannelInput,
   parseSubscriptionsCsv,
   expireItems,
@@ -35,12 +36,22 @@ import {
   normalizeState,
   parseChannelFeed,
   relativeAge,
+  restoreItem,
   sanitizeFileName,
   searchResultToItem,
   visibleItems,
 } from "./subscriptions";
 import { fetchDescription, searchYouTube } from "./innertube";
-import type { SearchResult } from "./search";
+import type { SearchPage, SearchResult } from "./search";
+import {
+  DURATION_OPTIONS,
+  FEATURE_OPTIONS,
+  SORT_OPTIONS,
+  UPLOAD_DATE_OPTIONS,
+  defaultFilters,
+  isDefaultFilters,
+} from "./search-params";
+import type { SearchFilters } from "./search-params";
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
 
@@ -290,10 +301,40 @@ export class SubscriptionsStore {
     }
   }
 
-  dismiss(item: HubItem): void {
-    item.state = item.state === "dismissed" ? "new" : "dismissed";
+  /**
+   * Remove a video from the hub — which now means hiding it, not deleting it.
+   *
+   * `hideItem` strips it to a tombstone on the way out; see the note there for
+   * why the description goes. The tombstone is what stops the video coming back
+   * from a later poll, and what stops a search offering it to you again.
+   */
+  hide(item: HubItem): void {
+    hideItem(item, new Date());
     this.emit();
     void this.save();
+  }
+
+  /**
+   * Put a hidden video back in the New list.
+   *
+   * The description was dropped when it was hidden, so it is fetched again —
+   * one player call, in the background, exactly like adding from search. The
+   * item is usable before it lands: an empty description is a note that says so,
+   * not a broken one.
+   */
+  async restore(item: HubItem): Promise<void> {
+    restoreItem(item);
+    this.emit();
+    void this.save();
+
+    if (item.description) return;
+    const description = await fetchDescription(item.videoId);
+    // Re-checked: a click during the round trip could have hidden it again, and
+    // writing a description onto a tombstone would undo the compaction.
+    if (description && item.state !== "dismissed") {
+      item.description = description;
+      void this.save();
+    }
   }
 }
 
@@ -307,21 +348,37 @@ export class SubscriptionsStore {
  * refresh, poll, or filter change.
  */
 export class HubView extends ItemView {
+  /**
+   * Which screen you are on.
+   *
+   * "hub" is your own videos; "browse" is YouTube's. They were one screen with
+   * one box doing both jobs, and that was the mistake issue 008 fixes: "narrow
+   * what I am looking at" and "go and get something new" are different
+   * intentions and now have different boxes on different screens.
+   *
+   * Switching rebuilds the view rather than toggling parts of it. That is a
+   * deliberate navigation, not a click landing on a control, so the rule about
+   * clicks never moving their neighbours is not in play — and everything either
+   * screen needs is held in fields, so coming back restores what you left.
+   */
+  private mode: "hub" | "browse" = "hub";
+
   private filter: HubFilter = "new";
   private channelFilter: string | null = null;
+  /** The hub's own box: free text over the list you are looking at. */
+  private itemQuery = "";
   private unsubscribe: (() => void) | null = null;
-  private listEl!: HTMLElement;
-  private channelsEl!: HTMLElement;
-  private statusEl!: HTMLElement;
+  // Nullable, and re-assigned on every `build()`: a rebuilt view must not be
+  // able to draw into the elements of the screen it replaced.
+  private listEl: HTMLElement | null = null;
+  private channelsEl: HTMLElement | null = null;
+  private statusEl: HTMLElement | null = null;
   /** Cards on screen right now, so a click can update one in place. */
   private cards = new Map<string, HTMLElement>();
 
   /**
-   * Search mode. `searchQuery` is null whenever the hub is showing its own
-   * items, which is the one flag everything else reads: the list, the status
-   * line, and what clearing the box goes back to. The filter and the channel
-   * selection are untouched by any of this, so leaving search restores exactly
-   * the hub you left.
+   * Browse state. It outlives a trip back to the hub, so returning to the
+   * search screen shows the results you left rather than an empty box.
    */
   private searchQuery: string | null = null;
   private searchResults: SearchResult[] = [];
@@ -329,6 +386,12 @@ export class HubView extends ItemView {
   private searchState: "idle" | "loading" | "error" = "idle";
   private searchError = "";
   private searchInputEl: HTMLInputElement | null = null;
+  private searchFilters: SearchFilters = defaultFilters();
+  /** How many results this search dropped for already being in the hub. */
+  private searchSkipped = 0;
+  /** The two halves of the results list: the answer, then the related. */
+  private primaryEl: HTMLElement | null = null;
+  private relatedEl: HTMLElement | null = null;
   /** Results with an add in flight, so a second tap cannot double-add. */
   private adding = new Set<string>();
   /** Bumped per search, so a slow first page cannot land over a newer one. */
@@ -396,6 +459,28 @@ export class HubView extends ItemView {
     // sat underneath it. Namespaced class, no collision.
     root.toggleClass("ytfree-phone", this.phone);
 
+    // A rebuild throws away the previous screen's elements. Anything the store
+    // listener might draw into has to be forgotten with them.
+    this.listEl = null;
+    this.channelsEl = null;
+    this.statusEl = null;
+    this.primaryEl = null;
+    this.relatedEl = null;
+    this.searchInputEl = null;
+    this.menuEl = null;
+    this.scrimEl = null;
+    this.menuButtonEl = null;
+    this.menuLabelEl = null;
+    this.menuOpen = false;
+    this.cards.clear();
+
+    if (this.mode === "browse") this.buildBrowse(root);
+    else this.buildHub(root);
+  }
+
+  // ------------------------------------------------------------ the hub screen
+
+  private buildHub(root: HTMLElement): void {
     const header = root.createDiv({ cls: "ytfree-hub-header" });
 
     // Phone: the filters move into the collapsible menu and the header carries
@@ -404,6 +489,17 @@ export class HubView extends ItemView {
     else this.buildFilters(header);
 
     const actions = header.createDiv({ cls: "ytfree-hub-actions" });
+
+    // The way to YouTube. An icon rather than a box, because the thing it opens
+    // is a screen: putting a second text field next to the filter box was how
+    // the two jobs got confused with each other in the first place.
+    const browse = actions.createEl("button", {
+      cls: "ytfree-hub-icon-button",
+      attr: { type: "button", "aria-label": "Search YouTube", title: "Search YouTube" },
+    });
+    setIcon(browse, "youtube");
+    browse.addEventListener("click", () => this.setMode("browse"));
+
     // The same thing the settings pane's "Sync now" runs, notices included, so
     // there is only one meaning of "sync" in the plugin.
     const refresh = actions.createEl("button", { cls: "ytfree-hub-icon-button" });
@@ -415,7 +511,7 @@ export class HubView extends ItemView {
       void run.then(() => this.renderAll());
     });
 
-    this.buildSearch(root);
+    this.buildItemFilter(root);
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status" });
 
     const body = root.createDiv({ cls: "ytfree-hub-body" });
@@ -427,72 +523,63 @@ export class HubView extends ItemView {
   }
 
   /**
-   * The search box — its own row, above the status line and below whatever the
-   * header is showing on this platform.
+   * The hub's own box. It filters the list in front of you and touches nothing
+   * else — no network, no YouTube, no mode to get out of.
    *
-   * A row of its own rather than a slot in the header because the header is
-   * already the tightest thing on a phone, and because the box is the entrance
-   * to a different mode: it should read as the top of the list it replaces.
+   * Filtering happens on every keystroke because it is free: the items are
+   * already in memory, and a list that answers while you are still typing is
+   * the entire reason to have this rather than a second search.
    */
-  private buildSearch(root: HTMLElement): void {
+  private buildItemFilter(root: HTMLElement): void {
     const row = root.createDiv({ cls: "ytfree-hub-search" });
 
     const input = row.createEl("input", {
       cls: "ytfree-hub-search-input",
       // `search` gives iOS a Search key and both platforms a native clear
       // control, which fires `input` like any other edit — so clearing by hand
-      // and clearing with the × take the same path out of search mode.
+      // and clearing with the × take the same path.
       type: "search",
       attr: {
-        placeholder: "Search YouTube",
+        placeholder: "Filter these videos",
         enterkeyhint: "search",
         autocapitalize: "off",
         autocorrect: "off",
         spellcheck: "false",
-        "aria-label": "Search YouTube",
+        "aria-label": "Filter the videos in your hub",
       },
     });
-    this.searchInputEl = input;
+    // Survives a trip to the search screen and back, like everything else here.
+    input.value = this.itemQuery;
 
+    const apply = (): void => {
+      this.itemQuery = input.value;
+      this.renderList();
+      this.renderStatus();
+    };
+    input.addEventListener("input", apply);
     input.addEventListener("keydown", (evt) => {
-      if (evt.key === "Enter") {
+      if (evt.key === "Escape") {
         evt.preventDefault();
-        this.runSearch(input.value);
-      } else if (evt.key === "Escape") {
-        evt.preventDefault();
-        this.exitSearch();
+        input.value = "";
+        apply();
       }
     });
-    // Emptying the box is the way back, and it has to work however the box was
-    // emptied — backspace, the native ×, or a paste of nothing.
-    input.addEventListener("input", () => {
-      if (input.value.trim() === "" && this.searchQuery !== null) this.exitSearch();
-    });
-
-    const go = row.createEl("button", {
-      cls: "ytfree-hub-icon-button",
-      attr: { type: "button", "aria-label": "Search YouTube", title: "Search YouTube" },
-    });
-    setIcon(go, "search");
-    go.addEventListener("click", () => this.runSearch(input.value));
   }
 
-  /** The three filter chips. Same markup either side; only the host differs. */
+  /** The filter chips. Same markup either side; only the host differs. */
   private buildFilters(host: HTMLElement): void {
     const filters = host.createDiv({ cls: "ytfree-hub-filters" });
     const options: Array<[HubFilter, string]> = [
       ["new", "New"],
       ["all", "All"],
       ["kept", "Kept"],
+      ["hidden", "Hidden"],
     ];
     for (const [value, label] of options) {
       const button = filters.createEl("button", { text: label, cls: "ytfree-hub-filter" });
       button.toggleClass("is-active", this.filter === value);
       button.addEventListener("click", () => {
         this.filter = value;
-        // The filters describe the hub's own items, so choosing one is a way
-        // out of search — and the filter you chose is the one you land on.
-        this.clearSearch();
         for (const el of Array.from(filters.children)) {
           el.toggleClass("is-active", el === button);
         }
@@ -504,6 +591,132 @@ export class HubView extends ItemView {
         this.setMenuOpen(false);
       });
     }
+  }
+
+  // --------------------------------------------------------- the browse screen
+
+  private buildBrowse(root: HTMLElement): void {
+    const header = root.createDiv({ cls: "ytfree-hub-header" });
+
+    const back = header.createEl("button", {
+      cls: "ytfree-hub-icon-button",
+      attr: { type: "button", "aria-label": "Back to your hub", title: "Back to your hub" },
+    });
+    setIcon(back, "arrow-left");
+    back.addEventListener("click", () => this.setMode("hub"));
+
+    header.createDiv({ cls: "ytfree-hub-screen-title", text: "Search YouTube" });
+
+    const row = root.createDiv({ cls: "ytfree-hub-search" });
+    const input = row.createEl("input", {
+      cls: "ytfree-hub-search-input",
+      type: "search",
+      attr: {
+        placeholder: "Search YouTube",
+        enterkeyhint: "search",
+        autocapitalize: "off",
+        autocorrect: "off",
+        spellcheck: "false",
+        "aria-label": "Search YouTube",
+      },
+    });
+    this.searchInputEl = input;
+    input.value = this.searchQuery ?? "";
+
+    input.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter") {
+        evt.preventDefault();
+        this.runSearch(input.value);
+      } else if (evt.key === "Escape") {
+        evt.preventDefault();
+        this.exitSearch();
+      }
+    });
+    // Emptying the box empties the results — however it was emptied: backspace,
+    // the native ×, or a paste of nothing.
+    input.addEventListener("input", () => {
+      if (input.value.trim() === "" && this.searchQuery !== null) this.exitSearch();
+    });
+
+    const go = row.createEl("button", {
+      cls: "ytfree-hub-icon-button",
+      attr: { type: "button", "aria-label": "Search", title: "Search" },
+    });
+    setIcon(go, "search");
+    go.addEventListener("click", () => this.runSearch(input.value));
+
+    this.buildSearchFilters(root);
+    this.statusEl = root.createDiv({ cls: "ytfree-hub-status" });
+
+    const body = root.createDiv({ cls: "ytfree-hub-body" });
+    this.listEl = body.createDiv({ cls: "ytfree-hub-list" });
+  }
+
+  /**
+   * YouTube's filter panel, as four selects.
+   *
+   * Selects rather than chips, and one feature rather than YouTube's checkbox
+   * set, for the same reason: a `<select>` is a fixed box whose contents change
+   * without the control changing size, so choosing a filter cannot move the
+   * results underneath it. They are also the one control iOS renders as a
+   * proper picker without any help.
+   *
+   * Every one of these is sent to YouTube — see `search-params.ts`. Nothing is
+   * filtered here out of a page we already fetched, which is the difference
+   * between "over 20 minutes" meaning it and it meaning "the long ones out of
+   * these twenty".
+   */
+  private buildSearchFilters(root: HTMLElement): void {
+    const bar = root.createDiv({ cls: "ytfree-hub-filterbar" });
+
+    const select = <T extends string>(
+      label: string,
+      options: Array<[T, string]>,
+      current: T,
+      onPick: (value: T) => void,
+    ): void => {
+      const el = bar.createEl("select", {
+        cls: "dropdown ytfree-hub-filterbar-select",
+        attr: { "aria-label": label, title: label },
+      });
+      for (const [value, text] of options) {
+        el.createEl("option", { value, text });
+      }
+      el.value = current;
+      el.addEventListener("change", () => {
+        onPick(el.value as T);
+        // A filter change is a different search, not a different reading of the
+        // one you already have — so it goes back to YouTube. Only if there is
+        // something to search for: changing a filter with an empty box sets it
+        // up for the query you have not typed yet.
+        if (this.searchQuery) this.runSearch(this.searchQuery);
+      });
+    };
+
+    select("Upload date", UPLOAD_DATE_OPTIONS, this.searchFilters.uploadDate, (value) => {
+      this.searchFilters.uploadDate = value;
+    });
+    select("Duration", DURATION_OPTIONS, this.searchFilters.duration, (value) => {
+      this.searchFilters.duration = value;
+    });
+    select("Type", FEATURE_OPTIONS, this.searchFilters.feature, (value) => {
+      this.searchFilters.feature = value;
+    });
+    select("Sort by", SORT_OPTIONS, this.searchFilters.sort, (value) => {
+      this.searchFilters.sort = value;
+    });
+  }
+
+  /** Swap screens. Everything either one needs is in a field, so this is safe. */
+  private setMode(mode: "hub" | "browse"): void {
+    if (this.mode === mode) return;
+    this.mode = mode;
+    this.build();
+    this.renderAll();
+    // Landing on the search screen with an empty box should put the cursor in
+    // it. Not on a phone: that would raise the keyboard over the results you
+    // came back to look at.
+    if (mode === "browse" && !this.phone && !this.searchQuery) this.searchInputEl?.focus();
   }
 
   /**
@@ -558,7 +771,14 @@ export class HubView extends ItemView {
   /** What the collapsed menu says: the filter, then the channel. */
   private renderMenuLabel(): void {
     if (!this.menuLabelEl) return;
-    const filterLabel = this.filter === "new" ? "New" : this.filter === "kept" ? "Kept" : "All";
+    const filterLabel =
+      this.filter === "new"
+        ? "New"
+        : this.filter === "kept"
+          ? "Kept"
+          : this.filter === "hidden"
+            ? "Hidden"
+            : "All";
     const channel = this.channelFilter
       ? (this.store.state.channels.find((c) => c.id === this.channelFilter)?.title ?? "Channel")
       : "All channels";
@@ -574,21 +794,8 @@ export class HubView extends ItemView {
 
   private renderStatus(): void {
     if (!this.statusEl) return;
-
-    // In search mode the status line belongs to the search, not to the hub:
-    // the counts underneath are about a list you are not looking at.
-    if (this.searchQuery !== null) {
-      if (this.searchState === "error") {
-        this.statusEl.setText(`Search failed — ${this.searchError}`);
-      } else if (this.searchState === "loading" && this.searchResults.length === 0) {
-        this.statusEl.setText(`Searching for “${this.searchQuery}”…`);
-      } else if (this.searchResults.length === 0) {
-        this.statusEl.setText(`Nothing found for “${this.searchQuery}”.`);
-      } else {
-        this.statusEl.setText(
-          `${this.searchResults.length} results for “${this.searchQuery}” · click one to add it to your hub`,
-        );
-      }
+    if (this.mode === "browse") {
+      this.statusEl.setText(this.browseStatus());
       return;
     }
 
@@ -597,11 +804,48 @@ export class HubView extends ItemView {
     const parts: string[] = [];
     if (this.store.polling) parts.push("Checking channels…");
     else if (channels.length === 0) parts.push("No channels yet — import your subscriptions.");
-    else parts.push(`${shown} of ${items.length} videos · ${channels.length} channels`);
-    if (lastPolledAt && !this.store.polling) {
+    else if (this.filter === "hidden") {
+      const hidden = this.store.state.items.filter((item) => item.state === "dismissed").length;
+      parts.push(
+        this.itemQuery
+          ? `${shown} of ${hidden} hidden videos`
+          : `${hidden} hidden video${hidden === 1 ? "" : "s"} · put one back with the arrow`,
+      );
+    } else if (this.itemQuery) {
+      parts.push(`${shown} match${shown === 1 ? "" : "es"} for “${this.itemQuery}”`);
+    } else {
+      parts.push(`${shown} of ${items.length} videos · ${channels.length} channels`);
+    }
+    if (lastPolledAt && !this.store.polling && this.filter !== "hidden") {
       parts.push(`checked ${relativeAge(lastPolledAt, new Date())}`);
     }
     this.statusEl.setText(parts.join(" · "));
+  }
+
+  /** The search screen's own status line. */
+  private browseStatus(): string {
+    if (this.searchQuery === null) {
+      return isDefaultFilters(this.searchFilters)
+        ? "Type something and press Enter. Nothing here plays — a result can only be added to your hub."
+        : "Filters set. Type something and press Enter.";
+    }
+    if (this.searchState === "error") return `Search failed — ${this.searchError}`;
+    if (this.searchState === "loading" && this.searchResults.length === 0) {
+      return `Searching for “${this.searchQuery}”…`;
+    }
+
+    // Said out loud, because "nothing found" and "found nothing you have not
+    // already dealt with" are different answers and only one of them is worth
+    // rewording the query over.
+    const skipped = this.searchSkipped
+      ? ` · ${this.searchSkipped} already in your hub, not shown`
+      : "";
+    if (this.searchResults.length === 0) {
+      return this.searchSkipped
+        ? `Everything found for “${this.searchQuery}” is already in your hub.`
+        : `Nothing found for “${this.searchQuery}”.`;
+    }
+    return `${this.searchResults.length} results for “${this.searchQuery}”${skipped} · click one to add it`;
   }
 
   private renderChannels(): void {
@@ -640,7 +884,6 @@ export class HubView extends ItemView {
 
   private selectChannel(channelId: string | null): void {
     this.channelFilter = channelId;
-    this.clearSearch();
     this.renderChannels();
     this.renderList();
     this.renderStatus();
@@ -654,15 +897,60 @@ export class HubView extends ItemView {
       channelId: this.channelFilter,
       includeShorts: this.settings().includeShorts,
       showWatched: this.settings().showWatched,
+      query: this.itemQuery,
     });
   }
 
   // --------------------------------------------------------------- search
 
   /**
-   * Leave search mode without redrawing. The state is dropped and the box is
-   * emptied; the filter and the channel selection are deliberately not touched,
-   * because they are what you go back to.
+   * Drop the results you have already dealt with.
+   *
+   * "Dealt with" is anything the hub knows about: saved, kept, or hidden. A
+   * video you removed is a decision, and offering it back in a search two
+   * minutes later is the search arguing with you.
+   *
+   * This runs when a page *lands*, not when a card is drawn, which is what
+   * keeps it compatible with the no-reflow rule: a result you add while looking
+   * at it stays exactly where it is, with a tick, because it was already in
+   * `searchResults` before you clicked.
+   */
+  private acceptable(results: SearchResult[]): SearchResult[] {
+    const shown = new Set(this.searchResults.map((result) => result.videoId));
+    return results.filter(
+      (result) => !shown.has(result.videoId) && !this.store.hasItem(result.videoId),
+    );
+  }
+
+  /**
+   * Fetch pages until one of them survives `acceptable`, or the road runs out.
+   *
+   * Without this, a search whose whole first page is already in your hub would
+   * answer "nothing found" while sitting on a continuation token full of
+   * results. Three extra pages is the budget: enough for a query you have
+   * mostly worked through, bounded enough that a pathological one cannot turn a
+   * click into sixty requests.
+   */
+  private async fetchPage(
+    query: string,
+    continuation: string | null,
+  ): Promise<{ results: SearchResult[]; continuation: string | null; skipped: number }> {
+    let token = continuation;
+    let skipped = 0;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const page: SearchPage = await searchYouTube(query, this.searchFilters, token);
+      const fresh = this.acceptable(page.results);
+      skipped += page.results.length - fresh.length;
+      token = page.continuation;
+      if (fresh.length > 0 || !token) return { results: fresh, continuation: token, skipped };
+    }
+    return { results: [], continuation: token, skipped };
+  }
+
+  /**
+   * Empty the search. The box is cleared and the results are dropped; the
+   * filters are not, because they are a setting for this screen rather than
+   * part of the query.
    */
   private clearSearch(): void {
     if (this.searchQuery === null) return;
@@ -673,6 +961,7 @@ export class HubView extends ItemView {
     this.searchContinuation = null;
     this.searchState = "idle";
     this.searchError = "";
+    this.searchSkipped = 0;
     this.adding.clear();
     if (this.searchInputEl) this.searchInputEl.value = "";
   }
@@ -696,16 +985,18 @@ export class HubView extends ItemView {
     this.searchContinuation = null;
     this.searchState = "loading";
     this.searchError = "";
+    this.searchSkipped = 0;
     this.adding.clear();
     this.renderList();
     this.renderStatus();
 
-    void searchYouTube(text)
+    void this.fetchPage(text, null)
       .then(
         (page) => {
           if (token !== this.searchToken) return;
           this.searchResults = page.results;
           this.searchContinuation = page.continuation;
+          this.searchSkipped = page.skipped;
           this.searchState = "idle";
         },
         (err: unknown) => {
@@ -737,63 +1028,98 @@ export class HubView extends ItemView {
     this.searchState = "loading";
     button.setText("Loading…");
 
-    void searchYouTube(query, continuation)
-      .then(
-        (page) => {
-          if (token !== this.searchToken) return;
-          const known = new Set(this.searchResults.map((result) => result.videoId));
-          const fresh = page.results.filter((result) => !known.has(result.videoId));
-          this.searchResults = [...this.searchResults, ...fresh];
-          this.searchContinuation = page.continuation;
-          this.searchState = "idle";
-          const now = new Date();
-          for (const result of fresh) this.renderResult(result, now, button);
-          button.setText("More results");
-          // The end of the road: YouTube stopped offering a token, or answered
-          // with nothing new. Either way there is no page after this one.
-          if (!page.continuation || fresh.length === 0) button.remove();
-          this.renderStatus();
-        },
-        (err: unknown) => {
-          if (token !== this.searchToken) return;
-          this.searchState = "idle";
-          button.setText("More results");
-          new Notice(`YT Free: could not load more results — ${String(err)}`);
-        },
-      );
+    void this.fetchPage(query, continuation).then(
+      (page) => {
+        if (token !== this.searchToken) return;
+        this.searchResults = [...this.searchResults, ...page.results];
+        this.searchContinuation = page.continuation;
+        this.searchSkipped += page.skipped;
+        this.searchState = "idle";
+        const now = new Date();
+        for (const result of page.results) this.renderResult(result, now);
+        button.setText("More results");
+        // The end of the road: YouTube stopped offering a token, or answered
+        // with nothing new. Either way there is no page after this one.
+        if (!page.continuation || page.results.length === 0) button.remove();
+        this.renderStatus();
+      },
+      (err: unknown) => {
+        if (token !== this.searchToken) return;
+        this.searchState = "idle";
+        button.setText("More results");
+        new Notice(`YT Free: could not load more results — ${String(err)}`);
+      },
+    );
   }
 
   private renderSearch(): void {
-    this.listEl.empty();
+    const list = this.listEl;
+    if (!list) return;
+    list.empty();
     this.cards.clear();
+    this.primaryEl = null;
+    this.relatedEl = null;
 
     if (this.searchState === "error") {
-      this.listEl.createDiv({
-        cls: "ytfree-hub-empty",
-        text: `Search failed — ${this.searchError}`,
-      });
+      list.createDiv({ cls: "ytfree-hub-empty", text: `Search failed — ${this.searchError}` });
       return;
     }
     if (this.searchState === "loading" && this.searchResults.length === 0) {
-      this.listEl.createDiv({ cls: "ytfree-hub-empty", text: "Searching YouTube…" });
+      list.createDiv({ cls: "ytfree-hub-empty", text: "Searching YouTube…" });
+      return;
+    }
+    if (this.searchQuery === null) {
+      list.createDiv({
+        cls: "ytfree-hub-empty",
+        text: "Nothing searched for yet.",
+      });
       return;
     }
     if (this.searchResults.length === 0) {
-      this.listEl.createDiv({ cls: "ytfree-hub-empty", text: "No results." });
+      list.createDiv({
+        cls: "ytfree-hub-empty",
+        text: this.searchSkipped
+          ? "Everything this found is already in your hub."
+          : "No results.",
+      });
       return;
     }
 
+    // Two hosts, created up front and in this order, so an appended page lands
+    // in the right half without anything above it being redrawn.
+    this.primaryEl = list.createDiv({ cls: "ytfree-hub-results" });
+    this.relatedEl = list.createDiv({ cls: "ytfree-hub-results" });
+
     const now = new Date();
-    for (const result of this.searchResults) this.renderResult(result, now, null);
+    for (const result of this.searchResults) this.renderResult(result, now);
 
     if (this.searchContinuation) {
-      const more = this.listEl.createEl("button", {
+      const more = list.createEl("button", {
         cls: "ytfree-hub-more",
         text: "More results",
         attr: { type: "button" },
       });
       more.addEventListener("click", () => this.loadMore(more));
     }
+  }
+
+  /**
+   * Where a result goes: the answer, or the related material below it.
+   *
+   * The heading is created with the first related result rather than reserved,
+   * because it is at the bottom of a list that is being appended to — there is
+   * nothing below it to move.
+   */
+  private resultHost(result: SearchResult): HTMLElement | null {
+    if (!result.secondary) return this.primaryEl;
+    const related = this.relatedEl;
+    if (related && related.childElementCount === 0) {
+      related.createDiv({
+        cls: "ytfree-hub-results-heading",
+        text: "Related to your search",
+      });
+    }
+    return related;
   }
 
   /**
@@ -804,9 +1130,10 @@ export class HubView extends ItemView {
    * `<video>`, and nothing here that a click can turn into playback — see
    * `docs/V1-SCOPE-BROWSE.md`. Browse adds; the hub decides.
    */
-  private renderResult(result: SearchResult, now: Date, before: HTMLElement | null): void {
-    const card = this.listEl.createDiv({ cls: "ytfree-hub-card ytfree-hub-result" });
-    if (before) this.listEl.insertBefore(card, before);
+  private renderResult(result: SearchResult, now: Date): void {
+    const host = this.resultHost(result);
+    if (!host) return;
+    const card = host.createDiv({ cls: "ytfree-hub-card ytfree-hub-result" });
 
     const thumb = card.createDiv({ cls: "ytfree-hub-thumb" });
     if (result.thumbnail) {
@@ -875,32 +1202,87 @@ export class HubView extends ItemView {
   }
 
   private renderList(): void {
-    if (!this.listEl) return;
-    if (this.searchQuery !== null) {
+    const list = this.listEl;
+    if (!list) return;
+    if (this.mode === "browse") {
       this.renderSearch();
       return;
     }
-    this.listEl.empty();
+    list.empty();
     this.cards.clear();
 
     const items = this.currentItems();
     if (items.length === 0) {
-      this.listEl.createDiv({
-        cls: "ytfree-hub-empty",
-        text:
-          this.store.state.channels.length === 0
-            ? "Run “YT Free: Import YouTube subscriptions” to get started."
-            : "Nothing here. Try the All filter, or check for new videos.",
-      });
+      list.createDiv({ cls: "ytfree-hub-empty", text: this.emptyMessage() });
       return;
     }
 
     const now = new Date();
+    if (this.filter === "hidden") {
+      for (const item of items) this.renderHiddenRow(item, now);
+      return;
+    }
     for (const item of items) this.renderCard(item, now);
   }
 
+  private emptyMessage(): string {
+    if (this.itemQuery) return `Nothing in this list matches “${this.itemQuery}”.`;
+    if (this.filter === "hidden") {
+      return "Nothing hidden. Removing a video from the hub puts it here.";
+    }
+    return this.store.state.channels.length === 0
+      ? "Run “YT Free: Import YouTube subscriptions” to get started."
+      : "Nothing here. Try the All filter, or check for new videos.";
+  }
+
+  /**
+   * One hidden video: a line of text and a way back.
+   *
+   * Deliberately not a card. A hidden item has no thumbnail stored — see
+   * `hideItem` — and drawing one would mean rebuilding the URL and fetching an
+   * image per row for a list whose entire job is to be cheap. The title and the
+   * channel are what you came to recognise it by.
+   */
+  private renderHiddenRow(item: HubItem, now: Date): void {
+    const list = this.listEl;
+    if (!list) return;
+    const row = list.createDiv({ cls: "ytfree-hub-card ytfree-hub-hidden-row" });
+    this.cards.set(item.videoId, row);
+
+    const meta = row.createDiv({ cls: "ytfree-hub-meta" });
+    meta.createDiv({ cls: "ytfree-hub-title", text: item.title });
+    const hiddenAge = relativeAge(item.dismissedAt ?? "", now);
+    meta.createDiv({
+      cls: "ytfree-hub-sub",
+      text: [item.channelTitle, hiddenAge ? `hidden ${hiddenAge}` : "hidden"]
+        .filter(Boolean)
+        .join(" · "),
+    });
+
+    const actions = row.createDiv({ cls: "ytfree-hub-dismiss" });
+    const restore = new ButtonComponent(actions)
+      .setIcon("rotate-ccw")
+      .setTooltip("Put back in the hub")
+      .onClick((evt) => {
+        evt.stopPropagation();
+        void this.store.restore(item).catch((err: unknown) => {
+          new Notice(`YT Free: could not restore that video — ${String(err)}`);
+        });
+        // It is no longer hidden, so it no longer belongs in this list. Same
+        // as removing one from the New list: the row you acted on goes, and
+        // nothing else is redrawn.
+        row.remove();
+        this.cards.delete(item.videoId);
+        if (this.cards.size === 0) this.renderList();
+        this.renderStatus();
+      });
+    restore.buttonEl.addClass("ytfree-hub-icon-button");
+  }
+
   private renderCard(item: HubItem, now: Date): void {
-    const card = this.listEl.createDiv({ cls: "ytfree-hub-card" });
+    const list = this.listEl;
+    if (!list) return;
+    const card = list.createDiv({ cls: "ytfree-hub-card" });
     this.cards.set(item.videoId, card);
 
     const thumb = card.createDiv({ cls: "ytfree-hub-thumb" });
@@ -940,10 +1322,10 @@ export class HubView extends ItemView {
     const dismiss = card.createDiv({ cls: "ytfree-hub-dismiss" });
     const button = new ButtonComponent(dismiss)
       .setIcon("x")
-      .setTooltip("Remove")
+      .setTooltip("Hide — find it again under Hidden")
       .onClick((evt) => {
         evt.stopPropagation();
-        this.store.dismiss(item);
+        this.store.hide(item);
         card.remove();
         this.cards.delete(item.videoId);
         // The empty state is part of the list, so an emptied list is re-rendered

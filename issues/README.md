@@ -11,3 +11,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [005](005-mobile-full-quality.md) | Full quality on mobile (above 360p) via MSE | Scoped — not built, blocked on 004 |
 | 006 | Sign in to YouTube; import subscriptions, Watch Later and history | Scoped ([docs/V1-SCOPE-ACCOUNT-IMPORT.md](../docs/V1-SCOPE-ACCOUNT-IMPORT.md)) — **approved**, gate spiked and passed 2026-07-28, not built |
 | [007](007-browse-search.md) | Browse: search YouTube from inside the hub, add results as hub items | Built 2026-07-28 ([docs/V1-SCOPE-BROWSE.md](../docs/V1-SCOPE-BROWSE.md)) — awaiting manual test |
+| [008](008-browse-round-two.md) | Browse round two: YouTube's filters, a Hidden list, and two search boxes | Built 2026-07-28 — awaiting manual test |

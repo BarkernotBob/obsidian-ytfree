@@ -40,6 +40,18 @@ export interface SearchResult {
   /** "55:31". The feed has no equivalent, which is why it is shown here. */
   duration: string;
   thumbnail: string;
+  /**
+   * True for a result that came from a section *after* the one answering the
+   * query — YouTube's "related to your search" material.
+   *
+   * The response is not one list. Only the first video-bearing item section is
+   * the answer; the sections below it are loosely-related videos that no sort
+   * and no filter is applied to (measured — `spikes/search-filters/sections.mjs`
+   * — a view-count-sorted response has a perfectly ordered first section and an
+   * unordered one underneath). Flattening them together is what made a sorted
+   * list look random, so the hub draws these under their own heading instead.
+   */
+  secondary: boolean;
 }
 
 export interface SearchPage {
@@ -130,7 +142,7 @@ export function pickThumbnail(thumbnails: unknown): string {
   return chosen.url.startsWith("//") ? `https:${chosen.url}` : chosen.url;
 }
 
-function parseVideo(raw: unknown): SearchResult | null {
+function parseVideo(raw: unknown, secondary: boolean): SearchResult | null {
   const video = record(raw);
   if (!video) return null;
   const videoId = typeof video.videoId === "string" ? video.videoId : "";
@@ -151,6 +163,7 @@ function parseVideo(raw: unknown): SearchResult | null {
     views: parseViewCount(text(video.viewCountText) || text(video.shortViewCountText)),
     duration: text(video.lengthText),
     thumbnail: pickThumbnail(at(video, "thumbnail", "thumbnails")),
+    secondary,
   };
 }
 
@@ -172,11 +185,24 @@ export function parseSearchResponse(raw: unknown): SearchPage {
 
   const results: SearchResult[] = [];
   const seen = new Set<string>();
+  // The first section with a video in it is the answer to the query. Everything
+  // in a later section is related material — see the note on `secondary`. A
+  // section holding only ads or a chip cloud is not the answer to anything, so
+  // it does not count as the first one.
+  let answered = false;
   for (const section of array(root.contents)) {
-    for (const entry of array(at(section, "itemSectionRenderer", "contents"))) {
+    const entries = array(at(section, "itemSectionRenderer", "contents"));
+    const videos = entries.filter((entry) => {
       const object = record(entry);
-      if (!object || !("compactVideoRenderer" in object)) continue;
-      const result = parseVideo(object.compactVideoRenderer);
+      return Boolean(object && "compactVideoRenderer" in object);
+    });
+    if (videos.length === 0) continue;
+    const secondary = answered;
+    answered = true;
+
+    for (const entry of videos) {
+      const object = record(entry);
+      const result = parseVideo(object?.compactVideoRenderer, secondary);
       // A query and its continuation can repeat a video; the hub would show it
       // twice under one More results click.
       if (!result || seen.has(result.videoId)) continue;
