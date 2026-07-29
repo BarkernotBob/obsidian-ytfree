@@ -53,12 +53,14 @@ route is closed — googlevideo only grants CORS to youtube.com, measured
 ## Manual test (for BarkernotBob)
 
 Roughly 15 minutes, and steps 6–8 need a wait for iCloud. Use a talking-head video with
-captions — a podcast clip or a lecture, not music. Nothing here needs the terminal.
+captions — a podcast clip or a lecture, not music. Nothing here needs the terminal: the
+build was already installed to the vault when the issue was closed out.
 
 **Setup**
 
-1. Run `./install.sh` in the project folder, then in Obsidian turn YT Free off and back
-   on (Settings → Community plugins → the toggle next to YT Free).
+1. In Obsidian: Settings → Community plugins → toggle **YT Free** off, then back on.
+   (Only if a future build has *not* been installed for you: `cd ~/Projects/obsidian-ytfree
+   && ./install.sh` first.)
 2. Open Settings → YT Free. You should see a new **Smart Speed** section above
    **Transcript**, with four rows: Compress pauses, Pause speed, Shortest pause to skip,
    and — on the Mac only — Silence threshold (ffmpeg). Leave the defaults alone for now
