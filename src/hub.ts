@@ -24,6 +24,7 @@ import {
 import type { HubFilter, HubItem, SubscriptionsState } from "./subscriptions";
 import {
   buildWatchLaterNote,
+  deskSub,
   emptyState,
   extractChannelIdFromHtml,
   hideItem,
@@ -35,6 +36,7 @@ import {
   mergeItems,
   normalizeState,
   parseChannelFeed,
+  phoneSub,
   relativeAge,
   restoreItem,
   sanitizeFileName,
@@ -1154,8 +1156,12 @@ export class HubView extends ItemView {
     const meta = card.createDiv({ cls: "ytfree-hub-meta" });
     meta.createDiv({ cls: "ytfree-hub-title", text: result.title });
     const sub = meta.createDiv({ cls: "ytfree-hub-sub" });
+    // A phone row gives the line about 180pt. Three segments do not fit in it,
+    // and the view count is the one you never decide on: the duration is
+    // already a badge on the thumbnail, and who made it and how old it is are
+    // what you scan a result by.
     sub.setText(
-      [result.channelTitle, result.publishedText, formatViews(result.views)]
+      [result.channelTitle, result.publishedText, this.phone ? "" : formatViews(result.views)]
         .filter(Boolean)
         .join(" · "),
     );
@@ -1293,6 +1299,14 @@ export class HubView extends ItemView {
       img.alt = "";
     }
 
+    // Shown, not spelled: on a phone "Short" takes the corner of the thumbnail
+    // that a search result gives its duration, rather than a fourth segment on
+    // a line that already has too many. Created either way, so a normal video
+    // leaves the thumbnail exactly the same size.
+    if (this.phone) {
+      thumb.createSpan({ cls: "ytfree-hub-duration", text: item.isShort ? "Short" : "" });
+    }
+
     // A phone row has no width to spend on a marker column — the title is what
     // that width is for. The badge sits on the thumbnail instead, absolutely
     // positioned, so it still costs no layout when it appears.
@@ -1303,16 +1317,7 @@ export class HubView extends ItemView {
     const meta = card.createDiv({ cls: "ytfree-hub-meta" });
     meta.createDiv({ cls: "ytfree-hub-title", text: item.title });
     const sub = meta.createDiv({ cls: "ytfree-hub-sub" });
-    const bits = [item.channelTitle, relativeAge(item.published, now), formatViews(item.views)];
-    if (item.isShort) bits.push("Short");
-    // Where it came from, and whether it is already seen. A Watch Later item
-    // has no publish date, so without the label it looks like a bug.
-    if (item.origin === "watchlater" || item.origin === "both") bits.push("Watch Later");
-    // A search item carries no publish date either, for the same reason: say
-    // where it came from and the missing age reads as a fact, not a bug.
-    if (item.origin === "search") bits.push("Search");
-    if (item.watched) bits.push("Watched");
-    sub.setText(bits.filter(Boolean).join(" · "));
+    sub.setText(this.phone ? phoneSub(item, now) : deskSub(item, now));
     card.toggleClass("is-watched", Boolean(item.watched));
 
     // Fixed-width column, filled or not, so marking an item Kept moves nothing.

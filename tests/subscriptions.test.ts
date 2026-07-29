@@ -4,6 +4,7 @@ import type { HubItem } from "../src/subscriptions.ts";
 import {
   HIDDEN_LIMIT,
   buildWatchLaterNote,
+  deskSub,
   expireItems,
   extractChannelIdFromHtml,
   feedUrl,
@@ -17,6 +18,7 @@ import {
   parseChannelFeed,
   parseChannelInput,
   parseSubscriptionsCsv,
+  phoneSub,
   relativeAge,
   restoreItem,
   sanitizeFileName,
@@ -476,6 +478,32 @@ test("view counts shorten", () => {
   assert.equal(formatViews(1_250_000), "1.3M views");
   assert.equal(formatViews(42), "42 views");
   assert.equal(formatViews(null), "");
+});
+
+test("the desktop's second line spells out every flag the item carries", () => {
+  assert.equal(
+    deskSub(item({ isShort: true, watched: true, origin: "both" }), NOW),
+    "SmarterEveryDay · 21 hours ago · 1K views · Short · Watch Later · Watched",
+  );
+});
+
+test("a phone's second line is the channel and the age, and nothing else", () => {
+  // Short, watched and the view count are all shown elsewhere or dropped — the
+  // line has about 180pt to live in. See `phoneSub`.
+  assert.equal(
+    phoneSub(item({ isShort: true, watched: true, views: 1_250_000 }), NOW),
+    "SmarterEveryDay · 21 hours ago",
+  );
+});
+
+test("a phone item with no publish date says where it came from instead", () => {
+  assert.equal(
+    phoneSub(item({ published: "", origin: "watchlater" }), NOW),
+    "SmarterEveryDay · Watch Later",
+  );
+  assert.equal(phoneSub(item({ published: "", origin: "search" }), NOW), "SmarterEveryDay · Search");
+  // A feed item always has one, so a missing date there is a gap, not a source.
+  assert.equal(phoneSub(item({ published: "" }), NOW), "SmarterEveryDay");
 });
 
 // --------------------------------------------------------------------- state

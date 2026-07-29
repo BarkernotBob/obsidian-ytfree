@@ -1,4 +1,5 @@
 import Hls from "hls.js";
+import { setIcon } from "obsidian";
 // Type-only, and it has to stay that way. A value import of these names pulled
 // the whole resolver — and its `child_process` import — into every bundle that
 // touches the player, which is one of the two reasons the plugin could not load
@@ -29,6 +30,15 @@ export interface PlayerOptions {
    * this first; it resolves immediately once the stream is up.
    */
   ensureLoaded?: () => Promise<void>;
+  /**
+   * How the control row is drawn. "labels" is the desktop's row of text
+   * buttons. "icons" is the phone's: the same controls, as symbols, with the
+   * transport centred on the screen and the rest either side of it.
+   *
+   * Same buttons, same order of construction, same fixed sizes — only the
+   * contents of each button and the shape of the row change.
+   */
+  layout?: "labels" | "icons";
 }
 
 /**
@@ -106,11 +116,43 @@ export class YtFreePlayer {
    * pressing one never moves its neighbours or the note content around it.
    */
   private buildControls(): void {
+    const icons = this.options.layout === "icons";
     const bar = this.container.createDiv({ cls: "ytfree-controls" });
+    bar.toggleClass("ytfree-controls-icons", icons);
 
-    const button = (label: string, title: string, onClick: () => void) => {
-      const el = bar.createEl("button", { cls: "ytfree-btn", text: label, attr: { title } });
+    /*
+     * Three cells on a phone, one row on the desktop.
+     *
+     * The phone's row is a `1fr auto 1fr` grid, so the transport sits in the
+     * middle cell and is centred on the *screen* rather than on whatever
+     * happens to be beside it — the reason the row read as thrown together was
+     * that seven differently-sized boxes were left-packed against the margin.
+     * Construction order below is unchanged, so the desktop row is the same row
+     * it has always been; on a phone the cell decides where each control lands
+     * and CSS `order` puts Play between the two skips.
+     */
+    const groups = icons
+      ? {
+          left: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side" }),
+          mid: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-transport" }),
+          right: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side" }),
+        }
+      : null;
+    const host = (side: "left" | "mid" | "right"): HTMLElement => groups?.[side] ?? bar;
+
+    const button = (
+      side: "left" | "mid" | "right",
+      label: string,
+      icon: string,
+      title: string,
+      onClick: () => void,
+    ) => {
+      const el = host(side).createEl("button", {
+        cls: "ytfree-btn",
+        attr: { title, "aria-label": title },
+      });
       el.type = "button";
+      this.paint(el, label, icon);
       el.addEventListener("click", (e) => {
         e.preventDefault();
         onClick();
@@ -118,7 +160,7 @@ export class YtFreePlayer {
       return el;
     };
 
-    const playBtn = button("Play", "Play or pause", () => {
+    const playBtn = button("mid", "Play", "play", "Play or pause", () => {
       if (!this.video.paused) {
         this.video.pause();
         return;
@@ -126,18 +168,26 @@ export class YtFreePlayer {
       void this.withMedia(() => this.play());
     });
     playBtn.addClass("ytfree-btn-play");
-    // Text swap only — the button keeps a fixed width, so nothing shifts.
-    this.video.addEventListener("play", () => playBtn.setText("Pause"));
-    this.video.addEventListener("pause", () => playBtn.setText("Play"));
+    // Content swap only — the button keeps a fixed size, so nothing shifts.
+    this.video.addEventListener("play", () => this.paint(playBtn, "Pause", "pause", "Pause"));
+    this.video.addEventListener("pause", () => this.paint(playBtn, "Play", "play", "Play or pause"));
 
-    button("−10s", "Back 10 seconds", () => {
+    const back = button("mid", "−10s", "rewind", "Back 10 seconds", () => {
       this.video.currentTime = Math.max(0, this.video.currentTime - 10);
     });
-    button("+10s", "Forward 10 seconds", () => {
+    back.addClass("ytfree-btn-back");
+    const forward = button("mid", "+10s", "fast-forward", "Forward 10 seconds", () => {
       this.video.currentTime = this.video.currentTime + 10;
     });
+    forward.addClass("ytfree-btn-forward");
+    // A double chevron says "skip", not "skip how far". The numeral is a static
+    // corner badge inside a fixed-size button, so it costs no layout.
+    if (icons) for (const el of [back, forward]) el.createSpan({ cls: "ytfree-btn-badge", text: "10" });
 
-    const speed = bar.createEl("select", { cls: "ytfree-speed", attr: { title: "Playback speed" } });
+    const speed = host("left").createEl("select", {
+      cls: "ytfree-speed",
+      attr: { title: "Playback speed", "aria-label": "Playback speed" },
+    });
     for (const rate of [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]) {
       speed.createEl("option", { text: `${rate}×`, value: String(rate) });
     }
@@ -147,24 +197,30 @@ export class YtFreePlayer {
       this.video.playbackRate = this.playbackRate;
     });
 
-    button("PiP", "Picture-in-Picture", () => {
+    // Left, with the speed picker, rather than right with the size controls —
+    // and not only for the sense of it. Three buttons on the right and one
+    // control on the left is wider on that side than half a phone minus the
+    // transport, and a side cell that cannot fit its contents is a transport
+    // that is no longer in the middle. Two and two fits, on a 375pt screen too.
+    button("left", "PiP", "picture-in-picture", "Picture-in-Picture", () => {
       void this.withMedia(() => this.togglePip());
     });
 
-    button("Fullscreen", "Fullscreen", () => {
+    button("right", "Fullscreen", "maximize", "Fullscreen", () => {
       void this.withMedia(() => this.toggleFullscreen());
     });
 
     if (this.onTimestamp) {
-      button("Timestamp", "Insert timestamp at cursor", () => {
+      button("right", "Timestamp", "clock", "Insert timestamp at cursor", () => {
         this.onTimestamp?.(Math.floor(this.video.currentTime));
       });
     }
 
     if (this.options.onToggleCollapse) {
-      // Fixed width in CSS, because the label is the state: "Collapse" while
-      // the video is showing, "Show video" while it is not.
-      this.collapseBtn = button("Collapse", "Collapse the video", () =>
+      // Fixed size in CSS, because the content is the state: "Collapse" (or a
+      // chevron pointing up) while the video is showing, the opposite while
+      // it is not.
+      this.collapseBtn = button("right", "Collapse", "chevrons-up", "Collapse the video", () =>
         this.options.onToggleCollapse?.(),
       );
       this.collapseBtn.addClass("ytfree-btn-collapse");
@@ -173,11 +229,37 @@ export class YtFreePlayer {
     if (this.onDownload) {
       // Fixed width, and only ever a text swap inside it: "Download" → "12%" →
       // "Downloaded". The row cannot reflow while a download runs.
-      this.downloadBtn = button("Download", "Download this video for offline", () => {
+      this.downloadBtn = button("right", "Download", "download", "Download this video for offline", () => {
         this.onDownload?.();
       });
       this.downloadBtn.addClass("ytfree-btn-download");
     }
+  }
+
+  /**
+   * Fill a control: a symbol where the row is symbols, the word where it is
+   * words.
+   *
+   * The fallback is not decoration. `setIcon` with a name this Obsidian build
+   * does not know leaves the element empty, and an empty button is a control
+   * nobody can use — so an icon that did not render becomes its label instead.
+   */
+  private paint(el: HTMLButtonElement, label: string, icon: string, title?: string): void {
+    if (title) {
+      el.setAttribute("title", title);
+      el.setAttribute("aria-label", title);
+    }
+    const badge = el.querySelector(".ytfree-btn-badge");
+    el.empty();
+    if (this.options.layout === "icons") {
+      setIcon(el, icon);
+      if (el.firstElementChild) {
+        if (badge) el.appendChild(badge);
+        return;
+      }
+    }
+    el.setText(label);
+    if (badge) el.appendChild(badge);
   }
 
   /**
@@ -212,9 +294,10 @@ export class YtFreePlayer {
   /** Reflect collapsed state in the button that toggles it. */
   setCollapsed(collapsed: boolean): void {
     if (!this.collapseBtn) return;
-    this.collapseBtn.setText(collapsed ? "Show video" : "Collapse");
-    this.collapseBtn.setAttribute(
-      "title",
+    this.paint(
+      this.collapseBtn,
+      collapsed ? "Show video" : "Collapse",
+      collapsed ? "chevrons-down" : "chevrons-up",
       collapsed ? "Show the video again" : "Collapse the video",
     );
   }

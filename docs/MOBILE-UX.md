@@ -19,12 +19,12 @@ One screen, three zones, and only one of them is a menu.
 │  12 of 340 videos · 41 channels · checked 2h   │  status — 1.8em, reserved
 ├────────────────────────────────────────────────┤
 │                                                │
-│   ┌──────┐  How Convection Currents Work…      │
-│   │thumb │  Veritasium · 3d · 412K views       │  list — everything else
-│   └──────┘                              [ × ]  │
-│   ┌──────┐  The Problem With Capitalism        │
-│   │  ✓   │  SmarterEveryDay · 1w · 1.2M        │
-│   └──────┘                              [ × ]  │
+│   ┌──────┐  How Convection Currents Work…    │ │
+│   │thumb │  Veritasium · 3 days ago          │×│  list — everything else
+│   └──────┘ ─────────────────────────────────┴─┤
+│   ┌──────┐  The Problem With Capitalism      │ │
+│   │  ✓   │  SmarterEveryDay · 1 week ago     │×│
+│   └──────┘ ─────────────────────────────────┴─┤
 │                                                │
 └────────────────────────────────────────────────┘
 ```
@@ -74,21 +74,60 @@ Tapping it opens one panel containing **both** sections:
    nothing (existing rule, cheaper implementation).
 7. Touch targets: 44pt for the dismiss button and the channel rows, 40pt for the
    chrome.
+8. **The second line is two segments, and no more.** Everything else the item
+   knows is shown, not written — see below.
 
 ### Card anatomy (phone)
 
 ```
- 104×58 thumb      title, 2-line clamp, always visible
- ┌────────┐        ────────────────────────────────   ┌────┐
- │  ✓     │        channel · age · views · Watch Later│ ×  │
- └────────┘        ────────────────────────────────   └────┘
-      ↑ state badge, absolute                            ↑ 44×44
+ 104×58 thumb      title, 2-line clamp, always visible          ┌ 56pt, stretched
+ ┌────────┐        ────────────────────────────────────────    │┌────┐
+ │  ✓     │        channel · age                               ││ ×  │
+ └────────┘        ────────────────────────────────────────    │└────┘
+      ↑ state badge, absolute                                  ↑ divider meets
+ ───────────────────────────────────────────────────────────────  the separators
+      ↑ 1px separator, full bleed
 ```
 
-Fixed 74pt height. The title is the widest element and gets whatever the two
-fixed columns do not use — on a 390pt phone that is ~210pt, which is two real
-lines of title instead of the zero it had when a 200pt channel sidebar was
-competing for the same row.
+76pt rows, square corners, full-bleed hairlines. Rows are a *list*, not floating
+cards: with nothing between them the dismiss column's divider had nothing to
+meet, which is what made it read as a stray stub of line. The column is
+`align-self: stretch`, so it runs from the row's top edge to the hairline below
+it — not `height: 100%`, which measures against a box that is only definite by
+accident when the row centres its children.
+
+The title is the widest element and gets whatever the two fixed columns do not
+use — on a 390pt phone that is ~198pt, two real lines of title.
+
+### What the second line says, and what it shows instead
+
+On a phone the line is **`channel · age`**. It used to run to seven segments
+(channel, age, views, Short, Watch Later, Search, Watched) in a ~180pt column,
+so it truncated mid-word and every row broke in a different place.
+
+Nothing was dropped except the view count; the rest moved to where it costs no
+width and reads faster:
+
+| fact | where it lives now |
+|---|---|
+| Short | duration badge, thumbnail corner |
+| Watched | the dimmed thumbnail |
+| Kept / Dismissed | the state badge |
+| Watch Later / Search | in the age's place, only when there is no publish date |
+| views | gone — it is not what you choose by |
+
+`deskSub` and `phoneSub` (`src/subscriptions.ts`) are the two pure functions
+that build the line; the desktop's is unchanged. Search results follow the same
+rule: no view count on a phone, duration badge kept, because that *is* what you
+choose by.
+
+### Tap states
+
+iOS applies `:hover` on tap and leaves it applied, so a desktop hover grey stuck
+to whatever you last touched. Every hover rule in `styles.css` is behind
+`@media (hover: hover) and (pointer: fine)`, and the phone hub additionally sets
+`-webkit-tap-highlight-color: transparent` and neutralises `:focus`/`:active` on
+the icon buttons — the two states iOS adds on its own.
 
 ---
 
@@ -112,11 +151,18 @@ the `--view-top-fade-mask` that dims the first few pixels of `.view-content`.
 
 **Fix.** Two lines, no `!important`, no measuring:
 
-- `.ytfree-docked` reserves `var(--view-top-spacing-markdown, 0px)` as top
-  padding, so the video starts below the header and past the fade.
+- `.ytfree-docked` reserves the top spacing as padding, so the video starts
+  below the header and past the fade.
 - The docked wrapper redefines `--view-top-spacing-markdown` on the following
   `.markdown-source-view`, so the scroller does **not** reserve the same ~100pt a
   second time and the note text starts directly under the video.
+
+**How much spacing.** `--view-top-spacing-markdown` is
+`safe-area-inset-top + view-header-height + 16px`. Only the first two terms are
+the header; the 16px is the gap Obsidian leaves before a note's *text*. A video
+is not text, and against the bottom of the header is where a player belongs, so
+the padding is `max(0px, calc(var(--view-top-spacing-markdown, 0px) - var(--size-4-4, 16px)))`
+— measured 107px → 91px on a 390pt phone.
 
 Both are reserved from mount, before anything is fetched, so nothing moves later.
 When the player is closed the wrapper is removed and the scroller's own spacing
@@ -150,15 +196,52 @@ Only `.ytfree-hub-list` scrolls.
 
 ## 3. The docked player — controls, closing, and the fade mask
 
-### The control row is the desktop's, at thumb size
+### The control row is the desktop's controls, as symbols
 
 Issue 004 dropped the control row on mobile, reasoning that iOS's native video
 controls already expose PiP, AirPlay and speed. They don't, in practice: there
 is no 10-second skip, no speed picker short of a long-press, and the whole
-overlay disappears once playback starts. So the phone gets the same row as the
-desktop — only the heights grow (28px → 38px). Every fixed width from the
-desktop rules still applies, so Play/Pause and a ticking download percentage
-still cannot nudge their neighbours, and the row wraps rather than squeezing.
+overlay disappears once playback starts. So the phone gets the same *controls*
+as the desktop — but not the same row. Seven text buttons of seven different
+widths, left-packed and wrapping onto a second line, worked and looked like a
+debug panel.
+
+`PlayerOptions.layout` is `"labels"` (desktop) or `"icons"` (phone):
+
+```
+┌──────────────────────────────────────────────────┐
+│  1×  ⧉          ⏪   ( ▶ )   ⏩          ⛶   ⌃    │  48pt min-height
+└──────────────────────────────────────────────────┘
+   ↑ 1fr            ↑ auto, centred on the screen    ↑ 1fr
+```
+
+- **40px squares**, `--icon-size: 20px`, no borders, one radius — **except
+  Play**, which is 48px, round and in `--interactive-accent`, because it is the
+  one control you reach for.
+- **`1fr auto 1fr`**, so the transport is centred on the *screen* rather than on
+  whatever is beside it. Measured dead centre at 390, 375 and 360pt.
+- **PiP sits in the left group**, not the right. A `1fr` track has a min-content
+  floor: three buttons on the right (132px) exceed the track (117px), the tracks
+  grow, the row overflows and the transport is no longer in the middle. Two and
+  two fits, on a 375pt screen too.
+- **Skip buttons carry a static "10" badge**, absolutely positioned, so the
+  symbol says the direction and the badge says the amount without a second glyph.
+- Below 380pt everything steps down one size at once (36 / 44 / gap 4) rather
+  than overflowing by degrees.
+- `paint()` **falls back to the word** if `setIcon` left the button empty — an
+  Obsidian build that doesn't know an icon name renders nothing, and a blank
+  square is worse than a label.
+
+Every size in the row is fixed and state-independent, so Play→Pause,
+1×→1.75× and a ticking download percentage still move nothing.
+
+The status line moved too: it used to be a reserved row *above* the picture
+(~22px of permanent empty screen). It is now absolutely positioned across the
+top of the media box — out of the flow entirely, so it costs nothing and moves
+nothing when it appears. Top, not bottom, to stay clear of iOS's own control
+bar; `z-index: 3` because the poster is created after it and would otherwise
+hide "Resolving stream…". Known trade-off: while the video is collapsed the
+media box is 0-height with `overflow: hidden`, so the overlay is not visible.
 
 No timestamp button: on a phone the note is right there and the command palette
 has "Insert timestamp at cursor". Fullscreen and PiP fall back to WebKit's

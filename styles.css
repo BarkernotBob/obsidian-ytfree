@@ -58,8 +58,18 @@
   box-sizing: border-box;
 }
 
-.ytfree-btn:hover {
-  background: var(--interactive-hover);
+/*
+ * Hover is a pointer state, and a phone has no pointer.
+ *
+ * iOS applies :hover on tap and then leaves it applied — so every control the
+ * reader touched kept a grey box behind it until something else was touched.
+ * Behind the media query it is what it was meant to be: feedback for a mouse.
+ * Every hover rule in this file is gated the same way, for the same reason.
+ */
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-btn:hover {
+    background: var(--interactive-hover);
+  }
 }
 
 /* Widest label this button ever shows is "Pause"; pin it so the Play/Pause
@@ -104,9 +114,16 @@
  * player does — status line, control state, quality upgrade — can reflow the
  * note text below it.
  */
+/*
+ * `--file-margins-x`, not `--file-margins`: the pair is two values
+ * (`--file-margins-y --file-margins-x`), so putting it in the middle of a
+ * padding shorthand silently produced a *four*-value shorthand — measured as
+ * `8px 8px 24px 6px`, which is where the player's lopsided sides and the dead
+ * strip under it came from.
+ */
 .ytfree-pinned {
   flex: 0 0 auto;
-  padding: 8px var(--file-margins, 16px) 6px;
+  padding: 8px var(--file-margins-x, 16px) 6px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
 }
@@ -145,8 +162,23 @@
  * Where the variable is undefined (floating nav off, tablet, desktop) this is
  * 0px and the header is in normal flow — nothing to clear.
  */
+/*
+ * Nothing above the picture but the header it has to clear, and nothing below
+ * it but the controls.
+ *
+ * Obsidian's own spacing is `safe-area-inset-top + view-header-height + 16px`,
+ * and only the first two terms are the header. The 16px is the gap it leaves
+ * before a note's *text* — a video is not text, and against the bottom edge of
+ * the header is where a player is supposed to sit. `max()` because the same
+ * variable is a plain 8px where the header is in normal flow, and there is
+ * nothing to take 16px out of.
+ *
+ * Everything else that used to be up here is gone too: the wrapper's 4px gaps,
+ * and the reserved status line, which now draws over the picture.
+ */
 .ytfree-docked {
-  padding: var(--view-top-spacing-markdown, 0px) 0 6px;
+  padding: max(0px, calc(var(--view-top-spacing-markdown, 0px) - var(--size-4-4, 16px))) 0 4px;
+  gap: 0;
   background: var(--background-primary);
 }
 
@@ -204,31 +236,196 @@
   object-fit: contain;
 }
 
-.ytfree-docked .ytfree-status {
-  padding: 0 var(--file-margins, 16px);
+/*
+ * The status line, drawn on the picture rather than above it.
+ *
+ * A reserved row on a phone costs a line of the note permanently to carry a
+ * message that is on screen for a few seconds a session. Absolutely positioned
+ * inside the media box, it costs nothing at all — and it sits at the *top*,
+ * clear of the native control bar along the bottom. The z-index is load-bearing:
+ * the poster is created after it and would otherwise cover the one message that
+ * matters most, "Resolving stream…".
+ */
+.ytfree-media > .ytfree-status {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 0;
+  padding: 5px 10px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /*
- * The same control row as the desktop, at thumb size. iOS's native video
- * controls look like they make this redundant, but they have no 10-second skip
- * and no speed picker short of a long-press, and they vanish entirely once the
- * video is playing — so the row stays, just bigger.
+ * The control row on a phone: symbols, one row, transport in the middle.
  *
- * Only the heights grow. Every fixed width from the desktop rules still
- * applies, so Play/Pause and the download percentage cannot nudge their
- * neighbours, and `wrap` means a narrow phone drops a button to a second line
- * instead of squeezing the row.
+ * iOS's native video controls look like they make this redundant, but they have
+ * no 10-second skip and no speed picker short of a long-press, and they vanish
+ * entirely once the video is playing — so the row stays.
+ *
+ * What it is not any more is the desktop's row at thumb size. Seven text
+ * buttons of seven different widths, left-packed against the margin, wrapping
+ * onto a second line on a narrow phone: it worked and looked like a debug
+ * panel. A `1fr auto 1fr` grid instead — Play and the two skips are centred on
+ * the screen, not on whatever is beside them, and speed and the secondary
+ * controls take the two edges. The middle cell is `auto`, so it is centred
+ * whatever the sides contain.
+ *
+ * Every box has a fixed size, and every state change is a swap of the symbol
+ * inside one. Pressing anything here still moves nothing.
  */
-.ytfree-docked .ytfree-controls {
-  padding: 6px var(--file-margins, 16px) 0;
-  gap: 8px;
+.ytfree-controls-icons {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 6px;
+  min-height: 48px;
 }
 
-.ytfree-docked .ytfree-btn,
-.ytfree-docked .ytfree-speed {
-  height: 38px;
-  line-height: 38px;
+/*
+ * Docked, the row spans the screen and takes an inset of its own.
+ *
+ * Not `var(--file-margins)`: that variable is a *pair*, so it turned this into
+ * a four-value shorthand — the row was flush against the left edge and carried
+ * 24px of dead space underneath it, which is most of what stood between the
+ * controls and the note. 12px, because the three groups need the width: at
+ * the note's own 24px inset the row no longer fits a 375pt screen.
+ */
+.ytfree-docked .ytfree-controls {
+  padding: 6px 12px 0;
+}
+
+.ytfree-controls-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The transport is the middle cell; the sides push outwards from it. */
+.ytfree-controls-side:first-child {
+  justify-content: flex-start;
+}
+
+.ytfree-controls-side:last-child {
+  justify-content: flex-end;
+}
+
+/* Construction order is the desktop's — Play is built before the skips so the
+   desktop row is unchanged — so the phone's order is set here instead. */
+.ytfree-controls-transport .ytfree-btn-back {
+  order: 1;
+}
+
+.ytfree-controls-transport .ytfree-btn-play {
+  order: 2;
+}
+
+.ytfree-controls-transport .ytfree-btn-forward {
+  order: 3;
+}
+
+/* One square per control, one size for all of them, no borders. Uniformity is
+   the whole point: seven identical shapes read as a control bar, seven
+   different ones read as leftovers. */
+.ytfree-controls-icons .ytfree-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-m);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  --icon-size: 20px;
+}
+
+/* The one control that is not the same as the others, because it is the one
+   you reach for: bigger, round, and in the accent colour. */
+.ytfree-controls-icons .ytfree-btn-play {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  --icon-size: 24px;
+}
+
+/* "10", in the corner of the skip buttons. Static and absolutely positioned —
+   a button that stated its own size would be a button that changed size. */
+.ytfree-btn-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  font-size: 9px;
+  line-height: 1;
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Same pill as a button, and wide enough for "1.75×" so choosing a speed can
+   never re-measure the row. `text-align-last` is what centres the closed state
+   of a select in WebKit. */
+.ytfree-controls-icons .ytfree-speed {
+  width: 52px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-m);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
   font-size: var(--font-ui-small);
+  text-align: center;
+  text-align-last: center;
+}
+
+.ytfree-controls-icons .ytfree-btn:disabled {
+  opacity: 0.45;
+}
+
+/*
+ * Narrow phones, in one step rather than by degrees.
+ *
+ * A `1fr auto 1fr` grid whose side tracks cannot shrink below their contents
+ * overflows rather than reflowing — which is the right failure, but it is
+ * still a failure. Below 380pt everything comes down a size and the row fits
+ * again, transport still centred, targets still over 36pt.
+ */
+@media (max-width: 380px) {
+  .ytfree-controls-icons {
+    gap: 4px;
+  }
+
+  .ytfree-controls-group {
+    gap: 4px;
+  }
+
+  .ytfree-controls-icons .ytfree-btn {
+    width: 36px;
+    height: 36px;
+    --icon-size: 18px;
+  }
+
+  .ytfree-controls-icons .ytfree-btn-play {
+    width: 44px;
+    height: 44px;
+    --icon-size: 22px;
+  }
+
+  .ytfree-controls-icons .ytfree-speed {
+    width: 48px;
+    height: 36px;
+  }
 }
 
 /*
@@ -489,8 +686,10 @@
   font-size: var(--font-ui-small);
 }
 
-.ytfree-hub-filter:hover {
-  background: var(--background-modifier-hover);
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-filter:hover {
+    background: var(--background-modifier-hover);
+  }
 }
 
 .ytfree-hub-filter.is-active {
@@ -514,9 +713,11 @@
   padding: 0.45em;
 }
 
-.ytfree-hub-icon-button:hover {
-  color: var(--text-normal);
-  background: var(--background-modifier-hover);
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-icon-button:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
 }
 
 /* Reserved line: a status message appearing must not push the list down. */
@@ -557,8 +758,10 @@
   color: var(--text-muted);
 }
 
-.ytfree-hub-channel:hover {
-  background: var(--background-modifier-hover);
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-channel:hover {
+    background: var(--background-modifier-hover);
+  }
 }
 
 .ytfree-hub-channel.is-active {
@@ -607,8 +810,10 @@
   cursor: var(--cursor-link);
 }
 
-.ytfree-hub-card:hover {
-  background: var(--background-modifier-hover);
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-card:hover {
+    background: var(--background-modifier-hover);
+  }
 }
 
 /* Greyed for three seconds, then removed — the grey period is the undo. The
@@ -884,9 +1089,11 @@
   position: relative;
 }
 
+/* Full-bleed: the rows carry their own separators, and a separator that stops
+   short of the edge is what makes a list look unfinished. */
 .ytfree-hub.ytfree-phone .ytfree-hub-list {
   height: 100%;
-  padding: 0.3em 0.5em;
+  padding: 0;
 }
 
 /* Both overlay the list rather than sitting in it, and both toggle with
@@ -963,10 +1170,40 @@
   font-size: var(--font-ui-medium);
 }
 
+/*
+ * A list, not a stack of floating cards.
+ *
+ * Rounded corners and a hover tint are how a desktop separates rows; a phone
+ * separates them with a hairline, which is also what gives the delete column's
+ * rule something to meet at both ends. Border-box, so adding the line does not
+ * add a pixel to the row.
+ */
 .ytfree-hub.ytfree-phone .ytfree-hub-card {
-  height: 74px;
-  gap: 0.6em;
-  padding: 0 0.2em;
+  height: 76px;
+  box-sizing: border-box;
+  gap: 0.7em;
+  padding: 0 0 0 0.6em;
+  border-radius: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/*
+ * A phone has no pointer, so nothing here may carry a pointer's states.
+ *
+ * The hover rules are already behind `(hover: hover)`. These are the two iOS
+ * adds by itself: the grey flash it paints over the element under your thumb,
+ * and the background it leaves on a <button> that still holds focus after the
+ * row it belonged to is gone.
+ */
+.ytfree-hub.ytfree-phone {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-icon-button:focus,
+.ytfree-hub.ytfree-phone .ytfree-hub-icon-button:active {
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
 }
 
 .ytfree-hub.ytfree-phone .ytfree-hub-thumb {
@@ -1002,13 +1239,34 @@
   max-height: 2.6em;
 }
 
-/* The right fifth of the card, full height, and the button fills all of it —
-   removing an item is the action this list is for, and a 44px square in the
-   corner of a 74px row was a target you had to aim at. */
+/* Two segments, and they are the quiet half of the row — the title is what the
+   eye should land on. See `phoneSub` for what is on this line and why. */
+.ytfree-hub.ytfree-phone .ytfree-hub-sub {
+  margin-top: 0.25em;
+  color: var(--text-faint);
+}
+
+/*
+ * The right edge of the row, full height, and the button fills all of it —
+ * removing an item is the action this list is for, and a 44px square in the
+ * corner of a 76px row was a target you had to aim at.
+ *
+ * `align-self: stretch` rather than `height: 100%`: the row centres its
+ * children, so a percentage height is measured against a box that is only
+ * definite by accident. Stretching is the thing actually being asked for, and
+ * it is what puts the column's rule flush against the separator above and the
+ * one below — a line that stops short of both is the giveaway that this was a
+ * desktop card with a button dropped into the corner.
+ *
+ * 56px rather than the fifth of the screen it used to be: still a target twice
+ * the size of the icon in it, and the ~16px it gives back go to the title,
+ * which is the column that was actually short.
+ */
 .ytfree-hub.ytfree-phone .ytfree-hub-dismiss {
-  flex: 0 0 20%;
-  width: 20%;
-  height: 100%;
+  flex: 0 0 56px;
+  width: 56px;
+  height: auto;
+  align-self: stretch;
   border-left: 1px solid var(--background-modifier-border);
 }
 

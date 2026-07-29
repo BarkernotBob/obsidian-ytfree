@@ -1742,18 +1742,24 @@ export default class YtFreePlugin extends Plugin {
   ): Promise<PlayerEntry | null> {
     const mobile = !Platform.isDesktopApp;
 
-    // Reserved, fixed-height row so showing or clearing a status message never
-    // shifts the player or the surrounding note content.
-    const status = wrapper.createDiv({ cls: "ytfree-status" });
-    const setStatus = (message: string | null) => {
-      status.setText(message ?? "");
-      status.toggleClass("ytfree-status-visible", message !== null);
-    };
-
     // Mobile keeps the media in its own fixed-aspect box, so the poster, the
     // video and the fallback all occupy exactly the same space and swapping
     // between them moves nothing.
     const media = mobile ? wrapper.createDiv({ cls: "ytfree-media" }) : wrapper;
+
+    // Desktop: a reserved, fixed-height row, so showing or clearing a status
+    // message never shifts the player or the note content around it.
+    //
+    // Mobile: the same element, but *inside* the media box and drawn over the
+    // top of the picture. A reserved line above the video is a line of the note
+    // you never get to read, and the messages it carries are transient. It
+    // still costs no layout, for a better reason than before — it is out of
+    // the flow entirely.
+    const status = (mobile ? media : wrapper).createDiv({ cls: "ytfree-status" });
+    const setStatus = (message: string | null) => {
+      status.setText(message ?? "");
+      status.toggleClass("ytfree-status-visible", message !== null);
+    };
 
     const provider = mobile
       ? this.mobileProvider(videoId)
@@ -1781,6 +1787,10 @@ export default class YtFreePlugin extends Plugin {
         ensureLoaded: mobile
           ? () => this.players.get(videoId)?.activate?.() ?? Promise.resolve()
           : undefined,
+        // Symbols on a phone, words on the desktop. A phone row has no width
+        // for seven text buttons, and a thumb aims at a shape faster than it
+        // reads a word.
+        layout: mobile ? "icons" : "labels",
       },
     );
     const entry: PlayerEntry = {

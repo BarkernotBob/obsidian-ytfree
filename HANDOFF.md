@@ -1,6 +1,48 @@
 # HANDOFF
 
-## Status — 2026-07-28 (latest): browse round two — filters, Hidden, two boxes
+## Status — 2026-07-28 (latest): mobile polish — space, tap states, controls, rows
+
+Built and installed. 179 unit tests pass, build clean.
+[issues/009](issues/009-mobile-polish.md) is the issue and holds the manual
+test. Four asks from BarkernotBob, all phone-only, one change set.
+
+1. **62px of dead screen around the video, from three separate causes.** The
+   status line was a reserved row above the picture and is now an overlay across
+   the top of the media box. `padding: … var(--file-margins) …` is a *four*-value
+   shorthand because `--file-margins` is a pair, so the control row computed
+   `6px 8px 24px 0px` — flush left, 24px of nothing underneath; `--file-margins-x`
+   is the single value that was wanted. And `--view-top-spacing-markdown` is
+   header + 16px, where the 16px is the gap before a note's *text* — subtracted,
+   107px → 91px.
+2. **The grey that followed your thumb was a hover state.** iOS applies `:hover`
+   on tap and leaves it. Every hover rule is now behind
+   `@media (hover: hover) and (pointer: fine)`. Phone hub rows also got full-bleed
+   hairlines so the dismiss column's divider has something to meet, and the column
+   is `align-self: stretch` at 56px.
+3. **The control row is symbols on a `1fr auto 1fr` grid** — 40px squares, Play
+   48px round in the accent colour, transport centred on the screen (verified at
+   360/375/390pt). PiP sits on the left because three right-hand buttons blow past
+   the `1fr` track's min-content floor and push the transport off centre.
+   `paint()` falls back to the old word if `setIcon` leaves the button empty.
+4. **A phone row's second line is `channel · age`,** down from seven segments.
+   Short, Watched, Kept and origin are *shown* (badges, dimming) rather than
+   written; views are dropped. `deskSub`/`phoneSub` in `src/subscriptions.ts`,
+   both pure, both tested. Desktop line unchanged.
+
+**Desktop is affected in exactly one place:** the `--file-margins` fix also
+applies to `.ytfree-pinned`, so the pinned player's edges now line up with the
+note text and the empty strip under its buttons is gone. That is a correctness
+fix, not a redesign, but it is a visible change.
+
+Measured with the phone-CSS harness (Obsidian's own `app.css` extracted from
+`obsidian.asar`, hand-built phone DOM, headless Chromium), not by eye.
+
+**Next:** manual test on the iPhone — force-download the vault and fully
+relaunch Obsidian first, then walk sections A–E of issues/009.
+
+---
+
+## Status — 2026-07-28: browse round two — filters, Hidden, two boxes
 
 Built and installed. 176 unit tests pass, build clean.
 [issues/008](issues/008-browse-round-two.md) is the issue and holds the manual

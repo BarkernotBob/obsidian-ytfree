@@ -666,6 +666,47 @@ export function relativeAge(published: string, now: Date): string {
   return "just now";
 }
 
+/**
+ * The second line of a card, on a screen wide enough to spend on it: who,
+ * when, how many, and every flag the item carries, spelled out.
+ */
+export function deskSub(item: HubItem, now: Date): string {
+  const bits = [item.channelTitle, relativeAge(item.published, now), formatViews(item.views)];
+  if (item.isShort) bits.push("Short");
+  // Where it came from, and whether it is already seen. A Watch Later item has
+  // no publish date, so without the label it looks like a bug.
+  if (item.origin === "watchlater" || item.origin === "both") bits.push("Watch Later");
+  // A search item carries no publish date either, for the same reason: say
+  // where it came from and the missing age reads as a fact, not a bug.
+  if (item.origin === "search") bits.push("Search");
+  if (item.watched) bits.push("Watched");
+  return bits.filter(Boolean).join(" · ");
+}
+
+/**
+ * The same line on a phone: two facts, never more.
+ *
+ * The desktop line runs to seven segments, and the column it has to fit into on
+ * a phone is about 180pt — so it truncated mid-word, every row broke in a
+ * different place, and a list of them read as noise. The flags are not dropped,
+ * they are shown instead of said: Short is the badge on the thumbnail, watched
+ * is the dimmed thumbnail, and the Kept/Dismissed marker is already a badge.
+ * View count is the one thing genuinely dropped — it is not what you choose by.
+ *
+ * An item with no publish date says where it came from in the age's place, so
+ * the gap still reads as a fact rather than a bug.
+ */
+export function phoneSub(item: HubItem, now: Date): string {
+  const age = relativeAge(item.published, now);
+  const origin =
+    item.origin === "search"
+      ? "Search"
+      : item.origin === "watchlater" || item.origin === "both"
+        ? "Watch Later"
+        : "";
+  return [item.channelTitle, age || origin].filter(Boolean).join(" · ");
+}
+
 /** "1.2M views" — a raw seven-digit number is harder to read at a glance. */
 export function formatViews(views: number | null): string {
   if (views === null || !Number.isFinite(views)) return "";
