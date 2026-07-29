@@ -95,3 +95,56 @@ test("the Shorts probe still answers 303 for a long-form video", async () => {
   const { probeIsShort } = await import("../src/desktop/shorts-probe.ts");
   assert.equal(await probeIsShort("vS6HEes8daw"), false);
 });
+
+/**
+ * Browse, live.
+ *
+ * `searchYouTube` itself needs Obsidian's `requestUrl`, so what is exercised
+ * here is everything else: the request shape, and the parser against today's
+ * renderer tree rather than the one recorded in the fixtures. If YouTube
+ * reshapes search, this is what notices — the unit tests will happily keep
+ * passing against a captured yesterday.
+ */
+test("InnerTube search still answers unauthenticated, with parseable results", async () => {
+  const { parseSearchResponse } = await import("../src/search.ts");
+  const { CLIENTS, SEARCH_URL } = await import("../src/innertube-context.ts");
+
+  const response = await fetch(SEARCH_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": CLIENTS.android.ua },
+    body: JSON.stringify({
+      query: "smarter every day",
+      context: { client: { ...CLIENTS.android.ctx, hl: "en", gl: "US" } },
+    }),
+  });
+  assert.equal(response.status, 200, "search must work with no auth and no API key");
+
+  const page = parseSearchResponse(await response.json());
+  assert.ok(page.results.length >= 10, `only ${page.results.length} results parsed`);
+  assert.ok(page.continuation, "no continuation token — paging is gone");
+
+  const first = page.results[0];
+  assert.match(first.videoId, /^[A-Za-z0-9_-]{11}$/);
+  assert.ok(first.title && first.channelTitle, "a result lost its title or channel");
+  assert.ok(
+    page.results.filter((result) => result.duration).length > page.results.length / 2,
+    "durations have stopped arriving — the one thing search has that the feed does not",
+  );
+});
+
+test("the player still carries a description for a search-added item", async () => {
+  const { CLIENTS, PLAYER_URL, playerBody } = await import("../src/innertube-context.ts");
+  const response = await fetch(PLAYER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": CLIENTS.android.ua },
+    body: JSON.stringify({
+      ...playerBody("vS6HEes8daw"),
+      context: { client: { ...CLIENTS.android.ctx, hl: "en", gl: "US" } },
+    }),
+  });
+  const body = (await response.json()) as { videoDetails?: { shortDescription?: string } };
+  assert.ok(
+    (body.videoDetails?.shortDescription ?? "").length > 100,
+    "no description on the player response — browse would add items with empty descriptions",
+  );
+});

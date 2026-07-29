@@ -15,6 +15,7 @@ import {
   parseSubscriptionsCsv,
   relativeAge,
   sanitizeFileName,
+  searchResultToItem,
   visibleItems,
 } from "../src/subscriptions.ts";
 
@@ -248,6 +249,55 @@ test("expiry of zero days is off, not instant", () => {
 test("an unparseable publish date is kept rather than silently expired", () => {
   const { items } = expireItems([item({ published: "" })], 30, NOW);
   assert.equal(items.length, 1);
+});
+
+test("a searched-for item outlives a feed item of the same age", () => {
+  const old = "2026-01-01T00:00:00Z";
+  const { items, removed } = expireItems(
+    [
+      item({ videoId: "aaaaaaaaaaa", published: old, origin: "feed" }),
+      item({ videoId: "bbbbbbbbbbb", published: old, origin: "search" }),
+    ],
+    30,
+    NOW,
+  );
+  assert.equal(removed, 1);
+  assert.deepEqual(items.map((i) => i.videoId), ["bbbbbbbbbbb"]);
+});
+
+test("dismissing a search item still removes it", () => {
+  const { items } = expireItems([item({ origin: "search", state: "dismissed" })], 30, NOW);
+  assert.deepEqual(items, []);
+});
+
+// -------------------------------------------------------------------- search
+
+test("a search result becomes a New item with its description cached", () => {
+  const result = {
+    videoId: "vS6HEes8daw",
+    title: "The PROBLEM with Capitalism",
+    channelId: CHANNEL,
+    channelTitle: "SmarterEveryDay",
+    publishedText: "2 days ago",
+    views: 1_353_645,
+    duration: "55:31",
+    thumbnail: "https://i.ytimg.com/vi_webp/vS6HEes8daw/mqdefault.webp",
+  };
+  const added = searchResultToItem(result, "0:00 Intro", NOW);
+  assert.equal(added.state, "new");
+  assert.equal(added.origin, "search");
+  assert.equal(added.description, "0:00 Intro");
+  assert.equal(added.views, 1_353_645);
+  assert.equal(added.seenAt, NOW.toISOString());
+  // No date is invented from "2 days ago": search states an age, not a date.
+  assert.equal(added.published, "");
+  assert.equal(added.isShort, null);
+  assert.equal(added.notePath, undefined);
+});
+
+test("a search item with no description says so in its own words", () => {
+  const note = buildWatchLaterNote(item({ description: "", origin: "search" }), NOW);
+  assert.match(note, /_YouTube returned no description for this video\._/);
 });
 
 // ------------------------------------------------------------------ visible

@@ -36,12 +36,27 @@ channel's full back catalogue, playlists you own). It becomes a v2 ticket, not v
 | Fact | Evidence |
 |---|---|
 | `POST youtubei/v1/search` works with **no auth, no API key** | ANDROID client → HTTP 200, 1.4 MB |
-| Results are ad-free | 18 `compactVideoRenderer`, zero `promoted*` / `adSlot*` renderers in the payload |
+| Results are ad-free | 18 `compactVideoRenderer`, zero `promoted*` / `adSlot*` renderers in the payload — **wrong, corrected at build time: see below** |
 | Per result: id, title, channel, channel ID, published, views, thumbnail | `videoId`, `title`, `longBylineText.runs[0].navigationEndpoint.browseEndpoint.browseId`, `publishedTimeText`, `viewCountText`, `thumbnail.thumbnails` |
 | Results carry **duration** — the feed does not | `lengthText.runs[0].text` = `"55:31"` |
 | Results do **not** carry the description on the ANDROID client | `descriptionSnippet` empty; WEB's `detailedMetadataSnippets` is a truncated snippet, not the description |
 | Paging exists | ANDROID `nextContinuationData`; WEB `continuationItemRenderer` + token |
 | Same request shape the player already uses | `src/mobile/innertube.ts` — client context + `User-Agent` pairing is already solved |
+
+### Correction, measured again 2026-07-28 during the build
+
+**Ads are in the payload.** The row above was measured with a renderer census that only
+looked for `promoted*` and `adSlot*` *renderer* names; the ANDROID client delivers ads as
+`elementRenderer` entries instead (`adSlotLoggingData`, `adLayoutLoggingData` and
+`aboutThisAdRenderer` are all present in a raw capture), and recommendation shelves as
+`horizontalCardListRenderer` full of `videoCardRenderer`.
+
+Nothing about the decision changes — B is still right, and the results the hub draws are
+still ad-free and shelf-free — but the reason is now precise: **the parser reads exactly
+one renderer and refuses everything else in the response**, rather than the response being
+clean. That is a property of `src/search.ts`, so it is a property with a test
+(`tests/search.test.ts` pulls the shelf video IDs out of the fixture and asserts none of
+them reach the results). It is not a property of YouTube's goodwill.
 
 ## In scope for v1
 
@@ -109,4 +124,16 @@ channel's full back catalogue, playlists you own). It becomes a v2 ticket, not v
 
 ## Manual test (for BarkernotBob)
 
-Written when the issue is completed, not before.
+Built 2026-07-28. The steps live with the issue:
+[issues/007-browse-search.md](../issues/007-browse-search.md#manual-test-for-barkernotbob).
+
+Two things the build settled that this document had left open:
+
+- **A search item has no publish date, and none is invented.** Search states "2 days ago";
+  the ANDROID player response carries no `microformat` to recover a date from. So
+  `published` stays empty, the hub shows no age for the item, and it sorts with the undated
+  tail exactly as a Watch Later item does. The card says **Search** so the gap reads as a
+  fact rather than a bug.
+- **Duration is shown on the result and not stored on the item.** The scope asked for it on
+  the card, which is where it is. Carrying it into `HubItem` (and into the note's `length:`
+  frontmatter, which is empty today) is a v2 ticket, not a quiet widening of this one.

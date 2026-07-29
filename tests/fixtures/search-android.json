@@ -1,0 +1,1825 @@
+{
+  "contents": {
+    "sectionListRenderer": {
+      "contents": [
+        {
+          "itemSectionRenderer": {
+            "contents": [
+              {
+                "chipCloudRenderer": {}
+              },
+              {
+                "elementRenderer": {
+                  "newElement": {
+                    "type": {
+                      "componentType": {
+                        "templateConfig": {
+                          "uriTemplateConfig": {
+                            "uri": "full_width_portrait_image_layout.eml|da063650c94855f2"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "itemSectionRenderer": {
+            "contents": [
+              {
+                "elementRenderer": {
+                  "newElement": {
+                    "type": {
+                      "componentType": {
+                        "templateConfig": {
+                          "uriTemplateConfig": {
+                            "uri": "compact_channel.eml-ja|1b35929140df241f"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "vS6HEes8daw",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "The PROBLEM with Capitalism - Smarter Every Day 316"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "2 days ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "1,356,221 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "1.3M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "1.3 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "55:31"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "55 minutes, 31 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/vS6HEes8daw/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/vS6HEes8daw/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/vS6HEes8daw/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/vS6HEes8daw/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "5lCWqEFVzbY",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "They Call it \"The Taco Turn\" and it's Genius - Smarter Every Day 315"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "1 month ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "1,041,442 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "1M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "1 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "39:27"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "39 minutes, 27 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/5lCWqEFVzbY/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/5lCWqEFVzbY/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/5lCWqEFVzbY/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/5lCWqEFVzbY/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "XwBZx1cXEdM",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "Why Do Spinning Things Do This? - Smarter Every Day 312"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "6 months ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "1,304,935 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "1.3M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "1.3 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "20:14"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "20 minutes, 14 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/XwBZx1cXEdM/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/XwBZx1cXEdM/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/XwBZx1cXEdM/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/XwBZx1cXEdM/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "Oai7HUqncAA",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "Shooting Down a Lost Drone and why Dogs Tilt their Heads - Smarter Every Day 173"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "8 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "3,838,265 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "3.8M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "3.8 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "9:28"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "9 minutes, 28 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/Oai7HUqncAA/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/Oai7HUqncAA/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/Oai7HUqncAA/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/Oai7HUqncAA/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "8nilP--GFLY",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "The Unsolved Mystery of Impact Flashes - Smarter Every Day 307"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "1 year ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "3,667,567 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "3.6M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "3.6 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "47:13"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "47 minutes, 13 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/8nilP--GFLY/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/8nilP--GFLY/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/8nilP--GFLY/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/8nilP--GFLY/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "v0afQ6w3Bjw",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "Refueling a NUCLEAR REACTOR - Smarter Every Day 311"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "8 months ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "7,108,853 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "7.1M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "7.1 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "1:46:08"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "1 hour, 46 minutes, 8 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/v0afQ6w3Bjw/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/v0afQ6w3Bjw/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/v0afQ6w3Bjw/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/v0afQ6w3Bjw/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "RtWbpyjJqrU",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "Slow Motion Flipping Cat Physics | Smarter Every Day 58"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "13 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "11,236,479 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "11M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "11 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "6:26"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "6 minutes, 26 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi/RtWbpyjJqrU/default.jpg",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/RtWbpyjJqrU/mqdefault.jpg",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/RtWbpyjJqrU/hqdefault.jpg",
+                        "width": 480,
+                        "height": 360
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "itemSectionRenderer": {
+            "contents": [
+              {
+                "horizontalCardListRenderer": {
+                  "cards": [
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "oTfXehFVFyk"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "eXR1olg_I0w"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "MaB4k1SgfUg"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "_pbdwueqGp4"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "WdEWzqsfeHM"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "itemSectionRenderer": {
+            "contents": [
+              {
+                "compactVideoRenderer": {
+                  "videoId": "MFzDaBzBlL0",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "The Backwards Brain Bicycle - Smarter Every Day 133"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "11 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "31,535,430 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "31M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "31 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "7:58"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "7 minutes, 58 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/MFzDaBzBlL0/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/MFzDaBzBlL0/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/MFzDaBzBlL0/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/MFzDaBzBlL0/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "ywBV6M7VOFU",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "Everything About Grain Bins (Farmers are Geniuses) - Smarter Every Day 218"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "7 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "7,769,963 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "7.7M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "7.7 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "15:37"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "15 minutes, 37 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/ywBV6M7VOFU/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/ywBV6M7VOFU/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/ywBV6M7VOFU/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/ywBV6M7VOFU/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "itemSectionRenderer": {
+            "contents": [
+              {
+                "horizontalCardListRenderer": {
+                  "cards": [
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "tDDikEU0cMw"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "GRbokvmv-2M"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "JQb9eGeclQw"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "gzTQWmwqLDU"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "2OfjZ3ORJfc"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "ptUfuGG-vUg"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "vA7BW7Tevps"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "vlThrKniVLc"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "hG9tFVPE9Ic"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "jruIvKndAXU"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "21TGBf09GsY"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "TOofKvgOARE"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "OleE3sP5ToI"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "ZJ4DLIuxjvw"
+                      }
+                    },
+                    {
+                      "videoCardRenderer": {
+                        "videoId": "ZGGjCQLIQLk"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "itemSectionRenderer": {
+            "contents": [
+              {
+                "compactVideoRenderer": {
+                  "videoId": "VZ6_8WJ3mh8",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "TRACTOR PULLS: It's Not What You Think  - Smarter Every Day 276"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "3 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "2,866,026 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "2.8M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "2.8 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "28:51"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "28 minutes, 51 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi/VZ6_8WJ3mh8/default.jpg",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/VZ6_8WJ3mh8/mqdefault.jpg",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/VZ6_8WJ3mh8/hqdefault.jpg",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/VZ6_8WJ3mh8/sddefault.jpg",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "WtQ64nSbdY4",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "What Everyone Sees... But I Don't (The Johari Window) - Smarter Every Day 314"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "3 months ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "1,022,937 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "1M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "1 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "29:10"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "29 minutes, 10 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/WtQ64nSbdY4/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/WtQ64nSbdY4/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/WtQ64nSbdY4/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/WtQ64nSbdY4/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "cUkbdqw9pBk",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "I Asked An Actual Apollo Engineer to Explain the Saturn 5 Rocket (Long Cut) - Smarter Every Day 2"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "Smarter Every Day 2",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC8VkNBOwvsTlFjoSnNSMmxw"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "3 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "1,781,866 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "1.7M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "1.7 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "1:47:13"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "1 hour, 47 minutes, 13 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi/cUkbdqw9pBk/default.jpg",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/cUkbdqw9pBk/mqdefault.jpg",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/cUkbdqw9pBk/hqdefault.jpg",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/cUkbdqw9pBk/sddefault.jpg",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "bPJUVKizh90",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "How to Make Pizza on a Submarine - Smarter Every Day 246"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "5 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "7,178,284 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "7.1M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "7.1 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "16:29"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "16 minutes, 29 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi/bPJUVKizh90/default.jpg",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/bPJUVKizh90/mqdefault.jpg",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/bPJUVKizh90/hqdefault.jpg",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/bPJUVKizh90/sddefault.jpg",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "4I-p8vjQ95s",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "Trying to Catch a 1,000 MPH Baseball - Smarter Every Day 247"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "5 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "16,833,745 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "16M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "16 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "17:55"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "17 minutes, 55 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/4I-p8vjQ95s/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/4I-p8vjQ95s/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/4I-p8vjQ95s/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/4I-p8vjQ95s/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "g3Ud6mHdhlQ",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "How Do Nuclear Submarines Make Oxygen?- Smarter Every Day 251"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "5 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "10,321,898 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "10M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "10 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "29:34"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "29 minutes, 34 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/g3Ud6mHdhlQ/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/g3Ud6mHdhlQ/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/g3Ud6mHdhlQ/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/g3Ud6mHdhlQ/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "-0JKHuzJ67A",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "Everything About Disc Golf Aerodynamics - Smarter Every Day 313"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "4 months ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "835,160 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "835K views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "835 thousand views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "1:32:10"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "1 hour, 32 minutes, 10 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi/-0JKHuzJ67A/default.jpg",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/-0JKHuzJ67A/mqdefault.jpg",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/-0JKHuzJ67A/hqdefault.jpg",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/-0JKHuzJ67A/sddefault.jpg",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "Ms65JBrevYU",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "The Mystery of Magnetic Worms - Smarter Every Day 253"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "5 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "1,874,866 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "1.8M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "1.8 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "8:28"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "8 minutes, 28 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi/Ms65JBrevYU/default.jpg",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/Ms65JBrevYU/mqdefault.jpg",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/Ms65JBrevYU/hqdefault.jpg",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/Ms65JBrevYU/sddefault.jpg",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "RXXMJAU6vY8",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "Boarding a US NAVY NUCLEAR SUBMARINE in the Arctic - Smarter Every Day 240"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "6 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "17,367,382 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "17M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "17 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "29:25"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "29 minutes, 25 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi/RXXMJAU6vY8/default.jpg",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/RXXMJAU6vY8/mqdefault.jpg",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/RXXMJAU6vY8/hqdefault.jpg",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi/RXXMJAU6vY8/sddefault.jpg",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "compactVideoRenderer": {
+                  "videoId": "tcQVrD7RnNI",
+                  "title": {
+                    "runs": [
+                      {
+                        "text": "Bullets HITTING Bullets in Slow Motion - THE IMPOSSIBLE SHOT - Smarter Every Day 287"
+                      }
+                    ]
+                  },
+                  "longBylineText": {
+                    "runs": [
+                      {
+                        "text": "SmarterEveryDay",
+                        "navigationEndpoint": {
+                          "browseEndpoint": {
+                            "browseId": "UC6107grRI4m0o2-emgoDnAA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "publishedTimeText": {
+                    "runs": [
+                      {
+                        "text": "3 years ago"
+                      }
+                    ]
+                  },
+                  "viewCountText": {
+                    "runs": [
+                      {
+                        "text": "25,221,607 views"
+                      }
+                    ]
+                  },
+                  "shortViewCountText": {
+                    "runs": [
+                      {
+                        "text": "25M views"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "25 million views"
+                      }
+                    }
+                  },
+                  "lengthText": {
+                    "runs": [
+                      {
+                        "text": "35:28"
+                      }
+                    ],
+                    "accessibility": {
+                      "accessibilityData": {
+                        "label": "35 minutes, 28 seconds"
+                      }
+                    }
+                  },
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/tcQVrD7RnNI/default.webp",
+                        "width": 120,
+                        "height": 90
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/tcQVrD7RnNI/mqdefault.webp",
+                        "width": 320,
+                        "height": 180
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/tcQVrD7RnNI/hqdefault.webp",
+                        "width": 480,
+                        "height": 360
+                      },
+                      {
+                        "url": "https://i.ytimg.com/vi_webp/tcQVrD7RnNI/sddefault.webp",
+                        "width": 640,
+                        "height": 480
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "continuations": [
+        {
+          "nextContinuationData": {
+            "continuation": "ErIDEhFzbWFydGVyIGV2ZXJ5IGRheRqcA1NCU0NBUmhWUXpZeE1EZG5jbEpKTkcwd2J6SXRaVzFuYjBSdVFVR0NBUXQyVXpaSVJXVnpPR1JoZDRJQkN6VnNRMWR4UlVaV2VtSlpnZ0VMV0hkQ1duZ3hZMWhGWkUyQ0FRdFBZV2szU0ZWeGJtTkJRWUlCQ3podWFXeFFMUzFIUmt4WmdnRUxkakJoWmxFMmR6TkNhbmVDQVF0U2RGZGljSGxxU25GeVZZSUJDMDFHZWtSaFFucENiRXd3Z2dFTGVYZENWalpOTjFaUFJsV0NBUXRXV2paZk9GZEtNMjFvT0lJQkMxZDBVVFkwYmxOaVpGazBnZ0VMWTFWclltUnhkemx3UW11Q0FRdGlVRXBWVmt0cGVtZzVNSUlCQ3pSSkxYQTRkbXBST1RWemdnRUxaek5WWkRadFNHUm9iRkdDQVFzdE1FcExTSFY2U2pZM1FZSUJDMDF6TmpWS1FuSmxkbGxWZ2dFTFVsaFlUVXBCVlRaMldUaUNBUXQwWTFGV2NrUTNVbTVPU2JJQkJnb0VDQmNRQWclM0QlM0QYgeDoGA%3D%3D"
+          }
+        }
+      ]
+    }
+  }
+}

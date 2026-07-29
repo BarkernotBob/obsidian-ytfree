@@ -8,14 +8,11 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import {
-  EXPIRY_SAFETY_MARGIN_MS,
-  parseExpiry,
-  ResolveError,
-  ResolvedStream,
-  ResolveMode,
-  YtDlpMissingError,
-} from "../stream.ts";
+import { EXPIRY_SAFETY_MARGIN_MS, parseExpiry, ResolveError, YtDlpMissingError } from "../stream.ts";
+// `import type` and not a plain import: `node --test` strips types rather than
+// compiling them, so a type imported as a value makes the whole module fail to
+// load — which is what stopped `npm run smoke` running at all.
+import type { ResolvedStream, ResolveMode } from "../stream.ts";
 
 const pExecFile = promisify(execFile);
 

@@ -12,6 +12,7 @@
  */
 
 import { linkifyTimestamps } from "./description.ts";
+import type { SearchResult } from "./search.ts";
 
 /** A channel we poll. */
 export interface Channel {
@@ -59,8 +60,8 @@ export interface HubItem {
   watched?: boolean;
 }
 
-/** A channel feed, your Watch Later list, or both. */
-export type ItemOrigin = "feed" | "watchlater" | "both";
+/** A channel feed, your Watch Later list, both, or a search you ran. */
+export type ItemOrigin = "feed" | "watchlater" | "both" | "search";
 
 export interface SubscriptionsState {
   version: 1;
@@ -361,6 +362,44 @@ export function mergeItems(
   return { items: [...existing, ...added], added };
 }
 
+// -------------------------------------------------------------------- search
+
+/**
+ * A search hit, as a hub item.
+ *
+ * `published` is empty and stays empty: search states an age ("2 days ago"),
+ * not a date, and the ANDROID player response carries no `microformat` to
+ * recover one from. Guessing a date from the phrase would put a fabricated
+ * value in the note's frontmatter to save a line of UI, so the hub shows no age
+ * for a search item and it sorts with the undated tail, exactly as a Watch
+ * Later item does.
+ *
+ * The description is passed in rather than fetched here: this file stays pure,
+ * and the one player call it takes belongs to the caller — see
+ * `fetchDescription` in `innertube.ts`. An empty string is a fine value; the
+ * add is what the click asked for.
+ */
+export function searchResultToItem(
+  result: SearchResult,
+  description: string,
+  now: Date,
+): HubItem {
+  return {
+    videoId: result.videoId,
+    channelId: result.channelId,
+    channelTitle: result.channelTitle,
+    title: result.title,
+    published: "",
+    thumbnail: result.thumbnail,
+    description,
+    views: result.views,
+    isShort: null,
+    state: "new",
+    seenAt: now.toISOString(),
+    origin: "search",
+  };
+}
+
 /**
  * Drop New items past their sell-by date, and Dismissed items immediately.
  *
@@ -371,6 +410,10 @@ export function mergeItems(
  *
  * Kept items are never removed, and this function does not touch files. Expiry
  * removes a row from a JSON index; the note it produced is yours.
+ *
+ * Neither is anything you searched for. A feed item arrived because a channel
+ * published it; a search item is there because you went looking for it by name,
+ * and a list you built on purpose does not evaporate on a timer.
  */
 export function expireItems(
   items: HubItem[],
@@ -382,6 +425,7 @@ export function expireItems(
   const kept = items.filter((item) => {
     if (item.state === "kept") return true;
     if (item.state === "dismissed") return false;
+    if (item.origin === "search") return true;
     const published = Date.parse(item.published);
     return Number.isFinite(published) ? published >= cutoff : true;
   });
@@ -477,7 +521,9 @@ export function buildWatchLaterNote(item: HubItem, now: Date): string {
       ? linkifyTimestamps(item.description, item.videoId)
       : item.origin === "watchlater"
         ? "_From your YouTube Watch Later, which carries no description. It will fill in if this channel's feed still holds the video._"
-        : "_No description in the channel feed._",
+        : item.origin === "search"
+          ? "_YouTube returned no description for this video._"
+          : "_No description in the channel feed._",
     "",
   ];
   return lines.join("\n");

@@ -1,6 +1,50 @@
 # HANDOFF
 
-## Status — 2026-07-28 (latest): collapse replaces close, lazy controls, LP timestamps
+## Status — 2026-07-28 (latest): browse — search YouTube from inside the hub
+
+Built and installed. 159 unit tests pass, build clean, and all 9 live smoke tests
+pass including two new ones. [issues/007](issues/007-browse-search.md) is the
+issue; [docs/V1-SCOPE-BROWSE.md](docs/V1-SCOPE-BROWSE.md) is the scope it was
+built against, gate passed before any code.
+
+1. **Search is an API call we render, not YouTube's page in a frame.**
+   `POST youtubei/v1/search`, ANDROID client, signed out, no API key —
+   `src/search.ts` parses the result. It reads exactly one renderer
+   (`compactVideoRenderer`, out of the item sections) and refuses everything else
+   by never looking at it, which is what makes the surface ad-free and
+   shelf-free. Fixture-tested against two real captures; nothing in it throws.
+2. **The scope doc was wrong about ads and is now corrected.** Ads *are* in the
+   payload — as `elementRenderer`, not as `promoted*`/`adSlot*` renderers, which
+   is what the pre-build census looked for. Recommendation shelves are
+   `horizontalCardListRenderer` full of `videoCardRenderer`. The result is still
+   clean, but because of the parser, so `tests/search.test.ts` pulls the shelf
+   video IDs out of the fixture and asserts none of them reach the results.
+3. **A result can do exactly one thing: add itself.** No anchor, no `<video>`,
+   nothing a click turns into playback. Clicking adds a `HubItem` with
+   `origin: "search"`, fetching the description first with one player call
+   (search carries none, and the hub's premise is a description cached before it
+   can go stale). Already in the hub → the marker says so and the click is a
+   no-op. Search items never expire.
+4. **No publish date is invented.** Search states "2 days ago" and the ANDROID
+   player response has no `microformat`, so `published` stays empty: the hub
+   shows no age, the card says **Search**, and the item sorts with the undated
+   tail exactly as a Watch Later item does.
+5. **The client identities are now shared.** `src/innertube-context.ts` (pure —
+   no `obsidian` import, so the smoke test can send the same request) and
+   `src/innertube.ts` (the POST, search, description fetch). The mobile resolver
+   dropped its private copy and calls through them.
+6. **`npm run smoke` had been dead on this Node version** — `resolver.ts`
+   imported two types as values, and type-stripping made the whole module fail to
+   load. One `import type` fixed it; that is how the two new live tests could run
+   at all.
+
+### Next step
+
+The manual test in [issues/007](issues/007-browse-search.md#manual-test-for-barkernotbob),
+desktop then phone. Step 5 is the one that decides the design: the marker has to
+change with nothing around it moving. Not visually reviewed — offered, not run.
+
+## Status — 2026-07-28: collapse replaces close, lazy controls, LP timestamps
 
 Built and installed. 140 tests pass, build clean. Manual steps 25–29 in
 [docs/MOBILE-UX.md](docs/MOBILE-UX.md).

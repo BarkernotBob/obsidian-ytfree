@@ -10,3 +10,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [004](004-mobile-viewer.md) | A viewer that works on Obsidian mobile — InnerTube resolve + `<video>`, ad-free, 360p | Built 2026-07-28 — awaiting manual test. **Untried on a real iPhone.** |
 | [005](005-mobile-full-quality.md) | Full quality on mobile (above 360p) via MSE | Scoped — not built, blocked on 004 |
 | 006 | Sign in to YouTube; import subscriptions, Watch Later and history | Scoped ([docs/V1-SCOPE-ACCOUNT-IMPORT.md](../docs/V1-SCOPE-ACCOUNT-IMPORT.md)) — **approved**, gate spiked and passed 2026-07-28, not built |
+| [007](007-browse-search.md) | Browse: search YouTube from inside the hub, add results as hub items | Built 2026-07-28 ([docs/V1-SCOPE-BROWSE.md](../docs/V1-SCOPE-BROWSE.md)) — awaiting manual test |

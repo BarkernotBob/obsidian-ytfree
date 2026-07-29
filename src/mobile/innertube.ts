@@ -21,7 +21,7 @@
  * the app around it. This file is only the request.
  */
 
-import { requestUrl } from "obsidian";
+import { callInnertube, CLIENTS, playerBody, PLAYER_URL } from "../innertube.ts";
 import type { ResolvedStream } from "../stream.ts";
 import {
   hlsManifest,
@@ -34,83 +34,19 @@ import type { PlayerResponse } from "./player-response.ts";
 
 export * from "./player-response.ts";
 
-const PLAYER_URL = "https://www.youtube.com/youtubei/v1/player";
-
-interface ClientProfile {
-  ctx: Record<string, string | number>;
-  ua: string;
-}
-
-/**
- * Two clients, asked in order. ANDROID carries the muxed format on every video
- * measured; IOS is only consulted for its HLS manifest, which showed up on 1 of
- * 10 videos and is treated as a bonus rather than a path worth designing for.
- */
-const CLIENTS: Record<"android" | "ios", ClientProfile> = {
-  android: {
-    ctx: {
-      clientName: "ANDROID",
-      clientVersion: "20.10.38",
-      androidSdkVersion: 34,
-      osName: "Android",
-      osVersion: "14",
-    },
-    ua: "com.google.android.youtube/20.10.38 (Linux; U; Android 14; en_US) gzip",
-  },
-  ios: {
-    ctx: {
-      clientName: "IOS",
-      clientVersion: "20.10.4",
-      deviceModel: "iPhone16,2",
-      osName: "iPhone",
-      osVersion: "18.3.2.22D82",
-    },
-    ua: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
-  },
-};
-
 // ---------------------------------------------------------------- the request
 
 /**
- * `requestUrl` rather than `fetch`, and this is not a preference: the webview
- * origin is `capacitor://localhost` and youtube.com sends no
- * `Access-Control-Allow-Origin`, so a plain `fetch` is refused before it is
- * sent. `requestUrl` goes through the native layer, which has no CORS and
- * accepts the custom User-Agent the client context has to be paired with.
+ * The client identities and the POST itself live in `../innertube.ts`, shared
+ * with search — the player is not the only thing that speaks this protocol any
+ * more. All this adds is the resolver's own error type, so a caller here sees
+ * one failure vocabulary rather than two.
  */
 async function callPlayer(videoId: string, client: keyof typeof CLIENTS): Promise<PlayerResponse> {
-  const { ctx, ua } = CLIENTS[client];
-  let response;
   try {
-    response = await requestUrl({
-      url: PLAYER_URL,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "User-Agent": ua,
-      },
-      body: JSON.stringify({
-        videoId,
-        context: { client: { ...ctx, hl: "en", gl: "US" } },
-        contentCheckOk: true,
-        racyCheckOk: true,
-      }),
-      // Handled here, so a 4xx reads as a network failure rather than throwing
-      // an Obsidian error object at the caller.
-      throw: false,
-    });
+    return (await callInnertube(PLAYER_URL, client, playerBody(videoId))) as PlayerResponse;
   } catch (err) {
     throw new MobileResolveError("network", err instanceof Error ? err.message : String(err));
-  }
-
-  if (response.status < 200 || response.status >= 300) {
-    throw new MobileResolveError("network", `YouTube answered HTTP ${response.status}.`);
-  }
-
-  try {
-    return JSON.parse(response.text) as PlayerResponse;
-  } catch {
-    throw new MobileResolveError("network", "YouTube's response was not JSON.");
   }
 }
 

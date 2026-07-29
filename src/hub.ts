@@ -36,8 +36,11 @@ import {
   parseChannelFeed,
   relativeAge,
   sanitizeFileName,
+  searchResultToItem,
   visibleItems,
 } from "./subscriptions";
+import { fetchDescription, searchYouTube } from "./innertube";
+import type { SearchResult } from "./search";
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
 
@@ -187,6 +190,33 @@ export class SubscriptionsStore {
     }
   }
 
+  // --------------------------------------------------------------- search
+
+  hasItem(videoId: string): boolean {
+    return this.state.items.some((item) => item.videoId === videoId);
+  }
+
+  /**
+   * Add a search result to the hub. Adds — it does not open, does not create a
+   * note and does not play anything. Browse adds; the hub decides.
+   *
+   * The description is fetched here, one player call, because search carries
+   * none and the hub's premise is that the description is cached before it can
+   * go stale. `fetchDescription` answers "" rather than throwing, so a video
+   * that is private or gone still lands as an item.
+   */
+  async addSearchResult(result: SearchResult): Promise<"added" | "exists"> {
+    if (this.hasItem(result.videoId)) return "exists";
+    const description = await fetchDescription(result.videoId);
+    // Checked again: the fetch is a round trip, and a poll or a second click
+    // can land inside it. Never a duplicate.
+    if (this.hasItem(result.videoId)) return "exists";
+    this.state.items.push(searchResultToItem(result, description, new Date()));
+    this.emit();
+    void this.save();
+    return "added";
+  }
+
   // ----------------------------------------------------------------- note
 
   /**
@@ -287,6 +317,24 @@ export class HubView extends ItemView {
   private cards = new Map<string, HTMLElement>();
 
   /**
+   * Search mode. `searchQuery` is null whenever the hub is showing its own
+   * items, which is the one flag everything else reads: the list, the status
+   * line, and what clearing the box goes back to. The filter and the channel
+   * selection are untouched by any of this, so leaving search restores exactly
+   * the hub you left.
+   */
+  private searchQuery: string | null = null;
+  private searchResults: SearchResult[] = [];
+  private searchContinuation: string | null = null;
+  private searchState: "idle" | "loading" | "error" = "idle";
+  private searchError = "";
+  private searchInputEl: HTMLInputElement | null = null;
+  /** Results with an add in flight, so a second tap cannot double-add. */
+  private adding = new Set<string>();
+  /** Bumped per search, so a slow first page cannot land over a newer one. */
+  private searchToken = 0;
+
+  /**
    * A phone gets a different menu, not a narrower one. See docs/MOBILE-UX.md:
    * the filters and the channel list collapse behind a single disclosure whose
    * label is the current selection, and any selection closes it again.
@@ -367,6 +415,7 @@ export class HubView extends ItemView {
       void run.then(() => this.renderAll());
     });
 
+    this.buildSearch(root);
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status" });
 
     const body = root.createDiv({ cls: "ytfree-hub-body" });
@@ -375,6 +424,57 @@ export class HubView extends ItemView {
       this.channelsEl = body.createDiv({ cls: "ytfree-hub-channels" });
       this.listEl = body.createDiv({ cls: "ytfree-hub-list" });
     }
+  }
+
+  /**
+   * The search box — its own row, above the status line and below whatever the
+   * header is showing on this platform.
+   *
+   * A row of its own rather than a slot in the header because the header is
+   * already the tightest thing on a phone, and because the box is the entrance
+   * to a different mode: it should read as the top of the list it replaces.
+   */
+  private buildSearch(root: HTMLElement): void {
+    const row = root.createDiv({ cls: "ytfree-hub-search" });
+
+    const input = row.createEl("input", {
+      cls: "ytfree-hub-search-input",
+      // `search` gives iOS a Search key and both platforms a native clear
+      // control, which fires `input` like any other edit — so clearing by hand
+      // and clearing with the × take the same path out of search mode.
+      type: "search",
+      attr: {
+        placeholder: "Search YouTube",
+        enterkeyhint: "search",
+        autocapitalize: "off",
+        autocorrect: "off",
+        spellcheck: "false",
+        "aria-label": "Search YouTube",
+      },
+    });
+    this.searchInputEl = input;
+
+    input.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter") {
+        evt.preventDefault();
+        this.runSearch(input.value);
+      } else if (evt.key === "Escape") {
+        evt.preventDefault();
+        this.exitSearch();
+      }
+    });
+    // Emptying the box is the way back, and it has to work however the box was
+    // emptied — backspace, the native ×, or a paste of nothing.
+    input.addEventListener("input", () => {
+      if (input.value.trim() === "" && this.searchQuery !== null) this.exitSearch();
+    });
+
+    const go = row.createEl("button", {
+      cls: "ytfree-hub-icon-button",
+      attr: { type: "button", "aria-label": "Search YouTube", title: "Search YouTube" },
+    });
+    setIcon(go, "search");
+    go.addEventListener("click", () => this.runSearch(input.value));
   }
 
   /** The three filter chips. Same markup either side; only the host differs. */
@@ -390,6 +490,9 @@ export class HubView extends ItemView {
       button.toggleClass("is-active", this.filter === value);
       button.addEventListener("click", () => {
         this.filter = value;
+        // The filters describe the hub's own items, so choosing one is a way
+        // out of search — and the filter you chose is the one you land on.
+        this.clearSearch();
         for (const el of Array.from(filters.children)) {
           el.toggleClass("is-active", el === button);
         }
@@ -471,6 +574,24 @@ export class HubView extends ItemView {
 
   private renderStatus(): void {
     if (!this.statusEl) return;
+
+    // In search mode the status line belongs to the search, not to the hub:
+    // the counts underneath are about a list you are not looking at.
+    if (this.searchQuery !== null) {
+      if (this.searchState === "error") {
+        this.statusEl.setText(`Search failed — ${this.searchError}`);
+      } else if (this.searchState === "loading" && this.searchResults.length === 0) {
+        this.statusEl.setText(`Searching for “${this.searchQuery}”…`);
+      } else if (this.searchResults.length === 0) {
+        this.statusEl.setText(`Nothing found for “${this.searchQuery}”.`);
+      } else {
+        this.statusEl.setText(
+          `${this.searchResults.length} results for “${this.searchQuery}” · click one to add it to your hub`,
+        );
+      }
+      return;
+    }
+
     const { channels, items, lastPolledAt } = this.store.state;
     const shown = this.currentItems().length;
     const parts: string[] = [];
@@ -519,6 +640,7 @@ export class HubView extends ItemView {
 
   private selectChannel(channelId: string | null): void {
     this.channelFilter = channelId;
+    this.clearSearch();
     this.renderChannels();
     this.renderList();
     this.renderStatus();
@@ -535,8 +657,229 @@ export class HubView extends ItemView {
     });
   }
 
+  // --------------------------------------------------------------- search
+
+  /**
+   * Leave search mode without redrawing. The state is dropped and the box is
+   * emptied; the filter and the channel selection are deliberately not touched,
+   * because they are what you go back to.
+   */
+  private clearSearch(): void {
+    if (this.searchQuery === null) return;
+    // Any page still in flight belongs to a search that no longer exists.
+    this.searchToken++;
+    this.searchQuery = null;
+    this.searchResults = [];
+    this.searchContinuation = null;
+    this.searchState = "idle";
+    this.searchError = "";
+    this.adding.clear();
+    if (this.searchInputEl) this.searchInputEl.value = "";
+  }
+
+  private exitSearch(): void {
+    this.clearSearch();
+    this.renderList();
+    this.renderStatus();
+  }
+
+  private runSearch(query: string): void {
+    const text = query.trim();
+    if (!text) {
+      this.exitSearch();
+      return;
+    }
+
+    const token = ++this.searchToken;
+    this.searchQuery = text;
+    this.searchResults = [];
+    this.searchContinuation = null;
+    this.searchState = "loading";
+    this.searchError = "";
+    this.adding.clear();
+    this.renderList();
+    this.renderStatus();
+
+    void searchYouTube(text)
+      .then(
+        (page) => {
+          if (token !== this.searchToken) return;
+          this.searchResults = page.results;
+          this.searchContinuation = page.continuation;
+          this.searchState = "idle";
+        },
+        (err: unknown) => {
+          if (token !== this.searchToken) return;
+          this.searchState = "error";
+          this.searchError = err instanceof Error ? err.message : String(err);
+        },
+      )
+      .then(() => {
+        if (token !== this.searchToken) return;
+        this.renderList();
+        this.renderStatus();
+      });
+  }
+
+  /**
+   * One more page, appended.
+   *
+   * Appended rather than re-rendered: the results you were reading must not
+   * move, and re-running `renderSearch` would rebuild the list under your
+   * scroll position.
+   */
+  private loadMore(button: HTMLElement): void {
+    const query = this.searchQuery;
+    const continuation = this.searchContinuation;
+    if (!query || !continuation || this.searchState === "loading") return;
+
+    const token = this.searchToken;
+    this.searchState = "loading";
+    button.setText("Loading…");
+
+    void searchYouTube(query, continuation)
+      .then(
+        (page) => {
+          if (token !== this.searchToken) return;
+          const known = new Set(this.searchResults.map((result) => result.videoId));
+          const fresh = page.results.filter((result) => !known.has(result.videoId));
+          this.searchResults = [...this.searchResults, ...fresh];
+          this.searchContinuation = page.continuation;
+          this.searchState = "idle";
+          const now = new Date();
+          for (const result of fresh) this.renderResult(result, now, button);
+          button.setText("More results");
+          // The end of the road: YouTube stopped offering a token, or answered
+          // with nothing new. Either way there is no page after this one.
+          if (!page.continuation || fresh.length === 0) button.remove();
+          this.renderStatus();
+        },
+        (err: unknown) => {
+          if (token !== this.searchToken) return;
+          this.searchState = "idle";
+          button.setText("More results");
+          new Notice(`YT Free: could not load more results — ${String(err)}`);
+        },
+      );
+  }
+
+  private renderSearch(): void {
+    this.listEl.empty();
+    this.cards.clear();
+
+    if (this.searchState === "error") {
+      this.listEl.createDiv({
+        cls: "ytfree-hub-empty",
+        text: `Search failed — ${this.searchError}`,
+      });
+      return;
+    }
+    if (this.searchState === "loading" && this.searchResults.length === 0) {
+      this.listEl.createDiv({ cls: "ytfree-hub-empty", text: "Searching YouTube…" });
+      return;
+    }
+    if (this.searchResults.length === 0) {
+      this.listEl.createDiv({ cls: "ytfree-hub-empty", text: "No results." });
+      return;
+    }
+
+    const now = new Date();
+    for (const result of this.searchResults) this.renderResult(result, now, null);
+
+    if (this.searchContinuation) {
+      const more = this.listEl.createEl("button", {
+        cls: "ytfree-hub-more",
+        text: "More results",
+        attr: { type: "button" },
+      });
+      more.addEventListener("click", () => this.loadMore(more));
+    }
+  }
+
+  /**
+   * A search result card.
+   *
+   * It looks like a hub card and behaves like nothing else in the plugin: the
+   * only thing it can do is add itself. There is no link, no anchor, no
+   * `<video>`, and nothing here that a click can turn into playback — see
+   * `docs/V1-SCOPE-BROWSE.md`. Browse adds; the hub decides.
+   */
+  private renderResult(result: SearchResult, now: Date, before: HTMLElement | null): void {
+    const card = this.listEl.createDiv({ cls: "ytfree-hub-card ytfree-hub-result" });
+    if (before) this.listEl.insertBefore(card, before);
+
+    const thumb = card.createDiv({ cls: "ytfree-hub-thumb" });
+    if (result.thumbnail) {
+      const img = thumb.createEl("img");
+      img.src = result.thumbnail;
+      img.loading = "lazy";
+      img.alt = "";
+    }
+    // Duration is the one thing search knows that a channel feed does not, so
+    // it goes where a YouTube reader already looks for it. Created either way,
+    // so a missing one leaves the thumbnail exactly the same size.
+    thumb.createSpan({ cls: "ytfree-hub-duration", text: result.duration });
+
+    // Same split as a hub card: on a phone the marker is a badge on the
+    // thumbnail, because a phone row has no width to spend on a column.
+    const badge = this.phone ? thumb.createDiv({ cls: "ytfree-hub-marker" }) : null;
+
+    const meta = card.createDiv({ cls: "ytfree-hub-meta" });
+    meta.createDiv({ cls: "ytfree-hub-title", text: result.title });
+    const sub = meta.createDiv({ cls: "ytfree-hub-sub" });
+    sub.setText(
+      [result.channelTitle, result.publishedText, formatViews(result.views)]
+        .filter(Boolean)
+        .join(" · "),
+    );
+
+    const marker = badge ?? card.createDiv({ cls: "ytfree-hub-marker" });
+    this.paintResultMarker(marker, result.videoId);
+
+    card.addEventListener("click", () => this.addResult(result, marker));
+  }
+
+  /**
+   * Reserved space, filled three ways: addable, adding, already here. Same box
+   * whichever it is, so the answer arriving moves nothing.
+   */
+  private paintResultMarker(marker: HTMLElement, videoId: string): void {
+    marker.empty();
+    const inHub = this.store.hasItem(videoId);
+    const busy = this.adding.has(videoId);
+    marker.toggleClass("is-added", inHub);
+    marker.toggleClass("is-adding", busy);
+    setIcon(marker, busy ? "loader" : inHub ? "check" : "plus");
+    marker.setAttribute(
+      "aria-label",
+      busy ? "Adding…" : inHub ? "In your hub" : "Add to your hub",
+    );
+    marker.setAttribute("title", busy ? "Adding…" : inHub ? "In your hub" : "Add to your hub");
+  }
+
+  private addResult(result: SearchResult, marker: HTMLElement): void {
+    if (this.store.hasItem(result.videoId) || this.adding.has(result.videoId)) return;
+    this.adding.add(result.videoId);
+    this.paintResultMarker(marker, result.videoId);
+
+    void this.store
+      .addSearchResult(result)
+      .catch((err: unknown) => {
+        new Notice(`YT Free: could not add that video — ${String(err)}`);
+      })
+      .then(() => {
+        this.adding.delete(result.videoId);
+        this.paintResultMarker(marker, result.videoId);
+        this.renderStatus();
+      });
+  }
+
   private renderList(): void {
     if (!this.listEl) return;
+    if (this.searchQuery !== null) {
+      this.renderSearch();
+      return;
+    }
     this.listEl.empty();
     this.cards.clear();
 
@@ -583,6 +926,9 @@ export class HubView extends ItemView {
     // Where it came from, and whether it is already seen. A Watch Later item
     // has no publish date, so without the label it looks like a bug.
     if (item.origin === "watchlater" || item.origin === "both") bits.push("Watch Later");
+    // A search item carries no publish date either, for the same reason: say
+    // where it came from and the missing age reads as a fact, not a bug.
+    if (item.origin === "search") bits.push("Search");
     if (item.watched) bits.push("Watched");
     sub.setText(bits.filter(Boolean).join(" · "));
     card.toggleClass("is-watched", Boolean(item.watched));

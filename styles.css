@@ -619,6 +619,7 @@
 }
 
 .ytfree-hub-thumb {
+  position: relative;
   flex: 0 0 128px;
   width: 128px;
   height: 72px;
@@ -690,6 +691,70 @@
   line-height: 1.6em;
   font-size: var(--font-ui-small);
   color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------- hub: search ---
+   Browse: search results rendered as hub cards. See docs/V1-SCOPE-BROWSE.md —
+   a result can do exactly one thing, and it is not playback. */
+
+.ytfree-hub-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.4em 0.7em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+
+.ytfree-hub-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  box-sizing: border-box;
+  font-size: var(--font-ui-small);
+}
+
+/* Bottom-right of the thumbnail, where a YouTube reader already looks for it.
+   Absolutely positioned, so a video with no stated duration leaves the card
+   exactly as it is. */
+.ytfree-hub-duration {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 0 4px;
+  border-radius: var(--radius-s);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.ytfree-hub-duration:empty {
+  visibility: hidden;
+}
+
+/* Three states in one box — addable, adding, added. The box is the same size
+   for all three, so the answer arriving moves nothing on the card. */
+.ytfree-hub-result .ytfree-hub-marker.is-added {
+  color: var(--text-accent);
+}
+
+.ytfree-hub-result .ytfree-hub-marker.is-adding {
+  animation: ytfree-hub-spin 1s linear infinite;
+}
+
+@keyframes ytfree-hub-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The label swaps to "Loading…" on click; the width must not follow it. */
+.ytfree-hub-more {
+  display: block;
+  width: 12em;
+  margin: 0.8em auto 1.4em;
 }
 
 /* ----------------------------------------------------------- hub: phone ---
@@ -884,6 +949,23 @@
   padding: 0;
   border-radius: 0;
   --icon-size: 24px;
+}
+
+/* A 40px target, and 16px text — anything smaller and iOS zooms the whole view
+   when the box takes focus, which is a zoom nothing ever takes back. */
+.ytfree-hub.ytfree-phone .ytfree-hub-search {
+  padding: 0.4em 0.5em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-search-input {
+  height: 40px;
+  font-size: 16px;
+}
+
+/* On a phone the marker is a badge on a dark circle, so the accent colour the
+   desktop uses for "added" would sink into it. */
+.ytfree-hub.ytfree-phone .ytfree-hub-result .ytfree-hub-marker.is-added {
+  color: #fff;
 }
 
 /* ---------------------------------------------------------------- account */
