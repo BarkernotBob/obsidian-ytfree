@@ -19,4 +19,5 @@ export * from "./account.ts";
 export * from "./download.ts";
 export * from "./resolver.ts";
 export * from "./signin.ts";
+export * from "./silencedetect.ts";
 export * from "./transcript-fetch.ts";

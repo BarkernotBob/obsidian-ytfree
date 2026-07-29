@@ -44,12 +44,16 @@ import {
   SubscriptionsStore,
 } from "./hub";
 import { ProgressStore } from "./progress-store";
+import { SilenceStore } from "./silence-store";
+import { isStale, windowsFromCues } from "./silence";
+import type { SilenceMap, SilenceWindow } from "./silence";
 import type { CaptionTrack, Cue, VideoInfo } from "./transcript";
 import {
   groupCues,
   HEATMAP_ALIASES,
   HEATMAP_HEADING,
   parseJson3,
+  parseJson3Timed,
   parseTranscriptCues,
   pickCaptionTrack,
   renderHeatmap,
@@ -124,6 +128,22 @@ interface YtFreeSettings {
    * cannot be spelled out in the defaults any more than the download folder can. */
   accountCookieFile: string;
   accountSession: AccountSession;
+  /** Smart Speed's starting state on a freshly opened player. */
+  smartSpeed: boolean;
+  /** How fast a pause plays, when Smart Speed is on. */
+  silenceSpeed: number;
+  /**
+   * How long a quiet stretch has to be before it counts as a skippable pause.
+   *
+   * One number for both producers, deliberately: it is the transcript
+   * producer's gap threshold *and* silencedetect's `d=`, so turning the dial
+   * changes the same thing whether or not ffmpeg happens to be installed. Two
+   * numbers here would mean the feature behaved differently on two machines for
+   * a reason the user never chose.
+   */
+  silenceMinGap: number;
+  /** silencedetect's noise floor in dBFS. Desktop, and only with ffmpeg. */
+  silenceNoiseDb: number;
 }
 
 /** Frontmatter key holding the path to a downloaded copy. */
@@ -135,6 +155,9 @@ export const LOCAL_MEDIA_KEY = "local_media";
  * link a coin flip; anything past this is a scroll or a text selection.
  */
 const TAP_SLOP_PX = 10;
+
+/** How long a Smart Speed setting has to settle before a producer re-runs. */
+const SILENCE_REFRESH_DEBOUNCE_MS = 1200;
 
 /** The rendered timestamp link an event landed on, or null. */
 function seekAnchorFor(target: EventTarget | null): HTMLAnchorElement | null {
@@ -186,6 +209,14 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   accountShowWatched: false,
   accountCookieFile: "",
   accountSession: emptySession(),
+  // On by default. It is the feature, not an option about the feature — and it
+  // announces itself honestly: the toggle is lit in the control row and the
+  // time saved counts up inside it, so nobody has to wonder why a video sounds
+  // tighter than it did.
+  smartSpeed: true,
+  silenceSpeed: 3,
+  silenceMinGap: 0.5,
+  silenceNoiseDb: -30,
 };
 
 /**
@@ -319,6 +350,14 @@ export default class YtFreePlugin extends Plugin {
   subscriptions!: SubscriptionsStore;
   /** Where each video got to, so reopening a note does not start at 0:00. */
   progress!: ProgressStore;
+  /** Where the pauses are, per video — shared with the phone through iCloud. */
+  silence!: SilenceStore;
+  /** Videos whose silence map has already been chased this session. */
+  private silenceAttempted = new Set<string>();
+  /** Running ffmpeg analyses, keyed by video, so a closing note can kill one. */
+  private silenceJobs = new Map<string, { cancel: () => void }>();
+  /** Coalesces a slider drag into one recompute — see `refreshSmartSpeed`. */
+  private silenceRefreshTimer: number | null = null;
   /** Authenticated calls are serialized: never two account syncs at once. */
   private accountSyncing = false;
   private settingTab: YtFreeSettingTab | null = null;
@@ -327,6 +366,8 @@ export default class YtFreePlugin extends Plugin {
     await this.loadSettings();
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
     await this.progress.load();
+    this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
+    await this.silence.load();
     await this.setupSubscriptions();
     await this.setupAccount();
 
@@ -976,6 +1017,8 @@ export default class YtFreePlugin extends Plugin {
     this.clearResumeTimer();
     for (const handle of this.downloads.values()) handle.cancel();
     this.downloads.clear();
+    for (const job of this.silenceJobs.values()) job.cancel();
+    this.silenceJobs.clear();
     for (const view of [...this.pinned.keys()]) this.unmountPinned(view);
     for (const entry of this.players.values()) entry.player.destroy();
     this.players.clear();
@@ -983,6 +1026,7 @@ export default class YtFreePlugin extends Plugin {
     // After the players, not before: each `destroy` reports its final position,
     // and this is the write that gets those positions onto disk.
     void this.progress.flush();
+    void this.silence.flush();
   }
 
   // ---------------------------------------------------------------- pinned
@@ -1771,6 +1815,7 @@ export default class YtFreePlugin extends Plugin {
     // The note may have been closed or switched while the stream resolved.
     if (this.pinned.get(view) !== record) {
       entry?.player.destroy();
+      this.cancelSilence(videoId);
       if (entry && this.players.get(videoId) === entry) this.players.delete(videoId);
       wrapper.remove();
       return;
@@ -1784,6 +1829,7 @@ export default class YtFreePlugin extends Plugin {
     this.pinned.delete(view);
     if (record.entry) {
       record.entry.player.destroy();
+      this.cancelSilence(record.videoId);
       if (this.players.get(record.videoId) === record.entry) this.players.delete(record.videoId);
     }
     record.wrapper.remove();
@@ -2086,6 +2132,7 @@ export default class YtFreePlugin extends Plugin {
       new (class extends MarkdownRenderChild {
         onunload(): void {
           entry.player.destroy();
+          self.cancelSilence(videoId);
           if (self.players.get(videoId) === entry) self.players.delete(videoId);
         }
       })(wrapper),
@@ -2163,6 +2210,15 @@ export default class YtFreePlugin extends Plugin {
         // open in two panes agrees with itself.
         resumeAt: () => this.progress.resumeFor(videoId),
         onProgress: (seconds, duration) => this.progress.record(videoId, seconds, duration),
+        smartSpeed: {
+          enabled: this.settings.smartSpeed,
+          silenceRate: this.settings.silenceSpeed,
+          minGap: this.settings.silenceMinGap,
+          // The player toggle is a per-session override, so it does not write
+          // the setting back — flipping it off for one lecture should not turn
+          // the feature off for everything you open tomorrow.
+          onToggle: undefined,
+        },
       },
     );
     const entry: PlayerEntry = {
@@ -2177,6 +2233,17 @@ export default class YtFreePlugin extends Plugin {
     player.video.addEventListener("play", () => {
       this.lastActiveVideoId = videoId;
     });
+
+    // A stored map costs nothing, so it is applied before anything plays — that
+    // is what a map synced from the other device is *for*. Producing a new one
+    // costs a caption fetch, so it waits for the first play: opening ten notes
+    // to skim them should not be ten network calls for videos you did not watch.
+    this.applyStoredSilence(player, videoId);
+    player.video.addEventListener(
+      "play",
+      () => void this.produceSilence(player, videoId, sourcePath),
+      { once: true },
+    );
 
     // A present local copy wins: no yt-dlp, no expiry, instant first frame.
     const localFile = await this.localFileFor(sourcePath, videoId);
@@ -2240,6 +2307,228 @@ export default class YtFreePlugin extends Plugin {
     }
     setStatus(`Picking up at ${formatTimestamp(seconds)}`);
     window.setTimeout(() => setStatus(null), 6000);
+  }
+
+  // ----------------------------------------------------------- Smart Speed
+
+  /**
+   * The map we already have, if we have one that answers at the current
+   * setting.
+   *
+   * This is the whole mobile story for an ffmpeg-grade map: the Mac analysed
+   * the audio, iCloud carried the file, and the phone applies it here before a
+   * single byte of video has been fetched. It is also what makes the second
+   * viewing of anything instant.
+   */
+  private applyStoredSilence(player: YtFreePlayer, videoId: string): void {
+    const map = this.silence.mapFor(videoId, this.settings.silenceMinGap);
+    if (map) player.setSilenceWindows(map.windows, map.source);
+  }
+
+  /**
+   * Get this video a silence map, best available.
+   *
+   * Runs at most once per video per session — `silenceAttempted` — because both
+   * producers are network calls and a note reopened four times is still one
+   * video. The transcript producer runs whenever the stored map cannot answer
+   * the current setting; the ffmpeg producer then upgrades it in place, on
+   * desktop, if ffmpeg happens to be installed.
+   *
+   * Nothing in here is allowed to be load-bearing. Every failure ends as a
+   * dimmed toggle with a reason on it, because Smart Speed not working is a
+   * feature that is absent, and a video that will not play is a plugin that is
+   * broken. They must never be the same event.
+   */
+  private async produceSilence(
+    player: YtFreePlayer,
+    videoId: string,
+    sourcePath: string,
+  ): Promise<void> {
+    if (this.silenceAttempted.has(videoId)) return;
+    this.silenceAttempted.add(videoId);
+
+    const minGap = this.settings.silenceMinGap;
+    const stored = this.silence.rawMapFor(videoId);
+    const needsTranscript = !stored || isStale(stored, minGap);
+
+    if (needsTranscript) {
+      try {
+        const windows = await this.transcriptSilence(videoId, minGap);
+        if (windows === null) {
+          player.setSmartSpeedUnavailable(
+            `no ${this.transcriptLanguage()} captions for this video`,
+          );
+        } else {
+          this.recordSilence(player, videoId, "transcript", minGap, windows);
+        }
+      } catch (err) {
+        console.error("YT Free: caption timing unavailable for Smart Speed.", err);
+        player.setSmartSpeedUnavailable("captions could not be fetched");
+      }
+    }
+
+    await this.upgradeSilenceWithFfmpeg(player, videoId, sourcePath, minGap);
+  }
+
+  /** Hand a fresh map to the player and to the file, in that order. */
+  private recordSilence(
+    player: YtFreePlayer,
+    videoId: string,
+    source: SilenceMap["source"],
+    minGap: number,
+    windows: SilenceWindow[],
+  ): void {
+    player.setSilenceWindows(windows, source);
+    this.silence.record({
+      videoId,
+      source,
+      minGap,
+      computedAt: new Date().toISOString(),
+      windows,
+    });
+  }
+
+  /**
+   * Producer one: the gaps between caption lines. No ffmpeg, no yt-dlp, both
+   * platforms — this is the baseline a stranger gets.
+   *
+   * InnerTube on desktop as well as on mobile, deliberately. The desktop
+   * transcript command goes through `yt-dlp -J` because it also wants the replay
+   * heatmap out of the same call; this wants nothing but caption timing, and
+   * one `requestUrl` beats spawning yt-dlp and waiting several seconds for a
+   * megabyte of metadata we would throw away.
+   *
+   * Returns null — not an empty array — when the video simply has no captions,
+   * because "no map" and "a map with no pauses in it" are different facts and
+   * the toggle says different things about them.
+   */
+  private async transcriptSilence(
+    videoId: string,
+    minGap: number,
+  ): Promise<SilenceWindow[] | null> {
+    const track = await fetchCaptionTrack(videoId, this.transcriptLanguage());
+    if (!track) return null;
+    const response = await requestUrl({ url: track.url, throw: true });
+    const cues = parseJson3Timed(response.text);
+    if (cues.length === 0) return null;
+    return windowsFromCues(cues, minGap);
+  }
+
+  /**
+   * Producer two: ffmpeg's `silencedetect`, on the audio alone. Desktop, and
+   * only if ffmpeg is already on the machine.
+   *
+   * This is the enhancer, and it is written to be skippable at every step: no
+   * desktop, no ffmpeg, no yt-dlp, a failed resolve, a non-zero exit — each one
+   * simply leaves the transcript map in place. Nothing warns, nothing nags, and
+   * nothing is missing that the user could have had for free.
+   *
+   * Windows arrive in batches while the analysis streams, so a long video
+   * upgrades underneath a player that is already running. A local download, if
+   * there is one, is analysed instead of the network: no bandwidth, and far
+   * faster than realtime.
+   */
+  private async upgradeSilenceWithFfmpeg(
+    player: YtFreePlayer,
+    videoId: string,
+    sourcePath: string,
+    minGap: number,
+  ): Promise<void> {
+    if (!Platform.isDesktopApp) return;
+    const stored = this.silence.rawMapFor(videoId);
+    // Already measured, at a floor fine enough to answer. Nothing to gain.
+    if (stored?.source === "ffmpeg" && !isStale(stored, minGap)) return;
+
+    const { detectSilence, findFfmpeg, resolveAudioUrl, findYtDlp } = await desktop();
+    if (this.ffmpegPath === undefined) {
+      this.ffmpegPath = await findFfmpeg(this.settings.ffmpegPath);
+    }
+    if (!this.ffmpegPath) return;
+
+    let input: string;
+    try {
+      input =
+        (await this.localFileFor(sourcePath, videoId)) ??
+        (await resolveAudioUrl(
+          videoId,
+          (this.ytDlpPath ??= await findYtDlp(this.settings.ytDlpPath)),
+        ));
+    } catch (err) {
+      console.error("YT Free: no audio to analyse for Smart Speed.", err);
+      return;
+    }
+
+    // The windows accumulate here rather than in the store, so the file is
+    // written once with a complete map instead of a hundred times with a
+    // growing one — but the player is fed on every batch.
+    const windows: SilenceWindow[] = [];
+    const job = detectSilence({
+      ffmpegPath: this.ffmpegPath,
+      input,
+      noiseDb: this.settings.silenceNoiseDb,
+      minGap,
+      onWindows: (batch) => {
+        windows.push(...batch);
+        if (this.players.get(videoId)?.player === player) {
+          player.setSilenceWindows([...windows], "ffmpeg");
+        }
+      },
+    });
+    this.silenceJobs.set(videoId, job);
+
+    try {
+      await job.done;
+      // A completed analysis that found nothing is still an answer — a video
+      // with no pauses at all. Recording it stops every reopen re-running it.
+      this.recordSilence(player, videoId, "ffmpeg", minGap, windows);
+    } catch (err) {
+      // The transcript map is still in place and still working. This is the
+      // enhancer failing, which by design costs the user nothing.
+      console.error("YT Free: ffmpeg silence analysis failed.", err);
+    } finally {
+      if (this.silenceJobs.get(videoId) === job) this.silenceJobs.delete(videoId);
+    }
+  }
+
+  /** Stop analysing a video nobody is watching any more. */
+  private cancelSilence(videoId: string): void {
+    const job = this.silenceJobs.get(videoId);
+    if (!job) return;
+    job.cancel();
+    this.silenceJobs.delete(videoId);
+  }
+
+  /**
+   * Push changed Smart Speed settings into every open player.
+   *
+   * The minimum-silence slider is a filter applied at playback time, so this is
+   * genuinely all it takes — no refetch, no re-analysis, and the next frame
+   * obeys the new number. Lowering it below what a stored map was built with is
+   * the one case that needs more, and that is handled on the next play by
+   * `isStale`.
+   */
+  refreshSmartSpeed(): void {
+    for (const entry of this.players.values()) {
+      entry.player.setSilenceSettings(this.settings.silenceMinGap, this.settings.silenceSpeed);
+    }
+    // A finer setting than a stored map was built with does need a producer to
+    // run again, and the once-per-session guard would otherwise swallow it
+    // until the next restart. Forget the attempts; `isStale` decides the rest.
+    this.silenceAttempted.clear();
+
+    // Debounced, because a slider fires this on every step it passes through
+    // and a producer is a network call. Dragging from 0.5 to 0.2 should cost
+    // one analysis, not thirty.
+    if (this.silenceRefreshTimer !== null) window.clearTimeout(this.silenceRefreshTimer);
+    this.silenceRefreshTimer = window.setTimeout(() => {
+      this.silenceRefreshTimer = null;
+      for (const entry of this.players.values()) {
+        // Only what is actually being watched. A note sitting open unplayed
+        // keeps the same bargain it made at load: nothing is fetched for it.
+        if (!entry.player.hasPlayed) continue;
+        void this.produceSilence(entry.player, entry.videoId, entry.sourcePath);
+      }
+    }, SILENCE_REFRESH_DEBOUNCE_MS);
   }
 
   /** yt-dlp, via the stream cache. Desktop only. */
@@ -2946,6 +3235,80 @@ class YtFreeSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }),
       );
+
+    new Setting(containerEl).setName("Smart Speed").setHeading();
+
+    new Setting(containerEl)
+      .setName("Compress pauses")
+      .setDesc(
+        "Pauses in speech play fast while the speech itself plays at your chosen speed, with the pitch unchanged. Works on any captioned video with nothing installed, on this machine and on the phone. Every player has its own toggle in the control row; this is the state it starts in.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.smartSpeed).onChange(async (value) => {
+          this.plugin.settings.smartSpeed = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Pause speed")
+      .setDesc(
+        "How fast a pause plays. Never slower than the speed you picked for the video itself — speeding the talking up does not slow the silence down.",
+      )
+      .addDropdown((dropdown) => {
+        for (const rate of [1.5, 2, 2.5, 3, 4]) {
+          dropdown.addOption(String(rate), `${rate}×`);
+        }
+        dropdown.setValue(String(this.plugin.settings.silenceSpeed)).onChange(async (value) => {
+          this.plugin.settings.silenceSpeed = Number(value);
+          await this.plugin.saveSettings();
+          this.plugin.refreshSmartSpeed();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Shortest pause to skip")
+      .setDesc(
+        "A quiet stretch has to last at least this long to be compressed. Lower catches the breaths between sentences and saves more; higher only compresses the real gaps and is safer on a fast talker. One number for both engines — it is the caption-gap threshold, and it is exactly what ffmpeg's silence detection is given when ffmpeg is installed, so the setting means the same thing on every machine.",
+      )
+      .addDropdown((dropdown) => {
+        const options: Array<[number, string]> = [
+          [0.2, "0.2 s — aggressive"],
+          [0.3, "0.3 s"],
+          [0.4, "0.4 s"],
+          [0.5, "0.5 s — balanced"],
+          [0.75, "0.75 s"],
+          [1, "1 s"],
+          [1.5, "1.5 s"],
+          [2, "2 s — only long gaps"],
+        ];
+        for (const [value, label] of options) dropdown.addOption(String(value), label);
+        dropdown.setValue(String(this.plugin.settings.silenceMinGap)).onChange(async (value) => {
+          this.plugin.settings.silenceMinGap = Number(value);
+          await this.plugin.saveSettings();
+          this.plugin.refreshSmartSpeed();
+        });
+      });
+
+    // Only meaningful where ffmpeg can exist. On a phone this would be a dial
+    // attached to nothing.
+    if (desktopApp) {
+      new Setting(containerEl)
+        .setName("Silence threshold (ffmpeg)")
+        .setDesc(
+          "How quiet counts as quiet, in dBFS, when ffmpeg is installed and measuring the audio directly. Lower is stricter — −40 dB compresses only near-total silence, −20 dB will treat room tone as a pause. Ignored entirely without ffmpeg; the caption-timing engine has no volume to measure.",
+        )
+        .addSlider((slider) =>
+          slider
+            .setLimits(-50, -10, 5)
+            .setValue(this.plugin.settings.silenceNoiseDb)
+            .setDynamicTooltip()
+            .onChange(async (value) => {
+              this.plugin.settings.silenceNoiseDb = value;
+              await this.plugin.saveSettings();
+            }),
+        );
+    }
 
     new Setting(containerEl).setName("Transcript").setHeading();
 

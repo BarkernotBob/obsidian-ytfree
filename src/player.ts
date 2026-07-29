@@ -1,6 +1,9 @@
 import Hls from "hls.js";
 import { setIcon } from "obsidian";
+import { formatTimestamp } from "./format.ts";
 import type { SectionName } from "./sections.ts";
+import { compressibleWindows, rateFor, secondsSaved } from "./silence.ts";
+import type { SilenceSource, SilenceWindow } from "./silence.ts";
 // Type-only, and it has to stay that way. A value import of these names pulled
 // the whole resolver — and its `child_process` import — into every bundle that
 // touches the player, which is one of the two reasons the plugin could not load
@@ -49,10 +52,39 @@ export interface PlayerOptions {
    * decides what is worth writing down.
    */
   onProgress?: (seconds: number, duration: number) => void;
+  /**
+   * Smart Speed. Absent, the control is not drawn at all and the engine does
+   * not exist; present, the toggle is always drawn — availability changes how
+   * it looks, never whether it is there, so the row's geometry is fixed from
+   * the moment it is built.
+   */
+  smartSpeed?: SmartSpeedOptions;
+}
+
+export interface SmartSpeedOptions {
+  /** Starting state, from the global setting. The toggle overrides it. */
+  enabled: boolean;
+  /** How fast a pause plays. Never slower than the user's chosen speed. */
+  silenceRate: number;
+  /** Told when the reader flips the toggle, so the setting can follow. */
+  onToggle?: (enabled: boolean) => void;
+  /**
+   * The minimum silence length, in seconds — the user's setting, applied at the
+   * last moment rather than baked into the map, so changing it takes effect on
+   * the next frame with nothing to recompute.
+   */
+  minGap: number;
 }
 
 /** How often playback reports its position while it is running. */
 const PROGRESS_INTERVAL_MS = 5000;
+
+/**
+ * A frame gap longer than this is not playback, it is a window that was hidden
+ * or a laptop that was asleep. Counted as zero rather than as two minutes of
+ * saved listening.
+ */
+const MAX_FRAME_SECONDS = 0.5;
 
 /**
  * Wraps a native <video> element and keeps it playing across stream-URL expiry.
@@ -90,6 +122,27 @@ export class YtFreePlayer {
   private lastProgressAt = 0;
   private reportProgress: (() => void) | null = null;
 
+  // --- Smart Speed. All inert unless `options.smartSpeed` was supplied.
+  private smartBtn: HTMLButtonElement | null = null;
+  private smartBadge: HTMLElement | null = null;
+  private smartOn = false;
+  /** Raw silence intervals from whichever producer last spoke. */
+  private silenceWindows: SilenceWindow[] = [];
+  /** The same, filtered and trimmed at the current setting — what the loop reads. */
+  private activeWindows: SilenceWindow[] = [];
+  private silenceSource: SilenceSource | null = null;
+  /** Set once a producer has answered "there is no map and there won't be one". */
+  private smartReason: string | null = null;
+  private savedSeconds = 0;
+  private smartRaf: number | null = null;
+  private lastFrameAt = 0;
+  /**
+   * Has the engine ever written `playbackRate`? The guarantee is that a Smart
+   * Speed that was never switched on leaves the rate strictly alone, so the
+   * restore on toggle-off must not run for a toggle that was never on.
+   */
+  private smartTouchedRate = false;
+
   constructor(
     private container: HTMLElement,
     private provider: StreamProvider,
@@ -103,7 +156,12 @@ export class YtFreePlayer {
       attr: { controls: "", playsinline: "", preload: "metadata" },
     });
 
+    // Before anything can set a rate above 1: without this a 3× pause is a
+    // chipmunk, and Chromium and WebKit spell the property differently.
+    this.preservePitch();
+
     this.buildControls();
+    this.trackSmartSpeed();
 
     // Native error path (direct mp4, and some HLS failures).
     this.video.addEventListener("error", () => {
@@ -242,6 +300,27 @@ export class YtFreePlayer {
       this.video.playbackRate = this.playbackRate;
     });
 
+    // Smart Speed sits with the speed picker, because it is a speed control:
+    // the select says how fast the talking goes, this says what happens to the
+    // silence between it. Always built when the feature is wired up, whether or
+    // not this video turns out to have a map — a control that appears once an
+    // analysis finishes is a control that moves its neighbours.
+    if (this.options.smartSpeed) {
+      const smart = button("left", "Smart", "zap", "Smart Speed", () => {
+        this.setSmartSpeed(!this.smartOn);
+        this.options.smartSpeed?.onToggle?.(this.smartOn);
+      });
+      smart.addClass("ytfree-btn-smart");
+      // The time saved lives *inside* the button, in the same absolutely
+      // positioned strip the skip buttons put their "10" in. A readout beside
+      // the toggle would be a second control's worth of width on a row that has
+      // none to spare; a readout that costs no width can never reflow the row.
+      this.smartBadge = smart.createSpan({ cls: "ytfree-btn-badge ytfree-smart-saved" });
+      this.smartBtn = smart;
+      this.smartOn = this.options.smartSpeed.enabled;
+      this.paintSmart();
+    }
+
     // Left, with the speed picker, rather than right with the size controls —
     // and not only for the sense of it. Three buttons on the right and one
     // control on the left is wider on that side than half a phone minus the
@@ -339,6 +418,184 @@ export class YtFreePlayer {
       el.addClass("ytfree-btn-text");
     }
     if (badge) el.appendChild(badge);
+  }
+
+  // ----------------------------------------------------------- Smart Speed
+
+  /**
+   * Keep the pitch where it belongs, on both engines.
+   *
+   * `preservesPitch` is the standard; iOS Safari has only ever had the
+   * `webkit`-prefixed one, and it is the platform where a 3× pause without it
+   * is most obviously wrong. Re-applied after every source swap, because the
+   * element resets it along with everything else on `load()`.
+   */
+  private preservePitch(): void {
+    const el = this.video as HTMLVideoElement & { webkitPreservesPitch?: boolean };
+    el.preservesPitch = true;
+    el.webkitPreservesPitch = true;
+  }
+
+  /**
+   * The engine runs on `requestAnimationFrame`, not on `timeupdate`.
+   *
+   * `timeupdate` fires about four times a second, and a quarter of a second at
+   * 1× is a quarter of a second of pause played at speech rate on the way in
+   * and a clipped syllable on the way out. A frame is 16 ms, which is under the
+   * threshold where the rate change is audible as a seam. It only runs while
+   * something is playing — a paused player costs nothing.
+   */
+  private trackSmartSpeed(): void {
+    if (!this.options.smartSpeed) return;
+    this.video.addEventListener("play", () => this.startSmartLoop());
+    for (const event of ["pause", "ended"]) {
+      this.video.addEventListener(event, () => this.stopSmartLoop());
+    }
+  }
+
+  private startSmartLoop(): void {
+    if (this.smartRaf !== null || this.destroyed) return;
+    this.lastFrameAt = 0;
+    const tick = (now: number): void => {
+      if (this.destroyed) return;
+      this.smartRaf = requestAnimationFrame(tick);
+      this.smartFrame(now);
+    };
+    this.smartRaf = requestAnimationFrame(tick);
+  }
+
+  private stopSmartLoop(): void {
+    if (this.smartRaf === null) return;
+    cancelAnimationFrame(this.smartRaf);
+    this.smartRaf = null;
+  }
+
+  /**
+   * One frame: decide the rate, apply it if it changed, and count what the
+   * change bought.
+   *
+   * The early return is the acceptance criterion "toggle off → the engine never
+   * touches `playbackRate`", spelled out in the one place it could be violated.
+   */
+  private smartFrame(now: number): void {
+    if (!this.smartOn || this.activeWindows.length === 0) return;
+
+    const base = this.playbackRate;
+    const rate = rateFor(
+      this.video.currentTime,
+      this.activeWindows,
+      base,
+      this.options.smartSpeed?.silenceRate ?? base,
+    );
+
+    if (Math.abs(this.video.playbackRate - rate) > 0.001) {
+      this.video.playbackRate = rate;
+      this.smartTouchedRate = true;
+    }
+
+    const elapsed = this.lastFrameAt ? (now - this.lastFrameAt) / 1000 : 0;
+    this.lastFrameAt = now;
+    if (elapsed > 0 && elapsed <= MAX_FRAME_SECONDS) {
+      const saved = secondsSaved(elapsed, base, rate);
+      if (saved > 0) {
+        this.savedSeconds += saved;
+        this.paintSavedTime();
+      }
+    }
+  }
+
+  /**
+   * Hand the player a silence map. Safe to call repeatedly — the ffmpeg
+   * producer calls it every time a batch of windows lands, mid-playback, and
+   * replacing the windows under a running loop is a one-frame change of mind.
+   */
+  setSilenceWindows(windows: SilenceWindow[], source: SilenceSource): void {
+    if (this.destroyed) return;
+    this.silenceWindows = windows;
+    this.silenceSource = source;
+    this.smartReason = null;
+    this.refreshWindows();
+  }
+
+  /**
+   * There is no map for this video and there is not going to be one — no
+   * captions, and no ffmpeg to fall back on. The toggle dims and says why; it
+   * does not disappear, and it does not change size.
+   */
+  setSmartSpeedUnavailable(reason: string): void {
+    if (this.destroyed) return;
+    this.silenceWindows = [];
+    this.activeWindows = [];
+    this.silenceSource = null;
+    this.smartReason = reason;
+    this.paintSmart();
+  }
+
+  /** The user moved the minimum-silence slider. No refetch — just re-filter. */
+  setSilenceSettings(minGap: number, silenceRate: number): void {
+    if (!this.options.smartSpeed) return;
+    this.options.smartSpeed.minGap = minGap;
+    this.options.smartSpeed.silenceRate = silenceRate;
+    this.refreshWindows();
+  }
+
+  private refreshWindows(): void {
+    const minGap = this.options.smartSpeed?.minGap ?? 0;
+    this.activeWindows = compressibleWindows(this.silenceWindows, minGap);
+    this.paintSmart();
+  }
+
+  /** Flip the engine. Turning it off puts the rate back where the user had it. */
+  setSmartSpeed(on: boolean): void {
+    if (this.smartOn === on) return;
+    this.smartOn = on;
+    if (!on && this.smartTouchedRate) {
+      // Undoing our own change, not touching a rate we never moved.
+      this.video.playbackRate = this.playbackRate;
+    }
+    this.paintSmart();
+  }
+
+  get isSmartSpeedOn(): boolean {
+    return this.smartOn;
+  }
+
+  /**
+   * The toggle's three states, all inside a fixed square: on, off, and dimmed
+   * because this video has nothing to compress. Only the colour, the tooltip
+   * and the icon change — never the box.
+   */
+  private paintSmart(): void {
+    const el = this.smartBtn;
+    if (!el) return;
+
+    const usable = this.activeWindows.length > 0;
+    el.toggleClass("is-active", this.smartOn && usable);
+    el.disabled = !usable && this.smartReason !== null;
+
+    const source = this.silenceSource === "ffmpeg" ? "measured audio" : "caption timing";
+    const title = !usable
+      ? this.smartReason
+        ? `Smart Speed unavailable — ${this.smartReason}`
+        : "Smart Speed — looking for pauses…"
+      : this.smartOn
+        ? `Smart Speed on (${source}) — pauses play at ${this.options.smartSpeed?.silenceRate ?? 3}×`
+        : "Smart Speed off";
+
+    el.setAttribute("title", title);
+    el.setAttribute("aria-label", title);
+    el.setAttribute("aria-pressed", String(this.smartOn && usable));
+    this.paintSavedTime();
+  }
+
+  /**
+   * `−1:20` under the icon, in the badge strip. Blank below a second, because a
+   * readout that starts at "−0:00" reads as broken rather than as new.
+   */
+  private paintSavedTime(): void {
+    if (!this.smartBadge) return;
+    const text = this.savedSeconds >= 1 ? `−${formatTimestamp(this.savedSeconds)}` : "";
+    if (this.smartBadge.textContent !== text) this.smartBadge.setText(text);
   }
 
   /**
@@ -520,15 +777,14 @@ export class YtFreePlayer {
     this.video.addEventListener("error", fail, { once: true });
     // Same resume as a stream: the position is the video's, not the source's.
     const resumeAt = this.resumeSeconds();
-    if (resumeAt > 0) {
-      this.video.addEventListener(
-        "loadedmetadata",
-        () => {
-          this.video.currentTime = resumeAt;
-        },
-        { once: true },
-      );
-    }
+    this.video.addEventListener(
+      "loadedmetadata",
+      () => {
+        if (resumeAt > 0) this.video.currentTime = resumeAt;
+        this.preservePitch();
+      },
+      { once: true },
+    );
     this.video.src = url;
     this.video.load();
   }
@@ -550,6 +806,7 @@ export class YtFreePlayer {
       "loadedmetadata",
       () => {
         if (resumeAt > 0) this.video.currentTime = resumeAt;
+        this.preservePitch();
         this.video.playbackRate = this.playbackRate;
         if (wasPlaying) void this.video.play().catch(() => { /* ignore */ });
       },
@@ -589,6 +846,7 @@ export class YtFreePlayer {
       if (resumeAt > 0) this.video.currentTime = resumeAt;
       // A quality upgrade or refresh must not quietly reset how the user set
       // the player up.
+      this.preservePitch();
       this.video.playbackRate = this.playbackRate;
       this.video.volume = volume;
       this.video.muted = muted;
@@ -772,6 +1030,7 @@ export class YtFreePlayer {
     // most common way a session ends, and it is the position that matters most.
     this.reportProgress?.();
     this.destroyed = true;
+    this.stopSmartLoop();
     this.teardownHls();
     this.video.removeAttribute("src");
     this.video.load();

@@ -1,6 +1,38 @@
 # v1 scope — Smart Speed (silence compression)
 
-Gate required before build. Written 2026-07-29.
+Gate required before build. Written 2026-07-29. **Built 2026-07-29** — see
+[issue 015](../issues/015-smart-speed.md).
+
+## What was built differently, and why
+
+Three things in this document did not survive contact with the build. Recorded here
+rather than quietly edited away, because the reasoning is the useful part.
+
+1. **One pause-length setting, not two.** This document hardcoded a ~0.5 s caption gap
+   and gave ffmpeg its own `d=0.35`. BarkernotBob's call: the user picks the shortest pause
+   worth skipping, and *that same number* is what ffmpeg is given. So there is one
+   "Shortest pause to skip" dropdown (0.2 – 2 s, default 0.5) and `silencedetect`
+   receives `d=<that value>`. Two producers disagreeing about what counts as a pause
+   would have been a bug the user could hear and not explain.
+
+2. **Maps store raw windows; the setting filters at playback.** Consequence of (1): if
+   the threshold were baked into the stored map, every change to the dropdown would
+   invalidate every map. Instead each map records the `minGap` it was computed at, and
+   the apply layer filters on the live setting. Raising the setting is free and
+   instant; only *lowering* it below a map's recorded floor forces a recompute
+   (`isStale`). Margins are trimmed at playback for the same reason.
+
+3. **The time-saved formula here is wrong.** `elapsed × (1 − base/effective)` reports
+   0.67 s for a 3 s pause played at 3× — but 3 s of content took 1 s, so 2 s were
+   saved. Built as `wallSeconds × (rate/base − 1)`, which gives 2 s. Test in
+   `tests/silence.test.ts` pins it.
+
+One layout consequence, measured not guessed: Smart Speed is a ninth control, and the
+single-row bar was already spending 340 of the 347pt a docked 375pt phone has. Rather
+than shrink targets back to the 36pt that caused earlier fat-fingering, **below 460pt
+the bar is now two rows** — transport centred on its own row, side controls beneath.
+Every target keeps 40pt, gaps keep 8pt, Play is dead-centre. `tools/controls-harness.mjs`
+verifies overflow 0 at 375/390/430/700.
 
 **One sentence:** like Overcast's Smart Speed — pauses in speech play fast, speech plays
 at the user's chosen speed, and it works out of the box with nothing installed; ffmpeg,
@@ -61,7 +93,8 @@ v2 route *if* a real-time-only feature (Voice Boost) ever justifies it.
   its space whether the feature is available or not — availability changes appearance
   (dimmed), never geometry.** Same for the time-saved readout: fixed-width slot.
 - Time saved accumulates per session: `elapsed × (1 − base/effective)` summed while
-  boosted; shown as `−m:ss` next to the toggle.
+  boosted; shown as `−m:ss` next to the toggle. *(Built with the corrected formula —
+  see deviation 3 above.)*
 - Toggle off → the engine never touches `playbackRate`. Existing speed menu behavior is
   unchanged.
 
@@ -71,7 +104,10 @@ Caption cues already flow through `transcript.ts`, but today the parser keeps on
 line's start time ("One caption line, at the second it starts") — json3 also carries
 per-event durations (`dMs`) and per-word offsets (`segs[].tOffsetMs`), currently
 discarded. Extend the parser to keep durations; then a gap between one cue's end and the
-next cue's start longer than ~0.5 s is a pause.
+next cue's start longer than the user's "shortest pause to skip" (default 0.5 s) is a
+pause. *(Built against a running maximum cue end, not the previous cue's end —
+auto-captions overlap constantly, and pairwise comparison reports negative gaps and then
+misses the real pause behind them.)*
 
 - Producer trims margins into the window itself: keep ~150 ms of the pause's start at
   speech rate (Overcast-style breathing room), release ~100 ms before speech resumes so
@@ -98,8 +134,9 @@ next cue's start longer than ~0.5 s is a pause.
   window lands. Child killed on player close; one analysis per video per session.
 - If a local download of the video exists (issue 002), analyze the local file instead:
   zero bandwidth and near-instant.
-- Threshold (−30 dB) and minimum duration (0.35 s) are advanced settings with those
-  defaults. Auto-adaptive threshold (Skip Silence has one) is a v2 ticket.
+- Threshold (−30 dB) is a desktop-only advanced setting. Minimum duration is **not** a
+  separate setting — it is the shared "shortest pause to skip" value (deviation 1).
+  Auto-adaptive threshold (Skip Silence has one) is a v2 ticket.
 
 ## Persistence and sync — how mobile gets desktop-quality maps
 
@@ -116,9 +153,13 @@ prune LRU past ~200 videos. Merge is pure and unit-tested.
 
 ## Settings
 
-- Smart Speed on/off (global default; the player toggle overrides per session).
-- Silence speed (default 3×).
-- Advanced: transcript gap threshold, ffmpeg path, silencedetect noise/duration.
+As built:
+
+- **Compress pauses** — on/off (global default; the player toggle overrides per session).
+- **Pause speed** — 1.5 / 2 / 2.5 / 3 / 4×, default 3×.
+- **Shortest pause to skip** — 0.2 / 0.3 / 0.4 / 0.5 / 0.75 / 1 / 1.5 / 2 s, default
+  0.5 s. Drives the caption-gap producer *and* ffmpeg's `d=` (deviation 1).
+- **Silence threshold (ffmpeg)** — desktop only, −50 … −10 dB, default −30.
 
 ## Acceptance criteria
 

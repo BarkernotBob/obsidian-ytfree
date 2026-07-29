@@ -6,6 +6,7 @@
  */
 
 import { formatTimestamp } from "./format.ts";
+import type { TimedCue } from "./silence.ts";
 
 // Headings the fetch owns outright: rewritten wholesale on every run. They live
 // in `sections.ts` with the rest of a note's structure and are re-exported here
@@ -229,14 +230,42 @@ function forceJson3(baseUrl: string): string {
  * per-word links would be unusable.
  */
 export function parseJson3(text: string): Cue[] {
-  let data: { events?: Array<{ tStartMs?: number; segs?: Array<{ utf8?: string }> }> };
+  return parseJson3Timed(text).map((cue) => ({
+    seconds: Math.floor(cue.start),
+    text: cue.text,
+  }));
+}
+
+/**
+ * The same parse, keeping both ends of each line's timing.
+ *
+ * json3 states a duration next to every start — `dDurationMs`, which this
+ * parser used to throw away because a transcript link only needs the second a
+ * line begins. Smart Speed needs the other end: the gap between one line
+ * finishing and the next starting *is* the pause, and without durations there
+ * is no gap to measure.
+ *
+ * `dMs` is accepted alongside `dDurationMs` because both spellings have been
+ * seen in the wild from the timedtext endpoint, and an event with neither is
+ * reported as a zero-length cue rather than dropped — `windowsFromCues` knows
+ * what to do with an unstated end, and it is the right place to decide.
+ */
+export function parseJson3Timed(text: string): TimedCue[] {
+  let data: {
+    events?: Array<{
+      tStartMs?: number;
+      dDurationMs?: number;
+      dMs?: number;
+      segs?: Array<{ utf8?: string }>;
+    }>;
+  };
   try {
     data = JSON.parse(text);
   } catch {
     return [];
   }
 
-  const cues: Cue[] = [];
+  const cues: TimedCue[] = [];
   for (const event of data.events || []) {
     if (!event.segs) continue;
     const line = event.segs
@@ -245,7 +274,10 @@ export function parseJson3(text: string): Cue[] {
       .replace(/\s+/g, " ")
       .trim();
     if (!line) continue;
-    cues.push({ seconds: Math.floor((event.tStartMs || 0) / 1000), text: line });
+    const start = (event.tStartMs || 0) / 1000;
+    const durationMs = event.dDurationMs ?? event.dMs ?? 0;
+    const duration = Number.isFinite(durationMs) && durationMs > 0 ? durationMs / 1000 : 0;
+    cues.push({ start, end: start + duration, text: line });
   }
   return cues;
 }

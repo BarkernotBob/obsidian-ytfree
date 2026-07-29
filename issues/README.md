@@ -18,4 +18,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [012](012-resume-transcript-and-controls.md) | Where you left off, transcripts on the phone, and a row you can hit | Built 2026-07-29 — awaiting manual test |
 | [013](013-heatmap-on-the-phone.md) | Most-replayed moments on the phone, and backfilled without asking | Built 2026-07-29 — awaiting manual test |
 | [014](014-hidden-videos-came-back.md) | Hidden videos came back — save is a merge now, not an overwrite | Built 2026-07-29 — awaiting manual test |
-| [015](015-smart-speed.md) | Smart Speed: compress pauses like Overcast; ffmpeg optional, never required | Scoped ([docs/V1-SCOPE-SMART-SPEED.md](../docs/V1-SCOPE-SMART-SPEED.md)) — not built |
+| [015](015-smart-speed.md) | Smart Speed: compress pauses like Overcast; ffmpeg optional, never required | Built — awaiting manual test |

@@ -1,15 +1,62 @@
 # HANDOFF
 
-## Status — 2026-07-29 (latest): Smart Speed scoped; hidden-videos fix awaiting test
+## Status — 2026-07-29 (latest): Smart Speed built, not yet tested on a device
 
-**New:** [issues/015](issues/015-smart-speed.md) — Smart Speed (Overcast-style
-pause compression) is scoped and approved for build, doc at
+[issues/015](issues/015-smart-speed.md) is **code-complete**. **281 unit tests
+pass, `tsc` clean, build clean** (including the mobile eager-`require` guard).
+Not yet installed to the vault and not yet run on hardware — the manual test in
+the issue file is the exact next step.
+
+**Shape:** producers make a *silence map* (sorted `[start, end]` windows), one
+apply layer in `player.ts` consumes it and never knows which producer fed it.
+
+- `src/silence.ts` — the whole pure core: gap→window builder, margin trimming,
+  binary-search lookup, rate decision, time-saved, staleness, map arbitration
+  and merge, ffmpeg stderr parser. No DOM, no Node, no platform. 40 tests.
+- `src/silence-store.ts` — `silence-maps.json`, **merge-on-save** (014's lesson:
+  two devices write this file, so re-read then union inside the write chain).
+- `src/transcript.ts` — new `parseJson3Timed` keeps the per-cue durations the
+  old parser threw away; `parseJson3` is now a projection of it, unchanged.
+- `src/desktop/silencedetect.ts` — ffmpeg producer, desktop-only, spawns on the
+  **audio-only** URL (~1 MB/min via the new `resolveAudioUrl`), parses stderr
+  progressively and feeds the live player, SIGKILL on close.
+- `src/player.ts` — rAF engine (timeupdate at ~250 ms is too coarse),
+  `preservesPitch` on every path a `<video>` can be created or swapped, toggle
+  in the left control group with the time-saved readout as an absolutely
+  positioned badge inside it.
+- `src/main.ts` — stored map applies instantly on mount (free); producers fire
+  on first `play` (so merely opening a note costs no caption fetch).
+
+**Three deliberate deviations from the scope doc**, all recorded at the top of
+[docs/V1-SCOPE-SMART-SPEED.md](docs/V1-SCOPE-SMART-SPEED.md): one shared
+"shortest pause to skip" setting drives both the caption producer and ffmpeg's
+`d=` (BarkernotBob's call); maps store raw windows and the live setting filters at
+playback, so raising the threshold needs no recompute; and the doc's
+time-saved formula was arithmetically wrong and was replaced.
+
+**One layout change worth knowing about:** Smart Speed is a ninth control and
+the single-row bar was already spending 340 of the 347pt a docked 375pt phone
+has. Rather than shrink targets back to the 36pt that caused the fat-fingering
+this codebase already fixed once, **below 460pt the control bar is now two
+rows** — transport centred on top, side controls beneath. Targets stay 40pt,
+gaps stay 8pt, Play is dead-centre, `tools/controls-harness.mjs` reports
+overflow 0 at 375/390/430/700. The cost is ~48px of vertical chrome on phones.
+If BarkernotBob dislikes it, the alternatives are dropping a control on mobile or
+going back to 36pt targets.
+
+**Next:** `./install.sh`, then the manual test in
+[issues/015](issues/015-smart-speed.md) — steps 5 (nothing moves) and 8 (phone
+works with nothing installed) are the ones that decide it. The 012, 013 and 014
+manual tests are still outstanding.
+
+## Previous — 2026-07-29: Smart Speed scoped
+
+[issues/015](issues/015-smart-speed.md) scoped and approved for build, doc at
 [docs/V1-SCOPE-SMART-SPEED.md](docs/V1-SCOPE-SMART-SPEED.md). Hard constraint:
 works with zero dependencies (caption-gap maps, both platforms); ffmpeg only
 *upgrades* accuracy when found. Web Audio real-time route measured closed
-(googlevideo CORS is origin-whitelisted). Exact next step: build order in the
-issue file, starting with the apply layer in `player.ts`. The issues/README
-index also got its missing 010–014 rows.
+(googlevideo CORS is origin-whitelisted). The issues/README index also got its
+missing 010–014 rows.
 
 ## Previous — 2026-07-29: hidden videos stopped coming back
 

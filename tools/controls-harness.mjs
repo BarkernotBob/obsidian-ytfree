@@ -1,12 +1,16 @@
 /**
  * Does the control row fit, and are its targets far enough apart?
  *
- * The row is a `1fr auto 1fr` grid whose side tracks cannot shrink below their
+ * The bar is a `1fr auto 1fr` grid whose side tracks cannot shrink below their
  * contents: too wide and it overflows the note rather than reflowing, and the
  * only way to find out used to be to open it on a phone. This renders the real
  * control bar under Obsidian's own app.css plus this plugin's stylesheet, at
  * every width that matters, and reports the overflow, the gaps between
  * adjacent targets, and whether Play is actually centred on the player.
+ *
+ * Below 460pt the bar is deliberately two rows (transport above, side controls
+ * below), so `controlRows` is 2 on the phone widths and 1 on the desktop, and
+ * the gaps are reported per row.
  *
  * Same setup as `tools/phone-hub-harness.mjs`, and not part of `npm test` for
  * the same reasons. Run it when the control bar changes.
@@ -49,16 +53,22 @@ const badge = `<span class="ytfree-btn-badge">10</span>`;
 
 const speed = `<select class="ytfree-speed"><option>1.75×</option></select>`;
 
+// Smart Speed's time-saved readout lives inside its button, in the same badge
+// strip the skip buttons use. Rendered at its widest — a full hour saved — so
+// the measurement answers the question that matters: can this text ever push
+// the row wider than it was built?
+const saved = `<span class="ytfree-btn-badge ytfree-smart-saved">−1:04:37</span>`;
+
 /**
- * The phone's bar: speed and PiP left, transport centred, fullscreen and
- * collapse right. The desktop's is the same row with a timestamp and a
- * download button on the right and no collapse — the wider case, on the wider
- * screen, so both are rendered.
+ * The phone's bar: speed, Smart Speed and PiP left, transport centred,
+ * fullscreen and collapse right. The desktop's is the same row with a timestamp
+ * and a download button on the right and no collapse — the wider case, on the
+ * wider screen, so both are rendered.
  */
 const controls = (phone) => `
   <div class="ytfree-controls">
     <div class="ytfree-controls-group ytfree-controls-side">
-      ${speed}${btn("ytfree-btn-pip")}
+      ${speed}${btn("ytfree-btn-smart", saved)}${btn("ytfree-btn-pip")}
     </div>
     <div class="ytfree-controls-group ytfree-controls-transport">
       ${btn("ytfree-btn-play")}${btn("ytfree-btn-back", badge)}${btn("ytfree-btn-forward", badge)}
@@ -86,14 +96,29 @@ const page = (phone) => `<!doctype html>
 const measure = () => {
   const bar = document.querySelector(".ytfree-controls");
   const barBox = bar.getBoundingClientRect();
-  const buttons = [...bar.querySelectorAll(".ytfree-btn, .ytfree-speed")].sort(
-    (a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left,
-  );
+  const buttons = [...bar.querySelectorAll(".ytfree-btn, .ytfree-speed")];
   const boxes = buttons.map((b) => b.getBoundingClientRect());
 
-  // Edge-to-edge distance between neighbours, in document order across the
-  // whole row — the number that decides whether a thumb can miss.
-  const gaps = boxes.slice(1).map((b, i) => Math.round(b.left - boxes[i].right));
+  // Grouped by row before the gaps are taken. The bar is one row on a desktop
+  // and two on a narrow phone, and measuring across a row break would report
+  // the distance between a control and something 40px below it as a gap.
+  // Grouped on the centre line, not the top edge: Play is 8px taller than
+  // everything beside it and shares no top edge with any of it.
+  const mid = (b) => b.top + b.height / 2;
+  const rows = [];
+  for (const box of [...boxes].sort((a, b) => mid(a) - mid(b))) {
+    const row = rows.find((r) => Math.abs(r.mid - mid(box)) < 12);
+    if (row) row.boxes.push(box);
+    else rows.push({ mid: mid(box), boxes: [box] });
+  }
+  for (const row of rows) row.boxes.sort((a, b) => a.left - b.left);
+
+  // Edge-to-edge distance between neighbours within a row — the number that
+  // decides whether a thumb can miss. The wide ones are the deliberate air
+  // between groups; the small ones are what this harness is watching.
+  const gaps = rows.map((row) =>
+    row.boxes.slice(1).map((b, i) => Math.round(b.left - row.boxes[i].right)),
+  );
 
   const play = bar.querySelector(".ytfree-btn-play").getBoundingClientRect();
   const badges = [...bar.querySelectorAll(".ytfree-btn-badge")].map((b) => {
@@ -108,8 +133,9 @@ const measure = () => {
     overflow: Math.round(bar.scrollWidth - bar.clientWidth),
     barWidth: Math.round(barBox.width),
     smallestTarget: Math.min(...boxes.map((b) => Math.round(Math.min(b.width, b.height)))),
+    controlRows: rows.length,
     gaps,
-    smallestGap: Math.min(...gaps),
+    smallestGap: Math.min(...gaps.flat()),
     // Play centred on the bar, not on whatever sits beside it.
     playOffCentre: Math.round(play.left + play.width / 2 - (barBox.left + barBox.width / 2)),
     badgeOffCentre: badges,

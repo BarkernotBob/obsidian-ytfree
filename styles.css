@@ -213,8 +213,45 @@
    button instead of overlapping in the middle of it. A transform, so nothing
    about the button's box changes. */
 .ytfree-controls .ytfree-btn-back > svg,
-.ytfree-controls .ytfree-btn-forward > svg {
+.ytfree-controls .ytfree-btn-forward > svg,
+.ytfree-controls .ytfree-btn-smart > svg {
   transform: translateY(-4px);
+}
+
+/*
+ * Smart Speed: on, off, and nothing-to-do — three states in one box that never
+ * changes size.
+ *
+ * On is the accent colour, because it is the only control here that alters what
+ * you hear and it should be obvious at a glance whether it is doing so. Off is
+ * the same muted grey as everything else. Unavailable is the shared `:disabled`
+ * rule above — 0.45 opacity, no cursor — which is a change of appearance and
+ * not of geometry, so a video with no captions has a control bar identical in
+ * layout to one with them.
+ */
+.ytfree-controls .ytfree-btn-smart.is-active {
+  color: var(--interactive-accent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-controls .ytfree-btn-smart.is-active:hover {
+    color: var(--interactive-accent-hover);
+  }
+}
+
+/*
+ * The time saved, in the badge strip the skip buttons use for their "10".
+ *
+ * Absolutely positioned and `pointer-events: none` by inheritance from
+ * `.ytfree-btn-badge`, so a number that ticks from "" to "−12:04" cannot widen
+ * the button, cannot move the speed picker, and cannot move Play off centre.
+ * Tabular figures so the digits do not shuffle as it climbs.
+ */
+.ytfree-controls .ytfree-smart-saved {
+  font-size: 9px;
+  font-weight: var(--font-normal);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
 
 /* Same pill as a button, and wide enough for "1.75×" so choosing a speed can
@@ -470,27 +507,52 @@
 }
 
 /*
- * Narrow phones, in one step rather than by degrees.
+ * Narrow phones: two rows, because one row ran out of width.
  *
  * A `1fr auto 1fr` grid whose side tracks cannot shrink below their contents
  * overflows rather than reflowing — which is the right failure, but it is
- * still a failure. Below 460pt the row is measured rather than guessed at, and
- * what it spends its width on has changed: the buttons used to come down to
- * 36pt with 4pt between them, which is where the fat-fingering was. They keep
- * their full 40pt here, the gaps get *wider* than the desktop's inner gap, and
- * the width that pays for it comes off the speed picker and the group gaps.
+ * still a failure. The single row was already spending 340pt of the 347pt a
+ * docked 375pt phone has (375 − 16 margins − 12 padding); Smart Speed is a
+ * ninth control, and 40pt of button plus 8pt of gap does not fit in 7pt.
  *
- * The budget, on the narrowest phone Obsidian runs on (375pt), docked, at
- * 8pt margins: 375 − 16 − 12 padding = 347pt of content against 44 + 8 + 40
- * (left) + 40 + 8 + 48 + 8 + 40 (transport) + 40 + 8 + 40 (right) + 2 × 8
- * (group gaps) = 340pt. `tools/controls-harness.mjs` measures it rather than
+ * Three ways to pay for it, and only one is free: shrink the targets back to
+ * the 36pt that caused the fat-fingering this file already fixed once, drop a
+ * control the phone currently has, or spend vertical space. Vertical is what
+ * the player has to spare — the media box is the thing worth looking at and it
+ * keeps every pixel it had; the bar below it grows by one row, and the collapse
+ * control already exists for anyone who wants it back.
+ *
+ * So below 460pt: the transport takes a row of its own, perfectly centred, and
+ * the side controls share the row beneath it. Every target stays at its full
+ * 40pt (48 for Play), the gaps stay at 8pt, and the row-2 budget is 44 + 8 + 40
+ * + 8 + 40 (left) + 40 + 8 + 40 (right) = 228pt against 347 — room the single
+ * row never had. `tools/controls-harness.mjs` measures both rows rather than
  * trusting this sum.
  */
 @media (max-width: 460px) {
   .ytfree-controls {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "transport transport"
+      "left right";
     gap: 8px;
     padding: 4px 6px;
-    min-height: 56px;
+    /* 8 padding + 48 transport + 8 row gap + 40 side row. Fixed, so the row
+       count cannot change under a control that has just been pressed. */
+    min-height: 104px;
+  }
+
+  .ytfree-controls-transport {
+    grid-area: transport;
+    justify-self: center;
+  }
+
+  .ytfree-controls-side:first-child {
+    grid-area: left;
+  }
+
+  .ytfree-controls-side:last-child {
+    grid-area: right;
   }
 
   .ytfree-controls-group {

@@ -46,6 +46,44 @@ export async function findYtDlp(configuredPath: string): Promise<string> {
   throw new YtDlpMissingError();
 }
 
+/**
+ * The audio-only stream for a video, as one URL.
+ *
+ * For Smart Speed's ffmpeg producer, which needs to hear the video but has no
+ * use for the picture. An audio track is roughly 1 MB a minute against 30–60 for
+ * the muxed stream, so analysing the audio alone is the difference between a
+ * background job and a second download — and ffmpeg reads it far faster than
+ * realtime, so a map for a 40-minute video lands within the first minute of it.
+ *
+ * `ba` rather than a specific container: any audio format ffmpeg can decode is
+ * fine here, and pinning `m4a` would fail on the videos that do not offer one.
+ */
+export async function resolveAudioUrl(videoId: string, ytDlpPath: string): Promise<string> {
+  let stdout: string;
+  try {
+    const result = await pExecFile(
+      ytDlpPath,
+      [
+        "--no-warnings",
+        "--no-playlist",
+        "-f",
+        "ba/bestaudio",
+        "-g",
+        `https://www.youtube.com/watch?v=${videoId}`,
+      ],
+      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
+    );
+    stdout = result.stdout;
+  } catch (err: unknown) {
+    const e = err as { stderr?: string; message?: string };
+    throw new ResolveError((e.stderr || e.message || "unknown error").trim());
+  }
+
+  const url = stdout.trim().split("\n").filter(Boolean).pop();
+  if (!url) throw new ResolveError("yt-dlp returned no audio URL");
+  return url;
+}
+
 export async function getVersion(ytDlpPath: string): Promise<string> {
   const { stdout } = await pExecFile(ytDlpPath, ["--version"], { timeout: 10_000 });
   return stdout.trim();
