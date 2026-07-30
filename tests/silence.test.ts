@@ -24,7 +24,11 @@ import {
   subtractWindows,
   moveFor,
   MIN_SKIP_SECONDS,
+  transcriptWindows,
   windowsFromCues,
+  windowsFromWords,
+  wordInstants,
+  WORD_ALLOWANCE,
 } from "../src/silence.ts";
 import type { PlaybackWindow, SilenceMap } from "../src/silence.ts";
 import { parseJson3, parseJson3Timed } from "../src/transcript.ts";
@@ -42,6 +46,62 @@ function map(over: Partial<SilenceMap> = {}): SilenceMap {
     ...over,
   };
 }
+
+// ------------------------------------------- 022: words → window builder
+
+test("the pause between two word starts is a window, minus the word's own length", () => {
+  // The word at 10 is assumed to run to 10.5; the next word starts at 14.
+  assert.deepEqual(windowsFromWords([10, 14], 0.5), [
+    { start: 0, end: 10 },
+    { start: 10 + WORD_ALLOWANCE, end: 14 },
+  ]);
+});
+
+test("two word starts a second apart are not a pause at a half-second floor", () => {
+  // 1.0 s apart, minus the 0.5 s the first word is assumed to occupy, is exactly
+  // the floor — so 0.9 s apart is not. This is what keeps tier 0 conservative.
+  assert.deepEqual(windowsFromWords([10, 10.9], 0.5).slice(1), []);
+  assert.deepEqual(windowsFromWords([10, 11], 0.5).slice(1), [{ start: 10.5, end: 11 }]);
+});
+
+test("no window is invented after the last word", () => {
+  // A word with no successor says nothing about the outro. Only the lead-in
+  // before the first word and the gaps between words are claimed.
+  const windows = windowsFromWords([10, 30], 0.5);
+  assert.equal(windows[windows.length - 1].end, 30);
+});
+
+test("overlapping word instants from the rolling display collapse to one", () => {
+  const cues = [
+    { start: 10, end: 12, text: "a b", words: [10, 10.4] },
+    { start: 10.4, end: 13, text: "b c", words: [10.4, 10.405, 11] },
+  ];
+  assert.deepEqual(wordInstants(cues), [10, 10.4, 11]);
+});
+
+test("a word-timed track is read by its words, not by its event durations", () => {
+  // The 022 diagnosis: auto-caption events state display time, so they overlap
+  // and leave no gaps. The words underneath them do.
+  const cues = [
+    { start: 0, end: 6, text: "one two", words: [0, 5] },
+    { start: 5, end: 11, text: "two three", words: [5, 10] },
+  ];
+  assert.deepEqual(transcriptWindows(cues, 0.5), [
+    { start: WORD_ALLOWANCE, end: 5 },
+    { start: 5 + WORD_ALLOWANCE, end: 10 },
+  ]);
+});
+
+test("a human-written track keeps the event-gap producer", () => {
+  // No word timing at all. Running the word producer here would see one "word"
+  // per line and call every spoken line a pause — the worst failure available.
+  const cues = [
+    { start: 0, end: 4, text: "a whole spoken line" },
+    { start: 9, end: 12, text: "another one" },
+  ];
+  assert.deepEqual(transcriptWindows(cues, 0.5), [{ start: 4, end: 9 }]);
+  assert.deepEqual(transcriptWindows(cues, 0.5), windowsFromCues(cues, 0.5));
+});
 
 // ------------------------------------------------------ gap → window builder
 
@@ -376,6 +436,38 @@ test("dMs is accepted where dDurationMs would be", () => {
 test("an event with no duration is reported as it is, not guessed at", () => {
   const text = JSON.stringify({ events: [{ tStartMs: 1000, segs: [{ utf8: "x" }] }] });
   assert.deepEqual(parseJson3Timed(text), [{ start: 1, end: 1, text: "x" }]);
+});
+
+test("word offsets come out of the segments as absolute instants", () => {
+  // The real ASR shape: the first segment of an event states no offset because
+  // it lands on the event's own start.
+  const text = JSON.stringify({
+    events: [
+      {
+        tStartMs: 1000,
+        dDurationMs: 3000,
+        segs: [
+          { utf8: "and" },
+          { utf8: " his", tOffsetMs: 320 },
+          { utf8: " name", tOffsetMs: 900 },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(parseJson3Timed(text)[0].words, [1, 1.32, 1.9]);
+});
+
+test("a track with no per-word timing states no words at all", () => {
+  assert.equal(parseJson3Timed(JSON3)[0].words, undefined);
+});
+
+test("the newline that scrolls the display is not a word", () => {
+  const text = JSON.stringify({
+    events: [
+      { tStartMs: 2000, segs: [{ utf8: "\n" }, { utf8: "word", tOffsetMs: 0 }] },
+    ],
+  });
+  assert.deepEqual(parseJson3Timed(text)[0].words, [2]);
 });
 
 test("captions and their pauses, end to end", () => {

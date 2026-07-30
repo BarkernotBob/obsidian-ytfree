@@ -46,7 +46,7 @@ import {
 } from "./hub";
 import { ProgressStore } from "./progress-store";
 import { SilenceStore } from "./silence-store";
-import { combineSilence, isStale, windowsFromCues } from "./silence";
+import { combineSilence, isStale, transcriptWindows, wordInstants } from "./silence";
 import type { SilenceMap, SilenceWindow } from "./silence";
 import type { CaptionTrack, Cue, VideoInfo } from "./transcript";
 import {
@@ -2920,13 +2920,13 @@ export default class YtFreePlugin extends Plugin {
 
     if (needsTranscript) {
       try {
-        const windows = await this.transcriptSilence(videoId, minGap);
-        if (windows === null) {
+        const produced = await this.transcriptSilence(videoId, minGap);
+        if (produced === null) {
           player.setSmartSpeedUnavailable(
             `no ${this.transcriptLanguage()} captions for this video`,
           );
         } else {
-          this.recordSilence(player, videoId, "transcript", minGap, windows);
+          this.recordSilence(player, videoId, "transcript", minGap, produced.windows, undefined, produced.words);
         }
       } catch (err) {
         console.error("YT Free: caption timing unavailable for Smart Speed.", err);
@@ -2951,6 +2951,7 @@ export default class YtFreePlugin extends Plugin {
     minGap: number,
     windows: SilenceWindow[],
     analyzedTo?: number,
+    words?: number[],
   ): void {
     this.silence.record({
       videoId,
@@ -2959,6 +2960,7 @@ export default class YtFreePlugin extends Plugin {
       computedAt: new Date().toISOString(),
       windows,
       ...(analyzedTo === undefined ? {} : { analyzedTo }),
+      ...(words && words.length ? { words } : {}),
     });
     this.pushCombinedSilence(player, videoId);
   }
@@ -2976,17 +2978,23 @@ export default class YtFreePlugin extends Plugin {
    * Returns null — not an empty array — when the video simply has no captions,
    * because "no map" and "a map with no pauses in it" are different facts and
    * the toggle says different things about them.
+   *
+   * Since 022 it returns the word instants too, and they matter more than the
+   * windows do: they are what vetoes a skip over a word ffmpeg failed to hear.
    */
   private async transcriptSilence(
     videoId: string,
     minGap: number,
-  ): Promise<SilenceWindow[] | null> {
+  ): Promise<{ windows: SilenceWindow[]; words: number[] } | null> {
     const track = await fetchCaptionTrack(videoId, this.transcriptLanguage());
     if (!track) return null;
     const response = await requestUrl({ url: track.url, throw: true });
     const cues = parseJson3Timed(response.text);
     if (cues.length === 0) return null;
-    return windowsFromCues(cues, minGap);
+    // Two decimal places: 10 ms is a tenth of the closest two word starts ever
+    // measured, and the full float doubles the size of a file two devices sync.
+    const words = wordInstants(cues).map((w) => Math.round(w * 100) / 100);
+    return { windows: transcriptWindows(cues, minGap), words };
   }
 
   /**

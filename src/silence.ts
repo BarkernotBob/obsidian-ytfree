@@ -61,6 +61,22 @@ export interface SilenceMap {
    */
   analyzedTo?: number;
   windows: SilenceWindow[];
+  /**
+   * Every instant a word was spoken, for a transcript map built from a
+   * word-timed track. Seconds, sorted, two decimal places.
+   *
+   * Stored rather than recomputed because the veto in `vetoWords` has to run
+   * against a map that came off disk — the reported bug is a *stored* ffmpeg map
+   * skipping over "3." on a video opened for the second time, and a veto that
+   * only worked after a caption fetch would arrive too late to stop it. It is
+   * also what lets a phone apply the veto to an ffmpeg map a Mac computed and
+   * iCloud carried.
+   *
+   * `pruneWordLists` keeps this off all but the most recent maps: it is by far
+   * the largest thing in the file, and a video nobody has opened in months can
+   * fetch its captions again in one request.
+   */
+  words?: number[];
 }
 
 /** Everything known about one video: at most one map per producer. */
@@ -176,6 +192,10 @@ function normalizeMap(videoId: string, value: unknown): SilenceMap | null {
   if (typeof raw.analyzedTo === "number" && Number.isFinite(raw.analyzedTo)) {
     map.analyzedTo = Math.max(0, raw.analyzedTo);
   }
+  if (Array.isArray(raw.words)) {
+    const words = raw.words.filter((w): w is number => typeof w === "number" && Number.isFinite(w) && w >= 0);
+    if (words.length) map.words = words.sort((a, b) => a - b);
+  }
   return map;
 }
 
@@ -202,6 +222,20 @@ export interface TimedCue {
   start: number;
   end: number;
   text: string;
+  /**
+   * When the track has word-level timing, the second each word in this line
+   * begins. Absolute video time, not an offset.
+   *
+   * Auto-generated json3 states one of these per word and 022 is built on them:
+   * a caption *event* is a display instruction, so its stated duration is how
+   * long the line stays on screen, not how long anyone spoke — which is why the
+   * event-gap producer found almost nothing on `jlIDooGWXh0`. The words are the
+   * only honest record of when speech actually happened, and they are already in
+   * the file we fetch.
+   *
+   * Absent on human-written tracks, which state a line and no more.
+   */
+  words?: number[];
 }
 
 /**
@@ -242,6 +276,99 @@ export function windowsFromCues(cues: TimedCue[], minGap: number): SilenceWindow
   }
 
   return windows;
+}
+
+/**
+ * How long a word is assumed to last, given that json3 states only where it
+ * starts.
+ *
+ * This single number is what makes tier 0 conservative *by construction*. A word
+ * whose start we know and whose end we do not cannot be allowed to end the
+ * moment it began, or the producer would call the second half of every long word
+ * silence. Half a second is longer than almost every English word at speech
+ * rate, so the assumption errs towards "still talking" — which is the direction
+ * that costs a skip rather than a syllable.
+ *
+ * It also raises the bar for what counts as a pause at all: with a 0.5 s
+ * minimum, two word starts have to be a full second apart before anything is
+ * skipped. That is the intended trade. A phone with no ffmpeg skips less and
+ * never clips.
+ */
+export const WORD_ALLOWANCE = 0.5;
+
+/** Every word instant in a set of cues, sorted, with duplicates collapsed. */
+export function wordInstants(cues: TimedCue[]): number[] {
+  const all: number[] = [];
+  for (const cue of cues) {
+    for (const word of cue.words ?? []) {
+      if (Number.isFinite(word) && word >= 0) all.push(word);
+    }
+  }
+  all.sort((a, b) => a - b);
+
+  // Auto-captions repeat words across the rolling two-line events they use to
+  // scroll the display, so the same instant arrives several times. 10 ms is far
+  // under any real gap between two spoken words.
+  const out: number[] = [];
+  for (const word of all) {
+    if (out.length === 0 || word - out[out.length - 1] > 0.01) out.push(word);
+  }
+  return out;
+}
+
+/**
+ * Gaps between spoken words → silence windows. The tier 0 producer, and the one
+ * that replaces caption-event gaps wherever word timing exists.
+ *
+ * The raw window is `[word + WORD_ALLOWANCE, nextWord]`: from where the word is
+ * assumed to have finished, to where the next one demonstrably begins. It stops
+ * *at* the next word rather than short of it because trimming is the apply
+ * layer's job — `compressibleWindows` takes `LEAD_OUT_SECONDS` off every window
+ * it hands to playback, and taking it off twice would be a margin nobody wrote
+ * down.
+ *
+ * The stretch before the first word is included, exactly as `windowsFromCues`
+ * includes it and for the same reason: it is a title card or an intro sting, and
+ * compressing fluff is the point. The stretch after the last word is not — a
+ * word with no successor states nothing about what follows it, and inventing a
+ * window over the outro would be guessing.
+ */
+export function windowsFromWords(words: number[], minGap: number): SilenceWindow[] {
+  const floor = Math.max(0, minGap);
+  const sorted = [...words].sort((a, b) => a - b);
+  const windows: SilenceWindow[] = [];
+
+  let covered = 0;
+  for (const word of sorted) {
+    if (word - covered >= floor - EPSILON) windows.push({ start: covered, end: word });
+    covered = Math.max(covered, word + WORD_ALLOWANCE);
+  }
+  return windows;
+}
+
+/**
+ * The transcript producer's answer, from whichever timing the track actually
+ * carries.
+ *
+ * Not a preference — a correctness split. On an auto-generated track the event
+ * durations describe how long a line is *on screen*, which overlaps the next
+ * line by design, so gaps between events barely exist: the measured count on
+ * `jlIDooGWXh0` was zero windows from 354 events. Word instants are the real
+ * signal there.
+ *
+ * A human-written track has no word timing at all, and its event durations are
+ * honest — one line, one span, no overlap. Running the word producer on it would
+ * see one "word" per line and call the whole of every spoken line a pause, which
+ * is the worst failure this feature has. So the event-gap producer stays, for
+ * exactly the tracks it was right about.
+ */
+export function transcriptWindows(cues: TimedCue[], minGap: number): SilenceWindow[] {
+  const words = wordInstants(cues);
+  // More instants than lines means the track is timing words rather than lines.
+  // A one-to-one count is a human track, or an auto track stripped of `segs`.
+  return words.length > cues.length
+    ? windowsFromWords(words, minGap)
+    : windowsFromCues(cues, minGap);
 }
 
 // -------------------------------------------------------------- apply layer

@@ -249,6 +249,14 @@ export function parseJson3(text: string): Cue[] {
  * seen in the wild from the timedtext endpoint, and an event with neither is
  * reported as a zero-length cue rather than dropped — `windowsFromCues` knows
  * what to do with an unstated end, and it is the right place to decide.
+ *
+ * **The segments carry more than text**, and 022 is what noticed. An
+ * auto-generated track states `tOffsetMs` on each segment: the millisecond,
+ * relative to the event, that that word was spoken. Those instants are the only
+ * record of when speech actually happened — the event's own duration is display
+ * time, which overlaps the next line by design — so they are kept alongside the
+ * joined line. A track with no per-word timing simply has no `words`, and the
+ * producer downstream knows which of the two it is looking at.
  */
 export function parseJson3Timed(text: string): TimedCue[] {
   let data: {
@@ -256,7 +264,7 @@ export function parseJson3Timed(text: string): TimedCue[] {
       tStartMs?: number;
       dDurationMs?: number;
       dMs?: number;
-      segs?: Array<{ utf8?: string }>;
+      segs?: Array<{ utf8?: string; tOffsetMs?: number }>;
     }>;
   };
   try {
@@ -277,7 +285,27 @@ export function parseJson3Timed(text: string): TimedCue[] {
     const start = (event.tStartMs || 0) / 1000;
     const durationMs = event.dDurationMs ?? event.dMs ?? 0;
     const duration = Number.isFinite(durationMs) && durationMs > 0 ? durationMs / 1000 : 0;
-    cues.push({ start, end: start + duration, text: line });
+
+    // Only when the event states word timing at all. YouTube omits `tOffsetMs`
+    // on a segment that lands on the event's own start — normally the first word
+    // of the line — so a missing offset inside a word-timed event means zero,
+    // and dropping it would lose the word most exposed to a boundary. An event
+    // where *no* segment states an offset is a human-written line that happens
+    // to be split for formatting, and it contributes no words at all.
+    //
+    // Whitespace-only segments are the newline that scrolls the rolling display
+    // rather than a word, and they share an instant with the word after them.
+    const timed = event.segs.some((s) => typeof s.tOffsetMs === "number" && Number.isFinite(s.tOffsetMs));
+    const words: number[] = [];
+    if (timed) {
+      for (const seg of event.segs) {
+        if (!(seg.utf8 || "").trim()) continue;
+        const offset = typeof seg.tOffsetMs === "number" && Number.isFinite(seg.tOffsetMs) ? seg.tOffsetMs : 0;
+        words.push(start + offset / 1000);
+      }
+    }
+
+    cues.push({ start, end: start + duration, text: line, ...(words.length ? { words } : {}) });
   }
   return cues;
 }

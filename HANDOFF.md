@@ -1,6 +1,41 @@
 # HANDOFF
 
-## Status — 2026-07-30c: 022 step 1 — Smart Speed can no longer speed up speech
+## Status — 2026-07-30d: 022 step 2 — the transcript producer reads words
+
+Workstream 1. **342 unit tests pass, build clean.**
+
+`parseJson3Timed` now keeps `segs[].tOffsetMs` as `TimedCue.words` — absolute
+instants, one per spoken word. Measured against the real caption file for
+`jlIDooGWXh0` (`yt-dlp --write-auto-subs --sub-format json3`):
+
+| | |
+|---|---|
+| caption events with text | 630 |
+| word instants | 4324 |
+| windows from **event gaps** @0.5 s | **0** |
+| windows from **word gaps** @0.5 s | **97** (70.6 s of silence) |
+
+That zero is the issue's claim reproduced: an auto-caption event states how long
+a line is *on screen*, so consecutive events overlap and the producer found
+nothing at all on this video.
+
+- `windowsFromWords` emits `[word + WORD_ALLOWANCE, nextWord]`. `WORD_ALLOWANCE`
+  (0.5 s) stands in for the word length json3 does not state, which is what
+  makes tier 0 conservative by construction: two word starts must be a full
+  second apart before anything is skipped at a 0.5 s floor.
+- **The event-gap producer is kept, not deleted** — a deliberate departure from
+  the issue text. A human-written track has no word timing, so the word producer
+  would see one "word" per line and call every spoken line a pause. That is the
+  worst failure this feature has. `transcriptWindows` picks: word instants
+  outnumber cues → words, otherwise event gaps.
+- Raw intervals stop *at* the next word, not `LEAD_OUT` short of it. Trimming is
+  the apply layer's job and doing it twice would be an undocumented margin.
+- `SilenceMap.words` persists them (2 dp; ~30 KB for this 26-minute video).
+  Stored rather than recomputed because the veto has to run against a map that
+  came off disk — the reported bug is a *stored* ffmpeg map skipping "3." on a
+  second viewing.
+
+## Previous — 2026-07-30c: 022 step 1 — Smart Speed can no longer speed up speech
 
 [issues/022](issues/022-adaptive-silence-floor.md) workstream 2, the smallest and
 first of the suggested order. **336 unit tests pass, build clean.**
