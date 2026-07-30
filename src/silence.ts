@@ -87,6 +87,17 @@ export interface SilenceMap {
    * `isStale` throws it away rather than trusting it — see `pickThreshold`.
    */
   noiseDb?: number;
+  /**
+   * Whether the caption track this map came from carried per-word timing.
+   * Transcript maps only.
+   *
+   * It exists to tell two things apart that both look like "no `words`": a
+   * human-written track, which legitimately has none and must not be refetched
+   * forever, and a map written before 022, which was built by the event-gap
+   * producer and on an auto-caption track found nothing at all. Absence of this
+   * field means the second — see `isStale`.
+   */
+  wordTimed?: boolean;
 }
 
 /** Everything known about one video: at most one map per producer. */
@@ -96,7 +107,7 @@ export interface VideoSilence {
 }
 
 export interface SilenceState {
-  version: 2;
+  version: 3;
   maps: Record<string, VideoSilence>;
 }
 
@@ -133,7 +144,7 @@ export const MAX_SILENCE_MAPS = 200;
 const EPSILON = 1e-6;
 
 export function emptySilenceState(): SilenceState {
-  return { version: 2, maps: {} };
+  return { version: 3, maps: {} };
 }
 
 /**
@@ -208,6 +219,9 @@ function normalizeMap(videoId: string, value: unknown): SilenceMap | null {
   }
   if (typeof raw.noiseDb === "number" && Number.isFinite(raw.noiseDb)) {
     map.noiseDb = raw.noiseDb;
+  }
+  if (typeof raw.wordTimed === "boolean") {
+    map.wordTimed = raw.wordTimed;
   }
   return map;
 }
@@ -863,15 +877,22 @@ export function secondsSaved(wallSeconds: number, baseRate: number, rate: number
  * and longer, so it answers 0.8 s perfectly well by filtering; it cannot answer
  * 0.3 s, because the 0.3 s pauses were never in it.
  *
- * The second rule is 022's migration, and it is a one-off: an ffmpeg map with
- * no `noiseDb` was built before the threshold was measured, which means it was
- * built at the fixed −30 dB that put skip windows inside the words. Those maps
+ * The other two rules are 022's migration, and they are one-offs. An ffmpeg map
+ * with no `noiseDb` was built before the threshold was measured, which means it
+ * was built at the fixed −30 dB that put skip windows inside the words. A
+ * transcript map with no `wordTimed` was built by the event-gap producer, which
+ * on an auto-caption track found nothing at all and stored that nothing. Both
  * are wrong rather than coarse, so they are discarded and recomputed rather
  * than filtered.
+ *
+ * Note that `wordTimed: false` is *not* stale: it is a human-written caption
+ * track saying it has no word timing to offer, and refetching would find the
+ * same answer forever.
  */
 export function isStale(map: SilenceMap, minGap: number): boolean {
   if (map.minGap > minGap + EPSILON) return true;
-  return map.source === "ffmpeg" && map.noiseDb === undefined;
+  if (map.source === "ffmpeg") return map.noiseDb === undefined;
+  return map.wordTimed === undefined;
 }
 
 /**
