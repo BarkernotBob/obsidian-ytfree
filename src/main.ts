@@ -2131,6 +2131,67 @@ export default class YtFreePlugin extends Plugin {
       return;
     }
     record.entry = entry;
+    if (!mobile) this.addResizeGrip(wrapper);
+  }
+
+  /**
+   * Drag the corner of the picture to resize it. Desktop only.
+   *
+   * The slider in the pop-out is two clicks away and quantised to 5vh steps;
+   * a corner grip is where anyone who has resized a window looks first. Same
+   * variable, same 20–70vh clamp, and unlike the slider this one is a decision
+   * that outlives the note — it writes `pinnedHeightVh` back on release, so the
+   * settings screen and the next note you open agree with what you just did.
+   *
+   * The grip is absolutely positioned inside `.ytfree-stage` (the video's own
+   * box, `position: relative` already) so it costs the layout no height and
+   * moving it moves nothing else.
+   */
+  private addResizeGrip(wrapper: HTMLElement): void {
+    const stage = wrapper.querySelector<HTMLElement>(".ytfree-stage");
+    if (!stage || stage.querySelector(".ytfree-resize")) return;
+    const grip = stage.createDiv({
+      cls: "ytfree-resize",
+      attr: { "aria-hidden": "true", title: "Drag to resize the player" },
+    });
+
+    let startY = 0;
+    let startPx = 0;
+    let vh = this.settings.pinnedHeightVh;
+
+    const toVh = (px: number): number => {
+      const raw = (px / window.innerHeight) * 100;
+      return Math.min(70, Math.max(20, Math.round(raw * 10) / 10));
+    };
+
+    const move = (event: PointerEvent) => {
+      vh = toVh(startPx + (event.clientY - startY));
+      wrapper.style.setProperty("--ytfree-pinned-height", `${vh}vh`);
+    };
+
+    const up = (event: PointerEvent) => {
+      grip.removeClass("is-dragging");
+      grip.releasePointerCapture?.(event.pointerId);
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+      grip.removeEventListener("pointercancel", up);
+      // Round to the slider's own step so the two controls report the same
+      // number: a drag that left 43.7vh would show as 45 on a 5-step slider.
+      this.settings.pinnedHeightVh = Math.round(vh / 5) * 5;
+      wrapper.style.setProperty("--ytfree-pinned-height", `${this.settings.pinnedHeightVh}vh`);
+      void this.saveSettings();
+    };
+
+    grip.addEventListener("pointerdown", (event: PointerEvent) => {
+      event.preventDefault();
+      startY = event.clientY;
+      startPx = stage.getBoundingClientRect().height;
+      grip.addClass("is-dragging");
+      grip.setPointerCapture?.(event.pointerId);
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+      grip.addEventListener("pointercancel", up);
+    });
   }
 
   private unmountPinned(view: MarkdownView): void {

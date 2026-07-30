@@ -1034,7 +1034,50 @@ export class YtFreePlayer {
         attr: { type: "range", min: "20", max: "70", step: "5", "aria-label": "Player size" },
       });
       el.value = String(quick.heightVh);
-      el.addEventListener("input", () => quick.onHeight?.(Number(el.value)));
+
+      /*
+       * The panel hangs off the control bar, and the control bar sits under the
+       * picture — so resizing the picture moves the panel, and the slider slides
+       * out from under the finger that is dragging it. The height still changes
+       * live (that is the point of the slider), but the panel is held where it
+       * was for as long as the pointer is down: after each change it measures
+       * how far it moved and cancels that with a transform. `transform` only, so
+       * holding it still reflows nothing. Released on pointerup, where it snaps
+       * to the position its new anchor gives it.
+       */
+      let anchorTop: number | null = null;
+      let shift = 0;
+      const hold = () => {
+        if (anchorTop === null) return;
+        shift += anchorTop - panel.getBoundingClientRect().top;
+        panel.style.transform = `translateY(${shift.toFixed(2)}px)`;
+      };
+      const grab = () => {
+        // Key repeat fires keydown over and over: re-anchoring on each one
+        // would hand back the movement already cancelled.
+        if (anchorTop !== null) return;
+        shift = 0;
+        panel.style.transform = "";
+        anchorTop = panel.getBoundingClientRect().top;
+      };
+      const release = () => {
+        if (anchorTop === null) return;
+        anchorTop = null;
+        shift = 0;
+        panel.style.transform = "";
+      };
+      el.addEventListener("pointerdown", grab);
+      el.addEventListener("pointerup", release);
+      el.addEventListener("pointercancel", release);
+      // A keyboard change has no pointer to slide out from under, but it also
+      // has no "done" — so it gets the same treatment for the length of the key.
+      el.addEventListener("keydown", grab);
+      el.addEventListener("keyup", release);
+      el.addEventListener("blur", release);
+      el.addEventListener("input", () => {
+        quick.onHeight?.(Number(el.value));
+        hold();
+      });
     }
 
     panel.createDiv({ cls: "ytfree-panel-note", text: "This video only" });

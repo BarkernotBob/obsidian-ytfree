@@ -671,6 +671,35 @@
 }
 
 /*
+ * The corner grip: drag the bottom-right of the picture to resize it.
+ *
+ * Out of the flow, over the picture's corner, so it costs the note no height
+ * and nothing moves when it appears or is pressed. Desktop only — it is added
+ * from `addResizeGrip`, which mobile never calls. Faint until the pointer is
+ * near it, because it sits on top of video.
+ */
+.ytfree-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 15;
+  width: 18px;
+  height: 18px;
+  cursor: ns-resize;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  /* Two stacked strokes, drawn in the corner: the standard resize gnomon. */
+  background:
+    linear-gradient(135deg, transparent 46%, var(--text-muted) 46%, var(--text-muted) 54%, transparent 54%),
+    linear-gradient(135deg, transparent 70%, var(--text-muted) 70%, var(--text-muted) 78%, transparent 78%);
+}
+
+.ytfree-stage:hover .ytfree-resize,
+.ytfree-resize.is-dragging {
+  opacity: 0.85;
+}
+
+/*
  * Mobile: docked, not floating.
  *
  * Same place in the flex column as the desktop pinned player, but the height
