@@ -422,6 +422,28 @@ export class SubscriptionsStore {
   }
 
   /**
+   * A note for this video is open, however it got opened.
+   *
+   * The hub's own click already keeps an item, but that is not the only way a
+   * video gets watched: a note reached from the file explorer, a search result,
+   * a link in another note or the phone's recent files left its hub row sitting
+   * in the Inbox, undecided, for something that had plainly been decided.
+   *
+   * Kept is defined as "opened — a note exists", so this is that definition
+   * applied to the other doors into the same room. Only ever promotes an
+   * undecided item: a hidden video whose note you open stays hidden, because
+   * hiding it was the more recent decision and 014 is the whole story of what
+   * happens when the two devices disagree about which decision won.
+   */
+  noteOpened(videoId: string, notePath: string): void {
+    const item = this.state.items.find((entry) => entry.videoId === videoId);
+    if (!item || item.state !== "new") return;
+    keepItem(item, notePath, new Date());
+    this.emit();
+    void this.save();
+  }
+
+  /**
    * Remove a video from the hub — which now means hiding it, not deleting it.
    *
    * `hideItem` strips it to a tombstone on the way out; see the note there for
@@ -1555,10 +1577,41 @@ export class HubView extends ItemView {
 
     card.addEventListener("click", () => {
       void this.store.openItem(item).then(
-        () => this.paintMarker(stateMarker, item),
+        () => {
+          this.paintMarker(stateMarker, item);
+          this.dropIfFiltered(item.videoId);
+        },
         (err: unknown) => new Notice(`YT Free: could not create the note — ${String(err)}`),
       );
     });
+  }
+
+  /**
+   * A card the current list no longer contains goes, now rather than at the next
+   * refresh.
+   *
+   * The Inbox is "not opened, not hidden", so opening a video takes it out of
+   * that list — but until this, only the tick on the card changed and the row
+   * stayed until something else redrew the view. BarkernotBob's report is the obvious
+   * consequence: the hub in a side pane still showed everything he had worked
+   * through.
+   *
+   * This does move the rows below it, which the Hide button already does for the
+   * same reason. It is not the case the no-reflow rule is about: the click that
+   * triggers it has just opened a note, so the thing under your finger is the
+   * note, not the list.
+   */
+  private dropIfFiltered(videoId: string): void {
+    const card = this.cards.get(videoId);
+    if (!card) return;
+    if (this.currentItems().some((item) => item.videoId === videoId)) return;
+
+    card.remove();
+    this.cards.delete(videoId);
+    // The empty state is part of the list, so an emptied list is re-rendered
+    // rather than left blank.
+    if (this.cards.size === 0) this.renderList();
+    this.renderStatus();
   }
 
   /**

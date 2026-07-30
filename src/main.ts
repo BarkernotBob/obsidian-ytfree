@@ -1100,9 +1100,13 @@ export default class YtFreePlugin extends Plugin {
 
       // Keyed off "this note has a video", not off the player, so it still
       // applies when the pinned player is switched off.
-      if (path && this.videoIdForNote(path)) {
+      const noteVideo = path ? this.videoIdForNote(path) : null;
+      if (path && noteVideo) {
         this.collapseProperties(view, path);
         this.applyDefaultFolds(view, path);
+        // An open note is an opened video, whichever door it came through — see
+        // `noteOpened`. A no-op after the first time, so this costs a lookup.
+        this.subscriptions?.noteOpened(noteVideo, path);
       } else if (path) {
         if (this.collapsed.get(view) !== path) this.collapsed.delete(view);
         if (this.folded.get(view) !== path) this.folded.delete(view);
@@ -1249,6 +1253,53 @@ export default class YtFreePlugin extends Plugin {
       ]);
       if (ranges.length === 0) return;
       this.setFolds(view, { folds: ranges, lines: content.split("\n").length });
+    };
+    attempt();
+  }
+
+  /**
+   * Fold sections that have just been written into a note that is already open.
+   *
+   * `applyDefaultFolds` runs once per file per view, at open — and the whole
+   * point of the transcript fetch is that it lands *after* that, several seconds
+   * into a note you are looking at. So the transcript arrived as several
+   * thousand words unfolded under the cursor, which is what BarkernotBob is asking to
+   * stop.
+   *
+   * Additive, not a replacement: whatever the reader has already unfolded stays
+   * unfolded. Retried because `vault.process` writes the file and the open
+   * editor catches up a tick later — the heading is not in `getValue()` on the
+   * frame the write resolves.
+   */
+  private foldNewSections(path: string, groups: string[][]): void {
+    if (!this.settings.collapseSections) return;
+
+    let attempts = 0;
+    const attempt = (): void => {
+      // Not open anywhere: nothing to fold now, and `applyDefaultFolds` will do
+      // it the next time the note is opened.
+      const view = this.viewForPath(path);
+      if (!view) return;
+
+      let content = "";
+      try {
+        content = view.editor?.getValue() ?? "";
+      } catch {
+        content = "";
+      }
+      const ranges = foldableRanges(content, groups);
+      if (ranges.length === 0) {
+        if (++attempts < 20) window.setTimeout(attempt, 100);
+        return;
+      }
+
+      const existing = this.foldsOf(view);
+      const folds = [...(existing?.folds ?? [])];
+      for (const range of ranges) {
+        if (!folds.some((fold) => fold.from === range.from)) folds.push(range);
+      }
+      folds.sort((a, b) => a.from - b.from);
+      this.setFolds(view, { folds, lines: content.split("\n").length });
     };
     attempt();
   }
@@ -1407,6 +1458,9 @@ export default class YtFreePlugin extends Plugin {
         ),
       ),
     );
+    // Same rule as the transcript it is being filed above: a section written
+    // into a note you are already reading arrives folded.
+    this.foldNewSections(file.path, [HEATMAP_ALIASES]);
     new Notice(`YT Free: added ${peaks.length} replay peaks.`);
   }
 
@@ -1489,6 +1543,11 @@ export default class YtFreePlugin extends Plugin {
         // Last, so nothing collapses the blank lines it just wrote.
         return ensureFooter(next);
       });
+
+      // Collapsed on arrival, the same as it would be if you reopened the note:
+      // a transcript is reference material, not something to scroll past every
+      // time it lands.
+      this.foldNewSections(file.path, [TRANSCRIPT_ALIASES, HEATMAP_ALIASES]);
 
       progress.hide();
       const parts: string[] = [];
