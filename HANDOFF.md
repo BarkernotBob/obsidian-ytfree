@@ -1,6 +1,24 @@
 # HANDOFF
 
-## Status — 2026-07-30 (latest): a line, a rotation, and the dials in the player
+## Status — 2026-07-30: descriptions are escaped before they reach a note
+
+**331 unit tests pass, build clean, installed to the vault.**
+
+A YouTube description is plain text that has never been markdown, and it was being
+pasted straight under `# Video Description`. Smarter Every Day separates its sections
+with `~~~~~~~~`, which markdown reads as a fenced code block — in *TALKING BACKWARDS
+… 168* it opened one and the rest of the note, headings and transcript included,
+rendered as code. `escapeDescription` in `src/description.ts` backslash-escapes the
+line shapes that carry structure: `~~~`/``` fences (character by character, so no `~~`
+strikethrough pair is left behind), leading `#`, setext `---`/`===`, `>`, and `[[`.
+Lists are deliberately left alone. `buildWatchLaterNote` is the only write path, and
+it escapes before it linkifies.
+
+Still open: `templates/webclipper-ytfree.json` inserts the same raw description and has
+no escaping filter available — the nearest fix there is a `|blockquote` filter, which
+changes how the description looks. Existing notes are not rewritten.
+
+## Previous — 2026-07-30: a line, a rotation, and the dials in the player
 
 [issues/019](issues/019-progress-bar-landscape-quick-panel.md) is built and installed.
 **328 unit tests pass, build clean.** Four items, one of which corrects 017.
