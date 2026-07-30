@@ -1,5 +1,15 @@
 # HANDOFF
 
+## Status — 2026-07-30b: section buttons fold the video on a second tap
+
+Notes / Description / Transcript now do double duty. `jumpToSection(file, section,
+videoId)` in `main.ts` first asks `inSection()` whether the reader is already there —
+cursor inside the section's line range in source mode, else `lastJump` (the same button
+pressed twice) in reading mode. If so it skips the scroll and calls `toggleHeaderFor()`,
+which collapses the docked/pinned player (or restores it on the next tap) via the
+existing `setCollapsed`. Unlike the collapse control it does **not** pause: the ask was
+reading room, not silence. 331 tests pass, build clean. Not yet checked on the phone.
+
 ## Status — 2026-07-30: a way back, a line that lines up, a Play button that can't lie
 
 [issues/021](issues/021-restore-pill-seek-drag-pending-play.md) is built and installed.

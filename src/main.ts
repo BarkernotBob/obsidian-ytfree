@@ -72,6 +72,7 @@ import {
   foldableRanges,
   headingLine,
   normaliseHeadings,
+  sectionEnd,
 } from "./sections";
 import { DEFAULT_TIDY_DAYS, notesToTidy } from "./tidy";
 import type { TidyCandidate } from "./tidy";
@@ -362,6 +363,11 @@ export default class YtFreePlugin extends Plugin {
   private collapsed = new Map<MarkdownView, string>();
   /** Same, for the default section folds — see applyDefaultFolds. */
   private folded = new Map<MarkdownView, string>();
+  /**
+   * The section each note was last sent to, so a second tap on the same button
+   * can mean "I'm already here" — see `jumpToSection`.
+   */
+  private lastJump = new Map<string, SectionName>();
   /** Scroll listeners pinning a docked view at the top — see holdDockedLayout. */
   private dockGuards = new Map<MarkdownView, () => void>();
   /**
@@ -1539,7 +1545,7 @@ export default class YtFreePlugin extends Plugin {
    * target is dropped first, and only that one: the other sections stay as the
    * reader left them.
    */
-  private jumpToSection(file: TFile, section: SectionName): void {
+  private jumpToSection(file: TFile, section: SectionName, videoId?: string): void {
     const view = this.viewForPath(file.path);
     if (!view) return;
 
@@ -1554,6 +1560,17 @@ export default class YtFreePlugin extends Plugin {
       new Notice(`YT Free: this note has no ${SECTION_HEADINGS[section][0]} section.`);
       return;
     }
+
+    // The button's second job. Tapping Transcript when you are already reading
+    // the transcript has nowhere to take you, so it does the thing you wanted
+    // the room for instead: folds the video away, and gives it back on the tap
+    // after that.
+    if (videoId && this.inSection(file.path, view, content, section, line)) {
+      this.lastJump.set(file.path, section);
+      this.toggleHeaderFor(videoId);
+      return;
+    }
+    this.lastJump.set(file.path, section);
 
     const folds = this.foldsOf(view);
     if (folds) {
@@ -1580,6 +1597,44 @@ export default class YtFreePlugin extends Plugin {
         }
       }
     }, 0);
+  }
+
+  /**
+   * Is the reader already in this section?
+   *
+   * The cursor is the honest answer where there is one — in source mode it is
+   * where the reader is working. Reading mode has no cursor, so the fallback is
+   * the last button they pressed: pressing the same one twice in a row means
+   * the first press already put them there.
+   */
+  private inSection(
+    path: string,
+    view: MarkdownView,
+    content: string,
+    section: SectionName,
+    line: number,
+  ): boolean {
+    if (view.getMode() === "source") {
+      try {
+        const cursor = view.editor.getCursor().line;
+        return cursor >= line && cursor <= sectionEnd(content, line);
+      } catch {
+        /* fall through to the last-button answer */
+      }
+    }
+    return this.lastJump.get(path) === section;
+  }
+
+  /**
+   * Fold the video away, or bring it back — the section buttons' second tap.
+   *
+   * Unlike the collapse control it does not pause: the reader asked for room to
+   * read in, not for the video to stop.
+   */
+  private toggleHeaderFor(videoId: string): void {
+    const entry = this.players.get(videoId);
+    if (!entry) return;
+    this.setCollapsed(entry, entry.collapsed ? null : "manual");
   }
 
   // -------------------------------------------------------- transcript auto
@@ -2616,7 +2671,7 @@ export default class YtFreePlugin extends Plugin {
         // outside a file — a preview, an export — has no sections.
         onJump:
           noteFile instanceof TFile
-            ? (section) => this.jumpToSection(noteFile, section)
+            ? (section) => this.jumpToSection(noteFile, section, videoId)
             : undefined,
         // Where you got to last time, and where you are getting to now. Read
         // through the store on each call rather than captured once, so a video
