@@ -75,6 +75,7 @@ import {
 import { DEFAULT_TIDY_DAYS, notesToTidy } from "./tidy";
 import type { TidyCandidate } from "./tidy";
 import { YtFreePlayer } from "./player";
+import type { NowPlaying } from "./player";
 import {
   extractVideoId,
   ResolveMode,
@@ -1162,6 +1163,29 @@ export default class YtFreePlugin extends Plugin {
     // and this is the write that gets those positions onto disk.
     void this.progress.flush();
     void this.silence.flush();
+  }
+
+  /**
+   * What the lock screen should say this is.
+   *
+   * The hub knows the real title, the channel and a thumbnail; a note reached
+   * any other way knows its own name and whatever its frontmatter says. Either
+   * beats "Obsidian" and a blank square, so both are used, hub first.
+   */
+  private nowPlayingFor(videoId: string, sourcePath: string): NowPlaying | null {
+    const item = this.subscriptions?.state.items.find((entry) => entry.videoId === videoId);
+    if (item) {
+      return { title: item.title, artist: item.channelTitle, artwork: item.thumbnail };
+    }
+
+    const file = this.app.vault.getAbstractFileByPath(sourcePath);
+    if (!(file instanceof TFile)) return null;
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const author = Array.isArray(fm?.author) ? fm?.author[0] : fm?.author;
+    return {
+      title: typeof fm?.title === "string" && fm.title.trim() ? fm.title : file.basename,
+      artist: typeof author === "string" ? author : undefined,
+    };
   }
 
   // ---------------------------------------------------------------- pinned
@@ -2408,6 +2432,7 @@ export default class YtFreePlugin extends Plugin {
         // open in two panes agrees with itself.
         resumeAt: () => this.progress.resumeFor(videoId),
         onProgress: (seconds, duration) => this.progress.record(videoId, seconds, duration),
+        nowPlaying: () => this.nowPlayingFor(videoId, sourcePath),
         smartSpeed: {
           enabled: this.settings.smartSpeed,
           silenceRate: this.settings.silenceSpeed,

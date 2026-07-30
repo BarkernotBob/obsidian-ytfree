@@ -59,6 +59,20 @@ export interface PlayerOptions {
    * the moment it is built.
    */
   smartSpeed?: SmartSpeedOptions;
+  /**
+   * What to tell the operating system is playing. Read at play time rather than
+   * captured, because on mobile the player is built before the note's metadata
+   * has necessarily been read.
+   */
+  nowPlaying?: () => NowPlaying | null;
+}
+
+/** The lock screen's three fields. */
+export interface NowPlaying {
+  title: string;
+  artist?: string;
+  /** A thumbnail URL, or nothing — the OS draws its own placeholder. */
+  artwork?: string;
 }
 
 export interface SmartSpeedOptions {
@@ -85,6 +99,12 @@ const PROGRESS_INTERVAL_MS = 5000;
  * saved listening.
  */
 const MAX_FRAME_SECONDS = 0.5;
+
+/**
+ * Which player currently owns `navigator.mediaSession` — there is one of those
+ * per document, and a vault can have several players open at once.
+ */
+let nowPlayingOwner: YtFreePlayer | null = null;
 
 /**
  * Wraps a native <video> element and keeps it playing across stream-URL expiry.
@@ -142,6 +162,8 @@ export class YtFreePlayer {
    * restore on toggle-off must not run for a toggle that was never on.
    */
   private smartTouchedRate = false;
+  /** Kept so `destroy` can take it off `document`, which outlives this player. */
+  private onVisibility: (() => void) | null = null;
 
   constructor(
     private container: HTMLElement,
@@ -176,6 +198,117 @@ export class YtFreePlayer {
     });
 
     this.trackProgress();
+    this.trackNowPlaying();
+  }
+
+  /**
+   * Tell the OS what is playing, so the lock screen and Control Centre show
+   * this video with working buttons instead of nothing.
+   *
+   * What this cannot do is keep the audio running once the phone is locked or
+   * the app is switched away from. That is the host app's audio session and its
+   * background-audio entitlement — Obsidian's, not the plugin's — and no amount
+   * of JavaScript reaches it. Everything on this side of that line is here, so
+   * if the answer is ever yes, the controls are already right.
+   */
+  private trackNowPlaying(): void {
+    const session = navigator.mediaSession;
+    if (!session) return;
+
+    this.video.addEventListener("play", () => {
+      this.publishNowPlaying();
+      session.playbackState = "playing";
+    });
+    for (const event of ["pause", "ended"]) {
+      this.video.addEventListener(event, () => {
+        session.playbackState = this.video.ended ? "none" : "paused";
+      });
+    }
+    this.video.addEventListener("loadedmetadata", () => this.publishPosition());
+  }
+
+  private publishNowPlaying(): void {
+    const session = navigator.mediaSession;
+    if (!session) return;
+    // There is one media session per document and any number of players, so
+    // whoever started playing last owns it — and only that player may clear it.
+    nowPlayingOwner = this;
+
+    const now = this.options.nowPlaying?.();
+    if (now && typeof MediaMetadata === "function") {
+      session.metadata = new MediaMetadata({
+        title: now.title,
+        artist: now.artist ?? "",
+        artwork: now.artwork ? [{ src: now.artwork }] : [],
+      });
+    }
+
+    // Each in its own `try`: an OS that has never heard of an action throws on
+    // that one alone, and the rest are still worth having.
+    const handlers: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+      // Through `withMedia`, like the Play button: on a phone the stream may
+      // still be unresolved, and a lock-screen Play is as good a reason to
+      // resolve it as a tap on the player.
+      ["play", () => void this.withMedia(() => this.play())],
+      ["pause", () => this.video.pause()],
+      ["seekbackward", () => this.seekBy(-10)],
+      ["seekforward", () => this.seekBy(10)],
+      [
+        "seekto",
+        (details) => {
+          if (typeof details.seekTime === "number") this.video.currentTime = details.seekTime;
+        },
+      ],
+    ];
+    for (const [action, handler] of handlers) {
+      try {
+        session.setActionHandler(action, handler);
+      } catch {
+        // Unsupported action. Nothing to do and nothing to say.
+      }
+    }
+    this.publishPosition();
+  }
+
+  /** Keeps the lock screen's scrubber honest. Called on the progress report. */
+  private publishPosition(): void {
+    const session = navigator.mediaSession;
+    const duration = this.video.duration;
+    if (!session?.setPositionState || !Number.isFinite(duration) || duration <= 0) return;
+    try {
+      session.setPositionState({
+        duration,
+        playbackRate: this.video.playbackRate || 1,
+        position: Math.min(Math.max(0, this.video.currentTime), duration),
+      });
+    } catch {
+      // WebKit throws if position and duration disagree, which they briefly do
+      // mid-seek. The next report is a hundredth of a second away.
+    }
+  }
+
+  /** Leave the lock screen empty rather than pointing at a closed note. */
+  private clearNowPlaying(): void {
+    const session = navigator.mediaSession;
+    if (!session || nowPlayingOwner !== this) return;
+    nowPlayingOwner = null;
+    session.metadata = null;
+    session.playbackState = "none";
+    for (const action of ["play", "pause", "seekbackward", "seekforward", "seekto"] as const) {
+      try {
+        session.setActionHandler(action, null);
+      } catch {
+        // Same as setting them: an action the OS does not know is not an error.
+      }
+    }
+  }
+
+  private seekBy(seconds: number): void {
+    const duration = this.video.duration;
+    const target = this.video.currentTime + seconds;
+    this.video.currentTime = Number.isFinite(duration)
+      ? Math.min(Math.max(0, target), duration)
+      : Math.max(0, target);
   }
 
   /**
@@ -198,6 +331,12 @@ export class YtFreePlayer {
       this.lastProgressAt = Date.now();
       onProgress(this.video.currentTime, this.video.duration);
     };
+
+    // The OS scrubber rides on the same events but is not throttled with them:
+    // it is two numbers handed to the system, it costs nothing, and it is the
+    // one thing on the lock screen that looks broken the moment it lags.
+    this.video.addEventListener("timeupdate", () => this.publishPosition());
+    this.video.addEventListener("seeked", () => this.publishPosition());
 
     this.video.addEventListener("timeupdate", () => {
       if (Date.now() - this.lastProgressAt < PROGRESS_INTERVAL_MS) return;
@@ -451,6 +590,22 @@ export class YtFreePlayer {
     for (const event of ["pause", "ended"]) {
       this.video.addEventListener(event, () => this.stopSmartLoop());
     }
+
+    // A hidden window gets no animation frames, so locking the phone or
+    // switching apps freezes this engine wherever it happened to be. If that
+    // was inside an instrumental, the 3× it had just applied would stay applied
+    // for as long as the screen was off — audio still running, at chipmunk
+    // speed, with nothing left awake to put it back. So hand the rate back
+    // before the frames stop, and pick the loop up when the screen returns.
+    this.onVisibility = () => {
+      if (document.hidden) {
+        this.stopSmartLoop();
+        if (this.smartTouchedRate) this.applyRate(this.playbackRate);
+      } else if (!this.video.paused && !this.destroyed) {
+        this.startSmartLoop();
+      }
+    };
+    document.addEventListener("visibilitychange", this.onVisibility);
   }
 
   private startSmartLoop(): void {
@@ -1089,6 +1244,11 @@ export class YtFreePlayer {
     this.reportProgress?.();
     this.destroyed = true;
     this.stopSmartLoop();
+    if (this.onVisibility) {
+      document.removeEventListener("visibilitychange", this.onVisibility);
+      this.onVisibility = null;
+    }
+    this.clearNowPlaying();
     this.teardownHls();
     this.video.removeAttribute("src");
     this.video.load();
