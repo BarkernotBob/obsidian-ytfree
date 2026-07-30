@@ -72,6 +72,8 @@ import {
   headingLine,
   normaliseHeadings,
 } from "./sections";
+import { DEFAULT_TIDY_DAYS, notesToTidy } from "./tidy";
+import type { TidyCandidate } from "./tidy";
 import { YtFreePlayer } from "./player";
 import {
   extractVideoId,
@@ -120,6 +122,12 @@ interface YtFreeSettings {
   subscriptionsPollMinutes: number;
   subscriptionsExpiryDays: number;
   subscriptionsIncludeShorts: boolean;
+  /**
+   * Days a watched video note may sit with nothing written in it before it is
+   * moved to the trash. Zero switches the sweep off entirely. See `tidy.ts` for
+   * the four conditions a note has to meet before this number is even consulted.
+   */
+  tidyEmptyNoteDays: number;
   watchLaterFolder: string;
   accountSyncHours: number;
   accountHistoryLimit: number;
@@ -176,11 +184,31 @@ const TAP_SLOP_PX = 10;
 /** How long a Smart Speed setting has to settle before a producer re-runs. */
 const SILENCE_REFRESH_DEBOUNCE_MS = 1200;
 
+/** How long after the workspace settles the first tidy sweep runs, and how
+ * often it runs after that. Nothing here is urgent: the youngest note it can
+ * touch is a month old. */
+const TIDY_SETTLE_MS = 60_000;
+const TIDY_INTERVAL_MS = 24 * 3600_000;
+
 /** The rendered timestamp link an event landed on, or null. */
 function seekAnchorFor(target: EventTarget | null): HTMLAnchorElement | null {
   const anchor = (target as HTMLElement | null)?.closest?.("a");
   if (!anchor) return null;
   return anchor.getAttribute("href")?.startsWith("ytfree:") ? anchor : null;
+}
+
+/**
+ * Does the frontmatter carry a tag? The note template writes `tags: []`, so
+ * anything in there was put there by hand — which is a decision about the note,
+ * and enough on its own to keep it out of the tidy sweep.
+ */
+function hasTags(frontmatter: Record<string, unknown> | undefined): boolean {
+  for (const key of ["tags", "tag"]) {
+    const value = frontmatter?.[key];
+    if (Array.isArray(value) && value.some((tag) => String(tag ?? "").trim())) return true;
+    if (typeof value === "string" && value.trim()) return true;
+  }
+  return false;
 }
 
 function withinTapSlop(origin: { x: number; y: number }, touch: Touch): boolean {
@@ -217,6 +245,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   subscriptionsPollMinutes: 60,
   subscriptionsExpiryDays: 0,
   subscriptionsIncludeShorts: false,
+  tidyEmptyNoteDays: DEFAULT_TIDY_DAYS,
   watchLaterFolder: "Watch Later",
   // 12 hours, because yt-dlp's own documentation warns that recurring
   // authenticated requests can get an account flagged. Raising it is a decision
@@ -771,6 +800,21 @@ export default class YtFreePlugin extends Plugin {
     // poll period: changing the period in settings takes effect immediately
     // instead of at the next restart.
     this.registerInterval(window.setInterval(() => void this.maybePoll(), 60_000));
+
+    this.addCommand({
+      id: "tidy-empty-notes",
+      name: "Tidy watched video notes with nothing written in them",
+      callback: () => void this.tidyEmptyNotes(false),
+    });
+
+    // The sweep runs a minute after the workspace settles rather than at load:
+    // it reads frontmatter through the metadata cache, and at load that cache
+    // is still being built, so an eager sweep would see a vault of notes with
+    // no video in them and do nothing. Then once a day, for a session left open.
+    this.app.workspace.onLayoutReady(() => {
+      this.registerInterval(window.setTimeout(() => void this.tidyEmptyNotes(), TIDY_SETTLE_MS));
+    });
+    this.registerInterval(window.setInterval(() => void this.tidyEmptyNotes(), TIDY_INTERVAL_MS));
   }
 
   /**
@@ -812,6 +856,77 @@ export default class YtFreePlugin extends Plugin {
       watchLaterFolder: this.settings.watchLaterFolder,
       showWatched: this.settings.accountShowWatched,
     };
+  }
+
+  // ------------------------------------------------------------------ tidy
+
+  /**
+   * Move watched video notes with nothing written in them to the trash.
+   *
+   * The rules — all four of them, and why each is there — are in `tidy.ts`.
+   * This is the vault half: gather what the rules need, ask, and act on the
+   * answer. `trashFile` honours the user's "Deleted files" setting, so what
+   * happens to a note here is whatever they already chose happens to a note
+   * they delete themselves; nothing is ever removed outright.
+   *
+   * Every removal is logged with its path, because a sweep that runs by itself
+   * and says only a number is a sweep you cannot check up on.
+   */
+  async tidyEmptyNotes(quiet = true): Promise<number> {
+    const days = this.settings.tidyEmptyNoteDays;
+    if (days <= 0) {
+      if (!quiet) new Notice("YT Free: tidying empty video notes is switched off in settings.");
+      return 0;
+    }
+
+    const open = new Set<string>();
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof MarkdownView && view.file) open.add(view.file.path);
+    }
+
+    const candidates: TidyCandidate[] = [];
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const videoId = this.videoIdForNote(file.path);
+      if (!videoId) continue;
+      // Cheapest condition first: without a watch stamp nothing else can make
+      // this note eligible, and reading every video note in the vault to find
+      // that out would be a lot of I/O for an answer we already have.
+      const watchedAt = this.progress.watchedFor(videoId);
+      if (!watchedAt) continue;
+
+      candidates.push({
+        path: file.path,
+        videoId,
+        watchedAt,
+        modifiedAt: file.stat.mtime,
+        content: await this.app.vault.cachedRead(file),
+        tagged: hasTags(this.app.metadataCache.getFileCache(file)?.frontmatter),
+        open: open.has(file.path),
+      });
+    }
+
+    let removed = 0;
+    for (const candidate of notesToTidy(candidates, new Date(), days)) {
+      const file = this.app.vault.getAbstractFileByPath(candidate.path);
+      if (!(file instanceof TFile)) continue;
+      try {
+        await this.app.fileManager.trashFile(file);
+        console.info(`YT Free: trashed empty video note ${candidate.path}`);
+        removed++;
+      } catch (err) {
+        console.error(`YT Free: could not trash ${candidate.path}.`, err);
+      }
+    }
+
+    if (removed > 0) {
+      new Notice(
+        `YT Free: moved ${removed} watched video note${removed === 1 ? "" : "s"} with nothing written in ${removed === 1 ? "it" : "them"} to the trash.`,
+      );
+    } else if (!quiet) {
+      new Notice("YT Free: nothing to tidy.");
+    }
+    return removed;
   }
 
   // --------------------------------------------------------------- account
@@ -3267,6 +3382,22 @@ class YtFreeSettingTab extends PluginSettingTab {
           .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.subscriptionsExpiryDays = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Tidy empty notes after")
+      .setDesc(
+        "Days. A video note goes to the trash when you have played the video, that long has passed since, and nothing has been written in it — no notes, no tags, no edits. Notes you never played are left alone, and so is anything open in front of you. Zero switches this off.",
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(0, 180, 5)
+          .setValue(this.plugin.settings.tidyEmptyNoteDays)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.tidyEmptyNoteDays = value;
             await this.plugin.saveSettings();
           }),
       );

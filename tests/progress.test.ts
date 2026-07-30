@@ -8,8 +8,11 @@ import {
   MIN_REMEMBER_SECONDS,
   normalizeProgress,
   pruneProgress,
+  markWatched,
   recordPosition,
   resumePoint,
+  WATCH_STAMP_INTERVAL_MS,
+  watchedAt,
 } from "../src/progress.ts";
 
 const NOW = new Date("2026-07-29T12:00:00.000Z");
@@ -136,4 +139,44 @@ test("prune caps the file, oldest first", () => {
   // The five oldest — the largest `daysAgo` — are the ones that went.
   assert.equal("v0000000000" in state.positions, true);
   assert.equal(`v${String(MAX_PROGRESS_ENTRIES + 4).padStart(10, "0")}` in state.positions, false);
+});
+
+test("a play stamps the video as watched", () => {
+  const state = emptyProgress();
+  assert.equal(markWatched(state, ID, NOW), true);
+  assert.equal(watchedAt(state, ID), NOW.toISOString());
+  assert.equal(watchedAt(state, OTHER), null);
+});
+
+test("the watch stamp moves at most once an hour", () => {
+  const state = emptyProgress();
+  markWatched(state, ID, new Date(NOW.getTime() - WATCH_STAMP_INTERVAL_MS + 1000));
+  assert.equal(markWatched(state, ID, NOW), false);
+  assert.equal(markWatched(state, ID, new Date(NOW.getTime() + WATCH_STAMP_INTERVAL_MS)), true);
+});
+
+test("finishing a video clears the position but keeps the watch stamp", () => {
+  const state = emptyProgress();
+  recordPosition(state, ID, 120, 600, NOW);
+  markWatched(state, ID, NOW);
+  // Same call site, one report later, now at the credits.
+  recordPosition(state, ID, 599, 600, NOW);
+  assert.equal(resumePoint(state, ID), 0);
+  assert.equal(watchedAt(state, ID), NOW.toISOString());
+});
+
+test("normalize refuses watch stamps it cannot read", () => {
+  const state = normalizeProgress({
+    watched: { [ID]: NOW.toISOString(), "not-an-id": NOW.toISOString(), [OTHER]: "whenever" },
+  });
+  assert.deepEqual(Object.keys(state.watched), [ID]);
+});
+
+test("prune drops stale watch stamps too", () => {
+  const state = normalizeProgress({
+    watched: { [ID]: daysAgo(400), [OTHER]: daysAgo(40) },
+  });
+  assert.equal(pruneProgress(state, NOW), true);
+  assert.deepEqual(Object.keys(state.watched), [OTHER]);
+  assert.equal(pruneProgress(state, NOW), false);
 });

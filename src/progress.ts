@@ -45,12 +45,28 @@ export interface WatchPoint {
   updatedAt: string;
 }
 
+/**
+ * How often the "you watched this" stamp is allowed to move.
+ *
+ * It exists for the month-long tidy in `tidy.ts`, which cannot tell an hour
+ * from a minute, so rewriting it on every progress report would be a change
+ * every five seconds for nothing.
+ */
+export const WATCH_STAMP_INTERVAL_MS = 3_600_000;
+
 export interface ProgressState {
   positions: Record<string, WatchPoint>;
+  /**
+   * ISO time each video was last played, kept apart from `positions` because
+   * the two answer different questions and die at different moments: a position
+   * is erased the second the video finishes, and "you watched this" is exactly
+   * the fact that a finished video should still carry.
+   */
+  watched: Record<string, string>;
 }
 
 export function emptyProgress(): ProgressState {
-  return { positions: {} };
+  return { positions: {}, watched: {} };
 }
 
 /**
@@ -64,18 +80,33 @@ export function emptyProgress(): ProgressState {
 export function normalizeProgress(raw: unknown): ProgressState {
   const state = emptyProgress();
   const positions = (raw as ProgressState | null)?.positions;
-  if (!positions || typeof positions !== "object") return state;
+  const watched = (raw as ProgressState | null)?.watched;
 
-  for (const [videoId, value] of Object.entries(positions)) {
-    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) continue;
-    const seconds = Math.floor(Number((value as WatchPoint)?.seconds));
-    if (!Number.isFinite(seconds) || seconds < MIN_REMEMBER_SECONDS) continue;
-    const updatedAt = String((value as WatchPoint)?.updatedAt ?? "");
-    if (!Number.isFinite(Date.parse(updatedAt))) continue;
-    state.positions[videoId] = { seconds, updatedAt };
+  if (positions && typeof positions === "object") {
+    for (const [videoId, value] of Object.entries(positions)) {
+      if (!VIDEO_ID_RE.test(videoId)) continue;
+      const seconds = Math.floor(Number((value as WatchPoint)?.seconds));
+      if (!Number.isFinite(seconds) || seconds < MIN_REMEMBER_SECONDS) continue;
+      const updatedAt = String((value as WatchPoint)?.updatedAt ?? "");
+      if (!Number.isFinite(Date.parse(updatedAt))) continue;
+      state.positions[videoId] = { seconds, updatedAt };
+    }
+  }
+
+  if (watched && typeof watched === "object") {
+    for (const [videoId, value] of Object.entries(watched)) {
+      if (!VIDEO_ID_RE.test(videoId)) continue;
+      const at = String(value ?? "");
+      // A stamp nobody can parse is worse than none: it decides whether a note
+      // is a month old, and the answer to "I cannot tell" must be "leave it".
+      if (!Number.isFinite(Date.parse(at))) continue;
+      state.watched[videoId] = at;
+    }
   }
   return state;
 }
+
+const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 
 /**
  * Note where a video has got to, and answer whether anything changed.
@@ -107,6 +138,29 @@ export function recordPosition(
   if (existing && existing.seconds === at) return false;
   state.positions[videoId] = { seconds: at, updatedAt: now.toISOString() };
   return true;
+}
+
+/**
+ * Note that this video was played, and answer whether anything changed.
+ *
+ * Called from the same report as `recordPosition` and kept separate from it on
+ * purpose: a position that has reached the credits is deleted, and this is the
+ * record that has to outlive that. Rate-limited to one move an hour, which is
+ * far finer than the only thing that reads it.
+ */
+export function markWatched(state: ProgressState, videoId: string, now: Date): boolean {
+  if (!videoId) return false;
+  const previous = Date.parse(state.watched[videoId] ?? "");
+  if (Number.isFinite(previous) && now.getTime() - previous < WATCH_STAMP_INTERVAL_MS) {
+    return false;
+  }
+  state.watched[videoId] = now.toISOString();
+  return true;
+}
+
+/** When this video was last played, or null. */
+export function watchedAt(state: ProgressState, videoId: string): string | null {
+  return state.watched[videoId] ?? null;
 }
 
 export function isFinished(seconds: number, duration: number): boolean {
@@ -147,6 +201,23 @@ export function pruneProgress(state: ProgressState, now: Date, ttlDays = PROGRES
     entries.sort((a, b) => Date.parse(a[1].updatedAt) - Date.parse(b[1].updatedAt));
     for (const [videoId] of entries.slice(0, entries.length - MAX_PROGRESS_ENTRIES)) {
       delete state.positions[videoId];
+      changed = true;
+    }
+  }
+
+  // The watch stamps, on the same terms. A year is a long time after the month
+  // the tidy measures, so nothing that still matters is ever dropped here.
+  const stamps = Object.entries(state.watched).filter(([videoId, at]) => {
+    if (Date.parse(at) >= cutoff) return true;
+    delete state.watched[videoId];
+    changed = true;
+    return false;
+  });
+
+  if (stamps.length > MAX_PROGRESS_ENTRIES) {
+    stamps.sort((a, b) => Date.parse(a[1]) - Date.parse(b[1]));
+    for (const [videoId] of stamps.slice(0, stamps.length - MAX_PROGRESS_ENTRIES)) {
+      delete state.watched[videoId];
       changed = true;
     }
   }

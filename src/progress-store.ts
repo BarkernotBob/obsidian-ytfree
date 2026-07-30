@@ -9,10 +9,12 @@
 import type { App } from "obsidian";
 import {
   emptyProgress,
+  markWatched,
   normalizeProgress,
   pruneProgress,
   recordPosition,
   resumePoint,
+  watchedAt,
 } from "./progress.ts";
 import type { ProgressState } from "./progress.ts";
 
@@ -56,9 +58,20 @@ export class ProgressStore {
     return resumePoint(this.state, videoId);
   }
 
+  /** When this video was last played, or null. Read by the note tidy. */
+  watchedFor(videoId: string): string | null {
+    return watchedAt(this.state, videoId);
+  }
+
   /** Note a position. Only a real change costs a write. */
   record(videoId: string, seconds: number, duration: number): void {
-    if (recordPosition(this.state, videoId, seconds, duration, new Date())) this.schedule();
+    const now = new Date();
+    // Both, always, and neither short-circuits the other: a position at the
+    // credits is deleted rather than stored, and that is exactly the report
+    // that most needs to leave a watch stamp behind.
+    const moved = recordPosition(this.state, videoId, seconds, duration, now);
+    const stamped = markWatched(this.state, videoId, now);
+    if (moved || stamped) this.schedule();
   }
 
   private schedule(): void {
