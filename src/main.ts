@@ -1877,9 +1877,13 @@ export default class YtFreePlugin extends Plugin {
     const wrapper = createDiv({
       cls: mobile ? "ytfree-wrapper ytfree-pinned ytfree-docked" : "ytfree-wrapper ytfree-pinned",
     });
-    if (!mobile) {
-      wrapper.style.setProperty("--ytfree-pinned-height", `${this.settings.pinnedHeightVh}vh`);
-    }
+    // Both platforms now. The docked player used to take its height from the
+    // aspect ratio alone, so the height setting did nothing on a phone — and in
+    // landscape 16:9 of the width is taller than the whole screen, which left no
+    // room for the note the player is pinned to. See the `.ytfree-docked
+    // .ytfree-media` rule: on mobile this is a ceiling, and the width follows it
+    // down so the picture stays 16:9 instead of growing black bars.
+    wrapper.style.setProperty("--ytfree-pinned-height", `${this.settings.pinnedHeightVh}vh`);
     view.contentEl.prepend(wrapper);
     // Marks the view for the CSS that has to override Obsidian's own — see the
     // `.ytfree-has-docked` rules in styles.css. A class beats `:has()` here
@@ -3362,7 +3366,9 @@ class YtFreeSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Pinned player height")
-      .setDesc("Percent of the window height. Fixed, so the note text below never moves.")
+      .setDesc(
+        "Percent of the window height. Fixed, so the note text below never moves. On a phone it is a ceiling: the picture keeps its shape and shrinks to fit, which is what stops a sideways phone handing the whole screen to the video.",
+      )
       .addSlider((slider) =>
         slider
           .setLimits(20, 70, 5)
