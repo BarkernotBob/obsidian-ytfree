@@ -1267,9 +1267,11 @@ export class YtFreePlayer {
       return;
     }
 
-    // Either an instrumental, or a skip this player cannot honour — an unbuffered
-    // target, or a window too short to be worth a seek. Both play fast, which is
-    // what every window did before 017.
+    // Either an instrumental, or a skip this player cannot honour because the
+    // target is not buffered. Only the first of those plays fast: a `skip` move
+    // carries the *base* rate precisely so that a vetoed jump degrades into
+    // doing nothing rather than into audible speed-up. 022's rule — when
+    // playback is not confident enough to seek, it fails silent.
     const rate = move.rate;
     this.applyRate(rate);
 

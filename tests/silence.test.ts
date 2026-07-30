@@ -563,10 +563,29 @@ test("outside every window the base rate is handed straight back", () => {
   assert.deepEqual(moveFor(14, windows, 1.5, 3), { kind: "rate", rate: 1.5 });
 });
 
-test("too little of a window left to be worth a seek, so it plays fast instead", () => {
+test("too little of a window left to be worth a seek, so nothing happens at all", () => {
+  // 022. This used to return the fast rate, and that is where the chipmunk came
+  // from: a mis-detected window trimmed under the floor was speech played at 3×.
   const windows: PlaybackWindow[] = [{ start: 10, end: 14, action: "skip" }];
   const late = 14 - MIN_SKIP_SECONDS / 2;
-  assert.deepEqual(moveFor(late, windows, 1, 3), { kind: "rate", rate: 3 });
+  assert.deepEqual(moveFor(late, windows, 1, 3), { kind: "rate", rate: 1 });
+});
+
+test("a skip move carries the base rate, so a player that vetoes it stays silent", () => {
+  // The player falls through to `move.rate` when the target is unbuffered. That
+  // number must be the base rate, or every unbuffered skip becomes a chipmunk.
+  const windows: PlaybackWindow[] = [{ start: 10, end: 14, action: "skip" }];
+  const move = moveFor(10.2, windows, 1, 3);
+  assert.equal(move.rate, 1);
+});
+
+test("only a positively classified instrumental is allowed to play fast", () => {
+  const skip: PlaybackWindow[] = [{ start: 10, end: 14, action: "skip" }];
+  const speed: PlaybackWindow[] = [{ start: 10, end: 14, action: "speed" }];
+  for (const at of [10.05, 12, 13.9]) {
+    assert.equal(moveFor(at, skip, 1, 3).rate, 1, `skip window at ${at}`);
+    assert.equal(moveFor(at, speed, 1, 3).rate, 3, `speed window at ${at}`);
+  }
 });
 
 test("a skip never slows anyone down, and never speeds them up either", () => {

@@ -371,8 +371,8 @@ export interface PlaybackWindow extends SilenceWindow {
  * A seek is not free: the element fires `seeking`, drops the current decode, and
  * on a streamed source may re-request. Under a third of a second the whole thing
  * would be one click in place of one gap, and the gap was the quieter of the
- * two. Anything below the floor falls back to `speed`, which is what the
- * previous two issues did with every window.
+ * two. Anything below the floor is left alone — see `moveFor`, which used to
+ * play it fast instead and is where 022's chipmunk came from.
  */
 export const MIN_SKIP_SECONDS = 0.35;
 
@@ -496,13 +496,21 @@ export function moveFor(
 
   // `max`, not the silence rate outright: someone listening at 2× has already
   // said they want to go faster than 1.5×, and an interlude is never the moment
-  // to slow down.
+  // to slow down. This is the *only* path to the fast rate now, and 022 is the
+  // reason: 3× is reserved for a window positively classified as instrumental —
+  // ffmpeg heard audio there and the captions know no words were spoken. Every
+  // other uncertainty below hands back the base rate. Chipmunk on music is the
+  // feature; chipmunk on speech is the bug, and a "skip" window we decline to
+  // skip is exactly the case where the classification might be wrong.
   const fast = Math.max(baseRate, silenceRate);
   if (window.action !== "skip") return { kind: "rate", rate: fast };
 
   // Too little left to be worth a seek — either a short window, or one we are
-  // already most of the way through because the map arrived mid-pause.
-  if (window.end - seconds < MIN_SKIP_SECONDS) return { kind: "rate", rate: fast };
+  // already most of the way through because the map arrived mid-pause. This
+  // remnant is the chipmunk BarkernotBob heard on "and his name": a detection error
+  // trimmed to 0.30 s, under the floor, and the old code played it at 3×. Doing
+  // nothing is silent when the window is real and inaudible when it is not.
+  if (window.end - seconds < MIN_SKIP_SECONDS) return { kind: "rate", rate: baseRate };
   return { kind: "skip", to: window.end, rate: baseRate };
 }
 

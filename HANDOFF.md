@@ -1,6 +1,28 @@
 # HANDOFF
 
-## Status — 2026-07-30b: section buttons fold the video on a second tap
+## Status — 2026-07-30c: 022 step 1 — Smart Speed can no longer speed up speech
+
+[issues/022](issues/022-adaptive-silence-floor.md) workstream 2, the smallest and
+first of the suggested order. **336 unit tests pass, build clean.**
+
+The fast rate now has exactly one route to it: a window `combineSilence`
+positively classified as `action: "speed"` — ffmpeg heard audio there *and* the
+captions say no words were spoken, i.e. an instrumental. Every other outcome in
+`moveFor` hands back the base rate:
+
+- **Window remnant under `MIN_SKIP_SECONDS` → base rate**, was the fast rate.
+  This is BarkernotBob's chipmunked *"and his name,"*: window 265.32–266.02 trimmed by
+  the lead-in/lead-out margins to 0.30 s, under the 0.35 s floor, so `moveFor`
+  fell through to 3× — on speech, because the −30 dB threshold had mis-detected
+  it in the first place.
+- **A skip the player vetoes → base rate.** Already correct (`{kind:"skip"}`
+  carries `baseRate`), now covered by a named test so it stays that way, and the
+  stale comment in `smartFrame` that claimed otherwise is fixed.
+
+Detection is still wrong at this step — words still get *swallowed*; that is
+workstreams 1/3/4. What has gone is the audible artifact on top of it.
+
+## Previous — 2026-07-30b: section buttons fold the video on a second tap
 
 Notes / Description / Transcript now do double duty. `jumpToSection(file, section,
 videoId)` in `main.ts` first asks `inSection()` whether the reader is already there —
