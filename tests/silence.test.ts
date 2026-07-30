@@ -20,9 +20,13 @@ import {
   pruneSilenceMaps,
   rateFor,
   secondsSaved,
+  secondsSkipped,
+  subtractWindows,
+  moveFor,
+  MIN_SKIP_SECONDS,
   windowsFromCues,
 } from "../src/silence.ts";
-import type { SilenceMap } from "../src/silence.ts";
+import type { PlaybackWindow, SilenceMap } from "../src/silence.ts";
 import { parseJson3, parseJson3Timed } from "../src/transcript.ts";
 
 const ID = "dQw4w9WgXcQ";
@@ -430,8 +434,8 @@ test("an ffmpeg map that has only reached a minute cannot erase the caption map"
     skipNonSpeech: true,
   });
   assert.deepEqual(combined.windows, [
-    { start: 12, end: 13 },
-    { start: 600, end: 604 },
+    { start: 12, end: 13, action: "skip" },
+    { start: 600, end: 604, action: "skip" },
   ]);
 });
 
@@ -450,8 +454,8 @@ test("with non-speech skipping off, ffmpeg rules only as far as it has looked", 
   // 30–60 is music: measured, loud, and dropped. 600–604 is past the frontier,
   // so the caption map still answers for it.
   assert.deepEqual(combined.windows, [
-    { start: 12, end: 13 },
-    { start: 600, end: 604 },
+    { start: 12, end: 13, action: "skip" },
+    { start: 600, end: 604, action: "skip" },
   ]);
 });
 
@@ -463,6 +467,117 @@ test("a caption window straddling the frontier is cut at it, not dropped", () =>
 
 test("no map at all is not a map with no windows", () => {
   assert.deepEqual(combineSilence({ skipNonSpeech: true }), { windows: [], source: null });
+});
+
+// ------------------------------------------ 017: skipping rather than speeding
+
+test("with no ffmpeg, every caption gap is skipped", () => {
+  const combined = combineSilence({
+    transcript: map({ windows: [{ start: 10, end: 12 }] }),
+    skipNonSpeech: true,
+  });
+  assert.deepEqual(combined.windows, [{ start: 10, end: 12, action: "skip" }]);
+});
+
+test("a caption gap ffmpeg has heard audio in is an instrumental, and plays fast", () => {
+  // 30–60: nobody speaking, and ffmpeg measured sound there — music. 100–104:
+  // both producers agree there is nothing at all.
+  const combined = combineSilence({
+    transcript: map({
+      windows: [
+        { start: 30, end: 60 },
+        { start: 100, end: 104 },
+      ],
+    }),
+    ffmpeg: { windows: [{ start: 100, end: 104 }], analyzedTo: 300 },
+    skipNonSpeech: true,
+  });
+  assert.deepEqual(combined.windows, [
+    { start: 30, end: 60, action: "speed" },
+    { start: 100, end: 104, action: "skip" },
+  ]);
+});
+
+test("a caption gap ffmpeg has not reached yet is skipped, not guessed at", () => {
+  const combined = combineSilence({
+    transcript: map({ windows: [{ start: 600, end: 604 }] }),
+    ffmpeg: { windows: [{ start: 12, end: 13 }], analyzedTo: 60 },
+    skipNonSpeech: true,
+  });
+  assert.deepEqual(combined.windows, [
+    { start: 12, end: 13, action: "skip" },
+    { start: 600, end: 604, action: "skip" },
+  ]);
+});
+
+test("ffmpeg silence inside a caption gap splits it into a skip and two speeds", () => {
+  const combined = combineSilence({
+    transcript: map({ windows: [{ start: 30, end: 60 }] }),
+    ffmpeg: { windows: [{ start: 40, end: 45 }], analyzedTo: 300 },
+    skipNonSpeech: true,
+  });
+  assert.deepEqual(combined.windows, [
+    { start: 30, end: 40, action: "speed" },
+    { start: 40, end: 45, action: "skip" },
+    { start: 45, end: 60, action: "speed" },
+  ]);
+});
+
+test("subtracting takes the holes out and leaves the rest", () => {
+  assert.deepEqual(
+    subtractWindows([{ start: 0, end: 100 }], [
+      { start: 10, end: 20 },
+      { start: 90, end: 200 },
+    ]),
+    [
+      { start: 0, end: 10 },
+      { start: 20, end: 90 },
+    ],
+  );
+});
+
+test("a window entirely covered by a hole disappears", () => {
+  assert.deepEqual(subtractWindows([{ start: 10, end: 20 }], [{ start: 0, end: 30 }]), []);
+});
+
+test("the trim keeps the action it was given", () => {
+  const windows: PlaybackWindow[] = [{ start: 10, end: 20, action: "speed" }];
+  assert.deepEqual(compressibleWindows(windows, 0.5), [
+    { start: 10 + LEAD_IN_SECONDS, end: 20 - LEAD_OUT_SECONDS, action: "speed" },
+  ]);
+});
+
+test("silence is a jump to the end of the window, not a rate", () => {
+  const windows: PlaybackWindow[] = [{ start: 10, end: 14, action: "skip" }];
+  assert.deepEqual(moveFor(10.2, windows, 1, 3), { kind: "skip", to: 14, rate: 1 });
+});
+
+test("an instrumental is a rate, never a jump", () => {
+  const windows: PlaybackWindow[] = [{ start: 10, end: 40, action: "speed" }];
+  assert.deepEqual(moveFor(20, windows, 1, 3), { kind: "rate", rate: 3 });
+});
+
+test("outside every window the base rate is handed straight back", () => {
+  const windows: PlaybackWindow[] = [{ start: 10, end: 14, action: "skip" }];
+  assert.deepEqual(moveFor(9, windows, 1.5, 3), { kind: "rate", rate: 1.5 });
+  assert.deepEqual(moveFor(14, windows, 1.5, 3), { kind: "rate", rate: 1.5 });
+});
+
+test("too little of a window left to be worth a seek, so it plays fast instead", () => {
+  const windows: PlaybackWindow[] = [{ start: 10, end: 14, action: "skip" }];
+  const late = 14 - MIN_SKIP_SECONDS / 2;
+  assert.deepEqual(moveFor(late, windows, 1, 3), { kind: "rate", rate: 3 });
+});
+
+test("a skip never slows anyone down, and never speeds them up either", () => {
+  const windows: PlaybackWindow[] = [{ start: 10, end: 20, action: "skip" }];
+  assert.deepEqual(moveFor(11, windows, 4, 3), { kind: "skip", to: 20, rate: 4 });
+});
+
+test("a skip reports the whole pause, at the speed it would have played", () => {
+  assert.equal(secondsSkipped(3, 1), 3);
+  assert.equal(secondsSkipped(3, 4), 0.75);
+  assert.equal(secondsSkipped(0, 1), 0);
 });
 
 // --------------------------------------------------- 016: chunking the work

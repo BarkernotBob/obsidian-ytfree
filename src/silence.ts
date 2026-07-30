@@ -191,7 +191,7 @@ function isWindow(value: unknown): value is SilenceWindow {
   );
 }
 
-function sortWindows(windows: SilenceWindow[]): SilenceWindow[] {
+function sortWindows<T extends SilenceWindow>(windows: T[]): T[] {
   return [...windows].sort((a, b) => a.start - b.start);
 }
 
@@ -256,12 +256,12 @@ export function windowsFromCues(cues: TimedCue[], minGap: number): SilenceWindow
  * order matters — filter on the *raw* length, then trim, because a 0.5 s pause
  * trimmed to 0.25 s is still a 0.5 s pause the user asked to skip.
  */
-export function compressibleWindows(
-  windows: SilenceWindow[],
+export function compressibleWindows<T extends SilenceWindow>(
+  windows: T[],
   minGap: number,
-): SilenceWindow[] {
+): T[] {
   const floor = Math.max(0, minGap);
-  const out: SilenceWindow[] = [];
+  const out: T[] = [];
   for (const window of windows) {
     if (window.end - window.start < floor - EPSILON) continue;
     const start = window.start + LEAD_IN_SECONDS;
@@ -270,7 +270,8 @@ export function compressibleWindows(
     // the player would change rate twice for a few hundred milliseconds and the
     // only audible result would be the wobble.
     if (end - start <= 0) continue;
-    out.push({ start, end });
+    // Spread rather than rebuilt, so a classified window keeps its `action`.
+    out.push({ ...window, start, end });
   }
   return sortWindows(out);
 }
@@ -343,10 +344,78 @@ export function spliceAtFrontier(
   return mergeWindows(kept);
 }
 
+/**
+ * What playback does with a window, and the whole of issue 017.
+ *
+ * 015 and 016 had one answer — play it faster — and BarkernotBob's objection is that
+ * you can *hear* faster. A pause played at 3× is 3× of something, and the ear
+ * reads the seam either side of it as a glitch rather than as an edit. A pause
+ * that is seeked over is silent by definition, so there is nothing to hear.
+ *
+ * `speed` survives for exactly one case: audio that is not speech but is not
+ * silence either — a musical interlude, a demo, a room tone the mix wants you to
+ * feel. BarkernotBob's words: *"Instrumentals can ff."* Cutting it outright would edit
+ * the video rather than tighten it; playing it fast keeps the fact that it
+ * happened.
+ */
+export type SilenceAction = "skip" | "speed";
+
+/** A window with playback's decision already attached. */
+export interface PlaybackWindow extends SilenceWindow {
+  action: SilenceAction;
+}
+
+/**
+ * Shorter than this and a seek costs more than it saves.
+ *
+ * A seek is not free: the element fires `seeking`, drops the current decode, and
+ * on a streamed source may re-request. Under a third of a second the whole thing
+ * would be one click in place of one gap, and the gap was the quieter of the
+ * two. Anything below the floor falls back to `speed`, which is what the
+ * previous two issues did with every window.
+ */
+export const MIN_SKIP_SECONDS = 0.35;
+
 /** What playback should compress, and which producer to credit for it. */
 export interface CombinedSilence {
-  windows: SilenceWindow[];
+  windows: PlaybackWindow[];
   source: SilenceSource | null;
+}
+
+/** Tag a plain list with one action. */
+function tag(windows: SilenceWindow[], action: SilenceAction): PlaybackWindow[] {
+  return windows.map((window) => ({ start: window.start, end: window.end, action }));
+}
+
+/** The parts of `from` that no window in `holes` covers. Both must be merged. */
+export function subtractWindows(
+  from: SilenceWindow[],
+  holes: SilenceWindow[],
+): SilenceWindow[] {
+  const out: SilenceWindow[] = [];
+  for (const window of from) {
+    let cursor = window.start;
+    for (const hole of holes) {
+      if (hole.end <= cursor) continue;
+      if (hole.start >= window.end) break;
+      if (hole.start > cursor) out.push({ start: cursor, end: hole.start });
+      cursor = Math.max(cursor, hole.end);
+      if (cursor >= window.end) break;
+    }
+    if (window.end > cursor) out.push({ start: cursor, end: window.end });
+  }
+  return out.filter((window) => window.end - window.start > EPSILON);
+}
+
+/** The part of each window on one side of `frontier`. */
+function clip(windows: SilenceWindow[], frontier: number, side: "before" | "after"): SilenceWindow[] {
+  const out: SilenceWindow[] = [];
+  for (const window of windows) {
+    const start = side === "before" ? window.start : Math.max(window.start, frontier);
+    const end = side === "before" ? Math.min(window.end, frontier) : window.end;
+    if (end - start > EPSILON) out.push({ start, end });
+  }
+  return out;
 }
 
 /**
@@ -366,21 +435,88 @@ export function combineSilence(opts: {
   ffmpeg?: { windows: SilenceWindow[]; analyzedTo?: number } | null;
   skipNonSpeech: boolean;
 }): CombinedSilence {
-  const transcript = opts.transcript?.windows ?? [];
-  const ffmpeg = opts.ffmpeg?.windows ?? [];
+  const transcript = mergeWindows(opts.transcript?.windows ?? []);
+  const ffmpeg = mergeWindows(opts.ffmpeg?.windows ?? []);
   const haveFfmpeg = !!opts.ffmpeg;
 
+  // Captions alone cannot tell a pause from an interlude — "nobody is speaking"
+  // is the only question they answer — so every window is skipped. That is the
+  // phone's whole story, and the Mac's until ffmpeg is installed.
   if (!haveFfmpeg) {
     return {
-      windows: mergeWindows(transcript),
+      windows: tag(transcript, "skip"),
       source: opts.transcript ? "transcript" : null,
     };
   }
-  if (opts.skipNonSpeech) {
-    return { windows: unionWindows(transcript, ffmpeg), source: "ffmpeg" };
-  }
+
   const frontier = opts.ffmpeg?.analyzedTo ?? Number.POSITIVE_INFINITY;
-  return { windows: spliceAtFrontier(ffmpeg, transcript, frontier), source: "ffmpeg" };
+
+  if (!opts.skipNonSpeech) {
+    return { windows: tag(spliceAtFrontier(ffmpeg, transcript, frontier), "skip"), source: "ffmpeg" };
+  }
+
+  // The union, split by what each half of it means. ffmpeg measured no audio, so
+  // those windows are silence and go. A caption gap ffmpeg has *looked at* and
+  // found audible is the instrumental case, and that is the only thing that gets
+  // played fast rather than cut. Past the frontier ffmpeg has not looked yet, so
+  // a caption gap there is treated exactly as it is on a machine with no ffmpeg
+  // at all — skipped — rather than guessed at.
+  const unlooked = clip(transcript, frontier, "after");
+  const instrumental = subtractWindows(clip(transcript, frontier, "before"), ffmpeg);
+  const windows = sortWindows([
+    ...tag(unionWindows(ffmpeg, unlooked), "skip"),
+    ...tag(instrumental, "speed"),
+  ]);
+  return { windows, source: "ffmpeg" };
+}
+
+/**
+ * What the player should do at this instant: nothing, go faster, or jump.
+ *
+ * The one function the whole of 017 turns on, and pure for the same reason
+ * `rateFor` was — a decision this small, made 60 times a second, has to be
+ * testable without a `<video>`.
+ *
+ * A skip reports where to land rather than performing one, because the player is
+ * allowed to veto it: the target has to be buffered, or the jump trades a pause
+ * you can hear for a stall you can watch.
+ */
+export type PlaybackMove =
+  | { kind: "rate"; rate: number }
+  | { kind: "skip"; to: number; rate: number };
+
+export function moveFor(
+  seconds: number,
+  windows: PlaybackWindow[],
+  baseRate: number,
+  silenceRate: number,
+): PlaybackMove {
+  const window = windows.length === 0 ? null : windowAt(windows, seconds);
+  if (!window) return { kind: "rate", rate: baseRate };
+
+  // `max`, not the silence rate outright: someone listening at 2× has already
+  // said they want to go faster than 1.5×, and an interlude is never the moment
+  // to slow down.
+  const fast = Math.max(baseRate, silenceRate);
+  if (window.action !== "skip") return { kind: "rate", rate: fast };
+
+  // Too little left to be worth a seek — either a short window, or one we are
+  // already most of the way through because the map arrived mid-pause.
+  if (window.end - seconds < MIN_SKIP_SECONDS) return { kind: "rate", rate: fast };
+  return { kind: "skip", to: window.end, rate: baseRate };
+}
+
+/**
+ * Listening time a skip buys, in the same units the readout already counts.
+ *
+ * `secondsSaved` measures wall clock at the user's chosen speed, so a jump over
+ * `mediaSeconds` of video saves the time those seconds would have taken to play:
+ * `mediaSeconds / baseRate`. At 1× a 3 s pause skipped reports 3 s, against the
+ * 2 s the same pause reported at 3× — which is the point of the change.
+ */
+export function secondsSkipped(mediaSeconds: number, baseRate: number): number {
+  if (baseRate <= 0 || mediaSeconds <= 0) return 0;
+  return mediaSeconds / baseRate;
 }
 
 /** Shift a chunk's windows into whole-video time. See `planChunks`. */
@@ -438,7 +574,7 @@ export function planChunks(
  * called once per animation frame against a map that can hold a few thousand
  * windows for a long video.
  */
-export function windowAt(windows: SilenceWindow[], seconds: number): SilenceWindow | null {
+export function windowAt<T extends SilenceWindow>(windows: T[], seconds: number): T | null {
   let low = 0;
   let high = windows.length - 1;
   while (low <= high) {

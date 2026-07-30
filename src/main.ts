@@ -130,7 +130,13 @@ interface YtFreeSettings {
   accountSession: AccountSession;
   /** Smart Speed's starting state on a freshly opened player. */
   smartSpeed: boolean;
-  /** How fast a pause plays, when Smart Speed is on. */
+  /**
+   * How fast non-speech audio plays, when Smart Speed is on.
+   *
+   * Since 017 this is no longer what happens to silence — silence is seeked
+   * over. It applies to music, and to the pauses a seek would make worse than
+   * it found them: shorter than `MIN_SKIP_SECONDS`, or past the buffer.
+   */
   silenceSpeed: number;
   /**
    * How long a quiet stretch has to be before it counts as a skippable pause.
@@ -3351,7 +3357,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Compress pauses")
       .setDesc(
-        "Pauses in speech play fast while the speech itself plays at your chosen speed, with the pitch unchanged. Works on any captioned video with nothing installed, on this machine and on the phone. Every player has its own toggle in the control row; this is the state it starts in.",
+        "Silence is jumped over rather than played fast, so there is nothing to hear where a pause was. Audio that is not speech but is not silence either — music, a demo — plays fast instead of being cut. Works on any captioned video with nothing installed, on this machine and on the phone. Every player has its own toggle in the control row; this is the state it starts in.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.smartSpeed).onChange(async (value) => {
@@ -3363,7 +3369,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Skip non-speech audio")
       .setDesc(
-        "Compress anything nobody is talking over — musical intros, interludes, stings — and not only what is literally silent. On, the caption timing and the ffmpeg measurement are combined, so a stretch either one calls quiet gets compressed. Turn it off to leave music playing at normal speed, which needs ffmpeg to tell music from silence.",
+        "Compress anything nobody is talking over — musical intros, interludes, stings — and not only what is literally silent. On, the caption timing and the ffmpeg measurement are combined: a stretch both call quiet is skipped outright, and one only the captions call quiet plays at the pause speed below, because there is audio there to hear. Turn it off to leave music at normal speed, which needs ffmpeg to tell music from silence.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.skipNonSpeech).onChange(async (value) => {
@@ -3376,7 +3382,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Pause speed")
       .setDesc(
-        "How fast a pause plays. Never slower than the speed you picked for the video itself — speeding the talking up does not slow the silence down.",
+        "How fast non-speech audio plays — music, and any pause too short or too far ahead of the buffer to jump over. Real silence is skipped instead, so this number never applies to it. Never slower than the speed you picked for the video itself.",
       )
       .addDropdown((dropdown) => {
         for (const rate of [1.5, 2, 2.5, 3, 4]) {

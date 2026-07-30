@@ -2,8 +2,8 @@ import Hls from "hls.js";
 import { setIcon } from "obsidian";
 import { formatTimestamp } from "./format.ts";
 import type { SectionName } from "./sections.ts";
-import { compressibleWindows, rateFor, secondsSaved } from "./silence.ts";
-import type { SilenceSource, SilenceWindow } from "./silence.ts";
+import { compressibleWindows, moveFor, secondsSaved, secondsSkipped } from "./silence.ts";
+import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 // Type-only, and it has to stay that way. A value import of these names pulled
 // the whole resolver — and its `child_process` import — into every bundle that
 // touches the player, which is one of the two reasons the plugin could not load
@@ -127,9 +127,9 @@ export class YtFreePlayer {
   private smartBadge: HTMLElement | null = null;
   private smartOn = false;
   /** Raw silence intervals from whichever producer last spoke. */
-  private silenceWindows: SilenceWindow[] = [];
+  private silenceWindows: PlaybackWindow[] = [];
   /** The same, filtered and trimmed at the current setting — what the loop reads. */
-  private activeWindows: SilenceWindow[] = [];
+  private activeWindows: PlaybackWindow[] = [];
   private silenceSource: SilenceSource | null = null;
   /** Set once a producer has answered "there is no map and there won't be one". */
   private smartReason: string | null = null;
@@ -479,19 +479,42 @@ export class YtFreePlayer {
    */
   private smartFrame(now: number): void {
     if (!this.smartOn || this.activeWindows.length === 0) return;
+    // A seek already in flight is a decision in progress — the reader's, or the
+    // one this made last frame. Landing a second one on top of it is how a jump
+    // turns into a stutter.
+    if (this.video.seeking) {
+      this.lastFrameAt = now;
+      return;
+    }
 
     const base = this.playbackRate;
-    const rate = rateFor(
-      this.video.currentTime,
+    const at = this.video.currentTime;
+    const move = moveFor(
+      at,
       this.activeWindows,
       base,
       this.options.smartSpeed?.silenceRate ?? base,
     );
 
-    if (Math.abs(this.video.playbackRate - rate) > 0.001) {
-      this.video.playbackRate = rate;
-      this.smartTouchedRate = true;
+    if (move.kind === "skip" && this.canSeekTo(move.to)) {
+      // The rate goes back first: a seek out of a window the player was already
+      // speeding through must not land at 3× on the far side of it.
+      this.applyRate(base);
+      this.video.currentTime = move.to;
+      this.lastFrameAt = now;
+      const saved = secondsSkipped(move.to - at, base);
+      if (saved > 0) {
+        this.savedSeconds += saved;
+        this.paintSavedTime();
+      }
+      return;
     }
+
+    // Either an instrumental, or a skip this player cannot honour — an unbuffered
+    // target, or a window too short to be worth a seek. Both play fast, which is
+    // what every window did before 017.
+    const rate = move.rate;
+    this.applyRate(rate);
 
     const elapsed = this.lastFrameAt ? (now - this.lastFrameAt) / 1000 : 0;
     this.lastFrameAt = now;
@@ -504,12 +527,42 @@ export class YtFreePlayer {
     }
   }
 
+  private applyRate(rate: number): void {
+    if (Math.abs(this.video.playbackRate - rate) <= 0.001) return;
+    this.video.playbackRate = rate;
+    this.smartTouchedRate = true;
+  }
+
+  /**
+   * Is there data at `target`, or would jumping there stall?
+   *
+   * The whole point of a skip is that it is inaudible, and a seek past the end
+   * of the buffer is a spinner — worse than the pause it removed. `buffered` is
+   * the only thing that answers this cheaply, and it is answered honestly for a
+   * direct stream, a local file and an HLS media source alike.
+   *
+   * Half a second of headroom past the target, so a jump does not land on the
+   * very edge of what has arrived and stall on the next frame instead.
+   */
+  private canSeekTo(target: number): boolean {
+    const ranges = this.video.buffered;
+    for (let i = 0; i < ranges.length; i++) {
+      if (target >= ranges.start(i) && target + 0.5 <= ranges.end(i)) return true;
+      // The tail of the video is a legitimate landing place even with less than
+      // half a second of it left.
+      if (target >= ranges.start(i) && ranges.end(i) >= this.video.duration - 0.05) {
+        return target <= ranges.end(i);
+      }
+    }
+    return false;
+  }
+
   /**
    * Hand the player a silence map. Safe to call repeatedly — the ffmpeg
    * producer calls it every time a batch of windows lands, mid-playback, and
    * replacing the windows under a running loop is a one-frame change of mind.
    */
-  setSilenceWindows(windows: SilenceWindow[], source: SilenceSource): void {
+  setSilenceWindows(windows: PlaybackWindow[], source: SilenceSource): void {
     if (this.destroyed) return;
     this.silenceWindows = windows;
     this.silenceSource = source;
@@ -574,12 +627,17 @@ export class YtFreePlayer {
     el.disabled = !usable && this.smartReason !== null;
 
     const source = this.silenceSource === "ffmpeg" ? "measured audio" : "caption timing";
+    // Two sentences because there are now two behaviours, and which one you get
+    // is the thing a reader wonders about when a video jumps.
+    const speeds = this.activeWindows.some((window) => window.action === "speed");
     const title = !usable
       ? this.smartReason
         ? `Smart Speed unavailable — ${this.smartReason}`
         : "Smart Speed — looking for pauses…"
       : this.smartOn
-        ? `Smart Speed on (${source}) — pauses play at ${this.options.smartSpeed?.silenceRate ?? 3}×`
+        ? `Smart Speed on (${source}) — silence is skipped${
+            speeds ? `, non-speech audio plays at ${this.options.smartSpeed?.silenceRate ?? 3}×` : ""
+          }`
         : "Smart Speed off";
 
     el.setAttribute("title", title);
