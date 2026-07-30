@@ -190,17 +190,90 @@ Commit at each numbered step (working checkpoint), refresh HANDOFF.md.
 - [ ] On `jlIDooGWXh0` at 1×, pause speed 3×, min silence 0.5s, smart speed +
       skip music on: "and his name" plays clean, "3" (278.3s) and "him."
       (269.5s) are audible. No chipmunked speech anywhere in minutes 3–6.
+      → **Needs BarkernotBob's ears.** Proven against the data as far as it can be:
+      the real −30 dB map for that passage is checked in as
+      `tests/fixtures/silence-jlIDooGWXh0-278s.json`, and a test asserts no skip
+      window may contain any of the 79 word instants in it, at every minimum
+      pause the dropdown offers.
 - [ ] Real inter-sentence pauses in the same stretch are still skipped
-      (readout's saved-seconds counter advances).
+      (readout's saved-seconds counter advances). → **Needs BarkernotBob's eyes.**
+      Measured expectation for the whole 26 minutes: ~7 s skipped outright plus
+      ~16 s played at 3×. That is small, and it is what the video contains —
+      see the note below.
 - [ ] With ffmpeg removed from PATH: no errors, transcript-only maps skip long
-      gaps, zero audible artifacts at default settings.
+      gaps, zero audible artifacts at default settings. → **Needs BarkernotBob.**
 - [ ] On mobile: same as above (tier 0), and a Mac-computed map syncing in
-      raises skip coverage without changing safety.
-- [ ] A gated-audio video (OBS/denoised mic) still gets silence detected
-      (clamp path) — find one and note its ID here during implementation.
-- [ ] Stored maps from before this issue are recomputed, not trusted.
-- [ ] Advanced settings show the false-skip warning; defaults untouched by it.
+      raises skip coverage without changing safety. → **Needs BarkernotBob.**
+- [x] A gated-audio video (OBS/denoised mic) still gets silence detected
+      (clamp path). No YouTube ID found; verified instead on gated audio made
+      from this video (`agate=threshold=0.02:ratio=9000`), which is a stricter
+      test of the same path. Calibration reads floor −68.0 / speech −7.9 and
+      picks **−60 dB**; `silencedetect` at −60 dB finds 13 silences in that
+      minute against 15 at −30 dB. The clamp holds and costs almost nothing.
+- [x] Stored maps from before this issue are recomputed, not trusted. An ffmpeg
+      map with no `noiseDb` and a transcript map with no `wordTimed` are both
+      stale; a map whose `noiseDb` differs from this run's is not resumed.
+- [x] Advanced settings show the false-skip warning; defaults untouched by it.
+
+**One finding worth stating plainly.** The savings on this video are small — a
+few percent — and that is the correct answer, not a shortfall. The old −30 dB
+map claimed 138 seconds of "silence" in 26 minutes, and **112 of its 209
+windows had a spoken word inside them**: most of that 138 seconds was speech.
+What the video actually contains is short pauses (word gaps: median 0.24 s,
+p95 0.88 s, longest 2.00 s). A Smart Speed that is honest about this video will
+skip much less than the broken one did.
 
 ## Manual test (for BarkernotBob)
 
-*To be written when the issue is completed, per repo convention.*
+Do this on the Mac first, with ffmpeg installed. It takes about ten minutes.
+
+**Before you start.** Settings → YT Free → Smart Speed: turn *Smart Speed* on,
+*Skip music and other non-speech* on, *Pause playback speed* to 3×, *Shortest
+pause to skip* to 0.5 s. Do not open **Advanced** — the point of the test is
+that the defaults are right.
+
+1. **Clear out the old maps.** Quit Obsidian. In Finder, open the vault folder,
+   then `.obsidian/plugins/ytfree/`, and delete `silence-maps.json` if it is
+   there. (You do not have to — the plugin throws the bad maps away by itself —
+   but deleting it means what you hear next is definitely not an old map.)
+   Reopen Obsidian.
+2. **Open the video from the issue** — `jlIDooGWXh0` — and press play. Let it
+   sit for about thirty seconds without touching anything; that is the audio
+   being measured and analysed in the background.
+3. **Listen to 4:15 → 4:45** (255 s to 285 s). This is the passage that was
+   broken. You should hear, at normal speed and with nothing clipped:
+   *"…who chose his own name. And his name, the word itself, Yahweh, does
+   reveal something about him."*
+   - "**and his name**" must not sound sped-up or chipmunky.
+   - "…**about him.**" must be fully audible, including the "him."
+4. **Listen to 4:45 → 5:00.** You should hear *"…at the burning bush in Exodus
+   chapter 3."* — the "**3**" at the end must be spoken and audible. That single
+   word being skipped is the bug this whole issue was about.
+5. **Watch the counter.** The Smart Speed button in the control row counts up
+   the time it has saved. It should move — slowly. On this video, expect it to
+   reach roughly **15–20 seconds saved by the end of the 26 minutes**, not
+   minutes. If it is racing up, something is wrong; tell me.
+6. **Scrub around minutes 3 to 6 and just listen.** Anywhere a word sounds
+   clipped, swallowed, or fast, note the timestamp — that is a bug and I want
+   the number.
+7. **Now try it on your phone.** Open the same note in Obsidian on the iPhone
+   and play the same stretch. It will skip a bit less than the Mac does (the
+   phone has no ffmpeg, so it works from caption timing alone) but nothing
+   should be clipped or chipmunky. If the Mac has already analysed the video and
+   iCloud has synced, the phone may match the Mac.
+8. **One video that is not this one.** Play any other video you like for two or
+   three minutes with Smart Speed on, and listen for the same three things:
+   clipped words, swallowed words, chipmunk speech. Note timestamps for anything
+   you hear.
+
+**What "it worked" looks like:** every word is audible at normal speed, the
+pauses between sentences are shorter than they were, and the saved-time counter
+moves at a believable trickle rather than a run.
+
+**If a word still gets swallowed**, tell me the video ID and the timestamp to
+within a second or two. That is enough for me to pull the exact caption timing
+and the exact silence window and see which one was wrong.
+
+**Do not change anything under Advanced** to "fix" a problem you hear. Those
+three dials all trade safety for aggressiveness, and moving them is how the
+original bug was possible. Report what you heard instead.

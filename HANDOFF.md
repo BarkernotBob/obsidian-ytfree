@@ -1,6 +1,44 @@
 # HANDOFF
 
-## Status — 2026-07-30f: 022 step 4 — the threshold is measured, not chosen
+## Status — 2026-07-30g: 022 complete, pending BarkernotBob's ears
+
+Workstreams 5, 6 and 7. **375 unit tests pass, build clean, all seven
+workstreams landed.** What is left is the four acceptance criteria that need a
+person listening — they are written up as the Manual test in the issue.
+
+- **Old maps are retired.** `SilenceMap.wordTimed` is what makes this safe: it
+  tells a transcript map with no `words` (human-written track, legitimately no
+  word timing, must never be refetched again) apart from a map written before
+  022 (event-gap producer, found nothing at all on an auto-caption track).
+  Absence → stale. Same shape as `noiseDb` on the ffmpeg side. State version 3,
+  though the normalizer has always migrated by shape rather than by number.
+- **`pruneWordLists`** keeps `words` on the 30 most recently computed videos and
+  strips it from the rest on every write. Word lists are ~30 KB against a map's
+  few hundred bytes, and this file syncs through iCloud on every write. It
+  leaves `wordTimed` behind on purpose — otherwise pruning would make every old
+  video look pre-022 and refetch the lot.
+- **Minimum pause now floors at 0.4 s** (`MIN_SILENCE_GAP`), and `loadSettings`
+  moves anyone sitting on the old 0.2/0.3 up to it. Below 0.4 s a "pause" is a
+  breath inside a sentence, and the map fills with fragments shorter than
+  `MIN_SKIP_SECONDS` — which is what step 1 stopped playing fast.
+- **The reported failure is a fixture.**
+  `tests/fixtures/silence-jlIDooGWXh0-278s.json` holds the real −30 dB
+  silencedetect output for 258–286 s alongside the 79 word instants in it.
+  Three of its four windows contain a spoken word; one test asserts that
+  (so a bad regeneration can't quietly void the others) and the rest assert no
+  skip window may contain a word at any reachable setting.
+- **Clamp path verified end to end.** No gated YouTube video found, so gated
+  audio was made from this one (`agate=threshold=0.02:ratio=9000`). Calibration
+  reads floor −68.0 / speech −7.9 and picks −60 dB; silencedetect at −60 dB
+  finds 13 silences in that minute against 15 at −30. Costs almost nothing.
+
+**The thing to say to BarkernotBob before he tests.** The savings are small — about
+7 s skipped plus 16 s at 3× across 26 minutes — and that is the right answer.
+The old map's 138 seconds of "silence" was 112 windows with words inside them.
+This video's word gaps are median 0.24 s, p95 0.88 s, longest 2.00 s. There was
+never much to skip; the old version was skipping speech.
+
+## Previous — 2026-07-30f: 022 step 4 — the threshold is measured, not chosen
 
 Workstream 3, plus the ffmpeg half of 6 and the Advanced half of 5, because the
 calibration is worthless while old −30 dB maps survive and had nowhere to put
