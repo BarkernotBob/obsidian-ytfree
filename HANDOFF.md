@@ -1,6 +1,48 @@
 # HANDOFF
 
-## Status — 2026-07-30 (latest): silence is skipped, and notes clean up after themselves
+## Status — 2026-07-30 (latest): a line, a rotation, and the dials in the player
+
+[issues/019](issues/019-progress-bar-landscape-quick-panel.md) is built and installed.
+**328 unit tests pass, build clean.** Four items, one of which corrects 017.
+
+**1. The tidy asks one question now: is there anything under `# Notes`?** 017's other
+three conditions could each keep a note nobody had written in — a tag (the plugin writes
+the frontmatter), anything above the first heading (which is where **Most replayed**
+goes, so every note with a heatmap was permanently safe), and the file's mtime (the
+plugin writes to these notes itself; a transcript fetched a fortnight later reset the
+month). `hasWriting` reads the Notes section and nothing else; `TidyCandidate` lost
+`tagged` and `modifiedAt`. The one uncertainty still answers "keep": no `# Notes`
+heading, no judgement. Test count went 329 → 328 because two cases became one better one.
+
+**2. A purple line along the foot of the picture.** Lives in the media box, not the
+column — mobile had one, the desktop now gets a bare `.ytfree-stage` that is exactly the
+video's size — so it costs the note no height. `transform: scaleX()`, never `width`;
+`pointer-events: none`; repainted on `seeked` as well as `timeupdate`, because a Smart
+Speed skip moves the position without playing through it. Fullscreen hides it for free:
+fullscreen is requested on the `<video>`, and a sibling of the fullscreen element is not
+rendered.
+
+**3. Landscape → fullscreen, phones only, and it may not fire.** `Platform.isPhone` plus
+an `(orientation: landscape)` media query, acting only on a player that has actually
+played. iOS may refuse a fullscreen request with no user gesture behind it and a rotation
+is not one, so `enterFullscreen` fails silently by design — the worst case is that
+nothing happens. **Step 4 of 019's manual test is what settles it**; ask for the answer
+before assuming this item is closed.
+
+**4. Two more buttons under the video.** A gear that opens the plugin's settings tab
+(`app.setting`, internal, guarded), and a pop-out of per-video dials: Smart Speed, Skip
+music too, pause speed, shortest pause, player size. **None of them writes a setting** —
+`PlayerEntry.skipNonSpeech` is a per-player override, the height is set on the wrapper's
+CSS variable, and both die with the note. The panel is built at construction, hidden with
+`visibility`, and absolutely positioned off the control row;
+`tools/controls-harness.mjs` now measures the bar open and shut and reports 0 growth at
+375 / 390 / 430 / 700 pt, with no overflow and 8 pt between every target.
+
+**Next:** BarkernotBob's manual tests for 017 (step 9, the lock screen) and 019 (step 4, the
+rotation), and [issues/018](issues/018-watch-later.md)'s open question, which is still a
+decision rather than code.
+
+## Previous — 2026-07-30: silence is skipped, and notes clean up after themselves
 
 [issues/017](issues/017-skip-fold-tidy.md) is built. **329 unit tests pass, build clean.**
 Six items off BarkernotBob's list; five landed, one is half-landed and the missing half is not

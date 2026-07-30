@@ -29,6 +29,70 @@
 }
 
 /*
+ * The box the picture and the progress line share.
+ *
+ * The desktop's only: mobile already docks the video inside `.ytfree-media`,
+ * which is this and more. It is a flex column with nothing but the video in it,
+ * so it is exactly the video's size, and it exists to be the positioning parent
+ * of a line that must not be in the flow.
+ */
+.ytfree-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/*
+ * How far along you are, along the bottom of the picture.
+ *
+ * Out of the flow, so it costs the note no height and nothing below it can
+ * move when it appears; `pointer-events: none`, so it never takes a tap meant
+ * for the scrubber underneath it. It is hidden until the media reports a
+ * duration — a track drawn over an unresolved poster reads as a broken video.
+ *
+ * Nothing has to hide it in fullscreen: fullscreen is requested on the <video>
+ * itself and a sibling of the fullscreen element is not rendered at all. The
+ * `:fullscreen` rules below are there for the day that changes.
+ */
+.ytfree-progress {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  overflow: hidden;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.16);
+  visibility: hidden;
+}
+
+.ytfree-progress.is-live {
+  visibility: visible;
+}
+
+.ytfree-progress-fill {
+  height: 100%;
+  width: 100%;
+  /* Scaled, never re-widthed: a transform is composited and reflows nothing,
+     four times a second, for the length of the video. */
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: var(--ytfree-progress-color, #a882ff);
+}
+
+:fullscreen .ytfree-progress {
+  visibility: hidden;
+}
+
+/* Its own rule, not grouped with the one above: one selector a browser does not
+   know would drop the pair. */
+:-webkit-full-screen .ytfree-progress {
+  visibility: hidden;
+}
+
+/*
  * The control bar: one surface, one row, transport in the middle.
  *
  * Surfaces the controls Chromium buries in its "..." overflow menu, and it is
@@ -44,6 +108,9 @@
  * resize it or shift anything around it.
  */
 .ytfree-controls {
+  /* The per-video pop-out hangs off this row and opens upwards over the video,
+     so the row is its positioning parent. */
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
@@ -270,6 +337,130 @@
   text-align-last: center;
   box-shadow: none;
   box-sizing: border-box;
+}
+
+/*
+ * The per-video pop-out.
+ *
+ * Absolutely positioned out of the control bar, opening upwards over the
+ * picture: the bar keeps the same geometry open or shut, so the button that
+ * opens it cannot move itself or its neighbours — and `visibility`, not
+ * `display`, so the panel is measured once and never re-laid-out.
+ *
+ * Over the video rather than under the bar deliberately. Under it would push
+ * against the note text on a phone, and the video is the one thing on screen
+ * you are not reading while you are changing how it plays.
+ */
+.ytfree-panel {
+  position: absolute;
+  z-index: 20;
+  right: 6px;
+  bottom: calc(100% + 6px);
+  width: 232px;
+  padding: 6px 10px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-s);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.ytfree-panel.is-open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Fixed row height, label left, control right. Nothing in a row changes size
+   when it is pressed, so the panel cannot grow under a finger. */
+.ytfree-panel-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+}
+
+.ytfree-panel-label {
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ytfree-panel-note {
+  padding-top: 4px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  text-align: right;
+}
+
+.ytfree-panel .ytfree-panel-select {
+  width: 64px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  text-align: center;
+  text-align-last: center;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+.ytfree-panel .ytfree-panel-range {
+  width: 96px;
+  margin: 0;
+}
+
+/* A switch whose only moving part is a transform. */
+.ytfree-panel .ytfree-switch {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: var(--background-modifier-border);
+  box-shadow: none;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background-color 120ms ease;
+}
+
+.ytfree-panel .ytfree-switch.is-on {
+  background: var(--interactive-accent);
+}
+
+.ytfree-panel .ytfree-switch:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ytfree-panel .ytfree-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--background-primary);
+  transition: transform 120ms ease;
+}
+
+.ytfree-panel .ytfree-switch.is-on .ytfree-switch-knob {
+  transform: translateX(16px);
+}
+
+/* Open is the accent colour, like Smart Speed's — colour only, never size. */
+.ytfree-controls .ytfree-btn-panel.is-active {
+  color: var(--interactive-accent);
 }
 
 /*

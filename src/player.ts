@@ -65,6 +65,37 @@ export interface PlayerOptions {
    * has necessarily been read.
    */
   nowPlaying?: () => NowPlaying | null;
+  /**
+   * Open the plugin's own settings tab. Absent, the button is not drawn —
+   * reaching Obsidian's settings is an app API, not a player one.
+   */
+  onOpenSettings?: () => void;
+  /** The pop-out of per-video controls. Absent, there is no pop-out button. */
+  quick?: QuickPanelOptions;
+}
+
+/**
+ * The controls that belong to *this* video rather than to the plugin.
+ *
+ * Everything here is a per-player override that lasts as long as the note is
+ * open: changing it must never write a global setting, because "no music
+ * skipping on this lecture" and "no music skipping ever" are different
+ * decisions and only one of them was made.
+ */
+export interface QuickPanelOptions {
+  /**
+   * The player's height, in vh, and where to put a new one. Absent — a fenced
+   * block, which sizes itself — and the size control is not drawn.
+   */
+  heightVh?: number;
+  onHeight?: (vh: number) => void;
+  /**
+   * Whether non-speech audio is skipped along with the silence. Decided when
+   * the windows are combined, so the player cannot apply it alone: it hands the
+   * answer back and is given a fresh map.
+   */
+  skipNonSpeech?: boolean;
+  onSkipNonSpeech?: (value: boolean) => void;
 }
 
 /** The lock screen's three fields. */
@@ -136,6 +167,17 @@ export class YtFreePlayer {
   private local = false;
   private downloadBtn: HTMLButtonElement | null = null;
   private collapseBtn: HTMLButtonElement | null = null;
+  /** The purple line along the bottom of the picture, and the part that fills. */
+  private progressBar: HTMLElement | null = null;
+  private progressFill: HTMLElement | null = null;
+  // --- The per-video pop-out.
+  private panel: HTMLElement | null = null;
+  private panelBtn: HTMLButtonElement | null = null;
+  private panelOpen = false;
+  private smartSwitch: HTMLButtonElement | null = null;
+  /** Kept so `destroy` can take them off `document`, which outlives this player. */
+  private onDocPointer: ((event: Event) => void) | null = null;
+  private onDocKey: ((event: KeyboardEvent) => void) | null = null;
   /** The lazy resolve, once asked for. Every later caller awaits the same one. */
   private loading: Promise<void> | null = null;
   /** Throttle for the position reports — see `trackProgress`. */
@@ -173,10 +215,17 @@ export class YtFreePlayer {
     private onDownload?: () => void,
     private options: PlayerOptions = {},
   ) {
-    this.video = (options.mediaHost ?? container).createEl("video", {
+    // The picture and the line under it share a box, so the line can sit on the
+    // video's bottom edge without being in the flow — a 3px element in the
+    // column would push the note text down by 3px, and nothing here is allowed
+    // to move the note. Mobile already has such a box (the fixed-aspect media
+    // host); the desktop gets a bare one that is exactly the video's size.
+    const stage = options.mediaHost ?? container.createDiv({ cls: "ytfree-stage" });
+    this.video = stage.createEl("video", {
       cls: "ytfree-video",
       attr: { controls: "", playsinline: "", preload: "metadata" },
     });
+    this.buildProgressBar(stage);
 
     // Before anything can set a rate above 1: without this a 3× pause is a
     // chipmunk, and Chromium and WebKit spell the property differently.
@@ -199,6 +248,48 @@ export class YtFreePlayer {
 
     this.trackProgress();
     this.trackNowPlaying();
+  }
+
+  /**
+   * How far along you are, as a line across the foot of the picture.
+   *
+   * The native scrubber answers this too, but it is hidden the moment playback
+   * starts on iOS and it is the thing you have to reach for on a phone. A line
+   * you never touch says the one number you keep wanting — and because it lives
+   * inside the media box rather than in the column, it costs the note no height
+   * whether it is drawn or not.
+   *
+   * Nothing hides it in fullscreen because nothing has to: fullscreen is
+   * requested on the `<video>` element itself, and a sibling of a fullscreen
+   * element is not rendered. The rule in `styles.css` is a belt on top of that,
+   * for the day something fullscreens the wrapper instead.
+   */
+  private buildProgressBar(stage: HTMLElement): void {
+    const bar = stage.createDiv({ cls: "ytfree-progress" });
+    this.progressFill = bar.createDiv({ cls: "ytfree-progress-fill" });
+    this.progressBar = bar;
+
+    const paint = (): void => this.paintProgress();
+    // `seeked` matters as much as `timeupdate` here: a Smart Speed jump moves
+    // the position without playing through it, and a line that only advanced
+    // with playback would lag by the length of every skip.
+    for (const event of ["timeupdate", "seeked", "loadedmetadata", "durationchange", "emptied"]) {
+      this.video.addEventListener(event, paint);
+    }
+    paint();
+  }
+
+  /** `scaleX`, never `width`: a transform is composited and reflows nothing. */
+  private paintProgress(): void {
+    const fill = this.progressFill;
+    if (!fill || !this.progressBar) return;
+    const duration = this.video.duration;
+    const live = Number.isFinite(duration) && duration > 0;
+    // Hidden until there is a real duration, so an unresolved player does not
+    // show a track over its poster with nothing in it.
+    this.progressBar.toggleClass("is-live", live);
+    const fraction = live ? Math.min(1, Math.max(0, this.video.currentTime / duration)) : 0;
+    fill.style.transform = `scaleX(${fraction.toFixed(5)})`;
   }
 
   /**
@@ -469,6 +560,26 @@ export class YtFreePlayer {
       void this.withMedia(() => this.togglePip());
     });
 
+    if (this.options.onOpenSettings) {
+      button("left", "Settings", "settings", "YT Free settings", () => {
+        this.togglePanel(false);
+        this.options.onOpenSettings?.();
+      });
+    }
+
+    if (this.options.quick) {
+      // The pop-out and the button that opens it. Both are built now, closed —
+      // a panel that is created on the click that opens it is a panel that
+      // cannot be positioned before it is seen, and this one has to open
+      // upwards over the video without moving anything.
+      this.panelBtn = button("right", "Options", "sliders-horizontal", "This video's settings", () =>
+        this.togglePanel(),
+      );
+      this.panelBtn.addClass("ytfree-btn-panel");
+      this.panelBtn.setAttribute("aria-expanded", "false");
+      this.buildQuickPanel(bar, this.options.quick);
+    }
+
     button("right", "Fullscreen", "maximize", "Fullscreen", () => {
       void this.withMedia(() => this.toggleFullscreen());
     });
@@ -533,6 +644,137 @@ export class YtFreePlayer {
         jump(section);
       });
     }
+  }
+
+  /**
+   * The pop-out: the dials you change *for this video*, where you are watching
+   * it, instead of in a settings screen two taps and a context switch away.
+   *
+   * Nothing in here writes a setting. "No music skipping on this lecture" and
+   * "no music skipping ever" are different decisions, and the player is the
+   * wrong place to make the second one — the Settings button beside it is the
+   * right place, which is why both exist.
+   *
+   * It is built at construction and hidden with `visibility`, not created on
+   * the click and not `display: none`: it is absolutely positioned out of the
+   * flow, so opening it moves nothing, and the row it belongs to has the same
+   * geometry whether it is open or shut.
+   */
+  private buildQuickPanel(bar: HTMLElement, quick: QuickPanelOptions): void {
+    const panel = bar.createDiv({
+      cls: "ytfree-panel",
+      attr: { role: "dialog", "aria-label": "This video's settings" },
+    });
+    this.panel = panel;
+
+    const row = (label: string): HTMLElement => {
+      const el = panel.createDiv({ cls: "ytfree-panel-row" });
+      el.createSpan({ cls: "ytfree-panel-label", text: label });
+      return el;
+    };
+
+    /** A switch whose knob slides. Fixed box, transform only — no reflow. */
+    const toggle = (label: string, on: boolean, onChange: (value: boolean) => void) => {
+      const el = row(label).createEl("button", {
+        cls: "ytfree-switch",
+        attr: { role: "switch", "aria-checked": String(on), "aria-label": label },
+      });
+      el.type = "button";
+      el.createSpan({ cls: "ytfree-switch-knob" });
+      el.toggleClass("is-on", on);
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        const next = el.getAttribute("aria-checked") !== "true";
+        el.setAttribute("aria-checked", String(next));
+        el.toggleClass("is-on", next);
+        onChange(next);
+      });
+      return el;
+    };
+
+    const choice = (
+      label: string,
+      values: number[],
+      current: number,
+      format: (value: number) => string,
+      onChange: (value: number) => void,
+    ) => {
+      const el = row(label).createEl("select", {
+        cls: "ytfree-panel-select",
+        attr: { "aria-label": label },
+      });
+      for (const value of values) el.createEl("option", { text: format(value), value: String(value) });
+      el.value = String(current);
+      el.addEventListener("change", () => onChange(Number(el.value)));
+      return el;
+    };
+
+    if (this.options.smartSpeed) {
+      // Kept in step with the button on the bar in `paintSmart`, both ways:
+      // they are two faces of one state, and a pop-out that disagreed with the
+      // control behind it would be worse than not having it.
+      this.smartSwitch = toggle("Smart Speed", this.smartOn, (on) => {
+        this.setSmartSpeed(on);
+        this.options.smartSpeed?.onToggle?.(on);
+      });
+
+      if (quick.onSkipNonSpeech) {
+        toggle("Skip music too", quick.skipNonSpeech ?? false, (on) => quick.onSkipNonSpeech?.(on));
+      }
+
+      choice(
+        "Pause speed",
+        [1.5, 2, 2.5, 3, 4, 5],
+        this.options.smartSpeed.silenceRate,
+        (value) => `${value}×`,
+        (value) =>
+          this.setSilenceSettings(this.options.smartSpeed?.minGap ?? 0.5, value),
+      );
+
+      choice(
+        "Shortest pause",
+        [0.2, 0.3, 0.5, 0.8, 1.2],
+        this.options.smartSpeed.minGap,
+        (value) => `${value}s`,
+        (value) =>
+          this.setSilenceSettings(value, this.options.smartSpeed?.silenceRate ?? 3),
+      );
+    }
+
+    if (quick.heightVh !== undefined && quick.onHeight) {
+      const el = row("Player size").createEl("input", {
+        cls: "ytfree-panel-range",
+        attr: { type: "range", min: "20", max: "70", step: "5", "aria-label": "Player size" },
+      });
+      el.value = String(quick.heightVh);
+      el.addEventListener("input", () => quick.onHeight?.(Number(el.value)));
+    }
+
+    panel.createDiv({ cls: "ytfree-panel-note", text: "This video only" });
+
+    // Anywhere else, and Escape. Registered on the document because a tap on
+    // the note behind the panel is the commonest way to mean "done", and it
+    // never reaches this element.
+    this.onDocPointer = (event: Event) => {
+      if (!this.panelOpen) return;
+      const target = event.target as Node | null;
+      if (target && (panel.contains(target) || this.panelBtn?.contains(target))) return;
+      this.togglePanel(false);
+    };
+    this.onDocKey = (event: KeyboardEvent) => {
+      if (this.panelOpen && event.key === "Escape") this.togglePanel(false);
+    };
+    document.addEventListener("pointerdown", this.onDocPointer, true);
+    document.addEventListener("keydown", this.onDocKey);
+  }
+
+  private togglePanel(open?: boolean): void {
+    const panel = this.panel;
+    if (!panel) return;
+    this.panelOpen = open ?? !this.panelOpen;
+    panel.toggleClass("is-open", this.panelOpen);
+    this.panelBtn?.toggleClass("is-active", this.panelOpen);
+    this.panelBtn?.setAttribute("aria-expanded", String(this.panelOpen));
   }
 
   /**
@@ -774,10 +1016,18 @@ export class YtFreePlayer {
    * and the icon change — never the box.
    */
   private paintSmart(): void {
+    const usable = this.activeWindows.length > 0;
+    // The pop-out's switch is the same state wearing a different shape, so it
+    // is repainted from here rather than from whichever control was pressed.
+    if (this.smartSwitch) {
+      this.smartSwitch.toggleClass("is-on", this.smartOn);
+      this.smartSwitch.setAttribute("aria-checked", String(this.smartOn));
+      this.smartSwitch.disabled = !usable && this.smartReason !== null;
+    }
+
     const el = this.smartBtn;
     if (!el) return;
 
-    const usable = this.activeWindows.length > 0;
     el.toggleClass("is-active", this.smartOn && usable);
     el.disabled = !usable && this.smartReason !== null;
 
@@ -927,25 +1177,52 @@ export class YtFreePlayer {
    * silently.
    */
   private async toggleFullscreen(): Promise<void> {
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // Already gone, or refused. Either way there is nothing to say.
+      }
+      return;
+    }
+    await this.enterFullscreen(true);
+  }
+
+  /**
+   * Go fullscreen, and never come back out — the half a rotation wants.
+   *
+   * `announce` is off for anything the reader did not press: a phone turned
+   * sideways that cannot go fullscreen should do nothing, not put an error over
+   * the picture. iOS refuses `webkitEnterFullscreen` outside a user gesture on
+   * some versions, which is exactly why every path here is allowed to fail
+   * quietly.
+   */
+  async enterFullscreen(announce = false): Promise<void> {
     const el = this.video as HTMLVideoElement & {
       webkitEnterFullscreen?: () => void;
       webkitSupportsFullscreen?: boolean;
+      webkitPresentationMode?: string;
     };
+    if (document.fullscreenElement || el.webkitPresentationMode === "fullscreen") return;
+
     try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-        return;
-      }
       if (typeof this.video.requestFullscreen === "function") {
         await this.video.requestFullscreen();
         return;
       }
     } catch {
-      // Same as above: fall through rather than dead-end.
+      // Fall through to WebKit's rather than dead-ending.
     }
 
-    if (el.webkitSupportsFullscreen) el.webkitEnterFullscreen?.();
-    else this.flashStatus("Fullscreen is not available until the video is playing.");
+    try {
+      if (el.webkitSupportsFullscreen) {
+        el.webkitEnterFullscreen?.();
+        return;
+      }
+    } catch {
+      // Media not loaded yet, or no gesture behind this call.
+    }
+    if (announce) this.flashStatus("Fullscreen is not available until the video is playing.");
   }
 
   /**
@@ -1247,6 +1524,14 @@ export class YtFreePlayer {
     if (this.onVisibility) {
       document.removeEventListener("visibilitychange", this.onVisibility);
       this.onVisibility = null;
+    }
+    if (this.onDocPointer) {
+      document.removeEventListener("pointerdown", this.onDocPointer, true);
+      this.onDocPointer = null;
+    }
+    if (this.onDocKey) {
+      document.removeEventListener("keydown", this.onDocKey);
+      this.onDocKey = null;
     }
     this.clearNowPlaying();
     this.teardownHls();

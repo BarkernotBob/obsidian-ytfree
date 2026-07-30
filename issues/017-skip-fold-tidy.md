@@ -83,6 +83,11 @@ to fit, centred, rather than letterboxing or overflowing.
 A video note is created by the click that opens the video, before anyone knows
 whether the video was worth anything. Most are not.
 
+> **Superseded by [019](019-progress-bar-landscape-quick-panel.md).** Three of
+> the four conditions below could keep a note nobody had written a word in — a
+> tag, a heatmap above the fold, or the plugin's own writes touching the file.
+> The rule is now one question: is there anything under `# Notes`?
+
 A sweep runs a minute after Obsidian settles and once a day after that. It
 trashes a note only when **all four** hold:
 

@@ -22,3 +22,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [016](016-smart-speed-round-two.md) | Smart Speed round two: skip music too, and analyse faster than playback | Built 2026-07-29 — awaiting manual test |
 | [017](017-skip-fold-tidy.md) | Skip the silence, fold the transcript, tidy the leftovers | Built 2026-07-30 — awaiting manual test |
 | [018](018-watch-later.md) | What Watch Later is for now | Scoped — needs a decision, nothing built |
+| [019](019-progress-bar-landscape-quick-panel.md) | A line, a rotation, and the dials where you are watching | Built 2026-07-30 — awaiting manual test |

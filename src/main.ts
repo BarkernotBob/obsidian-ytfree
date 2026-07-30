@@ -279,6 +279,12 @@ interface PlayerEntry {
   wrapper: HTMLElement;
   collapsed: CollapseMode;
   /**
+   * "Skip music too" for this video only, set from the player's pop-out. Unset
+   * — the ordinary case — means the global setting answers. It is deliberately
+   * not persisted: a decision made about one lecture should not outlive it.
+   */
+  skipNonSpeech?: boolean;
+  /**
    * Mobile: the stream has not been resolved yet. The player is mounted and
    * takes up its final space from the moment the note opens, but nothing is
    * fetched until the poster or a timestamp is tapped — opening a note on
@@ -802,6 +808,43 @@ export default class YtFreePlugin extends Plugin {
       this.registerInterval(window.setTimeout(() => void this.tidyEmptyNotes(), TIDY_SETTLE_MS));
     });
     this.registerInterval(window.setInterval(() => void this.tidyEmptyNotes(), TIDY_INTERVAL_MS));
+
+    this.watchForLandscape();
+  }
+
+  /**
+   * A phone turned sideways is a phone asking to watch.
+   *
+   * Phones only — `Platform.isPhone` is false on an iPad, where landscape is
+   * just the shape the thing is held in and a note is still perfectly readable
+   * beside the video. And only for a video that has actually been playing:
+   * rotating while reading a note you opened this morning should not throw a
+   * paused player over the whole screen.
+   *
+   * iOS may refuse a fullscreen request that has no user gesture behind it, and
+   * a rotation is not one. `enterFullscreen` fails quietly by design, so the
+   * worst case here is that nothing happens and the Fullscreen button still
+   * works — which is the same as today.
+   */
+  private watchForLandscape(): void {
+    if (!Platform.isPhone) return;
+
+    const landscape = window.matchMedia("(orientation: landscape)");
+    const onRotate = (): void => {
+      if (!landscape.matches) return;
+      const entry = this.watchingEntry();
+      if (!entry) return;
+      void entry.player.enterFullscreen();
+    };
+    landscape.addEventListener("change", onRotate);
+    this.register(() => landscape.removeEventListener("change", onRotate));
+  }
+
+  /** The player the reader is actually watching, if there is one. */
+  private watchingEntry(): PlayerEntry | null {
+    const last = this.lastActiveVideoId ? this.players.get(this.lastActiveVideoId) : undefined;
+    const candidates = last ? [last] : [...this.players.values()];
+    return candidates.find((entry) => entry.player.hasPlayed) ?? null;
   }
 
   /**
@@ -2417,6 +2460,18 @@ export default class YtFreePlugin extends Plugin {
         resumeAt: () => this.progress.resumeFor(videoId),
         onProgress: (seconds, duration) => this.progress.record(videoId, seconds, duration),
         nowPlaying: () => this.nowPlayingFor(videoId, sourcePath),
+        // Two ways out of the player and into its settings: the whole screen,
+        // and the four dials you actually change while something is playing.
+        onOpenSettings: () => this.openSettingsTab(),
+        quick: {
+          // Only where the height variable is read — a fenced block sizes
+          // itself, so a size control there would be a control that does
+          // nothing. See `.ytfree-pinned` / `.ytfree-docked` in styles.css.
+          heightVh: wrapper.hasClass("ytfree-pinned") ? this.settings.pinnedHeightVh : undefined,
+          onHeight: (vh) => wrapper.style.setProperty("--ytfree-pinned-height", `${vh}vh`),
+          skipNonSpeech: this.settings.skipNonSpeech,
+          onSkipNonSpeech: (value) => this.setSkipNonSpeechFor(videoId, value),
+        },
         smartSpeed: {
           enabled: this.settings.smartSpeed,
           silenceRate: this.settings.silenceSpeed,
@@ -2560,9 +2615,48 @@ export default class YtFreePlugin extends Plugin {
     const combined = combineSilence({
       transcript,
       ffmpeg: ffmpeg ? { windows: ffmpeg.windows, analyzedTo: ffmpeg.analyzedTo } : null,
-      skipNonSpeech: this.settings.skipNonSpeech,
+      // The pop-out's answer for this video if it gave one, the setting if not.
+      skipNonSpeech: this.players.get(videoId)?.skipNonSpeech ?? this.settings.skipNonSpeech,
     });
     if (combined.source) player.setSilenceWindows(combined.windows, combined.source);
+  }
+
+  /**
+   * "Skip music too", for one video, from the player's own pop-out.
+   *
+   * It changes which windows exist rather than how they are filtered — a
+   * non-speech stretch is either in the map or it is not — so the combination
+   * is rebuilt from the stored maps. Nothing is refetched and nothing is
+   * saved: the override lives as long as the note stays open.
+   */
+  private setSkipNonSpeechFor(videoId: string, value: boolean): void {
+    const entry = this.players.get(videoId);
+    if (!entry) return;
+    entry.skipNonSpeech = value;
+    this.pushCombinedSilence(entry.player, videoId);
+  }
+
+  /**
+   * Obsidian's settings screen, open on this plugin's tab.
+   *
+   * `app.setting` is internal, so both calls are guarded and the failure is a
+   * sentence telling you where to go by hand rather than a button that does
+   * nothing.
+   */
+  private openSettingsTab(): void {
+    const setting = (
+      this.app as unknown as {
+        setting?: { open?: () => void; openTabById?: (id: string) => void };
+      }
+    ).setting;
+    try {
+      setting?.open?.();
+      setting?.openTabById?.(this.manifest.id);
+      if (!setting?.open) new Notice("YT Free: open Settings → Community plugins → YT Free.");
+    } catch (err) {
+      console.error("YT Free: could not open the settings tab.", err);
+      new Notice("YT Free: open Settings → Community plugins → YT Free.");
+    }
   }
 
   /**

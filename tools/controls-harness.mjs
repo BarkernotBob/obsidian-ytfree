@@ -59,24 +59,42 @@ const speed = `<select class="ytfree-speed"><option>1.75×</option></select>`;
 // the row wider than it was built?
 const saved = `<span class="ytfree-btn-badge ytfree-smart-saved">−1:04:37</span>`;
 
+// The per-video pop-out, at its tallest: five rows and the footnote. Measured
+// open as well as shut, because the promise it makes is that opening it changes
+// the bar's geometry not at all.
+const panelRow = (label, control) =>
+  `<div class="ytfree-panel-row"><span class="ytfree-panel-label">${label}</span>${control}</div>`;
+const panelSwitch = `<button type="button" class="ytfree-switch is-on"><span class="ytfree-switch-knob"></span></button>`;
+const panelSelect = `<select class="ytfree-panel-select"><option>2.5×</option></select>`;
+const panel = `
+  <div class="ytfree-panel">
+    ${panelRow("Smart Speed", panelSwitch)}
+    ${panelRow("Skip music too", panelSwitch)}
+    ${panelRow("Pause speed", panelSelect)}
+    ${panelRow("Shortest pause", panelSelect)}
+    ${panelRow("Player size", `<input type="range" class="ytfree-panel-range">`)}
+    <div class="ytfree-panel-note">This video only</div>
+  </div>`;
+
 /**
- * The phone's bar: speed, Smart Speed and PiP left, transport centred,
- * fullscreen and collapse right. The desktop's is the same row with a timestamp
- * and a download button on the right and no collapse — the wider case, on the
- * wider screen, so both are rendered.
+ * The phone's bar: speed, Smart Speed, PiP and Settings left, transport
+ * centred, this-video options, fullscreen and collapse right. The desktop's is
+ * the same row with a timestamp and a download button on the right and no
+ * collapse — the wider case, on the wider screen, so both are rendered.
  */
 const controls = (phone) => `
   <div class="ytfree-controls">
     <div class="ytfree-controls-group ytfree-controls-side">
-      ${speed}${btn("ytfree-btn-smart", saved)}${btn("ytfree-btn-pip")}
+      ${speed}${btn("ytfree-btn-smart", saved)}${btn("ytfree-btn-pip")}${btn("ytfree-btn-settings")}
     </div>
     <div class="ytfree-controls-group ytfree-controls-transport">
       ${btn("ytfree-btn-play")}${btn("ytfree-btn-back", badge)}${btn("ytfree-btn-forward", badge)}
     </div>
     <div class="ytfree-controls-group ytfree-controls-side">
-      ${btn("ytfree-btn-fullscreen")}
+      ${btn("ytfree-btn-panel")}${btn("ytfree-btn-fullscreen")}
       ${phone ? btn("ytfree-btn-collapse") : btn("ytfree-btn-timestamp") + btn("ytfree-btn-download")}
     </div>
+    ${panel}
   </div>`;
 
 const page = (phone) => `<!doctype html>
@@ -128,9 +146,24 @@ const measure = () => {
     return Math.round(box.left + box.width / 2 - (parent.left + parent.width / 2));
   });
 
+  // The pop-out, open: it must change nothing about the row it hangs off, and
+  // it must stay inside the player rather than off the side of the screen.
+  const panelEl = bar.querySelector(".ytfree-panel");
+  const closedHeight = Math.round(barBox.height);
+  panelEl.classList.add("is-open");
+  const openBox = bar.getBoundingClientRect();
+  const panelBox = panelEl.getBoundingClientRect();
+  panelEl.classList.remove("is-open");
+  const view = document.documentElement.getBoundingClientRect();
+
   return {
     // The failure this harness exists to catch.
     overflow: Math.round(bar.scrollWidth - bar.clientWidth),
+    // Zero, or opening the pop-out moves the note.
+    barGrowthWhenPanelOpens: Math.round(openBox.height) - closedHeight,
+    panelOutsideView: Math.round(
+      Math.max(0, view.left - panelBox.left) + Math.max(0, panelBox.right - view.right),
+    ),
     barWidth: Math.round(barBox.width),
     smallestTarget: Math.min(...boxes.map((b) => Math.round(Math.min(b.width, b.height)))),
     controlRows: rows.length,
