@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findTimestamps, linkifyTimestamps, seekLinkAt } from "../src/description.ts";
+import { escapeDescription, findTimestamps, linkifyTimestamps, seekLinkAt } from "../src/description.ts";
 
 const ID = "dQw4w9WgXcQ";
 
@@ -87,4 +87,22 @@ test("seekLinkAt returns null off the link and on non-ytfree links", () => {
   assert.equal(seekLinkAt(line, 1), null);
   assert.equal(seekLinkAt(line, line.length - 2), null);
   assert.equal(seekLinkAt("no links here", 3), null);
+});
+
+test("escapeDescription neutralises tilde and backtick fences", () => {
+  const out = escapeDescription("intro\n~~~~~~~~\nGET SMARTER SECTION\n```\ncode?");
+  assert.equal(out, "intro\n\\~\\~\\~\\~\\~\\~\\~\\~\nGET SMARTER SECTION\n\\`\\`\\`\ncode?");
+});
+
+test("escapeDescription keeps description text out of the note's heading structure", () => {
+  assert.equal(escapeDescription("# Chapters\n## Links"), "\\# Chapters\n\\## Links");
+  assert.equal(escapeDescription("Title\n---"), "Title\n\\---");
+  assert.equal(escapeDescription("Title\n==="), "Title\n\\===");
+  assert.equal(escapeDescription("> quoted"), "\\> quoted");
+  assert.equal(escapeDescription("see [[Note]]"), "see \\[\\[Note]]");
+});
+
+test("escapeDescription leaves ordinary text, links and lists alone", () => {
+  const plain = "Get a free audio book! http://www.audible.com/Smarter\n- one\n1. two\n#SmarterEveryDay";
+  assert.equal(escapeDescription(plain), plain);
 });

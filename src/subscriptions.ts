@@ -11,7 +11,7 @@
  * fetched when a note is finally created.
  */
 
-import { linkifyTimestamps } from "./description.ts";
+import { escapeDescription, linkifyTimestamps } from "./description.ts";
 import { DESCRIPTION_HEADING, NOTES_HEADING } from "./sections.ts";
 import type { SearchResult } from "./search.ts";
 
@@ -844,7 +844,7 @@ export function buildWatchLaterNote(item: HubItem, now: Date): string {
     // Real markdown links, written at creation time: the plugin also linkifies
     // at render time, but a link in the file survives the plugin being off.
     item.description
-      ? linkifyTimestamps(item.description, item.videoId)
+      ? linkifyTimestamps(escapeDescription(item.description), item.videoId)
       : item.origin === "watchlater"
         ? "_From your YouTube Watch Later, which carries no description. It will fill in if this channel's feed still holds the video._"
         : item.origin === "search"

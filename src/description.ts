@@ -81,6 +81,60 @@ export function linkifyTimestamps(text: string, videoId: string): string {
 }
 
 /**
+ * Make a YouTube description safe to paste into a note as markdown.
+ *
+ * A description is plain text that has never been markdown, and creators write
+ * things in it that markdown reads as structure. The one that actually broke a
+ * note: Smarter Every Day separates its sections with `~~~~~~~~` rules, and
+ * three or more tildes at the start of a line open a fenced code block — so
+ * everything from there to the next run of tildes rendered as code, and an odd
+ * number of runs swallowed the rest of the note, headings and transcript
+ * included.
+ *
+ * The other line shapes here are the same bug wearing different clothes:
+ *
+ * - ``` — the other fence character.
+ * - `# ...` — a description's own "SECTION" line becomes a real heading, which
+ *   lands in the outline and, worse, is what `sectionEnd` looks for: a `#` line
+ *   inside the description ends the description section early, so folds and a
+ *   transcript re-fetch aim at the wrong range.
+ * - `---` / `===` under a text line — setext, i.e. a heading again. `---` alone
+ *   is also a horizontal rule the creator never wrote.
+ * - `>` — a blockquote.
+ * - `- ` / `1. ` — a list. Left alone deliberately: creators do write lists, and
+ *   rendering one as a list is the right answer.
+ * - `[[` — an Obsidian wikilink, which makes a phantom note and shows up in the
+ *   graph.
+ *
+ * Everything is escaped with a backslash rather than dropped, so the text still
+ * reads exactly as written and copies back out clean.
+ */
+export function escapeDescription(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      // Leading whitespace is preserved; the escape goes on the first character
+      // that carries meaning.
+      const indent = line.slice(0, line.length - line.trimStart().length);
+      const body = line.slice(indent.length);
+      // A fence line is escaped character by character: one backslash on the
+      // first tilde would leave `~~` pairs behind it, which is strikethrough —
+      // a different piece of unasked-for formatting.
+      const fence = /^([~`]{3,})/.exec(body);
+      if (fence) {
+        const escaped = fence[1].replace(/([~`])/g, "\\$1");
+        return `${indent}${escaped}${body.slice(fence[1].length)}`;
+      }
+      if (/^(#{1,6}\s|>|-{3,}\s*$|={3,}\s*$)/.test(body)) {
+        return `${indent}\\${body}`;
+      }
+      return line;
+    })
+    .join("\n")
+    .replace(/\[\[/g, "\\[\\[");
+}
+
+/**
  * The `ytfree:` markdown link in `line` whose full `[text](url)` span covers
  * `offset`, or null.
  *
