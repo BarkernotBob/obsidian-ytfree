@@ -66,10 +66,18 @@
 .ytfree-progress {
   position: absolute;
   z-index: 2;
-  left: 0;
-  right: 0;
+  /*
+   * Inset to the same 16px the platform's own scrubber is, so the two lines
+   * share their left and right ends and purple sits directly under the native
+   * track whenever both are on screen. Measured, not guessed: Chromium's
+   * media-controls timeline is 16px from each edge of the video at every width
+   * (400 / 640 / 900 all give exactly 16), and it does not scale.
+   */
+  left: var(--ytfree-progress-inset, 16px);
+  right: var(--ytfree-progress-inset, 16px);
   bottom: 0;
   height: 3px;
+  border-radius: 2px;
   overflow: hidden;
   pointer-events: none;
   background: rgba(255, 255, 255, 0.16);
@@ -98,6 +106,47 @@
    know would drop the pair. */
 :-webkit-full-screen .ytfree-progress {
   visibility: hidden;
+}
+
+/*
+ * Where a drag is heading, over the middle of the picture.
+ *
+ * Out of the flow and `visibility`-toggled, like everything else that appears
+ * over the video: it exists from the moment the player is built, so showing it
+ * mid-gesture moves nothing. `pointer-events: none`, or it would take the touch
+ * that is drawing it.
+ */
+.ytfree-seek {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 6px 12px;
+  border-radius: var(--radius-m);
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.ytfree-seek.is-visible {
+  visibility: visible;
+}
+
+/*
+ * Left and right over the picture is a seek, not a scroll and not the host's
+ * swipe. `touch-action` is the half of that the browser has to be told before
+ * the gesture begins — `preventDefault` inside the move handler is too late to
+ * stop a pan the compositor has already started. `pan-y` keeps the other axis,
+ * so the note still scrolls past the video with a vertical drag.
+ */
+.ytfree-media,
+.ytfree-stage {
+  touch-action: pan-y;
 }
 
 /*
@@ -242,6 +291,31 @@
 
 .ytfree-controls .ytfree-btn-play:active {
   color: var(--text-on-accent);
+}
+
+/*
+ * Play, pressed before the stream existed.
+ *
+ * The button has already toggled — the reader asked for playback and will get
+ * it — but the video is still being resolved, and a pause symbol sitting
+ * perfectly still over a picture that is not moving is exactly the lie this
+ * state exists to avoid. It pulses instead. Opacity only: no size, no border,
+ * nothing that could move the controls either side of it.
+ */
+.ytfree-controls .ytfree-btn-play.is-waiting {
+  animation: ytfree-waiting 1.1s ease-in-out infinite;
+}
+
+@keyframes ytfree-waiting {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ytfree-controls .ytfree-btn-play.is-waiting {
+    animation: none;
+    opacity: 0.6;
+  }
 }
 
 /* An icon this Obsidian build did not have fell back to its word — see
@@ -1096,6 +1170,74 @@ body.ytfree-immersive-open {
 .ytfree-fallback-retry {
   background: var(--interactive-normal);
   color: var(--text-normal);
+}
+
+/*
+ * The way back when the pinned player is switched off.
+ *
+ * Absolute inside `.view-content`, which is the box the note's scroller sits
+ * *in* rather than the thing that scrolls, so this stays in the corner while
+ * the note moves under it — and, the point of it, adds nothing to the note's
+ * height. `.view-content` is `position: static` in Obsidian's own CSS, hence
+ * the class the plugin puts on it alongside the button.
+ */
+.view-content.ytfree-has-pin-restore {
+  position: relative;
+}
+
+.ytfree-pin-restore {
+  position: absolute;
+  top: var(--ytfree-pin-restore-top, 6px);
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 13px;
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-s);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ytfree-pin-restore:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ytfree-pin-restore .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/*
+ * A fixed width for the label, so hover — which only changes colour — cannot
+ * move the pill, and so the icon sits in the same place in every theme.
+ */
+.ytfree-pin-restore-label {
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+
+/*
+ * On a phone the view header floats over `.view-content`, so the corner it
+ * would otherwise take is the "…" menu's. Drop below the same spacing the
+ * editor's scroller reserves for that header.
+ */
+.is-phone .view-content.ytfree-has-pin-restore {
+  --ytfree-pin-restore-top: calc(var(--view-top-spacing-markdown, 0px) + 4px);
+}
+
+/* And a thumb needs more of it than a pointer does. */
+.is-phone .ytfree-pin-restore {
+  height: 34px;
+  border-radius: 17px;
+  padding: 0 12px;
 }
 
 /* Stands in for a fenced block whose video is already pinned above. */

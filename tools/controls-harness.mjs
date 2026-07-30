@@ -81,9 +81,9 @@ const panel = `
 /**
  * The phone's bar: speed, PiP and Fullscreen left — how it plays and where —
  * transport centred, and what it does to the note on the right: collapse, the
- * pin, and the pop-out last. The desktop's is the same row with a timestamp and
- * a download button in place of collapse: the wider case, on the wider screen,
- * so both are rendered.
+ * pin, and the pop-out last. The desktop's is the same row with a download
+ * button in place of collapse: the wider case, on the wider screen, so both are
+ * rendered.
  */
 const controls = (phone) => `
   <div class="ytfree-controls">
@@ -94,7 +94,7 @@ const controls = (phone) => `
       ${btn("ytfree-btn-play")}${btn("ytfree-btn-back", badge)}${btn("ytfree-btn-forward", badge)}
     </div>
     <div class="ytfree-controls-group ytfree-controls-side ytfree-controls-right">
-      ${phone ? btn("ytfree-btn-collapse") : btn("ytfree-btn-timestamp") + btn("ytfree-btn-download")}
+      ${phone ? btn("ytfree-btn-collapse") : btn("ytfree-btn-download")}
       ${btn("ytfree-btn-pin")}${btn("ytfree-btn-panel")}
     </div>
     ${panel}
@@ -218,13 +218,27 @@ const measure = () => {
     badgeOffCentre: badges,
     offCentreVertical,
     sideWidths: side,
-    // Both zero, or the line is not sitting on the bottom edge of the picture.
+    // Zero, or the line is not sitting on the bottom edge of the picture.
     progressBelowPicture: (() => {
       const line = document.querySelector(".ytfree-progress");
       const picture = document.querySelector(".ytfree-video, .ytfree-media");
-      const a = line.getBoundingClientRect();
-      const b = picture.getBoundingClientRect();
-      return [Math.round(a.bottom - b.bottom), Math.round(a.width - b.width)];
+      return Math.round(
+        line.getBoundingClientRect().bottom - picture.getBoundingClientRect().bottom,
+      );
+    })(),
+    /*
+     * [left, right], and both must be 16 — the inset Chromium's own
+     * `-webkit-media-controls-timeline` uses, measured off screenshots of the
+     * native controls at 400/640/900px and constant at all three. That is what
+     * puts the purple line directly under the platform's scrubber instead of
+     * running a half-inch wider at each end.
+     */
+    progressInset: (() => {
+      const a = document.querySelector(".ytfree-progress").getBoundingClientRect();
+      const b = document
+        .querySelector(".ytfree-video, .ytfree-media")
+        .getBoundingClientRect();
+      return [Math.round(a.left - b.left), Math.round(b.right - a.right)];
     })(),
     panelNaturalHeight,
     roomAboveBar,
@@ -261,6 +275,58 @@ const measureImmersive = () => {
   };
 };
 
+/**
+ * The pill that brings the pinned player back, on a note that has none.
+ *
+ * The whole promise of it is that it costs the note nothing: the first line of
+ * text has to land in exactly the same place with the pill on the page as
+ * without it, and the pill has to be inside the view rather than off its right
+ * edge or up behind the header. Rendered with the header a phone actually has,
+ * because that is the corner it would otherwise take.
+ */
+const restorePage = (phone) => `<!doctype html>
+<html><head><meta charset="utf-8"><style>${appCss}</style><style>${pluginCss}</style>
+<style>html,body{margin:0}.workspace-leaf-content{height:100vh}</style></head>
+<body class="theme-dark ${phone ? "is-phone is-mobile is-floating-nav" : "is-desktop"} mod-macos">
+  <div class="workspace-leaf-content" data-type="markdown">
+    <div class="view-header"><div class="view-header-title">A note</div></div>
+    <div class="view-content">
+      <div class="markdown-source-view mod-cm6">
+        <div class="cm-scroller"><div class="cm-content"><div class="cm-line" id="first">First line</div></div></div>
+      </div>
+    </div>
+  </div>
+</body></html>`;
+
+const measureRestore = () => {
+  const content = document.querySelector(".view-content");
+  const first = () => document.getElementById("first").getBoundingClientRect();
+  const before = first().top;
+
+  content.classList.add("ytfree-has-pin-restore");
+  const el = document.createElement("button");
+  el.className = "ytfree-pin-restore";
+  el.innerHTML =
+    `<svg class="svg-icon"></svg><span class="ytfree-pin-restore-label">Player</span>`;
+  content.appendChild(el);
+
+  const box = el.getBoundingClientRect();
+  const view = content.getBoundingClientRect();
+  const header = document.querySelector(".view-header").getBoundingClientRect();
+  return {
+    // Zero, or the pill pushed the note's text.
+    textMoved: Math.round(first().top - before),
+    // Zero, or it is hanging off the side of the view.
+    outsideView: Math.round(
+      Math.max(0, view.left - box.left) + Math.max(0, box.right - view.right),
+    ),
+    // Positive = clear of the header. A phone's floats over the content.
+    belowHeader: Math.round(box.top - header.bottom),
+    // Thumb-sized enough to hit, small enough not to be in the way.
+    size: [Math.round(box.width), Math.round(box.height)],
+  };
+};
+
 const browser = await chromium.launch({ executablePath: CHROME });
 for (const [label, width, phone] of [
   ["iPhone SE / mini (375)", 375, true],
@@ -282,6 +348,17 @@ for (const [label, width, height] of [
   const tab = await browser.newPage({ viewport: { width, height } });
   await tab.setContent(page(true));
   console.log(label, await tab.evaluate(measureImmersive));
+  await tab.close();
+}
+
+// And the reopen pill, on a note whose player is switched off.
+for (const [label, width, phone] of [
+  ["restore pill, iPhone 14 (390)", 390, true],
+  ["restore pill, desktop pane (700)", 700, false],
+]) {
+  const tab = await browser.newPage({ viewport: { width, height: 700 } });
+  await tab.setContent(restorePage(phone));
+  console.log(label, await tab.evaluate(measureRestore));
   await tab.close();
 }
 await browser.close();

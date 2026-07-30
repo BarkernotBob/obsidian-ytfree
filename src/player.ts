@@ -80,6 +80,11 @@ export interface PlayerOptions {
   pin?: PinOptions;
   /** The pop-out of per-video controls. Absent, there is no pop-out button. */
   quick?: QuickPanelOptions;
+  /**
+   * Dragging left and right across the picture seeks. Mobile only: on a phone
+   * a horizontal swipe belongs to the host app, and over a video it should not.
+   */
+  dragSeek?: boolean;
 }
 
 export interface PinOptions {
@@ -146,6 +151,26 @@ export interface SmartSpeedOptions {
 const PROGRESS_INTERVAL_MS = 5000;
 
 /**
+ * How much video a full-width drag across the picture covers.
+ *
+ * Not the whole video: a proportional scrub is unusable on an hour-long lecture
+ * — a thumb's width is two minutes — and the thing you actually want on a phone
+ * is "back a bit, forward a bit". Ninety seconds across the picture makes a
+ * single point of movement about a quarter of a second.
+ */
+const DRAG_SEEK_SECONDS = 90;
+
+/** How far a finger has to travel before a touch is a seek rather than a tap. */
+const DRAG_SEEK_THRESHOLD_PX = 12;
+
+/**
+ * The bottom strip of the picture belongs to the platform's own controls, and
+ * its scrubber is a horizontal drag too. Touches starting in here are left
+ * alone so the native bar still works.
+ */
+const NATIVE_CONTROLS_BAND_PX = 56;
+
+/**
  * A frame gap longer than this is not playback, it is a window that was hidden
  * or a laptop that was asleep. Counted as zero rather than as two minutes of
  * saved listening.
@@ -191,6 +216,22 @@ export class YtFreePlayer {
   /** The purple line along the bottom of the picture, and the part that fills. */
   private progressBar: HTMLElement | null = null;
   private progressFill: HTMLElement | null = null;
+  /** The Play/Pause button, repainted from one place — see `paintPlay`. */
+  private playBtn: HTMLButtonElement | null = null;
+  /**
+   * Play was pressed before there was anything to play.
+   *
+   * The button toggles anyway — the reader asked, and an unresponsive control is
+   * worse than a slow one — but the video is started by whatever finishes
+   * loading rather than by the tap, so the state on the button is never a lie
+   * about what the player is doing.
+   */
+  private pendingPlay = false;
+  // --- Drag-to-seek. Null between gestures.
+  private drag: { id: number; x: number; y: number; from: number; to: number; live: boolean } | null =
+    null;
+  /** The time a drag is heading for, painted instead of `currentTime`. */
+  private dragReadout: HTMLElement | null = null;
   // --- The per-video pop-out.
   private panel: HTMLElement | null = null;
   private panelBtn: HTMLButtonElement | null = null;
@@ -234,7 +275,6 @@ export class YtFreePlayer {
     private container: HTMLElement,
     private provider: StreamProvider,
     private onStatus: (message: string | null) => void,
-    private onTimestamp?: (seconds: number) => void,
     private onDownload?: () => void,
     private options: PlayerOptions = {},
   ) {
@@ -249,6 +289,7 @@ export class YtFreePlayer {
       attr: { controls: "", playsinline: "", preload: "metadata" },
     });
     this.buildProgressBar(stage);
+    if (options.dragSeek) this.bindDragSeek(stage);
 
     // Before anything can set a rate above 1: without this a 3× pause is a
     // chipmunk, and Chromium and WebKit spell the property differently.
@@ -311,8 +352,127 @@ export class YtFreePlayer {
     // Hidden until there is a real duration, so an unresolved player does not
     // show a track over its poster with nothing in it.
     this.progressBar.toggleClass("is-live", live);
-    const fraction = live ? Math.min(1, Math.max(0, this.video.currentTime / duration)) : 0;
+    // A drag in progress is the position the reader is choosing, not the one
+    // the video is still playing: the line is the preview of where they will
+    // land, which is the only feedback a paused frame can give them.
+    const at = this.drag?.live ? this.drag.to : this.video.currentTime;
+    const fraction = live ? Math.min(1, Math.max(0, at / duration)) : 0;
     fill.style.transform = `scaleX(${fraction.toFixed(5)})`;
+  }
+
+  /**
+   * Left and right across the picture is seeking, and nothing else.
+   *
+   * On a phone this gesture belonged to Obsidian — a horizontal swipe over the
+   * video opened the sidebar, which is never what a video means. The host is
+   * told to keep out with `data-ignore-swipe` on the wrapper (Obsidian walks up
+   * from the touch target and abandons the gesture on the first element that
+   * has it); this is the other half, which puts the movement to use.
+   *
+   * The seek is committed on release, not while the finger moves: one seek
+   * instead of sixty, which on an HLS stream is the difference between a scrub
+   * and a stall. The purple line and the readout follow the finger, so the
+   * feedback is immediate even though the video does not move until you let go.
+   */
+  private bindDragSeek(stage: HTMLElement): void {
+    this.dragReadout = stage.createDiv({ cls: "ytfree-seek" });
+
+    const duration = (): number => {
+      const value = this.video.duration;
+      return Number.isFinite(value) && value > 0 ? value : 0;
+    };
+
+    stage.addEventListener(
+      "touchstart",
+      (event) => {
+        // A second finger is a pinch or the platform's own gesture. Whatever it
+        // is, it is not this one, so an in-flight drag is abandoned rather than
+        // fought over.
+        if (event.touches.length !== 1) {
+          this.endDrag(false);
+          return;
+        }
+        if (duration() === 0) return; // nothing resolved yet: the poster's tap
+        const touch = event.touches[0];
+        // The platform's own control bar lives along the bottom edge and its
+        // scrubber is a horizontal drag too. Leave that strip alone.
+        const box = stage.getBoundingClientRect();
+        if (touch.clientY > box.bottom - NATIVE_CONTROLS_BAND_PX) return;
+        this.drag = {
+          id: touch.identifier,
+          x: touch.clientX,
+          y: touch.clientY,
+          from: this.video.currentTime,
+          to: this.video.currentTime,
+          live: false,
+        };
+      },
+      { passive: true },
+    );
+
+    stage.addEventListener(
+      "touchmove",
+      (event) => {
+        const drag = this.drag;
+        if (!drag) return;
+        const touch = Array.from(event.touches).find((t) => t.identifier === drag.id);
+        if (!touch) return;
+
+        const dx = touch.clientX - drag.x;
+        const dy = touch.clientY - drag.y;
+        if (!drag.live) {
+          if (Math.abs(dx) < DRAG_SEEK_THRESHOLD_PX) return;
+          // Mostly vertical: the reader is scrolling the note past the player,
+          // and taking that away would trap them at the top of it.
+          if (Math.abs(dx) <= Math.abs(dy)) {
+            this.drag = null;
+            return;
+          }
+          drag.live = true;
+        }
+
+        // Once it is a seek it is only a seek: no scrolling, and no native
+        // scrubber picking the same movement up underneath us.
+        event.preventDefault();
+        const width = stage.clientWidth || 1;
+        const total = duration();
+        drag.to = Math.min(total, Math.max(0, drag.from + (dx / width) * DRAG_SEEK_SECONDS));
+        this.paintProgress();
+        this.paintSeekReadout();
+      },
+      { passive: false },
+    );
+
+    for (const event of ["touchend", "touchcancel"]) {
+      stage.addEventListener(event, (e) => {
+        const drag = this.drag;
+        if (!drag) return;
+        const changed = (e as TouchEvent).changedTouches;
+        if (changed && !Array.from(changed).some((t) => t.identifier === drag.id)) return;
+        this.endDrag(event === "touchend");
+      });
+    }
+  }
+
+  /** Land the drag where the finger left it, or throw it away. */
+  private endDrag(commit: boolean): void {
+    const drag = this.drag;
+    this.drag = null;
+    if (this.dragReadout) this.dragReadout.removeClass("is-visible");
+    if (!drag) return;
+    if (commit && drag.live) this.video.currentTime = drag.to;
+    this.paintProgress();
+  }
+
+  /** `12:40  +1:05` over the picture, while the finger is down. */
+  private paintSeekReadout(): void {
+    const el = this.dragReadout;
+    const drag = this.drag;
+    if (!el || !drag) return;
+    const delta = Math.round(drag.to - drag.from);
+    const sign = delta < 0 ? "−" : "+";
+    el.setText(`${formatTimestamp(drag.to)}  ${sign}${formatTimestamp(Math.abs(delta))}`);
+    el.addClass("is-visible");
   }
 
   /**
@@ -524,6 +684,12 @@ export class YtFreePlayer {
     };
 
     const playBtn = button("mid", "Play", "play", "Play or pause", () => {
+      // Pressed while it is still starting: the reader has changed their mind,
+      // and the load carries on without playing at the end of it.
+      if (this.pendingPlay) {
+        this.setPendingPlay(false);
+        return;
+      }
       if (!this.video.paused) {
         this.video.pause();
         return;
@@ -531,9 +697,12 @@ export class YtFreePlayer {
       void this.withMedia(() => this.play());
     });
     playBtn.addClass("ytfree-btn-play");
+    this.playBtn = playBtn;
     // Content swap only — the button keeps a fixed size, so nothing shifts.
-    this.video.addEventListener("play", () => this.paint(playBtn, "Pause", "pause", "Pause"));
-    this.video.addEventListener("pause", () => this.paint(playBtn, "Play", "play", "Play or pause"));
+    for (const event of ["play", "pause", "ended"]) {
+      this.video.addEventListener(event, () => this.paintPlay());
+    }
+    this.paintPlay();
 
     const back = button("mid", "−10s", "rewind", "Back 10 seconds", () => {
       this.video.currentTime = Math.max(0, this.video.currentTime - 10);
@@ -579,15 +748,14 @@ export class YtFreePlayer {
       void this.withMedia(() => this.toggleFullscreen());
     });
 
-    // Right is what this player does to the *note*: stamp it, keep a copy of
-    // it, pin it, fold it away — and the pop-out, last, because an overflow
-    // menu belongs at the end of the run.
-    if (this.onTimestamp) {
-      button("right", "Timestamp", "clock", "Insert timestamp at cursor", () => {
-        this.onTimestamp?.(Math.floor(this.video.currentTime));
-      });
-    }
-
+    // Right is what this player does to the *note*: keep a copy of it, pin it,
+    // fold it away — and the pop-out, last, because an overflow menu belongs at
+    // the end of the run.
+    //
+    // No Timestamp button. Stamps arrive by typing (flow capture) or through
+    // the command, on both platforms now: reaching for a button means taking
+    // your hands off the note you were writing, which is the one thing the
+    // stamp is supposed to save you.
     if (this.options.onToggleCollapse) {
       // Fixed size in CSS, because the content is the state: "Collapse" (or a
       // chevron pointing up) while the video is showing, the opposite while
@@ -638,6 +806,58 @@ export class YtFreePlayer {
     }
 
     this.buildSectionLinks();
+  }
+
+  /**
+   * The Play button's three states: playing, stopped, and starting.
+   *
+   * One place, because the button used to be painted by the `<video>`'s own
+   * events alone — and an element with no source at all answers `paused` with
+   * *false* after a refused `play()`, so it read "Pause" while nothing was
+   * playing and nothing ever would. The button now says what the player is
+   * doing, which during a resolve is "starting", not "playing".
+   */
+  private paintPlay(): void {
+    const el = this.playBtn;
+    if (!el) return;
+    el.toggleClass("is-waiting", this.pendingPlay);
+    if (this.pendingPlay) {
+      this.paint(el, "Pause", "pause", "Starting… tap again to cancel");
+      return;
+    }
+    if (this.isPlaying) this.paint(el, "Pause", "pause", "Pause");
+    else this.paint(el, "Play", "play", "Play or pause");
+  }
+
+  private setPendingPlay(pending: boolean): void {
+    if (this.pendingPlay === pending) return;
+    this.pendingPlay = pending;
+    this.paintPlay();
+  }
+
+  /**
+   * Forget a Play that was asked for before the media existed.
+   *
+   * Called when the load it was waiting on fails: without this the button would
+   * sit at "starting" for as long as the note stayed open, which is the same
+   * lie in slower motion.
+   */
+  cancelPendingPlay(): void {
+    this.setPendingPlay(false);
+  }
+
+  /**
+   * Is there a source for `play()` to act on?
+   *
+   * The bug this answers: `play()` on an element with no source does not throw
+   * and does not fire `pause` — it sets `paused` to false, rejects its promise,
+   * and leaves the element in a state that a later `load()` does not reset,
+   * because the reset step is skipped while `readyState` is HAVE_NOTHING. The
+   * video then never starts, and the next tap only pauses the thing that was
+   * never playing.
+   */
+  private get hasSource(): boolean {
+    return this.hls !== null || this.video.readyState > 0 || this.video.currentSrc !== "";
   }
 
   /**
@@ -1414,6 +1634,7 @@ export class YtFreePlayer {
       () => {
         if (resumeAt > 0) this.video.currentTime = resumeAt;
         this.preservePitch();
+        if (this.pendingPlay) this.play();
       },
       { once: true },
     );
@@ -1440,7 +1661,7 @@ export class YtFreePlayer {
         if (resumeAt > 0) this.video.currentTime = resumeAt;
         this.preservePitch();
         this.video.playbackRate = this.playbackRate;
-        if (wasPlaying) void this.video.play().catch(() => { /* ignore */ });
+        if (wasPlaying || this.pendingPlay) this.play();
       },
       { once: true },
     );
@@ -1482,7 +1703,10 @@ export class YtFreePlayer {
       this.video.playbackRate = this.playbackRate;
       this.video.volume = volume;
       this.video.muted = muted;
-      if (autoplay) void this.video.play().catch(() => { /* user gesture may be required */ });
+      // `pendingPlay` is a Play pressed before this source existed. It is
+      // honoured here rather than at the tap, which is the whole point: the
+      // button toggled then, the video starts now.
+      if (autoplay || this.pendingPlay) this.play();
     };
 
     if (stream.isHls && Hls.isSupported()) {
@@ -1541,6 +1765,9 @@ export class YtFreePlayer {
       this.attach(stream, resumeAt, wasPlaying);
       this.onStatus(null);
     } catch (err) {
+      // There is no source to honour it against any more, and a button stuck at
+      // "starting" over a dead stream says nothing true.
+      this.setPendingPlay(false);
       this.onStatus(`Could not refresh stream: ${(err as Error).message}`);
     } finally {
       this.recovering = false;
@@ -1587,9 +1814,20 @@ export class YtFreePlayer {
     }
   }
 
-  /** Start playback. Rejection is normal and not worth reporting. */
+  /**
+   * Start playback — or, if there is nothing to play yet, remember that this is
+   * what was asked for and start the moment there is.
+   *
+   * Never `video.play()` on a sourceless element: see `hasSource`. Rejection
+   * from a real source is normal and not worth reporting.
+   */
   play(): void {
     if (this.destroyed) return;
+    if (!this.hasSource) {
+      this.setPendingPlay(true);
+      return;
+    }
+    this.setPendingPlay(false);
     void this.video.play().catch(() => { /* a gesture may still be required */ });
   }
 
@@ -1602,6 +1840,9 @@ export class YtFreePlayer {
   pause(): void {
     if (this.destroyed) return;
     this.pausedByTyping = false;
+    // Including a Play that has not landed yet: "stop" means stop, whether the
+    // video is playing or still on its way to playing.
+    this.setPendingPlay(false);
     this.video.pause();
   }
 

@@ -1,6 +1,53 @@
 # HANDOFF
 
-## Status — 2026-07-30: the line where you can see it, and a bar you can read
+## Status — 2026-07-30: a way back, a line that lines up, a Play button that can't lie
+
+[issues/021](issues/021-restore-pill-seek-drag-pending-play.md) is built and installed.
+**331 unit tests pass, build clean.** Five items.
+
+**1. A `Player` pill brings the pinned player back.** The pin that hides it lives on the
+bar the pinned player carries, so hiding it left the command palette as the only route
+back. `syncPinRestore(view, wanted)` in `main.ts` mounts a `button.ytfree-pin-restore`
+into `view.contentEl` on any note whose frontmatter has a video, only while the pinned
+player is off, and puts `ytfree-has-pin-restore` on the same element to give it a
+positioning context. `.view-content` does not scroll (its CM scroller does), so the pill
+holds the corner and costs the note no height — harness `textMoved: 0` on both shapes,
+`outsideView: 0`, 30 pt clear of the phone's floating header, 34 pt tall there / 26 on
+desktop. Cleaned up on view close, on toggle-on and in `onunload`.
+
+**2. The timestamp button is gone** from the bar, and `insertTimestampFromButton` with
+it. Auto-stamping and the **Insert timestamp** command are untouched; three settings
+descriptions now point at them.
+
+**3. The purple line is inset 16 px each side.** Measured, not guessed: Chromium's
+`-webkit-media-controls-timeline` was screenshotted at 400/640/900 px and the pixels
+counted — 16 px each end at every width, not a percentage. `.ytfree-progress` uses
+`--ytfree-progress-inset` (default 16px) so a platform that differs is one variable
+away. Harness: `progressInset [16, 16]`, `progressBelowPicture 0`, four widths plus
+both immersive landscapes.
+
+**4. Horizontal drag over the picture seeks, on mobile.** Obsidian's swipe recognizer
+(`Vm` in `app.js`) walks up from the touch target and abandons the gesture at the first
+element with `dataset.ignoreSwipe` — its own canvas does this. The mobile wrapper now
+sets `data-ignore-swipe="true"`, and `bindDragSeek` in `player.ts` puts the movement to
+use: picture width = 90 s, previewed on the purple line plus a centred `.ytfree-seek`
+readout, committed once on `touchend`. Claims the gesture only past 12 px and only when
+|dx| > |dy|; ignores multi-touch, a zero duration, and the bottom 56 px where the native
+scrubber is. `touch-action: pan-y` keeps vertical scrolling. Desktop unaffected.
+
+**5. Play can no longer show "playing" while nothing plays.** Spec-level cause:
+`play()` on a sourceless element sets `paused = false`, rejects its promise, fires no
+`pause`, and a later `load()` does not reset it while `readyState` is HAVE_NOTHING — so
+the button, painted from the element's events, stuck. `play()` now checks `hasSource`
+and otherwise records `pendingPlay`: pause icon, `is-waiting` pulse, label *Starting…
+tap again to cancel*. Honoured in `attach`'s resume, `loadLocal`'s loadedmetadata and
+`swapToLocal`; cleared by a second tap, by `pause()`, by `recover()`'s catch and by
+`deferMobileLoad`'s failure branch.
+
+Not yet confirmed on hardware: all five. The drag-seek and the pill are phone-shaped
+and only the harness has seen them.
+
+## Previous — 2026-07-30: the line where you can see it, and a bar you can read
 
 [issues/020](issues/020-controls-tidy-immersive-landscape.md) is built and installed.
 **331 unit tests pass, build clean.** Seven items; two of them are 019 not working on

@@ -12,6 +12,7 @@ import {
   Plugin,
   PluginSettingTab,
   requestUrl,
+  setIcon,
   Setting,
   TFile,
 } from "obsidian";
@@ -352,6 +353,11 @@ export default class YtFreePlugin extends Plugin {
   private cache = new StreamCache();
   private players = new Map<string, PlayerEntry>();
   private pinned = new Map<MarkdownView, PinnedEntry>();
+  /**
+   * The way back on. One per open video note whose pinned player is switched
+   * off — see `syncPinRestore`.
+   */
+  private pinRestore = new Map<MarkdownView, HTMLElement>();
   /** Last note whose properties we collapsed in a given view, so we do it once. */
   private collapsed = new Map<MarkdownView, string>();
   /** Same, for the default section folds — see applyDefaultFolds. */
@@ -1190,6 +1196,7 @@ export default class YtFreePlugin extends Plugin {
     for (const job of this.silenceJobs.values()) job.cancel();
     this.silenceJobs.clear();
     for (const view of [...this.pinned.keys()]) this.unmountPinned(view);
+    for (const view of [...this.pinRestore.keys()]) this.syncPinRestore(view, false);
     for (const entry of this.players.values()) entry.player.destroy();
     this.players.clear();
     this.cache.clear();
@@ -1324,6 +1331,11 @@ export default class YtFreePlugin extends Plugin {
         if (this.folded.get(view) !== path) this.folded.delete(view);
       }
 
+      // The way back on, for a note whose player has been switched off. Before
+      // the early-out below, and kept in step with the mount, so the button and
+      // the player can never both be on screen — or both be missing.
+      this.syncPinRestore(view, noteVideo !== null && wanted === null);
+
       // `isConnected` catches the case where Obsidian rebuilt the view's DOM
       // under us — same video, but our node is no longer in the document.
       if (current && current.videoId === wanted && current.wrapper.isConnected) continue;
@@ -1334,6 +1346,9 @@ export default class YtFreePlugin extends Plugin {
 
     for (const view of [...this.pinned.keys()]) {
       if (!open.has(view)) this.unmountPinned(view);
+    }
+    for (const view of [...this.pinRestore.keys()]) {
+      if (!open.has(view)) this.syncPinRestore(view, false);
     }
     for (const view of [...this.collapsed.keys()]) {
       if (!open.has(view)) this.collapsed.delete(view);
@@ -2132,6 +2147,54 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
+   * The one control a note with the player switched off has to keep.
+   *
+   * The pin on the control bar turns the pinned player off — and takes the bar
+   * it lives on with it, so the only way back was the command palette: three
+   * taps and a search on a phone, and nothing on screen to suggest the video
+   * was still there at all. This is a small button in the top corner of any
+   * note whose frontmatter points at a video, present only while the player is
+   * not.
+   *
+   * Absolutely positioned inside `.view-content`, which does not scroll (the
+   * editor's own scroller inside it does), so it stays in the corner as you
+   * read and — the part that matters — costs the note not one pixel of height.
+   */
+  private syncPinRestore(view: MarkdownView, wanted: boolean): void {
+    const existing = this.pinRestore.get(view);
+    // `isConnected`, for the same reason the mount checks it: Obsidian rebuilds
+    // a view's DOM under us and our node goes with it.
+    if (wanted && existing?.isConnected) return;
+    if (existing) {
+      existing.remove();
+      this.pinRestore.delete(view);
+      view.contentEl.removeClass("ytfree-has-pin-restore");
+    }
+    if (!wanted) return;
+
+    // The corner is only a corner if the box it sits in is a positioning
+    // context, and a markdown `.view-content` is not one by default.
+    view.contentEl.addClass("ytfree-has-pin-restore");
+    const el = view.contentEl.createEl("button", {
+      cls: "ytfree-pin-restore",
+      attr: {
+        type: "button",
+        title: "Show the pinned player for this note",
+        "aria-label": "Show the pinned player for this note",
+      },
+    });
+    setIcon(el, "pin");
+    el.createSpan({ cls: "ytfree-pin-restore-label", text: "Player" });
+    el.addEventListener("click", (event) => {
+      event.preventDefault();
+      // Deferred for the same reason the pin on the bar is: this handler's own
+      // element is removed by what it triggers.
+      window.setTimeout(() => void this.togglePinnedPlayer(), 0);
+    });
+    this.pinRestore.set(view, el);
+  }
+
+  /**
    * Hold the note body to the height the player left it.
    *
    * The class is what styles.css keys the flex column off. The listener is the
@@ -2350,25 +2413,6 @@ export default class YtFreePlugin extends Plugin {
     return this.timestampText(entry.videoId, display, this.captureSeconds(entry.player));
   }
 
-  /**
-   * Used by the player's Timestamp button, which has no editor of its own.
-   * Falls back to a Notice rather than failing silently when the note is in
-   * Reading view, where there is no cursor to write to.
-   */
-  private insertTimestampFromButton(videoId: string, seconds: number): void {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const editor = view?.editor;
-    if (!editor || view?.getMode() !== "source") {
-      new Notice("YT Free: switch to editing view to insert a timestamp.");
-      return;
-    }
-    this.lastActiveVideoId = videoId;
-    // Lookback applies here too, so all three capture paths agree.
-    editor.replaceSelection(
-      this.timestampText(videoId, seconds, applyLookback(seconds, this.settings.lookbackSeconds)),
-    );
-  }
-
   /** The player belonging to a specific note, or null. Never a fallback. */
   private playerForPath(path: string | undefined): PlayerEntry | null {
     if (!path) return null;
@@ -2454,6 +2498,13 @@ export default class YtFreePlugin extends Plugin {
     // between them moves nothing.
     const media = mobile ? wrapper.createDiv({ cls: "ytfree-media" }) : wrapper;
 
+    // Hands the whole player back from Obsidian's own swipe gestures. Obsidian
+    // walks up from the touch target on `touchstart` and abandons the gesture
+    // at the first element carrying this, so a drag across the video is ours to
+    // seek with instead of the sidebar's to open on. Undocumented, but it is
+    // the same attribute Obsidian's own canvas uses for the same reason.
+    if (mobile) wrapper.dataset.ignoreSwipe = "true";
+
     // Desktop: a reserved, fixed-height row, so showing or clearing a status
     // message never shifts the player or the note content around it.
     //
@@ -2477,10 +2528,6 @@ export default class YtFreePlugin extends Plugin {
       wrapper,
       provider,
       setStatus,
-      // No timestamp button on a phone: stamps arrive through flow capture as
-      // you type, and reaching for a button means the keyboard is already up
-      // and the note is already where the cursor is.
-      mobile ? undefined : (seconds) => this.insertTimestampFromButton(videoId, seconds),
       // Downloading needs yt-dlp, so the button is desktop-only. A note file is
       // also required — there is nowhere to record the path without one.
       !mobile && noteFile instanceof TFile
@@ -2495,6 +2542,9 @@ export default class YtFreePlugin extends Plugin {
         // builds its own `.ytfree-stage` around the video, which is what the
         // line needs to be able to sit on the picture's bottom edge.
         mediaHost: mobile ? media : undefined,
+        // Phones only. A desktop has a mouse on the native scrubber and no host
+        // gesture to take the movement away in the first place.
+        dragSeek: mobile,
         onToggleCollapse: mobile ? () => this.toggleCollapse(videoId) : undefined,
         // Reads `activate` at call time, not now: the lazy loader is attached
         // further down, after this player exists.
@@ -3084,6 +3134,9 @@ export default class YtFreePlugin extends Plugin {
           started = null;
           poster.disabled = false;
           setStatus(null);
+          // A Play pressed while this was resolving is waiting on a stream that
+          // is not coming. Take it back, or the button sits at "starting".
+          player.cancelPendingPlay();
           this.renderMobileFallback(media, entry, err, () => {
             player.primeForGesture();
             void activate();
@@ -3641,7 +3694,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Pin the player to the top of the note")
       .setDesc(
-        "When a note's frontmatter points at a YouTube video, the full player — controls, speed, PiP, timestamp — is mounted above the note body and stays there while you scroll. A ```ytfree block for the same video steps aside so you never get two players.",
+        "When a note's frontmatter points at a YouTube video, the full player — controls, speed, PiP, fullscreen — is mounted above the note body and stays there while you scroll. A ```ytfree block for the same video steps aside so you never get two players. Turned off, these notes keep a small Player button in the corner to bring it back.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.pinnedPlayer).onChange(async (value) => {
@@ -3871,7 +3924,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Timestamp every new line")
       .setDesc(
-        "Once a video in the note has been played, the first character you type on a line brings its timestamp in with it. Works on the first line of a note, and whether the video is playing or paused. Turn off to use the command or the Timestamp button instead.",
+        "Once a video in the note has been played, the first character you type on a line brings its timestamp in with it. Works on the first line of a note, and whether the video is playing or paused. Turn off to use the Insert timestamp command instead.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.autoStampNewLine).onChange(async (value) => {
@@ -3883,7 +3936,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Lookback")
       .setDesc(
-        "How far before the moment you wrote a line its timestamp link should land, because you decide something is worth noting after you hear it. The timestamp still displays the time you wrote at — only the click target moves back. Applies to auto-stamps, the command, and the Timestamp button.",
+        "How far before the moment you wrote a line its timestamp link should land, because you decide something is worth noting after you hear it. The timestamp still displays the time you wrote at — only the click target moves back. Applies to auto-stamps and to the command.",
       )
       .addSlider((slider) =>
         slider
