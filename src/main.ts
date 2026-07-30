@@ -46,7 +46,7 @@ import {
 } from "./hub";
 import { ProgressStore } from "./progress-store";
 import { SilenceStore } from "./silence-store";
-import { combineSilence, isStale, transcriptWindows, wordInstants } from "./silence";
+import { combineSilence, isStale, transcriptWindows, wordInstants, WORD_PAD } from "./silence";
 import type { SilenceMap, SilenceWindow } from "./silence";
 import type { CaptionTrack, Cue, VideoInfo } from "./transcript";
 import {
@@ -162,6 +162,14 @@ interface YtFreeSettings {
   /** silencedetect's noise floor in dBFS. Desktop, and only with ffmpeg. */
   silenceNoiseDb: number;
   /**
+   * How much room each spoken word is given, on both sides, before a skip is
+   * allowed to cross it. Seconds. See `vetoWords`.
+   *
+   * Advanced, and warned about: it is the one number here whose *lower* end
+   * makes the plugin skip more and clip words. Zero disables the veto.
+   */
+  silenceWordPad: number;
+  /**
    * Compress everything with no *speech* in it, rather than only what is
    * literally silent.
    *
@@ -252,6 +260,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   silenceSpeed: 3,
   silenceMinGap: 0.5,
   silenceNoiseDb: -30,
+  silenceWordPad: WORD_PAD,
   skipNonSpeech: true,
 };
 
@@ -2850,6 +2859,13 @@ export default class YtFreePlugin extends Plugin {
       ffmpeg: ffmpeg ? { windows: ffmpeg.windows, analyzedTo: ffmpeg.analyzedTo } : null,
       // The pop-out's answer for this video if it gave one, the setting if not.
       skipNonSpeech: this.players.get(videoId)?.skipNonSpeech ?? this.settings.skipNonSpeech,
+      // `rawMapFor`, not `transcript`: a caption map built at a coarser floor
+      // than the setting now asks for cannot answer for the *windows*, but its
+      // word instants are a record of when someone spoke and are true whatever
+      // the floor is. Throwing them away would drop the veto exactly when the
+      // user had just made the map more aggressive.
+      words: this.silence.rawMapFor(videoId, "transcript")?.words,
+      wordPad: this.settings.silenceWordPad,
     });
     if (combined.source) player.setSilenceWindows(combined.windows, combined.source);
   }

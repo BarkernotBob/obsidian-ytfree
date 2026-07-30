@@ -534,6 +534,77 @@ export function subtractWindows(
   return out.filter((window) => window.end - window.start > EPSILON);
 }
 
+/**
+ * How much room a word is given on each side of the instant it starts.
+ *
+ * Not a word length — `WORD_ALLOWANCE` is that. This is the uncertainty in the
+ * timestamp itself: YouTube's recogniser states word starts to a few tens of
+ * milliseconds, and a skip that lands 50 ms into a word is still a clipped word.
+ * 0.2 s is the default and it is a setting, in the Advanced section, because
+ * lowering it is exactly the trade the warning there describes.
+ */
+export const WORD_PAD = 0.2;
+
+/**
+ * Take every spoken word back out of the windows about to be skipped. **Words
+ * veto silence, and this is principle 4 of issue 022.**
+ *
+ * Detection can be wrong in a way that is inaudible (a pause called speech, so
+ * nothing is skipped) or in a way you can hear (speech called a pause, so a word
+ * disappears). This function makes the second one impossible for any word the
+ * captions know about: `jlIDooGWXh0` had "3." at 278.32 inside an ffmpeg window
+ * of 277.94–278.99, and the skip jumped clean over it. The captions had the word
+ * the whole time.
+ *
+ * It is not a substitute for calibrating the threshold — a video with no
+ * captions gets nothing from it, and even here the mis-detected windows still
+ * cost their pause. It is the backstop that holds when the measurement is wrong,
+ * which is why it runs at combine time: it covers stored maps, live batches and
+ * the ffmpeg maps a Mac computes and a phone reads through iCloud, in one place.
+ *
+ * Linear in both lists rather than an `n × m` subtraction, because it runs on
+ * every batch of an ffmpeg analysis and a long video has thousands of each.
+ */
+export function vetoWords<T extends SilenceWindow>(
+  windows: T[],
+  words: number[],
+  pad = WORD_PAD,
+): T[] {
+  if (words.length === 0) return windows;
+  const margin = Math.max(0, pad);
+  const out: T[] = [];
+  // Both lists are sorted, so this only ever moves forward — a word that ends
+  // before this window starts ends before every later window starts too.
+  let first = 0;
+
+  for (const window of windows) {
+    while (first < words.length && words[first] + margin <= window.start) first++;
+
+    let cursor = window.start;
+    for (let i = first; i < words.length && words[i] - margin < window.end; i++) {
+      const from = words[i] - margin;
+      const to = words[i] + margin;
+      if (from > cursor) keep(out, window, cursor, from);
+      cursor = Math.max(cursor, to);
+      if (cursor >= window.end) break;
+    }
+    if (window.end > cursor) keep(out, window, cursor, window.end);
+  }
+  return out;
+}
+
+/**
+ * A surviving fragment, if it is still worth anything.
+ *
+ * Under `MIN_SKIP_SECONDS` the player would decline to seek it anyway and —
+ * since 022 — do nothing at all, so carrying it forward would only mean a
+ * shorter map saying the same thing. Dropped here so the count in the readout
+ * and the windows on the map agree.
+ */
+function keep<T extends SilenceWindow>(out: T[], window: T, start: number, end: number): void {
+  if (end - start >= MIN_SKIP_SECONDS) out.push({ ...window, start, end });
+}
+
 /** The part of each window on one side of `frontier`. */
 function clip(windows: SilenceWindow[], frontier: number, side: "before" | "after"): SilenceWindow[] {
   const out: SilenceWindow[] = [];
@@ -561,17 +632,31 @@ export function combineSilence(opts: {
   transcript?: SilenceMap | null;
   ffmpeg?: { windows: SilenceWindow[]; analyzedTo?: number } | null;
   skipNonSpeech: boolean;
+  /**
+   * Every instant a word was spoken, if the captions state them. Nothing that
+   * contains one of these is ever skipped — see `vetoWords`.
+   */
+  words?: number[] | null;
+  wordPad?: number;
 }): CombinedSilence {
   const transcript = mergeWindows(opts.transcript?.windows ?? []);
   const ffmpeg = mergeWindows(opts.ffmpeg?.windows ?? []);
   const haveFfmpeg = !!opts.ffmpeg;
+
+  // Applied to every route out of this function, and only to the windows that
+  // get *skipped*: an instrumental is played, not cut, so a word inside one is
+  // heard either way. The word list is usually the transcript map's own, which
+  // makes the veto a near no-op on transcript windows — they were built from the
+  // same words — and the whole of the safety net on ffmpeg's.
+  const veto = <T extends SilenceWindow>(windows: T[]): T[] =>
+    vetoWords(windows, opts.words ?? [], opts.wordPad ?? WORD_PAD);
 
   // Captions alone cannot tell a pause from an interlude — "nobody is speaking"
   // is the only question they answer — so every window is skipped. That is the
   // phone's whole story, and the Mac's until ffmpeg is installed.
   if (!haveFfmpeg) {
     return {
-      windows: tag(transcript, "skip"),
+      windows: veto(tag(transcript, "skip")),
       source: opts.transcript ? "transcript" : null,
     };
   }
@@ -579,7 +664,10 @@ export function combineSilence(opts: {
   const frontier = opts.ffmpeg?.analyzedTo ?? Number.POSITIVE_INFINITY;
 
   if (!opts.skipNonSpeech) {
-    return { windows: tag(spliceAtFrontier(ffmpeg, transcript, frontier), "skip"), source: "ffmpeg" };
+    return {
+      windows: veto(tag(spliceAtFrontier(ffmpeg, transcript, frontier), "skip")),
+      source: "ffmpeg",
+    };
   }
 
   // The union, split by what each half of it means. ffmpeg measured no audio, so
@@ -591,7 +679,7 @@ export function combineSilence(opts: {
   const unlooked = clip(transcript, frontier, "after");
   const instrumental = subtractWindows(clip(transcript, frontier, "before"), ffmpeg);
   const windows = sortWindows([
-    ...tag(unionWindows(ffmpeg, unlooked), "skip"),
+    ...veto(tag(unionWindows(ffmpeg, unlooked), "skip")),
     ...tag(instrumental, "speed"),
   ]);
   return { windows, source: "ffmpeg" };

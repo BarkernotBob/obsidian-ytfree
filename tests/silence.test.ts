@@ -25,6 +25,8 @@ import {
   moveFor,
   MIN_SKIP_SECONDS,
   transcriptWindows,
+  vetoWords,
+  WORD_PAD,
   windowsFromCues,
   windowsFromWords,
   wordInstants,
@@ -612,6 +614,116 @@ test("ffmpeg silence inside a caption gap splits it into a skip and two speeds",
     { start: 30, end: 40, action: "speed" },
     { start: 40, end: 45, action: "skip" },
     { start: 45, end: 60, action: "speed" },
+  ]);
+});
+
+// ------------------------------------------------------ 022: words veto silence
+
+test("a word inside a skip window splits the window around it", () => {
+  // The reported bug, in miniature: ffmpeg called 270–280 silent and the
+  // captions have a word at 275.
+  assert.deepEqual(vetoWords([{ start: 270, end: 280 }], [275], 0.2), [
+    { start: 270, end: 274.8 },
+    { start: 275.2, end: 280 },
+  ]);
+});
+
+test("a word near the edge shrinks the window instead of splitting it", () => {
+  assert.deepEqual(vetoWords([{ start: 270, end: 280 }], [270.1], 0.2), [
+    { start: 270.3, end: 280 },
+  ]);
+});
+
+test("the window that swallowed \"3.\" no longer contains it", () => {
+  // The reported bug with its real numbers: ffmpeg stored 277.94–278.99 and the
+  // word "3." is spoken at 278.32 inside it. The lead-in remnant is too short to
+  // seek and is dropped; what survives lands after the word, not over it.
+  const out = vetoWords([{ start: 277.94, end: 278.99 }], [278.32], 0.2);
+  assert.deepEqual(out, [{ start: 278.52, end: 278.99 }]);
+  assert.ok(out.every((w) => 278.32 <= w.start || 278.32 >= w.end));
+});
+
+test("a fragment too short to seek is dropped rather than carried", () => {
+  // 277.94 → 278.12 is 0.18 s. The player would decline to seek it and, since
+  // 022, do nothing — so a map that still listed it would be lying.
+  assert.deepEqual(vetoWords([{ start: 277.94, end: 278.6 }], [278.32], 0.2), []);
+});
+
+test("run-on words merge into one veto rather than leaving slivers between them", () => {
+  assert.deepEqual(vetoWords([{ start: 0, end: 10 }], [4, 4.1, 4.2, 4.3], 0.2), [
+    { start: 0, end: 3.8 },
+    { start: 4.5, end: 10 },
+  ]);
+});
+
+test("the veto keeps each window's action and never touches one it is outside", () => {
+  const windows: PlaybackWindow[] = [
+    { start: 0, end: 5, action: "skip" },
+    { start: 20, end: 30, action: "speed" },
+  ];
+  assert.deepEqual(vetoWords(windows, [12], 0.2), windows);
+});
+
+test("no words means no veto, and a zero pad switches it off", () => {
+  const windows = [{ start: 0, end: 5 }];
+  assert.deepEqual(vetoWords(windows, [], 0.2), windows);
+  assert.deepEqual(vetoWords(windows, [2.5], 0), [
+    { start: 0, end: 2.5 },
+    { start: 2.5, end: 5 },
+  ]);
+});
+
+test("the veto walks a long map once, not once per window", () => {
+  // Guard on the linear scan: quadratic here would run on every ffmpeg batch.
+  const windows = Array.from({ length: 4000 }, (_, i) => ({ start: i * 10, end: i * 10 + 4 }));
+  const words = Array.from({ length: 40000 }, (_, i) => i);
+  const started = Date.now();
+  const out = vetoWords(windows, words, WORD_PAD);
+  assert.ok(Date.now() - started < 250, "veto should be linear");
+  assert.ok(out.length > 0);
+});
+
+test("combineSilence vetoes the skip windows and leaves the instrumental alone", () => {
+  // The full 022 path: ffmpeg mis-hears 270–280 as silence, a word sits at 275,
+  // and a separate caption gap ffmpeg heard music in stays a 3× interlude.
+  const combined = combineSilence({
+    transcript: map({ windows: [{ start: 30, end: 60 }, { start: 270, end: 280 }] }),
+    ffmpeg: { windows: [{ start: 270, end: 280 }], analyzedTo: 600 },
+    skipNonSpeech: true,
+    words: [275],
+    wordPad: 0.2,
+  });
+  assert.deepEqual(combined.windows, [
+    { start: 30, end: 60, action: "speed" },
+    { start: 270, end: 274.8, action: "skip" },
+    { start: 275.2, end: 280, action: "skip" },
+  ]);
+});
+
+test("the veto applies with no ffmpeg at all, which is the phone", () => {
+  const combined = combineSilence({
+    transcript: map({ windows: [{ start: 10, end: 20 }] }),
+    skipNonSpeech: true,
+    words: [15],
+    wordPad: 0.2,
+  });
+  assert.deepEqual(combined.windows, [
+    { start: 10, end: 14.8, action: "skip" },
+    { start: 15.2, end: 20, action: "skip" },
+  ]);
+});
+
+test("the veto applies with music-skipping turned off too", () => {
+  const combined = combineSilence({
+    transcript: map({ windows: [] }),
+    ffmpeg: { windows: [{ start: 10, end: 20 }], analyzedTo: 600 },
+    skipNonSpeech: false,
+    words: [15],
+    wordPad: 0.2,
+  });
+  assert.deepEqual(combined.windows, [
+    { start: 10, end: 14.8, action: "skip" },
+    { start: 15.2, end: 20, action: "skip" },
   ]);
 });
 

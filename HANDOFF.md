@@ -1,6 +1,30 @@
 # HANDOFF
 
-## Status — 2026-07-30d: 022 step 2 — the transcript producer reads words
+## Status — 2026-07-30e: 022 step 3 — words veto silence
+
+Workstream 4. **353 unit tests pass, build clean.** With steps 1–3 in, the two
+reported symptoms are both addressed before calibration has even landed.
+
+`vetoWords(windows, words, pad)` subtracts every spoken instant, padded by
+`silenceWordPad` (0.2 s), out of the windows about to be **skipped**. It runs
+inside `combineSilence` on all three routes out of it — no-ffmpeg, union, and
+music-skipping-off — so it covers stored maps, live ffmpeg batches, and an
+ffmpeg map a Mac wrote and a phone read through iCloud, in one place.
+Instrumentals are left alone: a `speed` window is played, not cut.
+
+- Fragments under `MIN_SKIP_SECONDS` are dropped, because since step 1 the
+  player does nothing with them and a map that still listed them would be lying.
+- Linear in both lists, with a guard test: it runs on every batch of an ffmpeg
+  analysis and a long video has thousands of each.
+- `words` comes from `rawMapFor`, not `mapFor`. A caption map built at a coarser
+  floor than the setting now asks for can't answer for windows, but its word
+  instants are true at any floor — dropping them would disable the veto exactly
+  when the user had just made the map more aggressive.
+
+Known gap, closing in step 5: a stored transcript map from before this issue has
+no `words`, and nothing yet forces a refetch to get them.
+
+## Previous — 2026-07-30d: 022 step 2 — the transcript producer reads words
 
 Workstream 1. **342 unit tests pass, build clean.**
 
