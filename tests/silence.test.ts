@@ -31,6 +31,13 @@ import {
   windowsFromWords,
   wordInstants,
   WORD_ALLOWANCE,
+  parseAstatsPeaks,
+  pickThreshold,
+  FLOOR_MARGIN_DB,
+  SPEECH_GUARD_DB,
+  THRESHOLD_MIN_DB,
+  THRESHOLD_MAX_DB,
+  UNCALIBRATED_NOISE_DB,
 } from "../src/silence.ts";
 import type { PlaybackWindow, SilenceMap } from "../src/silence.ts";
 import { parseJson3, parseJson3Timed } from "../src/transcript.ts";
@@ -865,3 +872,143 @@ function reMerged(...maps: SilenceMap[]) {
   mergeSilenceMaps(state, maps);
   return state;
 }
+
+// ------------------------------------------- 022: calibrating the threshold
+
+/** `n` windows spread evenly between `lo` and `hi` dB. */
+function band(n: number, lo: number, hi: number): number[] {
+  return Array.from({ length: n }, (_, i) => lo + ((hi - lo) * i) / Math.max(1, n - 1));
+}
+
+test("parseAstatsPeaks reads the levels out of ffmpeg's chatter", () => {
+  const text = [
+    "  Stream #0:0: Audio: opus, 48000 Hz, stereo, fltp",
+    "frame:0    pts:0        pts_time:0",
+    "lavfi.astats.Overall.Peak_level=-38.472656",
+    "frame:1    pts:4800     pts_time:0.1",
+    "lavfi.astats.Overall.Peak_level=-12.5",
+    "frame:2    pts:9600     pts_time:0.2",
+    "lavfi.astats.Overall.Peak_level=-inf",
+    "[out#0/null @ 0x14f605c30] video:0KiB audio:0KiB",
+  ].join("\n");
+  assert.deepEqual(parseAstatsPeaks(text), [-38.472656, -12.5, -Infinity]);
+});
+
+test("parseAstatsPeaks finds nothing in output that has none", () => {
+  assert.deepEqual(parseAstatsPeaks("ffmpeg version 7.1\nno audio streams\n"), []);
+});
+
+test("parseAstatsPeaks drops nan without dropping the rest", () => {
+  const text = "Peak_level=nan\nPeak_level=-30.0\n";
+  assert.deepEqual(parseAstatsPeaks(text), [-30]);
+});
+
+test("pickThreshold sits FLOOR_MARGIN_DB above an ordinary noise floor", () => {
+  // A normal voice track: a quiet band around -44 and speech around -10.
+  const peaks = [...band(100, -46, -40), ...band(900, -30, -8)];
+  const choice = pickThreshold(peaks);
+  assert.equal(choice.calibrated, true);
+  assert.ok(choice.floorDb !== undefined && choice.floorDb < -40);
+  assert.ok(choice.thresholdDb <= choice.floorDb! + FLOOR_MARGIN_DB + 0.1);
+  // The floor constraint binds, not the speech guard.
+  assert.ok(choice.thresholdDb < choice.speechDb! - SPEECH_GUARD_DB + 0.1);
+});
+
+test("pickThreshold never lands within SPEECH_GUARD_DB of speech", () => {
+  // A loud, compressed track whose floor is high: floor + margin would be -22,
+  // which is inside the words. The guard is what stops it.
+  const peaks = [...band(200, -30, -28), ...band(800, -14, -3)];
+  const choice = pickThreshold(peaks);
+  assert.ok(choice.thresholdDb <= choice.speechDb! - SPEECH_GUARD_DB + 0.1);
+});
+
+test("pickThreshold rescues gated audio whose floor is digital silence", () => {
+  // A hard noise gate: nothing at all between phrases, speech around -12.
+  // Anchoring on -90 would give -82 and detect nothing; the guard saves it.
+  const peaks = [...Array(400).fill(-91), ...band(600, -22, -6)];
+  const choice = pickThreshold(peaks);
+  assert.equal(choice.calibrated, true);
+  assert.ok(choice.thresholdDb >= THRESHOLD_MIN_DB);
+  assert.ok(choice.thresholdDb <= choice.speechDb! - SPEECH_GUARD_DB + 0.1);
+  // And it is a threshold that can actually fire: well above the gated floor.
+  assert.ok(choice.thresholdDb > -60 + 0.001 || choice.thresholdDb === THRESHOLD_MIN_DB);
+});
+
+test("pickThreshold treats -inf as a measurement it can ignore", () => {
+  const withInf = pickThreshold([...Array(400).fill(-Infinity), ...band(600, -22, -6)]);
+  const withoutInf = pickThreshold(band(600, -22, -6));
+  assert.equal(withInf.thresholdDb, withoutInf.thresholdDb);
+});
+
+test("pickThreshold clamps a silent recording to the quietest it will admit", () => {
+  const choice = pickThreshold(band(600, -80, -70));
+  assert.equal(choice.thresholdDb, THRESHOLD_MIN_DB);
+});
+
+test("pickThreshold clamps a recording with no silence in it", () => {
+  const choice = pickThreshold(band(600, -6, -1));
+  assert.equal(choice.thresholdDb, THRESHOLD_MAX_DB);
+});
+
+test("pickThreshold refuses to guess from too few windows", () => {
+  const choice = pickThreshold(band(20, -50, -10));
+  assert.equal(choice.calibrated, false);
+  assert.equal(choice.thresholdDb, UNCALIBRATED_NOISE_DB);
+});
+
+test("pickThreshold never falls back to the -30 dB that caused 022", () => {
+  for (const peaks of [[], band(5, -50, -10), Array(600).fill(-Infinity)]) {
+    assert.notEqual(pickThreshold(peaks).thresholdDb, -30);
+  }
+});
+
+test("a bigger floor margin only ever raises the threshold", () => {
+  const peaks = [...band(100, -46, -40), ...band(900, -34, -18)];
+  const low = pickThreshold(peaks, 4).thresholdDb;
+  const high = pickThreshold(peaks, 12).thresholdDb;
+  assert.ok(high >= low);
+});
+
+test("the real numbers off BarkernotBob's video land where the measurement said", () => {
+  // Peak levels measured over 60 s of jlIDooGWXh0: p5 -44.1, p90 -9.9.
+  // -30 dB (the old fixed default) is 14 dB inside the words on this track.
+  const peaks = [...band(60, -50, -44), ...band(540, -40, -6)];
+  const choice = pickThreshold(peaks);
+  assert.ok(choice.thresholdDb < -30, `expected quieter than -30, got ${choice.thresholdDb}`);
+  assert.ok(choice.thresholdDb > -45, `expected louder than -45, got ${choice.thresholdDb}`);
+});
+
+test("an ffmpeg map from before the threshold was measured is stale", () => {
+  const base = {
+    videoId: "abc",
+    computedAt: "2026-07-30T00:00:00.000Z",
+    minGap: 0.5,
+    windows: [{ start: 1, end: 2 }],
+  };
+  assert.equal(isStale({ ...base, source: "ffmpeg" } as SilenceMap, 0.5), true);
+  assert.equal(isStale({ ...base, source: "ffmpeg", noiseDb: -36 } as SilenceMap, 0.5), false);
+  // The transcript producer has no threshold, so the rule must not touch it.
+  assert.equal(isStale({ ...base, source: "transcript" } as SilenceMap, 0.5), false);
+});
+
+test("noiseDb survives a round trip through the store", () => {
+  const state = normalizeSilenceState({
+    version: 2,
+    maps: {
+      abc: {
+        videoId: "abc",
+        sources: {
+          ffmpeg: {
+            videoId: "abc",
+            source: "ffmpeg",
+            computedAt: "2026-07-30T00:00:00.000Z",
+            minGap: 0.5,
+            noiseDb: -36.1,
+            windows: [{ start: 1, end: 2 }],
+          },
+        },
+      },
+    },
+  });
+  assert.equal(state.maps.abc.sources.ffmpeg?.noiseDb, -36.1);
+});

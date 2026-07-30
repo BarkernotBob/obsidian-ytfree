@@ -46,7 +46,14 @@ import {
 } from "./hub";
 import { ProgressStore } from "./progress-store";
 import { SilenceStore } from "./silence-store";
-import { combineSilence, isStale, transcriptWindows, wordInstants, WORD_PAD } from "./silence";
+import {
+  combineSilence,
+  FLOOR_MARGIN_DB,
+  isStale,
+  transcriptWindows,
+  wordInstants,
+  WORD_PAD,
+} from "./silence";
 import type { SilenceMap, SilenceWindow } from "./silence";
 import type { CaptionTrack, Cue, VideoInfo } from "./transcript";
 import {
@@ -159,8 +166,23 @@ interface YtFreeSettings {
    * a reason the user never chose.
    */
   silenceMinGap: number;
-  /** silencedetect's noise floor in dBFS. Desktop, and only with ffmpeg. */
-  silenceNoiseDb: number;
+  /**
+   * A manual `silencedetect` threshold in dBFS, or `null` to measure the audio.
+   *
+   * `null` by default, and 022 is why: this was a fixed −30 dB, which is inside
+   * the words on a normally-mastered voice track, so the player skipped the
+   * gaps between syllables. Every recording has its own noise floor, so the
+   * threshold is now measured per video — see `pickThreshold`. The setting
+   * survives as an Advanced escape hatch for audio the measurement gets wrong.
+   */
+  silenceNoiseDb: number | null;
+  /**
+   * How far above the measured noise floor the threshold sits, in dB.
+   *
+   * Advanced. Raising it compresses more and risks clipping quiet speech;
+   * lowering it is the safe direction. See `FLOOR_MARGIN_DB`.
+   */
+  silenceFloorMargin: number;
   /**
    * How much room each spoken word is given, on both sides, before a skip is
    * allowed to cross it. Seconds. See `vetoWords`.
@@ -259,7 +281,8 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   smartSpeed: true,
   silenceSpeed: 3,
   silenceMinGap: 0.5,
-  silenceNoiseDb: -30,
+  silenceNoiseDb: null,
+  silenceFloorMargin: FLOOR_MARGIN_DB,
   silenceWordPad: WORD_PAD,
   skipNonSpeech: true,
 };
@@ -2968,6 +2991,7 @@ export default class YtFreePlugin extends Plugin {
     windows: SilenceWindow[],
     analyzedTo?: number,
     words?: number[],
+    noiseDb?: number,
   ): void {
     this.silence.record({
       videoId,
@@ -2977,6 +3001,7 @@ export default class YtFreePlugin extends Plugin {
       windows,
       ...(analyzedTo === undefined ? {} : { analyzedTo }),
       ...(words && words.length ? { words } : {}),
+      ...(noiseDb === undefined ? {} : { noiseDb }),
     });
     this.pushCombinedSilence(player, videoId);
   }
@@ -3041,7 +3066,7 @@ export default class YtFreePlugin extends Plugin {
     // Already measured to the end, at a floor fine enough to answer.
     if (stored && !isStale(stored, minGap) && stored.analyzedTo === undefined) return;
 
-    const { detectSilence, detectSilenceChunked, findFfmpeg, resolveAudioUrl, findYtDlp } =
+    const { calibrateThreshold, detectSilence, detectSilenceChunked, findFfmpeg, resolveAudioUrl, findYtDlp } =
       await desktop();
     if (this.ffmpegPath === undefined) {
       this.ffmpegPath = await findFfmpeg(this.settings.ffmpegPath);
@@ -3069,11 +3094,34 @@ export default class YtFreePlugin extends Plugin {
       console.info("YT Free: Smart Speed analysing without chunking — no duration yet.");
     }
 
+    // Where silence is on *this* recording, measured once and handed to every
+    // chunk. Calibrating per chunk would let the threshold drift between minute
+    // 3 and minute 4 of one video; see 022 for what a fixed −30 dB did instead.
+    const choice = await calibrateThreshold({
+      ffmpegPath: this.ffmpegPath,
+      input,
+      floorMargin: this.settings.silenceFloorMargin,
+    });
+    const noiseDb = this.settings.silenceNoiseDb ?? choice.thresholdDb;
+    console.info(
+      `YT Free: Smart Speed threshold ${noiseDb} dB for ${videoId}` +
+        (this.settings.silenceNoiseDb !== null
+          ? " (manual override)"
+          : choice.calibrated
+            ? ` (floor ${choice.floorDb?.toFixed(1)}, speech ${choice.speechDb?.toFixed(1)})`
+            : " (calibration unavailable)"),
+    );
+
     // Windows accumulate here rather than in the store, so the file is written
     // once with a complete map instead of a hundred times with a growing one —
     // but the player is fed on every batch.
-    const windows: SilenceWindow[] = [...(stored?.windows ?? [])];
-    let frontier = stored?.analyzedTo ?? 0;
+    //
+    // A stored map measured at a different threshold is not resumable: its
+    // windows and the ones about to arrive would disagree about what silence
+    // is. That map is thrown away and the video re-analysed from zero.
+    const resumable = !!stored && stored.noiseDb === noiseDb;
+    const windows: SilenceWindow[] = resumable ? [...(stored?.windows ?? [])] : [];
+    let frontier = resumable ? (stored?.analyzedTo ?? 0) : 0;
     const feed = (): void => {
       if (this.players.get(videoId)?.player === player) {
         this.pushCombinedSilence(player, videoId, { windows: [...windows], analyzedTo: frontier });
@@ -3088,7 +3136,7 @@ export default class YtFreePlugin extends Plugin {
     const shared = {
       ffmpegPath: this.ffmpegPath,
       input,
-      noiseDb: this.settings.silenceNoiseDb,
+      noiseDb,
       minGap,
       onWindows: (batch: SilenceWindow[]) => {
         windows.push(...batch);
@@ -3126,6 +3174,8 @@ export default class YtFreePlugin extends Plugin {
           minGap,
           windows,
           stopped ? frontier : undefined,
+          undefined,
+          noiseDb,
         );
       }
     } catch (err) {
@@ -3978,21 +4028,71 @@ class YtFreeSettingTab extends PluginSettingTab {
         });
       });
 
-    // Only meaningful where ffmpeg can exist. On a phone this would be a dial
+    // Everything below is a dial on the *safety margins*, and every one of them
+    // trades accuracy for aggressiveness in the direction that clips words.
+    // Collapsed, because the defaults are the answer and a user who opens this
+    // should have a reason. 022 was caused by one of these being a front-page
+    // setting with a wrong default.
+    const advanced = containerEl.createEl("details", { cls: "ytfree-advanced" });
+    advanced.createEl("summary", { text: "Advanced" });
+    advanced.createEl("p", {
+      text: "These trade accuracy for aggressiveness. Raising them can clip or skip real speech.",
+      cls: "setting-item-description",
+    });
+
+    new Setting(advanced)
+      .setName("Word protection")
+      .setDesc(
+        "How much room every spoken word is given, in seconds, before a skip is allowed to cross it. This is the guard that stops a word being swallowed when the volume-based detection is wrong about where the silence is. Zero turns it off.",
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(0, 0.5, 0.05)
+          .setValue(this.plugin.settings.silenceWordPad)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.silenceWordPad = value;
+            await this.plugin.saveSettings();
+            this.plugin.refreshSmartSpeed();
+          }),
+      );
+
+    // Only meaningful where ffmpeg can exist. On a phone these would be dials
     // attached to nothing.
     if (desktopApp) {
-      new Setting(containerEl)
-        .setName("Silence threshold (ffmpeg)")
+      new Setting(advanced)
+        .setName("Floor margin (ffmpeg)")
         .setDesc(
-          "How quiet counts as quiet, in dBFS, when ffmpeg is installed and measuring the audio directly. Lower is stricter — −40 dB compresses only near-total silence, −20 dB will treat room tone as a pause. Ignored entirely without ffmpeg; the caption-timing engine has no volume to measure.",
+          "How far above each video's measured noise floor the silence threshold sits, in dB. The threshold itself is measured per video from the first minute of audio — this only moves it. Higher compresses more and starts eating quiet speech; lower is the safe direction.",
         )
         .addSlider((slider) =>
           slider
-            .setLimits(-50, -10, 5)
-            .setValue(this.plugin.settings.silenceNoiseDb)
+            .setLimits(2, 20, 1)
+            .setValue(this.plugin.settings.silenceFloorMargin)
             .setDynamicTooltip()
             .onChange(async (value) => {
-              this.plugin.settings.silenceNoiseDb = value;
+              this.plugin.settings.silenceFloorMargin = value;
+              await this.plugin.saveSettings();
+            }),
+        );
+
+      new Setting(advanced)
+        .setName("Manual silence threshold (ffmpeg)")
+        .setDesc(
+          "Overrides the measurement with a fixed dBFS value. Leave blank to measure each video, which is almost always better — a fixed number that suits one recording is inside the words on another. Enter a negative number, e.g. −40.",
+        )
+        .addText((text) =>
+          text
+            .setPlaceholder("measured")
+            .setValue(
+              this.plugin.settings.silenceNoiseDb === null
+                ? ""
+                : String(this.plugin.settings.silenceNoiseDb),
+            )
+            .onChange(async (value) => {
+              const parsed = Number(value.trim().replace(/[−–—]/g, "-"));
+              this.plugin.settings.silenceNoiseDb =
+                value.trim() === "" || !Number.isFinite(parsed) ? null : parsed;
               await this.plugin.saveSettings();
             }),
         );

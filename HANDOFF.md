@@ -1,6 +1,67 @@
 # HANDOFF
 
-## Status — 2026-07-30e: 022 step 3 — words veto silence
+## Status — 2026-07-30f: 022 step 4 — the threshold is measured, not chosen
+
+Workstream 3, plus the ffmpeg half of 6 and the Advanced half of 5, because the
+calibration is worthless while old −30 dB maps survive and had nowhere to put
+its dials. **368 unit tests pass, build clean.**
+
+`calibrateThreshold` (desktop, `src/desktop/calibrate.ts`) runs ffmpeg `astats`
+over the first 60 s, once per video per run, and hands one threshold to every
+chunk. The decision is `pickThreshold` in `silence.ts`, pure and tested without
+ffmpeg installed: `min(floor + 8, speech − 20)`, clamped to [−60, −25], floor =
+p5, speech = p90.
+
+**Deviation from the issue, with the measurement behind it.** The issue says to
+read the floor off `astats` **RMS_level**. That was tried first and it does not
+work: `silencedetect` compares *individual samples* to its threshold, so an RMS
+series over the same window sits systematically below what the detector reacts
+to. On `jlIDooGWXh0` the RMS formula produces −48.5 dB, and −48.5 dB finds
+**4 silences in 26 minutes**. Reading **Peak_level** instead — the same quantity
+silencedetect is looking at — gives −36.1 dB from the issue's own defaults, and
+that is where ffmpeg starts contributing real windows again. Measured at four
+points in the video (0 s / 255 s / 600 s / 1200 s) the answer is stable to
+0.5 dB: floor p5 −44.1/−44.0/−43.6/−44.0, speech p90 −9.9/−7.8/−9.4/−10.4.
+
+Threshold vs. truth on that video, where "bad" = an ffmpeg window with a spoken
+word inside it:
+
+| threshold | raw windows | bad | skip s after veto | speed s |
+|---|---|---|---|---|
+| −30 (the old fixed default) | 209 | **112** | 13 | 10 |
+| −36 (**calibrated**) | 138 | 64 | 7 | 16 |
+| −40 | 74 | 26 | 4 | 23 |
+| −45 (fallback) | 19 | 6 | 2 | 29 |
+
+Two things worth saying plainly about that table. The **veto is what makes any
+of these safe** — it removes every bad window at every threshold; calibration is
+defence in depth and is what protects a video with no captions, where there are
+no words to veto with. And **the honest total is small**: about 7 s skipped plus
+16 s played at 3× across 26 minutes. That is not the calibration under-reaching,
+it is what this video actually contains — the word-gap distribution is median
+0.24 s, p95 0.88 s, max 2.00 s. The old −30 dB map's 138 seconds of "silence"
+was mostly speech, so the correct fix necessarily skips less.
+
+- **Migration (WS6, ffmpeg half).** `isStale` now also rejects an ffmpeg map
+  with no `noiseDb`: every such map was built at the broken −30 and is wrong
+  rather than coarse. A stored map whose `noiseDb` differs from this run's is
+  not resumed either — its windows and the incoming ones would disagree about
+  what silence is — so the video restarts from zero.
+- **Settings (WS5, Advanced half).** `silenceNoiseDb` is no longer a front-page
+  slider with a wrong default; it is `number | null`, blank = measured, in a
+  collapsed **Advanced** `<details>` alongside floor margin (2–20, default 8)
+  and word protection (0–0.5 s, default 0.2), under the warning "These trade
+  accuracy for aggressiveness. Raising them can clip or skip real speech."
+- Calibration never throws. A failure falls back to **−45 dB** and says so in
+  the console; a test asserts it can never fall back to −30.
+- 45 s timeout on the measurement, because it gates the analysis it precedes and
+  a stalled network read would otherwise hang Smart Speed rather than degrade it.
+
+Still open: the transcript half of WS6 (a stored transcript map from before this
+issue has no `words`, and nothing forces a refetch), `pruneWordLists`, the
+front-page settings tidy, WS7 fixtures, and the Manual test section in the issue.
+
+## Previous — 2026-07-30e: 022 step 3 — words veto silence
 
 Workstream 4. **353 unit tests pass, build clean.** With steps 1–3 in, the two
 reported symptoms are both addressed before calibration has even landed.

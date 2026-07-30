@@ -77,6 +77,16 @@ export interface SilenceMap {
    * fetch its captions again in one request.
    */
   words?: number[];
+  /**
+   * The silence threshold this map was actually built at, in dBFS. ffmpeg only.
+   *
+   * Stored because it is the one number that decides whether a map is any good,
+   * and because it used to be a *setting* rather than a measurement: every map
+   * built before 022 came from a fixed −30 dB, which on ordinary speech sits
+   * inside the words. A map with no `noiseDb` is therefore one of those, and
+   * `isStale` throws it away rather than trusting it — see `pickThreshold`.
+   */
+  noiseDb?: number;
 }
 
 /** Everything known about one video: at most one map per producer. */
@@ -195,6 +205,9 @@ function normalizeMap(videoId: string, value: unknown): SilenceMap | null {
   if (Array.isArray(raw.words)) {
     const words = raw.words.filter((w): w is number => typeof w === "number" && Number.isFinite(w) && w >= 0);
     if (words.length) map.words = words.sort((a, b) => a - b);
+  }
+  if (typeof raw.noiseDb === "number" && Number.isFinite(raw.noiseDb)) {
+    map.noiseDb = raw.noiseDb;
   }
   return map;
 }
@@ -849,9 +862,16 @@ export function secondsSaved(wallSeconds: number, baseRate: number, rate: number
  * Only downwards. A map built with a 0.5 s floor contains every pause of 0.5 s
  * and longer, so it answers 0.8 s perfectly well by filtering; it cannot answer
  * 0.3 s, because the 0.3 s pauses were never in it.
+ *
+ * The second rule is 022's migration, and it is a one-off: an ffmpeg map with
+ * no `noiseDb` was built before the threshold was measured, which means it was
+ * built at the fixed −30 dB that put skip windows inside the words. Those maps
+ * are wrong rather than coarse, so they are discarded and recomputed rather
+ * than filtered.
  */
 export function isStale(map: SilenceMap, minGap: number): boolean {
-  return map.minGap > minGap + EPSILON;
+  if (map.minGap > minGap + EPSILON) return true;
+  return map.source === "ffmpeg" && map.noiseDb === undefined;
 }
 
 /**
@@ -998,4 +1018,122 @@ export function createSilencedetectStream(): {
       return rest ? consume(rest) : [];
     },
   };
+}
+
+// -------------------------------------------------------------- calibration
+
+/**
+ * The threshold to use when calibration could not run, in dBFS.
+ *
+ * −45 and not −30, deliberately: an under-detecting threshold costs a few
+ * skipped pauses, and an over-detecting one talks over the words. The old −30
+ * default is the bug in 022 and is never a fallback.
+ */
+export const UNCALIBRATED_NOISE_DB = -45;
+/** How far above the measured noise floor the threshold sits. */
+export const FLOOR_MARGIN_DB = 8;
+/** How far below the measured speech level it must stay, whatever the floor says. */
+export const SPEECH_GUARD_DB = 20;
+/** Nothing outside this is a plausible speech/silence boundary. */
+export const THRESHOLD_MIN_DB = -60;
+export const THRESHOLD_MAX_DB = -25;
+/**
+ * Below this a window is digital silence, not a noise floor.
+ *
+ * Gated or denoised audio reads −90 dB or −inf between phrases, and a threshold
+ * anchored there detects nothing at all. Those windows are dropped from the
+ * floor estimate so the floor lands on real room tone — or, on a hard-gated
+ * track where there *is* no room tone, on speech, where `SPEECH_GUARD_DB` takes
+ * over and produces a usable threshold anyway.
+ */
+export const GATED_FLOOR_DB = -90;
+/** Fewer measurements than this is not a distribution worth reading. */
+const MIN_CALIBRATION_SAMPLES = 100;
+
+export interface ThresholdChoice {
+  /** dBFS, ready to hand to `silencedetect=noise=`. */
+  thresholdDb: number;
+  /** Whether the audio was measured, or this is `UNCALIBRATED_NOISE_DB`. */
+  calibrated: boolean;
+  /** The measured bands, for the console line that explains a surprising map. */
+  floorDb?: number;
+  speechDb?: number;
+  samples: number;
+}
+
+/**
+ * Peak levels out of `astats`, one per analysis window.
+ *
+ * ffmpeg prints them through `ametadata=mode=print` as one `key=value` line
+ * each, interleaved with everything else on stderr:
+ *
+ * ```
+ * frame:0    pts:0       pts_time:0
+ * lavfi.astats.Overall.Peak_level=-38.472656
+ * ```
+ *
+ * **Peak** and not RMS, which is the whole reason this parser exists rather
+ * than an easier one: `silencedetect` compares individual samples against its
+ * threshold, so an RMS series measured over the same window sits systematically
+ * below what the detector actually reacts to. Calibrating a peak-based detector
+ * on RMS produced −48 dB on the video in 022 where the right answer was −36,
+ * and −48 found four silences in twenty-six minutes.
+ *
+ * A gated stretch prints `-inf`, which parses to `-Infinity` and is kept: it is
+ * a real measurement, and `pickThreshold` is the one that decides what to do
+ * with it.
+ */
+export function parseAstatsPeaks(text: string): number[] {
+  const levels: number[] = [];
+  for (const match of text.matchAll(/Peak_level=(-?[\d.]+|-inf|inf|nan)/gi)) {
+    const raw = match[1].toLowerCase();
+    if (raw === "nan") continue;
+    levels.push(raw === "-inf" ? -Infinity : raw === "inf" ? Infinity : Number(raw));
+  }
+  return levels.filter((v) => !Number.isNaN(v));
+}
+
+/** The value at `q` of a sorted-ascending copy of `values`. */
+function percentile(values: number[], q: number): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.round(q * (sorted.length - 1));
+  return sorted[Math.min(sorted.length - 1, Math.max(0, index))];
+}
+
+/**
+ * Where silence ends and speech begins, for this video's audio.
+ *
+ * The failure 022 was written about is a fixed threshold: −30 dB is inside the
+ * words on a normally-mastered voice track, so silencedetect reported the gaps
+ * *between syllables* as silence and the player skipped them. Every recording
+ * has its own floor, so the threshold has to be measured rather than chosen.
+ *
+ * Two constraints, and the lower wins:
+ *
+ * - **`floor + FLOOR_MARGIN_DB`** — a few dB above the quietest thing in the
+ *   audio, which is what "silence" means here.
+ * - **`speech − SPEECH_GUARD_DB`** — never near the words, whatever the floor
+ *   turned out to be. This is what rescues hard-gated audio, whose floor is
+ *   digital zero and whose `floor + margin` would detect nothing.
+ *
+ * The floor is the 5th percentile rather than the minimum because one glitchy
+ * window should not set it, and speech is the 90th rather than the maximum for
+ * the same reason at the other end.
+ */
+export function pickThreshold(
+  peaks: number[],
+  floorMargin: number = FLOOR_MARGIN_DB,
+): ThresholdChoice {
+  const finite = peaks.filter((v) => Number.isFinite(v));
+  if (finite.length < MIN_CALIBRATION_SAMPLES) {
+    return { thresholdDb: UNCALIBRATED_NOISE_DB, calibrated: false, samples: finite.length };
+  }
+
+  const audible = finite.filter((v) => v > GATED_FLOOR_DB);
+  const floorDb = percentile(audible.length ? audible : finite, 0.05);
+  const speechDb = percentile(finite, 0.9);
+
+  const raw = Math.min(floorDb + floorMargin, speechDb - SPEECH_GUARD_DB);
+  const thresholdDb = Math.round(Math.min(THRESHOLD_MAX_DB, Math.max(THRESHOLD_MIN_DB, raw)) * 10) / 10;
+  return { thresholdDb, calibrated: true, floorDb, speechDb, samples: finite.length };
 }
