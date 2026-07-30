@@ -20,3 +20,5 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [014](014-hidden-videos-came-back.md) | Hidden videos came back — save is a merge now, not an overwrite | Built 2026-07-29 — awaiting manual test |
 | [015](015-smart-speed.md) | Smart Speed: compress pauses like Overcast; ffmpeg optional, never required | Built — tested, superseded in part by 016 |
 | [016](016-smart-speed-round-two.md) | Smart Speed round two: skip music too, and analyse faster than playback | Built 2026-07-29 — awaiting manual test |
+| [017](017-skip-fold-tidy.md) | Skip the silence, fold the transcript, tidy the leftovers | Built 2026-07-30 — awaiting manual test |
+| [018](018-watch-later.md) | What Watch Later is for now | Scoped — needs a decision, nothing built |

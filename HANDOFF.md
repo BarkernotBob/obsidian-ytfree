@@ -1,6 +1,51 @@
 # HANDOFF
 
-## Status — 2026-07-29 (latest): Smart Speed round two — union, chunks, ffmpeg installed
+## Status — 2026-07-30 (latest): silence is skipped, and notes clean up after themselves
+
+[issues/017](issues/017-skip-fold-tidy.md) is built. **329 unit tests pass, build clean.**
+Six items off BarkernotBob's list; five landed, one is half-landed and the missing half is not
+ours to write.
+
+**1. Silence is seeked over, not sped through.** A window now carries an `action`.
+`speed` means "a caption gap ffmpeg analysed and found *audible*" — an instrumental, which
+must not be cut. `skip` is everything else, including every window on a phone (no ffmpeg)
+and everything past ffmpeg's frontier. Two vetoes fall back to the old fast-forward: under
+`MIN_SKIP_SECONDS` (0.35 s) left in the window, or a target `video.buffered` does not
+cover — a seek past the buffer is a spinner, which is worse than the pause. All of it is
+in `moveFor`, which is pure; `player.ts` only applies the answer.
+
+**2. The tidy is the one to be careful about.** A daily sweep trashes a video note when
+four things hold: the video was played over a month ago, the file has not been edited
+since, nothing is written in it (no `# Notes` body, no tags, nothing above the first
+heading), and it is not open. Description and transcript sections are not read at all —
+the plugin wrote them. Every uncertainty answers "keep". It goes through
+`fileManager.trashFile`, never an outright delete, and logs every path. The month comes
+from a **new `watched` map in `progress.json`**, deliberately separate from `positions`,
+because a position is deleted the moment a video finishes and "you watched this" is
+exactly the fact that has to survive that. **Nothing can be tidied yet** — the stamps
+start empty today.
+
+**3. Background audio is host-gated, and I could not verify the host.** Built:
+`navigator.mediaSession` metadata and handlers, plus a real bug found on the way — a
+hidden window gets no animation frames, so a screen lock mid-instrumental left
+`playbackRate` at 3× with nothing awake to undo it (now handed back on
+`visibilitychange`). Not built and not buildable from a plugin: the audio session /
+background-audio entitlement that decides whether audio survives a lock at all. Step 9 of
+017's manual test is what settles it — and the wording of BarkernotBob's answer matters, so ask
+for it verbatim.
+
+**Also:** the transcript now lands folded (`foldNewSections` is additive and retries,
+because `vault.process` returns before the open editor catches up); opening a video note
+by any route moves it out of the Inbox and the card leaves the list; and the pinned-height
+slider works on a phone, with the docked media box taking a width ceiling from it so a
+sideways phone cannot hand the whole screen to the video.
+
+**Next:** [issues/018](issues/018-watch-later.md) is a written decision, not code — the
+YouTube Watch Later import never drains, because nothing here writes to YouTube. It ends
+in one question for BarkernotBob and does not proceed without it. Before that, 017's manual
+test, especially steps 9 and 12.
+
+## Previous — 2026-07-29: Smart Speed round two — union, chunks, ffmpeg installed
 
 [issues/016](issues/016-smart-speed-round-two.md) is built and installed. **297 unit tests
 pass, build clean.** ffmpeg 8.1.2 is now installed on this Mac
