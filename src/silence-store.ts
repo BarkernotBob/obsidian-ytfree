@@ -18,6 +18,7 @@ import {
   mergeSilenceMaps,
   normalizeSilenceState,
   pruneSilenceMaps,
+  pruneWordLists,
 } from "./silence.ts";
 import type { SilenceMap, SilenceSource, SilenceState, VideoSilence } from "./silence.ts";
 
@@ -118,6 +119,7 @@ export class SilenceStore {
         const onDisk = await this.read();
         mergeSilenceMaps(onDisk, pending);
         pruneSilenceMaps(onDisk);
+        pruneWordLists(onDisk);
         this.state = onDisk;
         await this.app.vault.adapter.write(this.path, JSON.stringify(onDisk));
       })

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   combineSilence,
   compressibleWindows,
@@ -38,8 +39,9 @@ import {
   THRESHOLD_MIN_DB,
   THRESHOLD_MAX_DB,
   UNCALIBRATED_NOISE_DB,
+  pruneWordLists,
 } from "../src/silence.ts";
-import type { PlaybackWindow, SilenceMap } from "../src/silence.ts";
+import type { PlaybackWindow, SilenceMap, SilenceWindow } from "../src/silence.ts";
 import { parseJson3, parseJson3Timed } from "../src/transcript.ts";
 
 const ID = "dQw4w9WgXcQ";
@@ -52,6 +54,7 @@ function map(over: Partial<SilenceMap> = {}): SilenceMap {
     computedAt: "2026-07-29T12:00:00.000Z",
     minGap: 0.5,
     windows: [{ start: 10, end: 12 }],
+    wordTimed: true,
     ...over,
   };
 }
@@ -987,8 +990,18 @@ test("an ffmpeg map from before the threshold was measured is stale", () => {
   };
   assert.equal(isStale({ ...base, source: "ffmpeg" } as SilenceMap, 0.5), true);
   assert.equal(isStale({ ...base, source: "ffmpeg", noiseDb: -36 } as SilenceMap, 0.5), false);
-  // The transcript producer has no threshold, so the rule must not touch it.
-  assert.equal(isStale({ ...base, source: "transcript" } as SilenceMap, 0.5), false);
+  // The transcript producer has no threshold; its own marker is `wordTimed`.
+  assert.equal(isStale({ ...base, source: "transcript" } as SilenceMap, 0.5), true);
+  assert.equal(
+    isStale({ ...base, source: "transcript", wordTimed: true } as SilenceMap, 0.5),
+    false,
+  );
+  // A human-written track legitimately has no word timing. Refetching it would
+  // find the same answer forever, so it is not stale.
+  assert.equal(
+    isStale({ ...base, source: "transcript", wordTimed: false } as SilenceMap, 0.5),
+    false,
+  );
 });
 
 test("noiseDb survives a round trip through the store", () => {
@@ -1011,4 +1024,141 @@ test("noiseDb survives a round trip through the store", () => {
     },
   });
   assert.equal(state.maps.abc.sources.ffmpeg?.noiseDb, -36.1);
+});
+
+// -------------------------------- 022: the reported failure, as a fixture
+
+/**
+ * 28 seconds of `jlIDooGWXh0` around the passage BarkernotBob reported: *"And his
+ * name, the word itself, Yahweh…"* through *"…Exodus chapter 3."* — the "and
+ * his name" that played chipmunk-fast and the "3" that was skipped outright.
+ *
+ * `ffmpeg30` is the real `silencedetect` output at the old fixed −30 dB. Three
+ * of its four windows have a spoken word inside them, which is the bug.
+ */
+const REPORTED = JSON.parse(
+  readFileSync(new URL("./fixtures/silence-jlIDooGWXh0-278s.json", import.meta.url), "utf8"),
+) as { words: number[]; ffmpeg30: SilenceWindow[]; transcript: SilenceWindow[] };
+
+test("the -30 dB map really did put skip windows inside the words", () => {
+  // The premise of the whole issue. If this ever stops being true the fixture
+  // has been regenerated wrongly and the tests below prove nothing.
+  const bad = REPORTED.ffmpeg30.filter((w) => REPORTED.words.some((x) => x > w.start && x < w.end));
+  assert.equal(bad.length, 3);
+});
+
+test("no window playback compresses may contain a spoken word", () => {
+  const { windows } = combineSilence({
+    transcript: { windows: REPORTED.transcript },
+    ffmpeg: { windows: REPORTED.ffmpeg30 },
+    skipNonSpeech: true,
+    words: REPORTED.words,
+  });
+  for (const window of compressibleWindows(windows, 0.5)) {
+    if (window.action !== "skip") continue;
+    const swallowed = REPORTED.words.filter((x) => x > window.start && x < window.end);
+    assert.deepEqual(
+      swallowed,
+      [],
+      `skip ${window.start}–${window.end} would swallow ${swallowed.join(", ")}`,
+    );
+  }
+});
+
+test("the three reported words survive at every setting the user can reach", () => {
+  // 258.32, 270.24 and 277.20 are the instants the -30 dB map skipped over.
+  // Every value the dropdown offers, from MIN_SILENCE_GAP up.
+  for (const minGap of [0.4, 0.5, 0.75, 1, 1.5, 2]) {
+    const { windows } = combineSilence({
+      transcript: { windows: REPORTED.transcript },
+      ffmpeg: { windows: REPORTED.ffmpeg30 },
+      skipNonSpeech: true,
+      words: REPORTED.words,
+    });
+    for (const word of [258.32, 270.24, 277.2]) {
+      const hit = compressibleWindows(windows, minGap).find(
+        (w) => w.action === "skip" && w.start < word && w.end > word,
+      );
+      assert.equal(hit, undefined, `${word} skipped at minGap ${minGap}`);
+    }
+  }
+});
+
+test("playback never runs a leftover skip fast instead of skipping it", () => {
+  // Workstream 2, against the real map: whatever the veto leaves behind, the
+  // player either skips it whole or plays it at the normal rate. The one thing
+  // it may not do is speed through a fragment, which is what the chipmunk was.
+  const { windows } = combineSilence({
+    transcript: { windows: REPORTED.transcript },
+    ffmpeg: { windows: REPORTED.ffmpeg30 },
+    skipNonSpeech: true,
+    words: REPORTED.words,
+  });
+  const compressible = compressibleWindows(windows, 0.5);
+  for (const window of compressible) {
+    if (window.action !== "skip") continue;
+    for (const at of [window.start, (window.start + window.end) / 2, window.end - 0.01]) {
+      const move = moveFor(at, compressible, 1, 3);
+      assert.ok(
+        move.kind === "skip" || move.rate === 1,
+        `at ${at.toFixed(2)} the player would run at ${move.rate}`,
+      );
+    }
+  }
+});
+
+// ------------------------------------------------ 022: keeping the file small
+
+test("word lists are dropped from all but the most recent videos", () => {
+  const state = emptySilenceState();
+  for (let i = 0; i < 5; i++) {
+    state.maps[`v${i}`] = {
+      videoId: `v${i}`,
+      sources: {
+        transcript: {
+          videoId: `v${i}`,
+          source: "transcript",
+          computedAt: `2026-07-${10 + i}T00:00:00.000Z`,
+          minGap: 0.5,
+          wordTimed: true,
+          words: [1, 2, 3],
+          windows: [{ start: 1, end: 2 }],
+        },
+      },
+    };
+  }
+  assert.equal(pruneWordLists(state, 2), true);
+  // The two newest keep their words; the three oldest lose them.
+  assert.equal(state.maps.v4.sources.transcript?.words?.length, 3);
+  assert.equal(state.maps.v3.sources.transcript?.words?.length, 3);
+  assert.equal(state.maps.v0.sources.transcript?.words, undefined);
+  // And nothing else about them is touched — the windows are still the answer.
+  assert.deepEqual(state.maps.v0.sources.transcript?.windows, [{ start: 1, end: 2 }]);
+});
+
+test("a pruned map is not mistaken for one written before 022", () => {
+  const state = emptySilenceState();
+  state.maps.v0 = {
+    videoId: "v0",
+    sources: {
+      transcript: {
+        videoId: "v0",
+        source: "transcript",
+        computedAt: "2026-07-10T00:00:00.000Z",
+        minGap: 0.5,
+        wordTimed: true,
+        words: [1, 2, 3],
+        windows: [{ start: 1, end: 2 }],
+      },
+    },
+  };
+  pruneWordLists(state, 0);
+  assert.equal(state.maps.v0.sources.transcript?.words, undefined);
+  assert.equal(isStale(state.maps.v0.sources.transcript!, 0.5), false);
+});
+
+test("pruning does nothing when there is nothing to prune", () => {
+  const state = emptySilenceState();
+  state.maps.v0 = { videoId: "v0", sources: { transcript: map({ videoId: "v0" }) } };
+  assert.equal(pruneWordLists(state, 30), false);
 });

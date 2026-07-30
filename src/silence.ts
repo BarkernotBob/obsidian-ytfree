@@ -131,6 +131,16 @@ export const LEAD_IN_SECONDS = 0.15;
  */
 export const LEAD_OUT_SECONDS = 0.25;
 
+/**
+ * The shortest pause the user may ask to have skipped, in seconds.
+ *
+ * 0.2 s in 015, and 022 raised it. Below about 0.4 s a "pause" is the breath
+ * inside a sentence rather than the gap between two of them, and a map built at
+ * that floor is mostly fragments shorter than `MIN_SKIP_SECONDS` — which the
+ * player can do nothing useful with, and which it used to play fast instead.
+ */
+export const MIN_SILENCE_GAP = 0.4;
+
 /** Past this many videos, the least recently computed maps are dropped. */
 export const MAX_SILENCE_MAPS = 200;
 
@@ -391,11 +401,21 @@ export function windowsFromWords(words: number[], minGap: number): SilenceWindow
  */
 export function transcriptWindows(cues: TimedCue[], minGap: number): SilenceWindow[] {
   const words = wordInstants(cues);
-  // More instants than lines means the track is timing words rather than lines.
-  // A one-to-one count is a human track, or an auto track stripped of `segs`.
-  return words.length > cues.length
+  return isWordTimed(cues, words)
     ? windowsFromWords(words, minGap)
     : windowsFromCues(cues, minGap);
+}
+
+/**
+ * Is this track timing words, or only lines?
+ *
+ * More instants than lines means words. A one-to-one count is a human track, or
+ * an auto track stripped of `segs`. Exported because the answer is also stored
+ * on the map — see `SilenceMap.wordTimed`, which is what tells a map with no
+ * word list apart from a map written before there were any.
+ */
+export function isWordTimed(cues: TimedCue[], words: number[] = wordInstants(cues)): boolean {
+  return words.length > cues.length;
 }
 
 // -------------------------------------------------------------- apply layer
@@ -962,6 +982,46 @@ export function pruneSilenceMaps(state: SilenceState, max = MAX_SILENCE_MAPS): b
     .sort((a, b) => entryComputedAt(state.maps[a]).localeCompare(entryComputedAt(state.maps[b])))
     .slice(0, ids.length - max);
   for (const id of doomed) delete state.maps[id];
+  return true;
+}
+
+/**
+ * How many videos keep their word lists. See `pruneWordLists`.
+ *
+ * Far below `MAX_SILENCE_MAPS`, because the two things cost wildly different
+ * amounts: a map's windows are a few hundred bytes and its word list is tens of
+ * kilobytes. Thirty videos of words is about a megabyte, which is a reasonable
+ * size for a file iCloud syncs on every write.
+ */
+export const MAX_WORD_LISTS = 30;
+
+/**
+ * Drop `words` from all but the most recently computed maps.
+ *
+ * The word list is by far the largest thing in the state file — 4300 instants
+ * for a 26-minute video against 97 windows — and it exists to let `vetoWords`
+ * run against a map read off disk. That is worth paying for on a video being
+ * watched now and not on one nobody has opened in months, which can fetch its
+ * captions again in a single request.
+ *
+ * `wordTimed` is deliberately left behind. It is one boolean, and it is what
+ * stops `isStale` mistaking a pruned map for a pre-022 one and refetching every
+ * old video at once.
+ */
+export function pruneWordLists(state: SilenceState, max = MAX_WORD_LISTS): boolean {
+  const withWords = Object.keys(state.maps).filter((id) =>
+    Object.values(state.maps[id].sources).some((map) => map?.words?.length),
+  );
+  if (withWords.length <= max) return false;
+
+  const doomed = withWords
+    .sort((a, b) => entryComputedAt(state.maps[a]).localeCompare(entryComputedAt(state.maps[b])))
+    .slice(0, withWords.length - max);
+  for (const id of doomed) {
+    for (const map of Object.values(state.maps[id].sources)) {
+      if (map) delete map.words;
+    }
+  }
   return true;
 }
 

@@ -2204,3 +2204,19 @@ body.ytfree-immersive-open {
 .ytfree-hub-card.is-watched .ytfree-hub-thumb {
   opacity: 0.55;
 }
+
+/* The collapsed Advanced block in settings. Its summary is a control, so it
+   gets the same hit area and cursor as one; the settings inside are indented
+   so it is obvious they belong to it rather than to the section above. */
+.ytfree-advanced > summary {
+  cursor: pointer;
+  padding: 0.6em 0;
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+}
+
+.ytfree-advanced > .setting-item,
+.ytfree-advanced > .setting-item-description {
+  padding-left: 1em;
+  border-left: 2px solid var(--background-modifier-border);
+}

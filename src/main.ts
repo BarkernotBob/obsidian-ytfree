@@ -50,6 +50,8 @@ import {
   combineSilence,
   FLOOR_MARGIN_DB,
   isStale,
+  isWordTimed,
+  MIN_SILENCE_GAP,
   transcriptWindows,
   wordInstants,
   WORD_PAD,
@@ -2965,7 +2967,17 @@ export default class YtFreePlugin extends Plugin {
             `no ${this.transcriptLanguage()} captions for this video`,
           );
         } else {
-          this.recordSilence(player, videoId, "transcript", minGap, produced.windows, undefined, produced.words);
+          this.recordSilence(
+            player,
+            videoId,
+            "transcript",
+            minGap,
+            produced.windows,
+            undefined,
+            produced.words,
+            undefined,
+            produced.wordTimed,
+          );
         }
       } catch (err) {
         console.error("YT Free: caption timing unavailable for Smart Speed.", err);
@@ -2992,6 +3004,7 @@ export default class YtFreePlugin extends Plugin {
     analyzedTo?: number,
     words?: number[],
     noiseDb?: number,
+    wordTimed?: boolean,
   ): void {
     this.silence.record({
       videoId,
@@ -3002,6 +3015,7 @@ export default class YtFreePlugin extends Plugin {
       ...(analyzedTo === undefined ? {} : { analyzedTo }),
       ...(words && words.length ? { words } : {}),
       ...(noiseDb === undefined ? {} : { noiseDb }),
+      ...(wordTimed === undefined ? {} : { wordTimed }),
     });
     this.pushCombinedSilence(player, videoId);
   }
@@ -3026,7 +3040,7 @@ export default class YtFreePlugin extends Plugin {
   private async transcriptSilence(
     videoId: string,
     minGap: number,
-  ): Promise<{ windows: SilenceWindow[]; words: number[] } | null> {
+  ): Promise<{ windows: SilenceWindow[]; words: number[]; wordTimed: boolean } | null> {
     const track = await fetchCaptionTrack(videoId, this.transcriptLanguage());
     if (!track) return null;
     const response = await requestUrl({ url: track.url, throw: true });
@@ -3035,7 +3049,7 @@ export default class YtFreePlugin extends Plugin {
     // Two decimal places: 10 ms is a tenth of the closest two word starts ever
     // measured, and the full float doubles the size of a file two devices sync.
     const words = wordInstants(cues).map((w) => Math.round(w * 100) / 100);
-    return { windows: transcriptWindows(cues, minGap), words };
+    return { windows: transcriptWindows(cues, minGap), words, wordTimed: isWordTimed(cues) };
   }
 
   /**
@@ -3502,6 +3516,14 @@ export default class YtFreePlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // 022 raised the floor of "shortest pause to skip" to 0.4 s. Below that a
+    // pause is a breath between words rather than a gap between thoughts, and
+    // the map fills with fragments too short for the player to do anything with
+    // — which is what 022's chipmunk was made of. A user sitting on the old
+    // 0.2 or 0.3 is moved up rather than left on a setting the UI no longer offers.
+    if (this.settings.silenceMinGap < MIN_SILENCE_GAP) {
+      this.settings.silenceMinGap = MIN_SILENCE_GAP;
+    }
   }
 
   async saveSettings(): Promise<void> {
@@ -4011,9 +4033,7 @@ class YtFreeSettingTab extends PluginSettingTab {
       )
       .addDropdown((dropdown) => {
         const options: Array<[number, string]> = [
-          [0.2, "0.2 s — aggressive"],
-          [0.3, "0.3 s"],
-          [0.4, "0.4 s"],
+          [0.4, "0.4 s — aggressive"],
           [0.5, "0.5 s — balanced"],
           [0.75, "0.75 s"],
           [1, "1 s"],
