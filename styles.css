@@ -2,6 +2,14 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /*
+   * The plugin's one colour, in one place. It is the progress line along the
+   * foot of the picture and it is the pop-out's icon while Smart Speed is on —
+   * two things that are true about the video rather than about the app, which
+   * is why they are this purple and not Obsidian's accent, whatever the reader
+   * has set that to.
+   */
+  --ytfree-purple: #a882ff;
 }
 
 /*
@@ -79,7 +87,7 @@
      four times a second, for the length of the video. */
   transform: scaleX(0);
   transform-origin: left center;
-  background: var(--ytfree-progress-color, #a882ff);
+  background: var(--ytfree-progress-color, var(--ytfree-purple, #a882ff));
 }
 
 :fullscreen .ytfree-progress {
@@ -137,12 +145,19 @@
   gap: 8px;
 }
 
-/* The transport is the middle cell; the sides push outwards from it. */
-.ytfree-controls-side:first-child {
+/*
+ * The transport is the middle cell; the sides push outwards from it.
+ *
+ * Named classes, not `:first-child` / `:last-child`. The pop-out is a child of
+ * this same bar and it is built last, so it held `:last-child` and the right
+ * group silently fell back to `flex-start` — which is the "everything bunched
+ * against the transport with a hole on the outside" the alignment pass found.
+ */
+.ytfree-controls-left {
   justify-content: flex-start;
 }
 
-.ytfree-controls-side:last-child {
+.ytfree-controls-right {
   justify-content: flex-end;
 }
 
@@ -280,45 +295,25 @@
    button instead of overlapping in the middle of it. A transform, so nothing
    about the button's box changes. */
 .ytfree-controls .ytfree-btn-back > svg,
-.ytfree-controls .ytfree-btn-forward > svg,
-.ytfree-controls .ytfree-btn-smart > svg {
+.ytfree-controls .ytfree-btn-forward > svg {
   transform: translateY(-4px);
 }
 
 /*
- * Smart Speed: on, off, and nothing-to-do — three states in one box that never
- * changes size.
+ * The pinned player, on and off.
  *
- * On is the accent colour, because it is the only control here that alters what
- * you hear and it should be obvious at a glance whether it is doing so. Off is
- * the same muted grey as everything else. Unavailable is the shared `:disabled`
- * rule above — 0.45 opacity, no cursor — which is a change of appearance and
- * not of geometry, so a video with no captions has a control bar identical in
- * layout to one with them.
+ * Obsidian's accent rather than the purple: this one is a switch belonging to
+ * the plugin — it turns the pinned player on for every note with a video in it
+ * — and the purple is reserved for the two things that describe the video.
  */
-.ytfree-controls .ytfree-btn-smart.is-active {
+.ytfree-controls .ytfree-btn-pin.is-active {
   color: var(--interactive-accent);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .ytfree-controls .ytfree-btn-smart.is-active:hover {
+  .ytfree-controls .ytfree-btn-pin.is-active:hover {
     color: var(--interactive-accent-hover);
   }
-}
-
-/*
- * The time saved, in the badge strip the skip buttons use for their "10".
- *
- * Absolutely positioned and `pointer-events: none` by inheritance from
- * `.ytfree-btn-badge`, so a number that ticks from "" to "−12:04" cannot widen
- * the button, cannot move the speed picker, and cannot move Play off centre.
- * Tabular figures so the digits do not shuffle as it climbs.
- */
-.ytfree-controls .ytfree-smart-saved {
-  font-size: 9px;
-  font-weight: var(--font-normal);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
 }
 
 /* Same pill as a button, and wide enough for "1.75×" so choosing a speed can
@@ -366,6 +361,11 @@
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease;
+  /* Seven rows is taller than the gap between the control bar and the top of a
+     phone. `togglePanel` measures the room there actually is and caps the
+     height at it; this is what makes the overflow reachable rather than lost. */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .ytfree-panel.is-open {
@@ -392,11 +392,52 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * The time Smart Speed has saved, beside its label.
+ *
+ * In the label column, which is the `1fr` of a `1fr auto` grid: a readout that
+ * ticks from "" to "−1:04:37" cannot move the switch beside it, cannot widen
+ * the panel, and cannot reach the control bar at all. Tabular figures so the
+ * digits do not shuffle as it climbs.
+ */
+.ytfree-panel .ytfree-panel-value {
+  margin-left: 6px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
 .ytfree-panel-note {
   padding-top: 4px;
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
   text-align: right;
+}
+
+/* The way out to the settings screen, at the foot of the pop-out: a line of
+   text, full width, under the note that says everything above it is temporary. */
+.ytfree-panel .ytfree-panel-link {
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-align: center;
+  cursor: pointer;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-panel .ytfree-panel-link:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
 }
 
 .ytfree-panel .ytfree-panel-select {
@@ -458,9 +499,26 @@
   transform: translateX(16px);
 }
 
-/* Open is the accent colour, like Smart Speed's — colour only, never size. */
+/*
+ * The pop-out's own button says two things at once, so it says them two ways.
+ *
+ * Purple is Smart Speed running — the one thing inside the menu that changes
+ * what you hear, and the reason the menu is worth glancing at while it is shut.
+ * Open is a background, not a colour, so the two states can be true together
+ * and neither can hide the other. Both are paint: no border, no size, nothing
+ * that could move the controls beside it.
+ */
+.ytfree-controls .ytfree-btn-panel.is-smart {
+  color: var(--ytfree-purple, #a882ff);
+}
+
 .ytfree-controls .ytfree-btn-panel.is-active {
-  color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.ytfree-controls .ytfree-btn-panel.is-active.is-smart {
+  color: var(--ytfree-purple, #a882ff);
 }
 
 /*
@@ -763,11 +821,11 @@
     justify-self: center;
   }
 
-  .ytfree-controls-side:first-child {
+  .ytfree-controls-left {
     grid-area: left;
   }
 
-  .ytfree-controls-side:last-child {
+  .ytfree-controls-right {
     grid-area: right;
   }
 
@@ -837,6 +895,72 @@
   left: 0;
   width: 100%;
   height: 56.25vw;
+}
+
+/*
+ * The immersive view: the plugin's own fullscreen.
+ *
+ * A phone turned sideways cannot ask iOS for fullscreen — there is no user
+ * gesture behind a rotation and WebKit refuses — so it asks nobody. The wrapper
+ * is lifted out of the note and laid over the screen, which is CSS and always
+ * works, and it brings the whole player with it: the picture, the purple line
+ * along the bottom of it, and every control. Apple's own fullscreen has none of
+ * our controls in it, so this is the better half of the trade as well as the
+ * only half that is available.
+ *
+ * `position: fixed` on the wrapper rather than moving the element: reparenting
+ * a playing `<video>` on iOS is how you lose the buffer and the position, and
+ * the whole point is that the picture does not so much as flicker.
+ */
+.ytfree-wrapper.is-immersive {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-modal, 100);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: #000;
+}
+
+/* The picture takes everything the controls do not, at whatever shape it is. */
+.ytfree-wrapper.is-immersive .ytfree-media,
+.ytfree-wrapper.is-immersive .ytfree-stage {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  aspect-ratio: auto;
+}
+
+.ytfree-wrapper.is-immersive .ytfree-video {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  object-fit: contain;
+}
+
+/* The bar floats on the picture instead of sitting under it — there is no
+   "under it" here — and the section links go, because there is no note on
+   screen to jump around in. */
+.ytfree-wrapper.is-immersive .ytfree-controls {
+  margin: 0 8px 8px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.ytfree-wrapper.is-immersive .ytfree-sections {
+  display: none;
+}
+
+/* Nothing behind it scrolls while it is up. */
+body.ytfree-immersive-open {
+  overflow: hidden;
 }
 
 /*

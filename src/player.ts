@@ -66,12 +66,26 @@ export interface PlayerOptions {
    */
   nowPlaying?: () => NowPlaying | null;
   /**
-   * Open the plugin's own settings tab. Absent, the button is not drawn —
-   * reaching Obsidian's settings is an app API, not a player one.
+   * Open the plugin's own settings tab. Absent, the row is not drawn —
+   * reaching Obsidian's settings is an app API, not a player one. It lives at
+   * the foot of the pop-out rather than on the bar: a screen you visit twice a
+   * year does not deserve a permanent thumb-sized target next to Play.
    */
   onOpenSettings?: () => void;
+  /**
+   * The pinned player — the copy that rides at the top of the note. A global
+   * setting rather than a per-video one, which is why it is on the bar and not
+   * in the pop-out: everything in there is "this video only".
+   */
+  pin?: PinOptions;
   /** The pop-out of per-video controls. Absent, there is no pop-out button. */
   quick?: QuickPanelOptions;
+}
+
+export interface PinOptions {
+  /** Whether the pinned player is on right now. Paints the button's state. */
+  pinned: boolean;
+  onToggle: () => void;
 }
 
 /**
@@ -96,6 +110,13 @@ export interface QuickPanelOptions {
    */
   skipNonSpeech?: boolean;
   onSkipNonSpeech?: (value: boolean) => void;
+  /**
+   * Whether typing in the note pauses this video. The global default is a
+   * setting; this is the answer for the note in front of you, and like
+   * everything else in here it dies with it.
+   */
+  pauseWhileTyping?: boolean;
+  onPauseWhileTyping?: (value: boolean) => void;
 }
 
 /** The lock screen's three fields. */
@@ -175,6 +196,9 @@ export class YtFreePlayer {
   private panelBtn: HTMLButtonElement | null = null;
   private panelOpen = false;
   private smartSwitch: HTMLButtonElement | null = null;
+  private pinBtn: HTMLButtonElement | null = null;
+  /** The plugin's own fullscreen — see `setImmersive`. */
+  private immersive = false;
   /** Kept so `destroy` can take them off `document`, which outlives this player. */
   private onDocPointer: ((event: Event) => void) | null = null;
   private onDocKey: ((event: KeyboardEvent) => void) | null = null;
@@ -185,7 +209,6 @@ export class YtFreePlayer {
   private reportProgress: (() => void) | null = null;
 
   // --- Smart Speed. All inert unless `options.smartSpeed` was supplied.
-  private smartBtn: HTMLButtonElement | null = null;
   private smartBadge: HTMLElement | null = null;
   private smartOn = false;
   /** Raw silence intervals from whichever producer last spoke. */
@@ -466,10 +489,17 @@ export class YtFreePlayer {
   private buildControls(): void {
     const bar = this.container.createDiv({ cls: "ytfree-controls" });
 
+    // Named rather than positional. They used to be told apart by `:first-child`
+    // and `:last-child`, and the pop-out — built into this same bar, and last in
+    // it — quietly took `:last-child` away from the right-hand group: it stopped
+    // being right-aligned, so it sat one grid gap from the transport with all
+    // the air stranded on the far side. A class cannot be stolen by a sibling.
     const groups = {
-      left: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side" }),
+      left: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side ytfree-controls-left" }),
       mid: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-transport" }),
-      right: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side" }),
+      right: bar.createDiv({
+        cls: "ytfree-controls-group ytfree-controls-side ytfree-controls-right",
+      }),
     };
     const host = (side: "left" | "mid" | "right"): HTMLElement => groups[side];
 
@@ -517,6 +547,9 @@ export class YtFreePlayer {
     // corner badge inside a fixed-size button, so it costs no layout.
     for (const el of [back, forward]) el.createSpan({ cls: "ytfree-btn-badge", text: "10" });
 
+    // Left is how the picture plays and where it plays: the speed picker, then
+    // the two ways out of the note — Picture-in-Picture and Fullscreen, which
+    // are the same decision at two sizes and belong beside each other.
     const speed = host("left").createEl("select", {
       cls: "ytfree-speed",
       attr: { title: "Playback speed", "aria-label": "Playback speed" },
@@ -530,60 +563,25 @@ export class YtFreePlayer {
       this.video.playbackRate = this.playbackRate;
     });
 
-    // Smart Speed sits with the speed picker, because it is a speed control:
-    // the select says how fast the talking goes, this says what happens to the
-    // silence between it. Always built when the feature is wired up, whether or
-    // not this video turns out to have a map — a control that appears once an
-    // analysis finishes is a control that moves its neighbours.
-    if (this.options.smartSpeed) {
-      const smart = button("left", "Smart", "zap", "Smart Speed", () => {
-        this.setSmartSpeed(!this.smartOn);
-        this.options.smartSpeed?.onToggle?.(this.smartOn);
-      });
-      smart.addClass("ytfree-btn-smart");
-      // The time saved lives *inside* the button, in the same absolutely
-      // positioned strip the skip buttons put their "10" in. A readout beside
-      // the toggle would be a second control's worth of width on a row that has
-      // none to spare; a readout that costs no width can never reflow the row.
-      this.smartBadge = smart.createSpan({ cls: "ytfree-btn-badge ytfree-smart-saved" });
-      this.smartBtn = smart;
-      this.smartOn = this.options.smartSpeed.enabled;
-      this.paintSmart();
-    }
+    // Smart Speed is no longer a button here. It was the ninth control on a
+    // row that had run out of width, and it is a setting you change once a
+    // video rather than a transport you reach for — so it lives in the pop-out,
+    // and the pop-out's own icon turns purple while it is on. One glance still
+    // answers "is this thing speeding through my silence", which was the only
+    // job the button on the bar was doing.
+    if (this.options.smartSpeed) this.smartOn = this.options.smartSpeed.enabled;
 
-    // Left, with the speed picker, rather than right with the size controls —
-    // and not only for the sense of it. Three buttons on the right and one
-    // control on the left is wider on that side than half a phone minus the
-    // transport, and a side cell that cannot fit its contents is a transport
-    // that is no longer in the middle. Two and two fits, on a 375pt screen too.
     button("left", "PiP", "picture-in-picture", "Picture-in-Picture", () => {
       void this.withMedia(() => this.togglePip());
     });
 
-    if (this.options.onOpenSettings) {
-      button("left", "Settings", "settings", "YT Free settings", () => {
-        this.togglePanel(false);
-        this.options.onOpenSettings?.();
-      });
-    }
-
-    if (this.options.quick) {
-      // The pop-out and the button that opens it. Both are built now, closed —
-      // a panel that is created on the click that opens it is a panel that
-      // cannot be positioned before it is seen, and this one has to open
-      // upwards over the video without moving anything.
-      this.panelBtn = button("right", "Options", "sliders-horizontal", "This video's settings", () =>
-        this.togglePanel(),
-      );
-      this.panelBtn.addClass("ytfree-btn-panel");
-      this.panelBtn.setAttribute("aria-expanded", "false");
-      this.buildQuickPanel(bar, this.options.quick);
-    }
-
-    button("right", "Fullscreen", "maximize", "Fullscreen", () => {
+    button("left", "Fullscreen", "maximize", "Fullscreen", () => {
       void this.withMedia(() => this.toggleFullscreen());
     });
 
+    // Right is what this player does to the *note*: stamp it, keep a copy of
+    // it, pin it, fold it away — and the pop-out, last, because an overflow
+    // menu belongs at the end of the run.
     if (this.onTimestamp) {
       button("right", "Timestamp", "clock", "Insert timestamp at cursor", () => {
         this.onTimestamp?.(Math.floor(this.video.currentTime));
@@ -610,7 +608,60 @@ export class YtFreePlayer {
       this.downloadBtn.addClass("ytfree-btn-download");
     }
 
+    if (this.options.pin) {
+      // A pin, on the bar rather than in the pop-out, because it is the one
+      // decision here that is not about this video: it turns the pinned player
+      // on for every note that has a video in it. It was reachable only from
+      // the command palette, which on a phone is three taps and a search.
+      this.pinBtn = button("right", "Pin", "pin", "Pinned player", () => {
+        // Deferred: turning the pin off unmounts this very player, and tearing
+        // down the element whose click is still being dispatched is how you get
+        // an event handler running against a detached tree.
+        window.setTimeout(() => this.options.pin?.onToggle(), 0);
+      });
+      this.pinBtn.addClass("ytfree-btn-pin");
+      this.paintPin(this.options.pin.pinned);
+    }
+
+    if (this.options.quick) {
+      // The pop-out and the button that opens it. Both are built now, closed —
+      // a panel that is created on the click that opens it is a panel that
+      // cannot be positioned before it is seen, and this one has to open
+      // upwards over the video without moving anything.
+      this.panelBtn = button("right", "Options", "sliders-horizontal", "This video's settings", () =>
+        this.togglePanel(),
+      );
+      this.panelBtn.addClass("ytfree-btn-panel");
+      this.panelBtn.setAttribute("aria-expanded", "false");
+      this.buildQuickPanel(bar, this.options.quick);
+      this.paintSmart();
+    }
+
     this.buildSectionLinks();
+  }
+
+  /**
+   * The pinned player was switched somewhere else — the command palette, or
+   * another note's copy of this bar. A player that outlives the switch has to
+   * be told, or its pin says the opposite of what is true.
+   */
+  setPinned(pinned: boolean): void {
+    if (this.destroyed || !this.options.pin) return;
+    this.options.pin.pinned = pinned;
+    this.paintPin(pinned);
+  }
+
+  /** The pin's two states, in one box: colour and wording, never size. */
+  private paintPin(pinned: boolean): void {
+    const el = this.pinBtn;
+    if (!el) return;
+    el.toggleClass("is-active", pinned);
+    const title = pinned
+      ? "Pinned player on — tap to unpin"
+      : "Pinned player off — tap to pin this video to the top of the note";
+    el.setAttribute("title", title);
+    el.setAttribute("aria-label", title);
+    el.setAttribute("aria-pressed", String(pinned));
   }
 
   /**
@@ -710,13 +761,19 @@ export class YtFreePlayer {
     };
 
     if (this.options.smartSpeed) {
-      // Kept in step with the button on the bar in `paintSmart`, both ways:
-      // they are two faces of one state, and a pop-out that disagreed with the
-      // control behind it would be worse than not having it.
+      // Smart Speed's only control now, and the pop-out button on the bar is
+      // its only indicator — both painted from `paintSmart`, so the switch, the
+      // icon's colour and the engine can never disagree.
       this.smartSwitch = toggle("Smart Speed", this.smartOn, (on) => {
         this.setSmartSpeed(on);
         this.options.smartSpeed?.onToggle?.(on);
       });
+      // The time saved, in the label column. The column is `1fr` in a
+      // `1fr auto` grid, so a readout that ticks from "" to "−1:04:37" cannot
+      // move the switch beside it or resize the panel.
+      this.smartBadge = this.smartSwitch.parentElement?.querySelector<HTMLElement>(
+        ".ytfree-panel-label",
+      )?.createSpan({ cls: "ytfree-panel-value" }) ?? null;
 
       if (quick.onSkipNonSpeech) {
         toggle("Skip music too", quick.skipNonSpeech ?? false, (on) => quick.onSkipNonSpeech?.(on));
@@ -741,6 +798,16 @@ export class YtFreePlayer {
       );
     }
 
+    if (quick.onPauseWhileTyping) {
+      // The other thing that happens to playback without being asked. It was a
+      // settings-screen toggle only, which is the wrong place for a decision
+      // you make about one video — "let this one run while I write" is a
+      // sentence about the lecture in front of you, not about the plugin.
+      toggle("Pause while typing", quick.pauseWhileTyping ?? true, (on) =>
+        quick.onPauseWhileTyping?.(on),
+      );
+    }
+
     if (quick.heightVh !== undefined && quick.onHeight) {
       const el = row("Player size").createEl("input", {
         cls: "ytfree-panel-range",
@@ -752,6 +819,23 @@ export class YtFreePlayer {
 
     panel.createDiv({ cls: "ytfree-panel-note", text: "This video only" });
 
+    if (this.options.onOpenSettings) {
+      // The way out to the decisions that *do* outlive this note. At the foot
+      // of the pop-out, under the line that says everything above it is
+      // temporary, because that is exactly the distinction it exists for.
+      const el = panel.createEl("button", {
+        cls: "ytfree-panel-link",
+        text: "All YT Free settings…",
+        attr: { "aria-label": "Open YT Free settings" },
+      });
+      el.type = "button";
+      el.addEventListener("click", (event) => {
+        event.preventDefault();
+        this.togglePanel(false);
+        this.options.onOpenSettings?.();
+      });
+    }
+
     // Anywhere else, and Escape. Registered on the document because a tap on
     // the note behind the panel is the commonest way to mean "done", and it
     // never reaches this element.
@@ -762,7 +846,11 @@ export class YtFreePlayer {
       this.togglePanel(false);
     };
     this.onDocKey = (event: KeyboardEvent) => {
-      if (this.panelOpen && event.key === "Escape") this.togglePanel(false);
+      if (event.key !== "Escape") return;
+      // The panel first: Escape means "close the thing on top", and with both
+      // open the panel is the thing on top.
+      if (this.panelOpen) this.togglePanel(false);
+      else if (this.immersive) this.setImmersive(false);
     };
     document.addEventListener("pointerdown", this.onDocPointer, true);
     document.addEventListener("keydown", this.onDocKey);
@@ -772,6 +860,15 @@ export class YtFreePlayer {
     const panel = this.panel;
     if (!panel) return;
     this.panelOpen = open ?? !this.panelOpen;
+    if (this.panelOpen) {
+      // The panel opens upwards from the control bar, and it has grown: seven
+      // rows on a phone whose player starts a couple of hundred points down the
+      // screen would run off the top of it. Capped at the room there actually
+      // is, measured at the moment it opens — the bar has a different height in
+      // portrait, in landscape and in the immersive view. It scrolls past that.
+      const barTop = (panel.parentElement ?? this.container).getBoundingClientRect().top;
+      panel.style.maxHeight = `${Math.max(160, Math.round(barTop) - 12)}px`;
+    }
     panel.toggleClass("is-open", this.panelOpen);
     this.panelBtn?.toggleClass("is-active", this.panelOpen);
     this.panelBtn?.setAttribute("aria-expanded", String(this.panelOpen));
@@ -1011,25 +1108,20 @@ export class YtFreePlayer {
   }
 
   /**
-   * The toggle's three states, all inside a fixed square: on, off, and dimmed
-   * because this video has nothing to compress. Only the colour, the tooltip
-   * and the icon change — never the box.
+   * Smart Speed's three states — on, off, and nothing-to-compress — across the
+   * switch that sets it and the pop-out icon that reports it. Colour, wording
+   * and disabled-ness only; no box anywhere changes size.
    */
   private paintSmart(): void {
     const usable = this.activeWindows.length > 0;
-    // The pop-out's switch is the same state wearing a different shape, so it
-    // is repainted from here rather than from whichever control was pressed.
+    // The switch in the pop-out is the control; the pop-out's own button is the
+    // indicator. Both are painted here rather than by whoever was pressed, so
+    // they cannot disagree with the engine or with each other.
     if (this.smartSwitch) {
       this.smartSwitch.toggleClass("is-on", this.smartOn);
       this.smartSwitch.setAttribute("aria-checked", String(this.smartOn));
       this.smartSwitch.disabled = !usable && this.smartReason !== null;
     }
-
-    const el = this.smartBtn;
-    if (!el) return;
-
-    el.toggleClass("is-active", this.smartOn && usable);
-    el.disabled = !usable && this.smartReason !== null;
 
     const source = this.silenceSource === "ffmpeg" ? "measured audio" : "caption timing";
     // Two sentences because there are now two behaviours, and which one you get
@@ -1045,15 +1137,25 @@ export class YtFreePlayer {
           }`
         : "Smart Speed off";
 
-    el.setAttribute("title", title);
-    el.setAttribute("aria-label", title);
-    el.setAttribute("aria-pressed", String(this.smartOn && usable));
+    this.smartSwitch?.setAttribute("title", title);
+    this.smartSwitch?.setAttribute("aria-label", title);
+
+    const el = this.panelBtn;
+    if (el) {
+      // Purple while Smart Speed is running, and nothing while it is not. It is
+      // the one thing in the pop-out that changes what you hear, so it is the
+      // one thing the closed menu has to be able to say.
+      el.toggleClass("is-smart", this.smartOn && usable);
+      const label = `This video's settings — ${title}`;
+      el.setAttribute("title", label);
+      el.setAttribute("aria-label", label);
+    }
     this.paintSavedTime();
   }
 
   /**
-   * `−1:20` under the icon, in the badge strip. Blank below a second, because a
-   * readout that starts at "−0:00" reads as broken rather than as new.
+   * `−1:20` beside the pop-out's Smart Speed label. Blank below a second,
+   * because a readout that starts at "−0:00" reads as broken rather than as new.
    */
   private paintSavedTime(): void {
     if (!this.smartBadge) return;
@@ -1177,33 +1279,44 @@ export class YtFreePlayer {
    * silently.
    */
   private async toggleFullscreen(): Promise<void> {
-    if (document.fullscreenElement) {
-      try {
-        await document.exitFullscreen();
-      } catch {
-        // Already gone, or refused. Either way there is nothing to say.
-      }
+    if (this.immersive || document.fullscreenElement) {
+      await this.exitFullscreen();
       return;
     }
-    await this.enterFullscreen(true);
+    await this.enterFullscreen();
+  }
+
+  /** Out of whichever kind of fullscreen this player is in. */
+  async exitFullscreen(): Promise<void> {
+    if (this.immersive) this.setImmersive(false);
+    if (!document.fullscreenElement) return;
+    try {
+      await document.exitFullscreen();
+    } catch {
+      // Already gone, or refused. Either way there is nothing to say.
+    }
   }
 
   /**
-   * Go fullscreen, and never come back out — the half a rotation wants.
+   * Go fullscreen — the whole screen, whatever the platform will give.
    *
-   * `announce` is off for anything the reader did not press: a phone turned
-   * sideways that cannot go fullscreen should do nothing, not put an error over
-   * the picture. iOS refuses `webkitEnterFullscreen` outside a user gesture on
-   * some versions, which is exactly why every path here is allowed to fail
-   * quietly.
+   * The native APIs first, because a native fullscreen video is the better
+   * thing: the OS scrubber, the OS rotation, the OS gestures. But an iPhone
+   * refuses `webkitEnterFullscreen` when there is no user gesture behind the
+   * call, and a phone being turned sideways is not a gesture — which is why
+   * rotating did nothing at all before this. So the fallback is the plugin's
+   * own: the player is taken out of the note and laid over the screen with CSS,
+   * which needs no permission from anyone and cannot be refused.
    */
-  async enterFullscreen(announce = false): Promise<void> {
+  async enterFullscreen(): Promise<void> {
     const el = this.video as HTMLVideoElement & {
       webkitEnterFullscreen?: () => void;
       webkitSupportsFullscreen?: boolean;
+      webkitDisplayingFullscreen?: boolean;
       webkitPresentationMode?: string;
     };
-    if (document.fullscreenElement || el.webkitPresentationMode === "fullscreen") return;
+    if (this.immersive || document.fullscreenElement) return;
+    if (el.webkitPresentationMode === "fullscreen" || el.webkitDisplayingFullscreen) return;
 
     try {
       if (typeof this.video.requestFullscreen === "function") {
@@ -1211,18 +1324,47 @@ export class YtFreePlayer {
         return;
       }
     } catch {
-      // Fall through to WebKit's rather than dead-ending.
+      // Fall through rather than dead-ending.
     }
 
     try {
       if (el.webkitSupportsFullscreen) {
         el.webkitEnterFullscreen?.();
+        // It reports failure by doing nothing, so ask a frame later whether it
+        // actually happened and cover the case where it did not.
+        window.setTimeout(() => {
+          if (this.destroyed) return;
+          if (el.webkitDisplayingFullscreen || el.webkitPresentationMode === "fullscreen") return;
+          this.setImmersive(true);
+        }, 250);
         return;
       }
     } catch {
       // Media not loaded yet, or no gesture behind this call.
     }
-    if (announce) this.flashStatus("Fullscreen is not available until the video is playing.");
+    this.setImmersive(true);
+  }
+
+  /**
+   * The plugin's own fullscreen: the player, fixed over everything, and nothing
+   * else on screen.
+   *
+   * A class on the wrapper, so the picture, the progress line and the control
+   * bar all come with it and every control keeps working — which is more than
+   * the native one offers on a phone, where our bar disappears behind Apple's.
+   * The note underneath is left alone; the wrapper is out of the flow while
+   * this is on and drops straight back into it when it goes.
+   */
+  setImmersive(on: boolean): void {
+    if (this.destroyed || this.immersive === on) return;
+    this.immersive = on;
+    this.container.toggleClass("is-immersive", on);
+    document.body.toggleClass("ytfree-immersive-open", on);
+    if (!on) this.togglePanel(false);
+  }
+
+  get isImmersive(): boolean {
+    return this.immersive;
   }
 
   /**
@@ -1519,6 +1661,9 @@ export class YtFreePlayer {
     // Before the flag, or the report refuses itself: closing the note is the
     // most common way a session ends, and it is the position that matters most.
     this.reportProgress?.();
+    // Before the flag, or the class stays on `document.body` — which outlives
+    // this player — and every note in the vault keeps its scrolling locked.
+    this.setImmersive(false);
     this.destroyed = true;
     this.stopSmartLoop();
     if (this.onVisibility) {

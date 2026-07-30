@@ -53,49 +53,68 @@ const badge = `<span class="ytfree-btn-badge">10</span>`;
 
 const speed = `<select class="ytfree-speed"><option>1.75×</option></select>`;
 
-// Smart Speed's time-saved readout lives inside its button, in the same badge
-// strip the skip buttons use. Rendered at its widest — a full hour saved — so
-// the measurement answers the question that matters: can this text ever push
-// the row wider than it was built?
-const saved = `<span class="ytfree-btn-badge ytfree-smart-saved">−1:04:37</span>`;
+// Smart Speed's time-saved readout is in the pop-out now, in the label column
+// of its row. Rendered at its widest — a full hour saved — because the question
+// is the same one it answered on the bar: can this text push anything wider
+// than it was built?
+const saved = `<span class="ytfree-panel-value">−1:04:37</span>`;
 
-// The per-video pop-out, at its tallest: five rows and the footnote. Measured
-// open as well as shut, because the promise it makes is that opening it changes
-// the bar's geometry not at all.
+// The per-video pop-out, at its tallest: six rows, the footnote and the way out
+// to the settings screen. Measured open as well as shut, because the promise it
+// makes is that opening it changes the bar's geometry not at all.
 const panelRow = (label, control) =>
   `<div class="ytfree-panel-row"><span class="ytfree-panel-label">${label}</span>${control}</div>`;
 const panelSwitch = `<button type="button" class="ytfree-switch is-on"><span class="ytfree-switch-knob"></span></button>`;
 const panelSelect = `<select class="ytfree-panel-select"><option>2.5×</option></select>`;
 const panel = `
   <div class="ytfree-panel">
-    ${panelRow("Smart Speed", panelSwitch)}
+    ${panelRow(`Smart Speed${saved}`, panelSwitch)}
     ${panelRow("Skip music too", panelSwitch)}
     ${panelRow("Pause speed", panelSelect)}
     ${panelRow("Shortest pause", panelSelect)}
+    ${panelRow("Pause while typing", panelSwitch)}
     ${panelRow("Player size", `<input type="range" class="ytfree-panel-range">`)}
     <div class="ytfree-panel-note">This video only</div>
+    <button type="button" class="ytfree-panel-link">All YT Free settings…</button>
   </div>`;
 
 /**
- * The phone's bar: speed, Smart Speed, PiP and Settings left, transport
- * centred, this-video options, fullscreen and collapse right. The desktop's is
- * the same row with a timestamp and a download button on the right and no
- * collapse — the wider case, on the wider screen, so both are rendered.
+ * The phone's bar: speed, PiP and Fullscreen left — how it plays and where —
+ * transport centred, and what it does to the note on the right: collapse, the
+ * pin, and the pop-out last. The desktop's is the same row with a timestamp and
+ * a download button in place of collapse: the wider case, on the wider screen,
+ * so both are rendered.
  */
 const controls = (phone) => `
   <div class="ytfree-controls">
-    <div class="ytfree-controls-group ytfree-controls-side">
-      ${speed}${btn("ytfree-btn-smart", saved)}${btn("ytfree-btn-pip")}${btn("ytfree-btn-settings")}
+    <div class="ytfree-controls-group ytfree-controls-side ytfree-controls-left">
+      ${speed}${btn("ytfree-btn-pip")}${btn("ytfree-btn-fullscreen")}
     </div>
     <div class="ytfree-controls-group ytfree-controls-transport">
       ${btn("ytfree-btn-play")}${btn("ytfree-btn-back", badge)}${btn("ytfree-btn-forward", badge)}
     </div>
-    <div class="ytfree-controls-group ytfree-controls-side">
-      ${btn("ytfree-btn-panel")}${btn("ytfree-btn-fullscreen")}
+    <div class="ytfree-controls-group ytfree-controls-side ytfree-controls-right">
       ${phone ? btn("ytfree-btn-collapse") : btn("ytfree-btn-timestamp") + btn("ytfree-btn-download")}
+      ${btn("ytfree-btn-pin")}${btn("ytfree-btn-panel")}
     </div>
     ${panel}
   </div>`;
+
+/*
+ * The purple line, in the box the platform actually gives it.
+ *
+ * A phone puts the video inside `.ytfree-media`; a desktop has no such box, so
+ * the player builds a bare `.ytfree-stage` around the video and the line hangs
+ * off that. The desktop was handed the whole wrapper as its media host instead,
+ * which put the line under the section links where nobody could see it — hence
+ * measuring the line against the picture here, on both shapes.
+ */
+const progress = `<div class="ytfree-progress is-live"><div class="ytfree-progress-fill"></div></div>`;
+
+const stage = (phone) =>
+  phone
+    ? `<div class="ytfree-media" style="height:120px">${progress}</div>`
+    : `<div class="ytfree-stage"><div class="ytfree-video" style="height:120px"></div>${progress}</div>`;
 
 const page = (phone) => `<!doctype html>
 <html><head><meta charset="utf-8"><style>${appCss}</style><style>${pluginCss}</style>
@@ -103,9 +122,10 @@ const page = (phone) => `<!doctype html>
 <body class="theme-dark ${phone ? "is-phone" : "is-desktop"} mod-macos">
   <div class="workspace-leaf-content" data-type="markdown">
     <div class="view-content">
-      <div class="ytfree-docked">
-        <div class="ytfree-media" style="height:60px"></div>
+      <div class="ytfree-wrapper ${phone ? "ytfree-pinned ytfree-docked" : "ytfree-pinned"}">
+        ${stage(phone)}
         ${controls(phone)}
+        <div class="ytfree-sections"><button class="ytfree-section-link">Notes</button></div>
       </div>
     </div>
   </div>
@@ -153,8 +173,32 @@ const measure = () => {
   panelEl.classList.add("is-open");
   const openBox = bar.getBoundingClientRect();
   const panelBox = panelEl.getBoundingClientRect();
+  // What the panel wants, against the room there is between the bar and the top
+  // of the screen. `togglePanel` caps the height at the second number, so a
+  // panel taller than its room scrolls instead of running off the top.
+  const panelNaturalHeight = Math.round(panelEl.scrollHeight);
+  const roomAboveBar = Math.round(barBox.top);
   panelEl.classList.remove("is-open");
   const view = document.documentElement.getBoundingClientRect();
+
+  // The two side groups, which should look like a pair rather than like one
+  // group and a leftover.
+  const side = [...bar.querySelectorAll(".ytfree-controls-side")].map((g) => {
+    const kids = [...g.children].map((k) => k.getBoundingClientRect());
+    return Math.round(kids[kids.length - 1].right - kids[0].left);
+  });
+
+  // Every control on its row's centre line. Play is taller than the rest, so
+  // this is the number that says whether they are centred on each other or
+  // merely sitting on the same baseline.
+  const offCentreVertical = Math.max(
+    ...rows.map((row) => {
+      const top = Math.min(...row.boxes.map((b) => b.top));
+      const bottom = Math.max(...row.boxes.map((b) => b.bottom));
+      const centre = (top + bottom) / 2;
+      return Math.max(...row.boxes.map((b) => Math.round(Math.abs(mid(b) - centre))));
+    }),
+  );
 
   return {
     // The failure this harness exists to catch.
@@ -172,6 +216,48 @@ const measure = () => {
     // Play centred on the bar, not on whatever sits beside it.
     playOffCentre: Math.round(play.left + play.width / 2 - (barBox.left + barBox.width / 2)),
     badgeOffCentre: badges,
+    offCentreVertical,
+    sideWidths: side,
+    // Both zero, or the line is not sitting on the bottom edge of the picture.
+    progressBelowPicture: (() => {
+      const line = document.querySelector(".ytfree-progress");
+      const picture = document.querySelector(".ytfree-video, .ytfree-media");
+      const a = line.getBoundingClientRect();
+      const b = picture.getBoundingClientRect();
+      return [Math.round(a.bottom - b.bottom), Math.round(a.width - b.width)];
+    })(),
+    panelNaturalHeight,
+    roomAboveBar,
+  };
+};
+
+/**
+ * The immersive view — the plugin's own fullscreen, which is what a phone
+ * turned sideways gets, because iOS refuses a real one without a gesture.
+ *
+ * The picture should reach both side edges of the screen, the control bar
+ * should still be on it, and nothing should be off the bottom.
+ */
+const measureImmersive = () => {
+  document.querySelector(".ytfree-wrapper").classList.add("is-immersive");
+  const view = { width: window.innerWidth, height: window.innerHeight };
+  const wrapper = document.querySelector(".ytfree-wrapper").getBoundingClientRect();
+  const picture = document
+    .querySelector(".ytfree-stage, .ytfree-media")
+    .getBoundingClientRect();
+  const bar = document.querySelector(".ytfree-controls").getBoundingClientRect();
+  const line = document.querySelector(".ytfree-progress").getBoundingClientRect();
+  return {
+    coversScreen: [
+      Math.round(wrapper.width - view.width),
+      Math.round(wrapper.height - view.height),
+    ],
+    pictureWidth: Math.round(picture.width),
+    // Positive = the bar has run off the bottom of the screen.
+    barBelowScreen: Math.round(bar.bottom - view.height),
+    barOnPicture: bar.top < picture.bottom,
+    progressBelowPicture: Math.round(line.bottom - picture.bottom),
+    sectionsHidden: getComputedStyle(document.querySelector(".ytfree-sections")).display === "none",
   };
 };
 
@@ -185,6 +271,17 @@ for (const [label, width, phone] of [
   const tab = await browser.newPage({ viewport: { width, height: 700 } });
   await tab.setContent(page(phone));
   console.log(label, await tab.evaluate(measure));
+  await tab.close();
+}
+
+// And the same phone on its side, in the immersive view.
+for (const [label, width, height] of [
+  ["iPhone 14 landscape, immersive (844×390)", 844, 390],
+  ["iPhone SE landscape, immersive (667×375)", 667, 375],
+]) {
+  const tab = await browser.newPage({ viewport: { width, height } });
+  await tab.setContent(page(true));
+  console.log(label, await tab.evaluate(measureImmersive));
   await tab.close();
 }
 await browser.close();

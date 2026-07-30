@@ -285,6 +285,12 @@ interface PlayerEntry {
    */
   skipNonSpeech?: boolean;
   /**
+   * "Pause while typing" for this video only, set from the player's pop-out.
+   * Unset — the ordinary case — means the global setting answers, and like the
+   * one above it is deliberately not persisted.
+   */
+  pauseWhileTyping?: boolean;
+  /**
    * Mobile: the stream has not been resolved yet. The player is mounted and
    * takes up its final space from the moment the note opens, but nothing is
    * fetched until the poster or a timestamp is tapped — opening a note on
@@ -682,12 +688,7 @@ export default class YtFreePlugin extends Plugin {
     this.addCommand({
       id: "toggle-pinned-player",
       name: "Toggle pinned player for this note",
-      callback: async () => {
-        this.settings.pinnedPlayer = !this.settings.pinnedPlayer;
-        await this.saveSettings();
-        this.syncPinnedPlayers();
-        new Notice(`YT Free: pinned player ${this.settings.pinnedPlayer ? "on" : "off"}.`);
-      },
+      callback: () => void this.togglePinnedPlayer(),
     });
 
     this.addCommand({
@@ -821,20 +822,26 @@ export default class YtFreePlugin extends Plugin {
    * rotating while reading a note you opened this morning should not throw a
    * paused player over the whole screen.
    *
-   * iOS may refuse a fullscreen request that has no user gesture behind it, and
-   * a rotation is not one. `enterFullscreen` fails quietly by design, so the
-   * worst case here is that nothing happens and the Fullscreen button still
-   * works — which is the same as today.
+   * iOS refuses a fullscreen request that has no user gesture behind it, and a
+   * rotation is not one — which is why the first version of this did nothing at
+   * all when BarkernotBob turned his phone. So a rotation does not ask the OS: it
+   * goes straight to the player's own immersive view, which is CSS and cannot
+   * be refused. Turning back to portrait puts it away again.
    */
   private watchForLandscape(): void {
     if (!Platform.isPhone) return;
 
     const landscape = window.matchMedia("(orientation: landscape)");
     const onRotate = (): void => {
-      if (!landscape.matches) return;
       const entry = this.watchingEntry();
       if (!entry) return;
-      void entry.player.enterFullscreen();
+      if (landscape.matches) {
+        entry.player.setImmersive(true);
+        return;
+      }
+      // Only our own view is closed on the way back. A reader who asked for
+      // real fullscreen with the button gets to stay in it.
+      if (entry.player.isImmersive) entry.player.setImmersive(false);
     };
     landscape.addEventListener("change", onRotate);
     this.register(() => landscape.removeEventListener("change", onRotate));
@@ -1226,6 +1233,45 @@ export default class YtFreePlugin extends Plugin {
   pinnedVideoIdFor(path: string | undefined): string | null {
     if (!this.settings.pinnedPlayer) return null;
     return this.videoIdForNote(path);
+  }
+
+  /**
+   * Pinned player on or off, from the command palette or from the pin on the
+   * control bar.
+   *
+   * One place, because the button and the command have to mean the same thing —
+   * and because turning it *on* has a second half the command never had: a
+   * fenced block already rendered in the note stands down in favour of the
+   * pinned player, but only when it is re-rendered, and until it is the same
+   * video is buffering twice.
+   */
+  async togglePinnedPlayer(): Promise<void> {
+    this.settings.pinnedPlayer = !this.settings.pinnedPlayer;
+    await this.saveSettings();
+    this.syncPinnedPlayers();
+    this.rerenderMarkdownViews();
+    // A fenced player that survives the switch keeps its own pin button, and a
+    // stale pin is worse than no pin: it says the opposite of what is true.
+    for (const entry of this.players.values()) entry.player.setPinned(this.settings.pinnedPlayer);
+    new Notice(`YT Free: pinned player ${this.settings.pinnedPlayer ? "on" : "off"}.`);
+  }
+
+  /**
+   * Ask every open note to draw its fenced blocks again. Reading view only —
+   * `previewMode` is not in the public typings for every build, and a live
+   * preview redraws its own blocks when the note changes.
+   */
+  private rerenderMarkdownViews(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (!(view instanceof MarkdownView)) continue;
+      try {
+        (view as unknown as { previewMode?: { rerender?: (full?: boolean) => void } }).previewMode
+          ?.rerender?.(true);
+      } catch (err) {
+        console.error("YT Free: could not redraw a note after toggling the pinned player.", err);
+      }
+    }
   }
 
   /** Same lookup, without the pinned-player gate — downloads need it either way. */
@@ -2181,11 +2227,11 @@ export default class YtFreePlugin extends Plugin {
    */
   private handleTyping(): void {
     try {
-      if (!this.settings.pauseWhileTyping) return;
-
       const view = this.app.workspace.getActiveViewOfType(MarkdownView);
       const entry = this.playerForPath(view?.file?.path);
       if (!entry) return;
+      // The pop-out's answer for this video if it gave one, the setting if not.
+      if (!(entry.pauseWhileTyping ?? this.settings.pauseWhileTyping)) return;
 
       entry.player.pauseForTyping();
 
@@ -2441,7 +2487,14 @@ export default class YtFreePlugin extends Plugin {
         ? () => void this.startDownload(videoId, noteFile)
         : undefined,
       {
-        mediaHost: media,
+        // Mobile only, and that is the fix for the progress line the desktop
+        // never had: `media` is the *wrapper* on a desktop — status, video,
+        // controls and section links — so handing it over as the media host
+        // hung the line off the bottom of the whole player, under the section
+        // links, where it was both invisible and wrong. With no host the player
+        // builds its own `.ytfree-stage` around the video, which is what the
+        // line needs to be able to sit on the picture's bottom edge.
+        mediaHost: mobile ? media : undefined,
         onToggleCollapse: mobile ? () => this.toggleCollapse(videoId) : undefined,
         // Reads `activate` at call time, not now: the lazy loader is attached
         // further down, after this player exists.
@@ -2463,6 +2516,12 @@ export default class YtFreePlugin extends Plugin {
         // Two ways out of the player and into its settings: the whole screen,
         // and the four dials you actually change while something is playing.
         onOpenSettings: () => this.openSettingsTab(),
+        // The pinned player, from the player itself. A global switch, so it is
+        // on the bar rather than in the pop-out, where everything is per-video.
+        pin: {
+          pinned: this.settings.pinnedPlayer,
+          onToggle: () => void this.togglePinnedPlayer(),
+        },
         quick: {
           // Only where the height variable is read — a fenced block sizes
           // itself, so a size control there would be a control that does
@@ -2471,6 +2530,14 @@ export default class YtFreePlugin extends Plugin {
           onHeight: (vh) => wrapper.style.setProperty("--ytfree-pinned-height", `${vh}vh`),
           skipNonSpeech: this.settings.skipNonSpeech,
           onSkipNonSpeech: (value) => this.setSkipNonSpeechFor(videoId, value),
+          // Per video, like everything else in the pop-out: "let this lecture
+          // run while I write" is a decision about this lecture. The setting
+          // screen is still where "never do this" is said.
+          pauseWhileTyping: this.settings.pauseWhileTyping,
+          onPauseWhileTyping: (value) => {
+            const target = this.players.get(videoId);
+            if (target) target.pauseWhileTyping = value;
+          },
         },
         smartSpeed: {
           enabled: this.settings.smartSpeed,
@@ -3832,7 +3899,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Pause while typing")
       .setDesc(
-        "Typing anywhere in a note with an active video pauses playback, so you never fall behind mid-sentence. A video you paused yourself is never resumed.",
+        "Typing anywhere in a note with an active video pauses playback, so you never fall behind mid-sentence. A video you paused yourself is never resumed. The player's own pop-out can overrule this for one video without changing it here.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.pauseWhileTyping).onChange(async (value) => {
@@ -3841,18 +3908,26 @@ class YtFreeSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl)
-      .setName("Resume after")
-      .setDesc("Milliseconds of no typing before playback starts again.")
-      .addSlider((slider) =>
-        slider
-          .setLimits(250, 5000, 250)
-          .setValue(this.plugin.settings.resumeIdleMs)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.resumeIdleMs = value;
-            await this.plugin.saveSettings();
-          }),
-      );
+    // Seconds, because that is the unit the pause is felt in — "two seconds of
+    // quiet before it starts again" is the sentence in your head, and "2000"
+    // was a number you had to convert before you could judge it. Still stored
+    // in milliseconds, which is what `setTimeout` wants and what every existing
+    // `data.json` already holds.
+    const resume = new Setting(containerEl).setName("Resume after");
+    const describeResume = (ms: number): void => {
+      resume.setDesc(`${(ms / 1000).toFixed(2).replace(/\.?0+$/, "")}s of no typing before playback starts again.`);
+    };
+    describeResume(this.plugin.settings.resumeIdleMs);
+    resume.addSlider((slider) =>
+      slider
+        .setLimits(0.25, 5, 0.25)
+        .setValue(this.plugin.settings.resumeIdleMs / 1000)
+        .setDynamicTooltip()
+        .onChange(async (value) => {
+          this.plugin.settings.resumeIdleMs = Math.round(value * 1000);
+          describeResume(this.plugin.settings.resumeIdleMs);
+          await this.plugin.saveSettings();
+        }),
+    );
   }
 }

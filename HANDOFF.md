@@ -1,6 +1,55 @@
 # HANDOFF
 
-## Status — 2026-07-30: descriptions are escaped before they reach a note
+## Status — 2026-07-30: the line where you can see it, and a bar you can read
+
+[issues/020](issues/020-controls-tidy-immersive-landscape.md) is built and installed.
+**331 unit tests pass, build clean.** Seven items; two of them are 019 not working on
+the device it was written for.
+
+**1. The desktop purple line was drawn in the wrong box.** `buildPlayer` passed
+`mediaHost: media`, and on the desktop `media` *is* the whole wrapper — so the stage
+wrapped the video *and* the section links and the line landed inches below the picture.
+Desktop now passes `undefined` and gets the `.ytfree-stage` 019 claimed it had; mobile
+still passes its own media box. Harness: 0 pt between picture bottom and line, both
+shapes.
+
+**2. Landscape sets immersive mode, not fullscreen.** iOS refuses
+`webkitEnterFullscreen` outside a user gesture and a rotation is not one — the call was
+made and silently dropped. `setImmersive()` instead puts `is-immersive` on the wrapper:
+`position: fixed`, inset 0, picture letterboxed to the screen, controls on a dark strip,
+sections hidden, `body.ytfree-immersive-open` locking scroll. CSS on the element that
+already holds the playing `<video>`, so nothing is reparented and the buffer survives.
+`enterFullscreen()` falls back to it 250 ms after WebKit ignores the request. Escape
+leaves it (pop-out first); `destroy()` clears the body class. Measured at 844×390 and
+667×375: covers the screen, full-width picture, controls on screen.
+
+**3. `.ytfree-controls-side:last-child` had stopped matching** the day the pop-out panel
+became the bar's last child — the right group had been `flex-start` ever since (desktop
+slack 110/16). Groups are named now: `ytfree-controls-left` / `-right`, in player, base
+CSS and the 460 px query. Four widths: overflow 0, `playOffCentre` 0, `offCentreVertical`
+0, smallest target 40 pt, smallest gap 8 pt, nothing moves when the panel opens.
+
+**4. Smart Speed left the bar for the pop-out.** Zap button and its badge deleted; the
+switch in the panel is the only control, with the saved time beside its label. The
+pop-out's button paints purple (`.is-smart`) when Smart Speed is on for the video. PiP
+and Fullscreen moved to the left group to balance the sides.
+
+**5. A pin button** on the right, sharing `togglePinnedPlayer()` with the command;
+purple while on; the toggle is deferred a tick because it rebuilds the player the button
+lives in. `setPinned()` repaints any surviving bar when the command is used instead.
+
+**6. *Resume after* is a seconds slider** (0.25–5, quarter steps) with a live
+description; storage is still ms, so no setting moves.
+
+**7. *Pause while typing* is in the pop-out, per video** — `entry.pauseWhileTyping`,
+falling back to the setting; the panel footnote says *This video only*, and a new
+**All YT Free settings…** link opens the tab for the global default.
+
+Not yet confirmed on hardware: the desktop line and the landscape immersive view.
+Known trade-off: on a short phone the panel is taller than the room above the bar
+(284 vs ~250 pt), so it scrolls under a JS-computed `max-height` rather than growing.
+
+## Previous — 2026-07-30: descriptions are escaped before they reach a note
 
 **331 unit tests pass, build clean, installed to the vault.**
 
