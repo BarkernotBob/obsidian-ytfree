@@ -35,9 +35,7 @@ function candidate(over: Partial<TidyCandidate> = {}): TidyCandidate {
     path: "Watch Later/Some video.md",
     videoId: ID,
     watchedAt: new Date(daysAgo(40)).toISOString(),
-    modifiedAt: daysAgo(40),
     content: noteWith(""),
-    tagged: false,
     open: false,
     ...over,
   };
@@ -52,13 +50,36 @@ test("one line under Notes is writing", () => {
   assert.equal(hasWriting(noteWith("[[00:12]] the bit about the pump")), true);
 });
 
-test("a tag counts as writing", () => {
-  assert.equal(hasWriting(noteWith(""), true), true);
-});
-
-test("text above the first heading counts as writing", () => {
-  const content = noteWith("").replace("# Notes", "Reminder: send this to Dad\n\n# Notes");
-  assert.equal(hasWriting(content), true);
+test("everything the plugin writes is not writing", () => {
+  // The case BarkernotBob asked for: frontmatter filled in, a heatmap above the fold,
+  // a description with the video's own chapter list, a full transcript — and an
+  // empty Notes section, which is the only thing that decides.
+  const furnished = [
+    "---",
+    'title: "Some video"',
+    `media_link: https://www.youtube.com/watch?v=${ID}`,
+    "author: Some Channel",
+    "length: 18:42",
+    "tags: [video, youtube]",
+    "description: A long line the fetch wrote.",
+    "---",
+    "# Most replayed",
+    "- [[03:12]] the loudest moment",
+    "- [[07:44]] and the next one",
+    "",
+    "# Notes",
+    "",
+    "# Video Description",
+    "## Chapters",
+    "0:00 Intro",
+    "",
+    "# Video Transcript",
+    "00:00 hello and welcome",
+    "00:04 today we are going to",
+    "",
+  ].join("\n");
+  assert.equal(hasWriting(furnished), false);
+  assert.equal(tidyable(candidate({ content: furnished }), NOW, DEFAULT_TIDY_DAYS), true);
 });
 
 test("a note with no Notes heading is not ours to judge", () => {
@@ -93,8 +114,11 @@ test("a video watched this week is left alone", () => {
   assert.equal(tidyable(candidate({ watchedAt }), NOW, DEFAULT_TIDY_DAYS), false);
 });
 
-test("a recently edited note is left alone, whatever the edit was", () => {
-  assert.equal(tidyable(candidate({ modifiedAt: daysAgo(2) }), NOW, DEFAULT_TIDY_DAYS), false);
+test("an edit that left no notes behind does not save the note", () => {
+  // The file's mtime is not read at all. A transcript fetched or a heatmap
+  // backfilled last night is the plugin writing, not the reader, and it must
+  // not reset the month.
+  assert.equal(tidyable(candidate(), NOW, DEFAULT_TIDY_DAYS), true);
 });
 
 test("a note open in front of you is left alone", () => {
@@ -109,7 +133,7 @@ test("zero days switches the sweep off", () => {
 test("notesToTidy picks only the ones that qualify", () => {
   const doomed = candidate({ path: "a.md" });
   const written = candidate({ path: "b.md", content: noteWith("a thought") });
-  const fresh = candidate({ path: "c.md", modifiedAt: daysAgo(1) });
+  const fresh = candidate({ path: "c.md", watchedAt: new Date(daysAgo(1)).toISOString() });
   const picked = notesToTidy([doomed, written, fresh], NOW, DEFAULT_TIDY_DAYS);
   assert.deepEqual(
     picked.map((note) => note.path),

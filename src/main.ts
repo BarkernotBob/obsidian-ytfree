@@ -198,20 +198,6 @@ function seekAnchorFor(target: EventTarget | null): HTMLAnchorElement | null {
   return anchor.getAttribute("href")?.startsWith("ytfree:") ? anchor : null;
 }
 
-/**
- * Does the frontmatter carry a tag? The note template writes `tags: []`, so
- * anything in there was put there by hand — which is a decision about the note,
- * and enough on its own to keep it out of the tidy sweep.
- */
-function hasTags(frontmatter: Record<string, unknown> | undefined): boolean {
-  for (const key of ["tags", "tag"]) {
-    const value = frontmatter?.[key];
-    if (Array.isArray(value) && value.some((tag) => String(tag ?? "").trim())) return true;
-    if (typeof value === "string" && value.trim()) return true;
-  }
-  return false;
-}
-
 function withinTapSlop(origin: { x: number; y: number }, touch: Touch): boolean {
   return (
     Math.abs(touch.clientX - origin.x) <= TAP_SLOP_PX &&
@@ -864,7 +850,7 @@ export default class YtFreePlugin extends Plugin {
   /**
    * Move watched video notes with nothing written in them to the trash.
    *
-   * The rules — all four of them, and why each is there — are in `tidy.ts`.
+   * The rules — all three of them, and why each is there — are in `tidy.ts`.
    * This is the vault half: gather what the rules need, ask, and act on the
    * answer. `trashFile` honours the user's "Deleted files" setting, so what
    * happens to a note here is whatever they already chose happens to a note
@@ -900,9 +886,7 @@ export default class YtFreePlugin extends Plugin {
         path: file.path,
         videoId,
         watchedAt,
-        modifiedAt: file.stat.mtime,
         content: await this.app.vault.cachedRead(file),
-        tagged: hasTags(this.app.metadataCache.getFileCache(file)?.frontmatter),
         open: open.has(file.path),
       });
     }
@@ -3414,7 +3398,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Tidy empty notes after")
       .setDesc(
-        "Days. A video note goes to the trash when you have played the video, that long has passed since, and nothing has been written in it — no notes, no tags, no edits. Notes you never played are left alone, and so is anything open in front of you. Zero switches this off.",
+        "Days. A video note goes to the trash when you have played the video, that long has passed since, and there is still nothing under its Notes heading. The frontmatter, the description, the transcript and the most-replayed moments do not count — the plugin wrote those. Notes you never played are left alone, and so is anything open in front of you. Zero switches this off.",
       )
       .addSlider((slider) =>
         slider
