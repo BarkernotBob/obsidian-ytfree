@@ -338,21 +338,36 @@ export function groupCues(cues: Cue[], intervalSeconds: number): Paragraph[] {
 }
 
 /**
+ * How much of the opening a replay peak has to clear.
+ *
+ * Not tunable on purpose: the 0:00 spike is an artifact of how the heatmap is
+ * collected, not a preference.
+ */
+export const LEAD_IN_SECONDS = 10;
+
+/**
  * The strongest replay spikes, spread out.
  *
  * Sorting by value alone returns eight buckets of the same moment, because the
  * heatmap is sampled every ~15 seconds and a spike covers several buckets. The
  * greedy minimum-gap pass is what turns "the top eight numbers" into "the top
  * eight moments".
+ *
+ * The opening `LEAD_IN_SECONDS` are dropped first. Every viewer passes through
+ * 0:00, so the first bucket is the tallest one on almost every video — it
+ * measures "the video was opened", not a moment worth returning to, and it took
+ * a slot on every note.
  */
 export function topPeaks(
   heatmap: VideoInfo["heatmap"],
   count: number,
   minGapSeconds = 45,
+  leadInSeconds = LEAD_IN_SECONDS,
 ): Peak[] {
   const buckets = (heatmap || [])
     .filter((b) => typeof b.start_time === "number" && typeof b.value === "number")
     .map((b) => ({ seconds: Math.floor(b.start_time as number), value: b.value as number }))
+    .filter((b) => b.seconds >= leadInSeconds)
     .sort((a, b) => b.value - a.value || a.seconds - b.seconds);
 
   const chosen: Peak[] = [];

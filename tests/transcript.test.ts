@@ -191,11 +191,25 @@ test("topPeaks spreads the peaks out instead of returning one spike eight times"
 
 test("topPeaks returns chronological order, not leaderboard order", () => {
   const heatmap = [
-    { start_time: 0, value: 0.2 },
+    { start_time: 60, value: 0.2 },
     { start_time: 300, value: 0.9 },
     { start_time: 600, value: 0.5 },
   ];
-  assert.deepEqual(topPeaks(heatmap, 3).map((p) => p.seconds), [0, 300, 600]);
+  assert.deepEqual(topPeaks(heatmap, 3).map((p) => p.seconds), [60, 300, 600]);
+});
+
+test("topPeaks drops the opening, where every viewer passes through", () => {
+  // The 0:00 bucket is the tallest on almost every video and means nothing.
+  const heatmap = [
+    { start_time: 0, value: 1 },
+    { start_time: 5, value: 0.95 },
+    { start_time: 300, value: 0.4 },
+  ];
+  assert.deepEqual(topPeaks(heatmap, 8).map((p) => p.seconds), [300]);
+});
+
+test("topPeaks keeps a peak that starts exactly at the lead-in edge", () => {
+  assert.deepEqual(topPeaks([{ start_time: 10, value: 1 }], 8).map((p) => p.seconds), [10]);
 });
 
 test("topPeaks copes with no heatmap and with a zero count", () => {
