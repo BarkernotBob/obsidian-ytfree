@@ -1,6 +1,16 @@
 # HANDOFF
 
-## Status — 2026-07-30i: 023 built and installed to the vault
+## Status — 2026-07-30j: feed failures are retried, and no longer sticky
+
+`youtube.com/feeds/videos.xml` fails at random — the same live channel answered
+404, 404, 404, 500, 404, 404, 404, 500 and then 200, with or without a browser
+User-Agent. A poll now tries each feed four times with backoff, and a channel is
+only painted as failed after `FEED_FAILURE_GRACE` consecutive polls fail. Old
+sticky errors in `subscriptions.json` clear themselves on the next good poll.
+A 404 from this endpoint means nothing about the channel; don't reintroduce
+"404 = deleted" logic.
+
+## 2026-07-30i: 023 built and installed to the vault
 
 Note: the 023 build had never been copied into the vault — `./install.sh`, not
 `npm run build`, is what puts a change on screen. Run it after every change.

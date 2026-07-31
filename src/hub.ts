@@ -35,6 +35,11 @@ import {
   parseSubscriptionsCsv,
   expireItems,
   feedUrl,
+  noteFeedFailure,
+  noteFeedSuccess,
+  withRetries,
+  FEED_ATTEMPTS,
+  FEED_BACKOFF_MS,
   formatDuration,
   formatViews,
   mergeItems,
@@ -84,6 +89,8 @@ export interface HubSettings {
  * with an empty badge, which is a reserved box either way.
  */
 const DURATION_BACKFILL_PER_POLL = 40;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Run `worker` over `items`, at most `limit` in flight. */
 async function mapLimit<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
@@ -247,17 +254,24 @@ export class SubscriptionsStore {
     try {
       await mapLimit(this.state.channels, 5, async (channel) => {
         try {
-          const response = await requestUrl({ url: feedUrl(channel.id), throw: true });
+          // Retried, because the endpoint fails at random — see FEED_ATTEMPTS.
+          const response = await withRetries(
+            () => requestUrl({ url: feedUrl(channel.id), throw: true }),
+            FEED_ATTEMPTS,
+            FEED_BACKOFF_MS,
+            sleep,
+          );
           const feed = parseChannelFeed(response.text);
           // The feed's own title is authoritative; a Takeout export goes stale.
           if (feed.channelTitle) channel.title = feed.channelTitle;
-          channel.error = null;
+          noteFeedSuccess(channel);
           const merged = mergeItems(this.state.items, channel, feed.entries, now);
           this.state.items = merged.items;
         } catch (err) {
-          // Recorded, shown in the hub, and retried next poll. A channel that
-          // 404s because it was deleted should be visible, not silently absent.
-          channel.error = err instanceof Error ? err.message : String(err);
+          // Counted, and shown only after several polls running have failed. A
+          // channel that is genuinely gone still surfaces; a bad afternoon at
+          // Google no longer paints half the list red.
+          noteFeedFailure(channel, err instanceof Error ? err.message : String(err));
         }
       });
 

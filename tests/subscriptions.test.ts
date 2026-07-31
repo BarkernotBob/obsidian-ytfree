@@ -10,6 +10,10 @@ import {
   extractChannelIdFromHtml,
   feedUrl,
   formatViews,
+  noteFeedFailure,
+  noteFeedSuccess,
+  withRetries,
+  FEED_FAILURE_GRACE,
   hiddenItems,
   hideItem,
   hubItemMatches,
@@ -535,4 +539,71 @@ test("a corrupt state file degrades to an empty hub", () => {
   const partial = normalizeState({ channels: [{ id: "not-a-channel" }, { id: CHANNEL }], items: [{ videoId: "x" }] });
   assert.deepEqual(partial.channels.map((c) => c.id), [CHANNEL]);
   assert.deepEqual(partial.items, []);
+});
+
+// ---------------------------------------------------------------- feed retry
+
+test("a feed is retried until it answers, and the waits go between attempts", async () => {
+  const waits: number[] = [];
+  let calls = 0;
+  const value = await withRetries(
+    async () => {
+      calls++;
+      if (calls < 3) throw new Error("Request failed, status 500");
+      return "feed";
+    },
+    4,
+    [10, 20, 30],
+    async (ms) => void waits.push(ms),
+  );
+  assert.equal(value, "feed");
+  assert.equal(calls, 3);
+  // Two failures, two waits — nothing is waited out after the answer arrives.
+  assert.deepEqual(waits, [10, 20]);
+});
+
+test("a feed that never answers throws the last error and does not wait at the end", async () => {
+  const waits: number[] = [];
+  let calls = 0;
+  await assert.rejects(
+    withRetries(
+      async () => {
+        calls++;
+        throw new Error(`failure ${calls}`);
+      },
+      4,
+      [10, 20, 30],
+      async (ms) => void waits.push(ms),
+    ),
+    /failure 4/,
+  );
+  assert.equal(calls, 4);
+  assert.equal(waits.length, 3);
+});
+
+test("a channel is not called broken until several polls running have failed", () => {
+  // The endpoint 404s and 500s at random on live channels, so one bad poll says
+  // nothing about the channel and must not reach the hub.
+  const channel = { id: CHANNEL, title: "SmarterEveryDay", addedAt: NOW.toISOString() };
+  for (let poll = 1; poll < FEED_FAILURE_GRACE; poll++) {
+    noteFeedFailure(channel, "Request failed, status 500");
+    assert.equal(channel.error, null, `shown after ${poll} failed poll(s)`);
+  }
+  noteFeedFailure(channel, "Request failed, status 404");
+  assert.equal(channel.error, "Request failed, status 404");
+});
+
+test("one good poll clears both the run of failures and the message", () => {
+  const channel = { id: CHANNEL, title: "SmarterEveryDay", addedAt: NOW.toISOString() };
+  for (let poll = 0; poll < FEED_FAILURE_GRACE + 2; poll++) {
+    noteFeedFailure(channel, "Request failed, status 500");
+  }
+  assert.ok(channel.error);
+  noteFeedSuccess(channel);
+  assert.equal(channel.error, null);
+  assert.equal(channel.failures, 0);
+  // And the count really is reset, not merely hidden: the next single failure
+  // starts the grace over rather than tripping it.
+  noteFeedFailure(channel, "Request failed, status 500");
+  assert.equal(channel.error, null);
 });

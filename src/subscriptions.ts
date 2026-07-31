@@ -22,8 +22,14 @@ export interface Channel {
   title: string;
   /** ISO time this channel was added, so the hub can sort a fresh import. */
   addedAt: string;
-  /** Message from the last failed poll, or null. Kept so the hub can show it. */
+  /**
+   * The failure the hub is allowed to show, or null. Not the last error — a
+   * feed has to fail `FEED_FAILURE_GRACE` polls running before anything is
+   * said about it. See `noteFeedFailure`.
+   */
   error?: string | null;
+  /** Consecutive polls whose feed request failed. Reset by any success. */
+  failures?: number;
 }
 
 /** New → clicked (Kept) or skipped (Dismissed). Only New expires. */
@@ -289,6 +295,67 @@ const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/;
 
 export function feedUrl(channelId: string): string {
   return `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`;
+}
+
+/**
+ * What a feed request is worth retrying, and how long to wait.
+ *
+ * `youtube.com/feeds/videos.xml` is not a reliable endpoint. Asked for the same
+ * live channel eight times in a row it answered 404, 404, 404, 500, 404, 404,
+ * 404, 500 — and 200 a moment later; a browser User-Agent made no difference.
+ * The status carries no information about the channel, so nothing is exempt
+ * from a retry: a 404 here does not mean the channel is gone.
+ */
+export const FEED_ATTEMPTS = 4;
+
+/** Waits before attempts 2, 3 and 4. Enough to outlast a blip, not a poll. */
+export const FEED_BACKOFF_MS = [400, 1200, 3600];
+
+/**
+ * How many consecutive polls must fail before the hub calls a feed broken.
+ *
+ * With four attempts a poll, a channel this crosses has failed some sixteen
+ * requests over three polls — at which point it is worth showing. Below it, the
+ * old copy of the feed is still on screen and nothing is wrong that waiting
+ * will not fix, so saying so is only noise.
+ */
+export const FEED_FAILURE_GRACE = 3;
+
+/** Run `attempt` until it returns, `attempts` times, waiting in between. */
+export async function withRetries<T>(
+  attempt: () => Promise<T>,
+  attempts: number,
+  backoffMs: readonly number[],
+  sleep: (ms: number) => Promise<void>,
+): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await attempt();
+    } catch (err) {
+      last = err;
+      // The wait belongs between attempts, never after the last one — a poll
+      // that has given up should not also be slow.
+      if (i < attempts - 1) await sleep(backoffMs[Math.min(i, backoffMs.length - 1)] ?? 0);
+    }
+  }
+  throw last;
+}
+
+/** A feed answered. Forget the run of failures and clear anything shown. */
+export function noteFeedSuccess(channel: Channel): void {
+  channel.failures = 0;
+  channel.error = null;
+}
+
+/**
+ * A feed did not answer, after every retry. Counted, and shown only once the
+ * count clears the grace — until then the channel looks untroubled, because as
+ * far as anything you can act on goes, it is.
+ */
+export function noteFeedFailure(channel: Channel, message: string): void {
+  channel.failures = (channel.failures ?? 0) + 1;
+  channel.error = channel.failures >= FEED_FAILURE_GRACE ? message : null;
 }
 
 export function shortsProbeUrl(videoId: string): string {
