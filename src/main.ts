@@ -44,6 +44,7 @@ import {
   ImportSubscriptionsModal,
   SubscriptionsStore,
 } from "./hub";
+import { YT_ICON, registerIcons } from "./icon";
 import { ProgressStore } from "./progress-store";
 import { SilenceStore } from "./silence-store";
 import {
@@ -801,7 +802,8 @@ export default class YtFreePlugin extends Plugin {
         new HubView(leaf, this.subscriptions, () => this.hubSettings(), () => this.syncNow()),
     );
 
-    this.addRibbonIcon("youtube", "YT Free subscriptions", () => void this.openHub());
+    registerIcons();
+    this.addRibbonIcon(YT_ICON, "YT Free subscriptions", () => void this.openHub());
 
     this.addCommand({
       id: "open-subscriptions-hub",

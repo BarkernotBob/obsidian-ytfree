@@ -21,6 +21,7 @@ import {
   requestUrl,
   setIcon,
 } from "obsidian";
+import { YT_ICON } from "./icon";
 import type { HubFilter, HubItem, SubscriptionsState } from "./subscriptions";
 import {
   buildWatchLaterNote,
@@ -625,7 +626,7 @@ export class HubView extends ItemView {
   }
 
   getIcon(): string {
-    return "youtube";
+    return YT_ICON;
   }
 
   async onOpen(): Promise<void> {
@@ -697,7 +698,7 @@ export class HubView extends ItemView {
       cls: "ytfree-hub-icon-button",
       attr: { type: "button", "aria-label": "Search YouTube", title: "Search YouTube" },
     });
-    setIcon(browse, "youtube");
+    setIcon(browse, YT_ICON);
     browse.addEventListener("click", () => this.setMode("browse"));
 
     // The same thing the settings pane's "Sync now" runs, notices included, so

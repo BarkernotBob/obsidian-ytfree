@@ -1400,6 +1400,28 @@ body.ytfree-immersive-open {
   padding: 0.45em;
 }
 
+/* The header pair (Search YouTube, Sync now) were icon-sized targets. Fixed
+   boxes — not padding — so the hit area grows without the header reflowing:
+   32px on a pointer, a 44px thumb target on the phone. The glyph keeps its
+   own size, the box around it is what gets bigger. */
+.ytfree-hub-actions .ytfree-hub-icon-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  flex: 0 0 auto;
+  border-radius: var(--radius-s);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-actions .ytfree-hub-icon-button {
+  width: 44px;
+  height: 44px;
+}
+
+.ytfree-hub-actions .ytfree-hub-icon-button .svg-icon {
+  width: var(--icon-m);
+  height: var(--icon-m);
+}
+
 @media (hover: hover) and (pointer: fine) {
   .ytfree-hub .ytfree-hub-icon-button:hover {
     color: var(--text-normal);
