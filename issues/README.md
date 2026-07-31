@@ -23,3 +23,7 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [017](017-skip-fold-tidy.md) | Skip the silence, fold the transcript, tidy the leftovers | Built 2026-07-30 — awaiting manual test |
 | [018](018-watch-later.md) | What Watch Later is for now | Scoped — needs a decision, nothing built |
 | [019](019-progress-bar-landscape-quick-panel.md) | A line, a rotation, and the dials where you are watching | Built 2026-07-30 — awaiting manual test |
+| [020](020-controls-tidy-immersive-landscape.md) | The line where you can see it, and a bar you can read | Built 2026-07-30 — awaiting manual test |
+| [021](021-restore-pill-seek-drag-pending-play.md) | A way back, a line that lines up, and a Play button that never lies | Built 2026-07-30 — awaiting manual test |
+| [022](022-adaptive-silence-floor.md) | Adaptive silence floor: no chipmunks, no swallowed words | Built 2026-07-30 — awaiting manual test (needs BarkernotBob's ears) |
+| [023](023-card-controls-layout.md) | Four buttons on every card, and the layout that fits them | Built 2026-07-30 — awaiting manual test |

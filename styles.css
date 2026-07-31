@@ -1509,14 +1509,41 @@ body.ytfree-immersive-open {
   color: var(--text-muted);
 }
 
+/*
+ * The card: one definition, two shapes.
+ *
+ * Desktop is a row — picture on the left, title and facts beside it, the four
+ * buttons on a line underneath the text. It is knowingly taller than the 90px
+ * row it replaces (about seven cards visible instead of ten) and buys
+ * left-to-right scanning consistent with the rest of the card. The phone's
+ * two-up grid is at the foot of this file. See docs/V1-SCOPE-CARD-CONTROLS.md.
+ *
+ * `align-items: start` and a thumbnail that spans both rows, so a one-line
+ * title and a three-line one produce the same picture in the same place.
+ */
 .ytfree-hub-card {
-  display: flex;
-  align-items: center;
-  gap: 0.8em;
-  height: 90px;
-  padding: 0 0.5em;
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "thumb meta"
+    "thumb actions";
+  align-items: start;
+  column-gap: 0.8em;
+  padding: 8px 0.5em;
   border-radius: var(--radius-m);
   cursor: var(--cursor-link);
+}
+
+/* A column on a desktop; the phone block below turns it into two. */
+.ytfree-hub-grid {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Watched by an IntersectionObserver, never seen. */
+.ytfree-hub-sentinel {
+  height: 1px;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -1533,10 +1560,10 @@ body.ytfree-immersive-open {
 }
 
 .ytfree-hub-thumb {
+  grid-area: thumb;
   position: relative;
-  flex: 0 0 128px;
-  width: 128px;
-  height: 72px;
+  width: 160px;
+  height: 90px;
   border-radius: var(--radius-s);
   overflow: hidden;
   background: var(--background-secondary);
@@ -1550,8 +1577,138 @@ body.ytfree-immersive-open {
 }
 
 .ytfree-hub-meta {
-  flex: 1 1 auto;
+  grid-area: meta;
   min-width: 0;
+}
+
+/*
+ * The four buttons.
+ *
+ * Every state of a button — idle, working, done — is a layer stacked in the
+ * same single grid cell and swapped with `visibility`; the border is present in
+ * all of them and the font never changes weight. That is what makes pressing
+ * one incapable of resizing it, which is what stops the card and its
+ * neighbours moving. The done state is a checkmark with no label, because a
+ * done label wider than the idle one pushes anyway.
+ */
+.ytfree-card-actions {
+  grid-area: actions;
+  display: grid;
+  grid-template-columns: repeat(4, 96px);
+  grid-auto-rows: 34px;
+  justify-content: start;
+  gap: 4px;
+  padding-top: 6px;
+}
+
+.ytfree-card-act {
+  display: grid;
+  grid-template-areas: "s";
+  place-items: center;
+  box-sizing: border-box;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-normal);
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ytfree-card-act > * {
+  grid-area: s;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-card-act:hover {
+    background: var(--background-modifier-hover);
+    box-shadow: none;
+  }
+}
+
+/* Colour only — a border that appeared with the state would move the label. */
+.ytfree-card-act.is-done {
+  border-color: var(--text-accent);
+  color: var(--text-accent);
+}
+
+.ytfree-card-act.is-danger.is-done {
+  border-color: var(--text-error);
+  color: var(--text-error);
+}
+
+.ytfree-card-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ytfree-card-icon {
+  display: flex;
+  align-items: center;
+  --icon-size: 16px;
+}
+
+.ytfree-card-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Hidden, not absent: all three layers occupy the cell at all times. */
+.ytfree-card-busy,
+.ytfree-card-done {
+  visibility: hidden;
+}
+
+.ytfree-card-act.is-busy .ytfree-card-idle,
+.ytfree-card-act.is-done .ytfree-card-idle {
+  visibility: hidden;
+}
+
+.ytfree-card-act.is-busy .ytfree-card-busy {
+  visibility: visible;
+}
+
+/* Busy outranks done: a second press on a done button still shows it working. */
+.ytfree-card-act.is-done:not(.is-busy) .ytfree-card-done {
+  visibility: visible;
+}
+
+.ytfree-card-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--text-accent);
+  animation: ytfree-hub-spin 0.8s linear infinite;
+}
+
+/*
+ * How far in you got, along the foot of the picture — YouTube's own
+ * convention, and the only progress indicator that costs a 178px card no
+ * height. The track is transparent, so a video nobody has started draws
+ * nothing at all while still reserving the same nothing.
+ */
+.ytfree-hub-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+}
+
+.ytfree-hub-progress-fill {
+  height: 100%;
+  background: var(--text-error);
 }
 
 /* Two lines maximum, always: a long title must not make its card taller than
@@ -1575,19 +1732,16 @@ body.ytfree-immersive-open {
   text-overflow: ellipsis;
 }
 
-.ytfree-hub-marker,
+/* The restore control on a hidden row — the last user of this column. The
+   marker column and the phone's badge are gone: what used to be a tick in a
+   reserved column is now a state on the button that caused it. */
 .ytfree-hub-dismiss {
-  flex: 0 0 2em;
+  flex: 0 0 2.6em;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 2em;
-  color: var(--text-muted);
-}
-
-.ytfree-hub-dismiss {
-  flex-basis: 2.6em;
   height: 2.6em;
+  color: var(--text-muted);
   --icon-size: 20px;
 }
 
@@ -1648,16 +1802,6 @@ body.ytfree-immersive-open {
   visibility: hidden;
 }
 
-/* Three states in one box — addable, adding, added. The box is the same size
-   for all three, so the answer arriving moves nothing on the card. */
-.ytfree-hub-result .ytfree-hub-marker.is-added {
-  color: var(--text-accent);
-}
-
-.ytfree-hub-result .ytfree-hub-marker.is-adding {
-  animation: ytfree-hub-spin 1s linear infinite;
-}
-
 @keyframes ytfree-hub-spin {
   to {
     transform: rotate(360deg);
@@ -1712,7 +1856,10 @@ body.ytfree-immersive-open {
   flex-direction: column;
 }
 
+/* Spans the columns on a phone: a heading in one cell of a two-up grid would
+   put the first related result beside its own title. */
 .ytfree-hub-results-heading {
+  grid-column: 1 / -1;
   padding: 1em 0.6em 0.4em;
   font-size: var(--font-ui-smaller);
   letter-spacing: 0.06em;
@@ -1721,10 +1868,41 @@ body.ytfree-immersive-open {
 }
 
 /* A hidden video stores no thumbnail — see `hideItem` — so its row is text and
-   a way back, at a height that says so rather than leaving a 128px hole. */
+   a way back, at a height that says so rather than leaving a 160px hole. It is
+   the one list that is deliberately not cards: there is no picture to put on
+   one, and Restore is the only action it has. */
 .ytfree-hub-hidden-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
   height: 56px;
   cursor: default;
+}
+
+/*
+ * A removed search result, collapsed in place.
+ *
+ * The height is set from the card it replaced, so removing the third result
+ * cannot pull the fourth up under your thumb. It lasts until the next search —
+ * the persistent list is stage two.
+ */
+.ytfree-hub-removed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8em;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  cursor: default;
+}
+
+.ytfree-hub-removed-undo {
+  padding: 0.2em 0.8em;
+  font-size: var(--font-ui-small);
+  cursor: pointer;
 }
 
 .ytfree-hub-hidden-row .ytfree-hub-title {
@@ -1809,9 +1987,11 @@ body.ytfree-immersive-open {
  * it. Padding rather than a margin, so it scrolls with the content instead of
  * shortening the scroller.
  */
+/* Side padding, which the old edge-to-edge row list did not need: the cards are
+   bordered boxes now, and a box flush against the screen edge reads as clipped. */
 .ytfree-hub.ytfree-phone .ytfree-hub-list {
   height: 100%;
-  padding: 0 0 calc(88px + env(safe-area-inset-bottom, 0px)) 0;
+  padding: 0 8px calc(88px + env(safe-area-inset-bottom, 0px)) 8px;
   box-sizing: border-box;
 }
 
@@ -1898,176 +2078,73 @@ body.ytfree-immersive-open {
  * add a pixel to the row.
  */
 /*
- * One row of picture and facts, and nothing else.
+ * The phone: a two-up grid of cards, not a list of rows.
  *
- * The card carried three clamped lines of description for exactly one round.
- * It was the wrong thing to buy height with: a channel's description is
- * marketing copy and a link farm, and three lines of it is three lines of
- * marketing copy — you read the title and the channel and decide. So the
- * description is gone and the card is the height of its picture. The 128×72
- * thumbnail, the length badge and the two-line title stay: those were the part
- * that worked.
- *
- * Still a grid rather than a flex row, because the delete column has to fill
- * the card's whole height and the content column has to be the one that
- * shrinks. Fixed height and a fixed row track, so no title or badge can make
- * one card taller than the one above it.
+ * This is a rewrite, not a tweak. The dismiss column, the 112×63 thumbnail and
+ * the byline geometry are all gone — Remove is one of four buttons now, and
+ * four buttons need width to be legible. The prototype settled the shape: at
+ * 390pt a two-up grid gives a ~178px card, four buttons across that is ~40px
+ * each, which is a legal target but not a readable label, so the buttons are
+ * 2×2 with an icon and a word. The price, stated plainly: a ~250px card, about
+ * four per screen. See docs/V1-SCOPE-CARD-CONTROLS.md.
  */
-.ytfree-hub.ytfree-phone .ytfree-hub-card {
+.ytfree-hub.ytfree-phone .ytfree-hub-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--ytfree-dismiss-width);
-  grid-template-rows: var(--ytfree-card-body);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
   align-items: start;
-  column-gap: 0;
-  height: calc(var(--ytfree-card-body) + 2 * var(--ytfree-card-pad-y));
+  padding: 4px 0;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-card {
+  display: block;
+  height: auto;
+  padding: 0;
   box-sizing: border-box;
-  padding: var(--ytfree-card-pad-y) 0 var(--ytfree-card-pad-y) 0.6em;
-  border-radius: 0;
-  border-bottom: 1px solid var(--background-modifier-border);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
   overflow: hidden;
 }
 
-/* A search result has nothing to dismiss, so its content gets the whole card.
-   Without this it inherited the two-column grid above and laid itself out
-   against a 112px track that nothing ever filled. */
-.ytfree-hub.ytfree-phone .ytfree-hub-card.ytfree-hub-result {
-  grid-template-columns: minmax(0, 1fr);
-  padding-right: 0.6em;
-}
-
-/*
- * The content of a card: picture and title on one row, byline under both.
- *
- * The byline used to sit in the title column, where it had the card's width
- * minus the picture minus the dismiss target — about 150pt — and "3 weeks ago"
- * was routinely the half that got cut. Below the picture it has the full
- * content width instead, and the picture gives up 16pt of its own to pay for
- * the line. Fixed tracks throughout, so no title, badge or byline can make one
- * card taller than the one above it.
- */
-.ytfree-hub-row {
-  grid-column: 1;
-  grid-row: 1;
-  display: grid;
-  grid-template-columns: var(--ytfree-thumb-width) minmax(0, 1fr);
-  grid-template-rows: var(--ytfree-thumb-height) var(--ytfree-byline-height);
-  column-gap: 0.7em;
-  row-gap: var(--ytfree-byline-gap);
-  min-width: 0;
-  height: 100%;
-}
-
-/*
- * A phone has no pointer, so nothing here may carry a pointer's states.
- *
- * The hover rules are already behind `(hover: hover)`. These are the two iOS
- * adds by itself: the grey flash it paints over the element under your thumb,
- * and the background it leaves on a <button> that still holds focus after the
- * row it belonged to is gone.
- */
-.ytfree-hub.ytfree-phone {
-  -webkit-tap-highlight-color: transparent;
-  /* Declared on the root, not on the column that uses it: the card's
-     `grid-template-columns` has to read the same number, and a custom property
-     set on a child is invisible to its parent. */
-  --ytfree-dismiss-width: 112px;
-  /*
-   * The card, in the four numbers everything else is derived from.
-   *
-   * 112×63 rather than 128×72: the byline moved out from beside the picture to
-   * underneath it, and the 16pt the picture gives up is most of what the new
-   * line costs. The card ends up 8pt taller than before and the picture is an
-   * eighth smaller — still the biggest thing on the row, which is the point of
-   * a thumbnail.
-   */
-  --ytfree-thumb-width: 112px;
-  --ytfree-thumb-height: 63px;
-  --ytfree-byline-height: 17px;
-  --ytfree-byline-gap: 4px;
-  --ytfree-card-pad-y: 8px;
-  --ytfree-card-body: calc(
-    var(--ytfree-thumb-height) + var(--ytfree-byline-gap) + var(--ytfree-byline-height)
-  );
-}
-
-.ytfree-hub.ytfree-phone .ytfree-hub-icon-button:focus,
-.ytfree-hub.ytfree-phone .ytfree-hub-icon-button:active {
-  background: transparent;
-  box-shadow: none;
-  color: var(--text-muted);
-}
-
 .ytfree-hub.ytfree-phone .ytfree-hub-thumb {
-  position: relative;
-  grid-column: 1;
-  grid-row: 1;
-  flex: none;
-  width: var(--ytfree-thumb-width);
-  height: var(--ytfree-thumb-height);
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
 }
 
 .ytfree-hub.ytfree-phone .ytfree-hub-meta {
-  grid-column: 2;
-  grid-row: 1;
+  padding: 6px 8px 0;
   min-width: 0;
 }
 
-/* Badge, not a column: absolutely positioned, so appearing costs no width and
-   marking an item Kept still moves nothing. */
-.ytfree-hub.ytfree-phone .ytfree-hub-marker {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  flex: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
-  --icon-size: 13px;
-}
-
-/* Nothing to show for a new item. Visibility, so the box is reserved anyway. */
-.ytfree-hub-marker:empty {
-  visibility: hidden;
-}
-
 /*
- * Three lines on a phone, where the desktop gets two.
+ * Two lines, and a fixed height for them.
  *
- * The 112px dismiss column comes out of this element's width, and measured
- * against 200 real hub titles it took the share that get cut off from 24% to
- * 58%. The height it needs to make that back is already there and unused: the
- * row is as tall as the 72px thumbnail beside it, and a two-line title plus a
- * byline only fills 49 of those. Three lines puts the cut-off share back to
- * 25% — the wider target costs no legibility, it spends slack.
+ * A one-line title and a two-line one have to make the same card, or the two
+ * columns of the grid stop lining up with each other and every row below jogs.
  */
 .ytfree-hub.ytfree-phone .ytfree-hub-title {
   font-size: var(--font-ui-small);
   line-height: 1.3;
-  -webkit-line-clamp: 3;
-  max-height: 3.9em;
+  -webkit-line-clamp: 2;
+  height: 2.6em;
+  max-height: 2.6em;
 }
 
 /*
- * The byline, under the picture and across the whole card.
- *
- * Two segments, and they are the quiet half of the row — the title is what the
- * eye should land on. See `phoneSubParts` for what is on this line and why.
- *
- * A fixed height rather than a line box that grows: the row's track is that
- * height, and a byline that wrapped would be clipped by it rather than move
- * anything. Nothing here can wrap in the first place — the age is a rigid track
- * and the channel is the one element allowed to end in an ellipsis.
+ * The byline: who made it, and when. Two segments, and the quiet half of the
+ * card — see `phoneSubParts`. A fixed height, so a card with no date is the
+ * same height as the one beside it.
  */
 .ytfree-hub.ytfree-phone .ytfree-hub-sub {
-  grid-column: 1 / -1;
-  grid-row: 2;
   display: flex;
   align-items: center;
   gap: 0.35em;
-  margin-top: 0;
-  height: var(--ytfree-byline-height);
+  margin-top: 3px;
+  height: 16px;
+  font-size: var(--font-ui-smaller);
   color: var(--text-faint);
 }
 
@@ -2085,44 +2162,42 @@ body.ytfree-immersive-open {
   white-space: nowrap;
 }
 
-/*
- * The right edge of the row, full height, and the button fills all of it —
- * removing an item is the action this list is for, and a 44px square in the
- * corner of a 76px row was a target you had to aim at.
- *
- * `align-self: stretch` rather than `height: 100%`: the row centres its
- * children, so a percentage height is measured against a box that is only
- * definite by accident. Stretching is the thing actually being asked for, and
- * it is what puts the column's rule flush against the separator above and the
- * one below — a line that stops short of both is the giveaway that this was a
- * desktop card with a button dropped into the corner.
- *
- * 112px, doubled from 56 at BarkernotBob's ask. It is a quarter of the screen, and
- * the width comes out of the title, which now gets about 18 characters a line
- * against 25 before — the trade to reverse first if titles start reading
- * clipped. One variable, because the card's grid and this column have to state
- * the same number.
- */
-.ytfree-hub.ytfree-phone .ytfree-hub-dismiss {
-  grid-column: 2;
-  grid-row: 1;
-  flex: none;
-  width: var(--ytfree-dismiss-width);
-  height: auto;
-  align-self: stretch;
-  /* Cancels the card's own padding, so the rule runs the full height of the
-     row and meets the separators above and below it. */
-  margin: calc(-1 * var(--ytfree-card-pad-y)) 0;
-  border-left: 1px solid var(--background-modifier-border);
+/* 2×2, 40px rows. The one shape that carries four equal, legible actions at
+   this width — a row of four cannot, and the labels clip to "Prev / Watc". */
+.ytfree-hub.ytfree-phone .ytfree-card-actions {
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 40px;
+  justify-content: stretch;
+  padding: 6px;
 }
 
-.ytfree-hub.ytfree-phone .ytfree-hub-dismiss .ytfree-hub-icon-button {
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  border-radius: 0;
+/*
+ * A phone has no pointer, so nothing here may carry a pointer's states.
+ *
+ * The hover rules are already behind `(hover: hover)`. These are the two iOS
+ * adds by itself: the grey flash it paints over the element under your thumb,
+ * and the background it leaves on a <button> that still holds focus after the
+ * row it belonged to is gone.
+ */
+.ytfree-hub.ytfree-phone {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-icon-button:focus,
+.ytfree-hub.ytfree-phone .ytfree-hub-icon-button:active {
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+/* The restore control on a hidden row. The only survivor of the old dismiss
+   column: a bigger target on a phone, and nothing to lay out around. */
+.ytfree-hub.ytfree-phone .ytfree-hub-dismiss {
+  flex: 0 0 56px;
+  height: 44px;
   --icon-size: 24px;
 }
+
 
 /* A 40px target, and 16px text — anything smaller and iOS zooms the whole view
    when the box takes focus, which is a zoom nothing ever takes back. */
@@ -2160,10 +2235,46 @@ body.ytfree-immersive-open {
   height: 64px;
 }
 
-/* On a phone the marker is a badge on a dark circle, so the accent colour the
-   desktop uses for "added" would sink into it. */
-.ytfree-hub.ytfree-phone .ytfree-hub-result .ytfree-hub-marker.is-added {
-  color: #fff;
+/* --------------------------------------------------------------- preview ---
+   Everything the card had no room for. A modal rather than an inline expansion,
+   which is what keeps the list's scroll position — see the note on
+   `openPreview`. Info only at this stage; the player is stage three. */
+
+.ytfree-preview-modal {
+  width: min(640px, 92vw);
+}
+
+.ytfree-preview-title {
+  font-size: var(--font-ui-large);
+  line-height: 1.3;
+  color: var(--text-normal);
+}
+
+.ytfree-preview-facts {
+  margin-top: 0.3em;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+/* Scrolls rather than grows: a 4,000-character description is a page of links,
+   and the four buttons underneath must stay reachable without scrolling to
+   them. */
+.ytfree-preview-description {
+  max-height: 40vh;
+  overflow-y: auto;
+  margin-top: 0.8em;
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+/* Three across, not four: Preview is what you are already looking at. */
+.ytfree-preview-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 40px;
+  justify-content: stretch;
+  padding-top: 1em;
 }
 
 /* ---------------------------------------------------------------- account */

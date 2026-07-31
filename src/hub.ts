@@ -48,6 +48,8 @@ import {
   visibleItems,
 } from "./subscriptions";
 import { NOTES_HEADING } from "./sections";
+import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
+import type { CardActionKey, CardFacts, CardSlot } from "./cards";
 import { fetchVideoDetails, searchYouTube } from "./innertube";
 import type { SearchPage, SearchResult } from "./search";
 import {
@@ -327,6 +329,17 @@ export class SubscriptionsStore {
     return this.state.items.some((item) => item.videoId === videoId);
   }
 
+  /** The hub's own copy of this video, if it has one. */
+  itemFor(videoId: string): HubItem | null {
+    return this.state.items.find((item) => item.videoId === videoId) ?? null;
+  }
+
+  /** A note for this video exists — which is what Kept means. */
+  hasNote(videoId: string): boolean {
+    const item = this.itemFor(videoId);
+    return Boolean(item?.notePath);
+  }
+
   /**
    * Add a search result to the hub. Adds — it does not open, does not create a
    * note and does not play anything. Browse adds; the hub decides.
@@ -353,20 +366,22 @@ export class SubscriptionsStore {
   // ----------------------------------------------------------------- note
 
   /**
-   * Turn an item into a Watch Later note and open it. One click, not two: the
-   * click is the only signal the hub needs, so there is no separate save.
+   * Turn an item into a Watch Later note. Creates it; does not open it.
    *
-   * Re-clicking a kept item opens what is already there. Nothing here ever
-   * overwrites a file.
+   * This is the half of the old `openItem` that Save needs. Splitting it is
+   * what lets a card offer "make the note" and "make the note and go there" as
+   * two buttons without a fourth item state: Kept still means exactly what it
+   * meant — a note exists.
+   *
+   * Answers the file either way, and says whether this call is the one that
+   * made it, because a brand new note is the only one whose cursor should be
+   * moved. Nothing here ever overwrites a file.
    */
-  async openItem(item: HubItem): Promise<void> {
+  async createNote(item: HubItem): Promise<{ file: TFile; created: boolean } | null> {
     const existing = item.notePath
       ? this.app.vault.getAbstractFileByPath(item.notePath)
       : null;
-    if (existing instanceof TFile) {
-      await this.app.workspace.getLeaf(false).openFile(existing);
-      return;
-    }
+    if (existing instanceof TFile) return { file: existing, created: false };
 
     const folder = this.settings().watchLaterFolder.replace(/^\/+|\/+$/g, "");
     if (folder && !(this.app.vault.getAbstractFileByPath(folder) instanceof TFolder)) {
@@ -404,19 +419,42 @@ export class SubscriptionsStore {
     this.emit();
     void this.save();
 
-    if (file instanceof TFile) {
-      const leaf = this.app.workspace.getLeaf(false);
-      await leaf.openFile(file);
-      // A fresh note is for writing, so start the cursor in the Notes section
-      // rather than at the top of the frontmatter.
-      if (created && leaf.view instanceof MarkdownView) {
-        const editor = leaf.view.editor;
-        for (let i = 0; i < editor.lineCount(); i++) {
-          if (editor.getLine(i) === NOTES_HEADING) {
-            editor.setCursor({ line: i + 1, ch: 0 });
-            editor.focus();
-            break;
-          }
+    return file instanceof TFile ? { file, created } : null;
+  }
+
+  /**
+   * Make the note and leave it alone — the Save button.
+   *
+   * Deliberately not "add to a list": the note is the thing, and a video with a
+   * note is Kept whether or not you went there. Answers whether anything was
+   * created so a caller can tell a fresh save from a second press.
+   */
+  async saveItem(item: HubItem): Promise<boolean> {
+    const made = await this.createNote(item);
+    return made?.created ?? false;
+  }
+
+  /**
+   * Turn an item into a Watch Later note and open it — the Watch button, and
+   * what tapping a card used to do.
+   *
+   * Re-clicking a kept item opens what is already there.
+   */
+  async openItem(item: HubItem): Promise<void> {
+    const made = await this.createNote(item);
+    if (!made) return;
+
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf.openFile(made.file);
+    // A fresh note is for writing, so start the cursor in the Notes section
+    // rather than at the top of the frontmatter.
+    if (made.created && leaf.view instanceof MarkdownView) {
+      const editor = leaf.view.editor;
+      for (let i = 0; i < editor.lineCount(); i++) {
+        if (editor.getLine(i) === NOTES_HEADING) {
+          editor.setCursor({ line: i + 1, ch: 0 });
+          editor.focus();
+          break;
         }
       }
     }
@@ -507,6 +545,35 @@ export class SubscriptionsStore {
 }
 
 /**
+ * Everything a card needs, from either side.
+ *
+ * The two callers hand over facts, not objects: `buildCard` never learns what
+ * a `HubItem` or a `SearchResult` is, which is what keeps one card definition
+ * serving both lists.
+ */
+interface CardSpec {
+  videoId: string;
+  title: string;
+  thumbnail: string;
+  /** Already formatted — "12:04", "Short", or "" for a video with no length. */
+  duration: string;
+  /** The desktop's one line of facts. */
+  deskSubText: string;
+  /** The phone's two-part byline: who made it, and when. */
+  phoneSub: { channel: string; trailing: string };
+  /** How far in playback got, 0–1. Drawn along the foot of the thumbnail. */
+  watched: number;
+  extraClass?: string;
+  /** Re-read on every repaint, so a button reflects the state it caused. */
+  slots: () => CardSlot[];
+  run: (key: CardActionKey, repaint: () => void) => Promise<void> | void;
+}
+
+interface CardButton {
+  paint: (slot: CardSlot) => void;
+}
+
+/**
  * The four lists, in the order they are offered.
  *
  * A video is in exactly one of three states — undecided, kept (you opened it),
@@ -573,6 +640,12 @@ export class HubView extends ItemView {
   private statusEl: HTMLElement | null = null;
   /** Cards on screen right now, so a click can update one in place. */
   private cards = new Map<string, HTMLElement>();
+  /** The columns the cards go in. Not the list: the sentinel sits outside it. */
+  private gridEl: HTMLElement | null = null;
+  /** How many pages of `CARD_PAGE` cards have been drawn — see `appendPage`. */
+  private pages = 1;
+  private sentinel: IntersectionObserver | null = null;
+  private sentinelEl: HTMLElement | null = null;
 
   /**
    * Browse state. It outlives a trip back to the hub, so returning to the
@@ -590,8 +663,16 @@ export class HubView extends ItemView {
   /** The two halves of the results list: the answer, then the related. */
   private primaryEl: HTMLElement | null = null;
   private relatedEl: HTMLElement | null = null;
-  /** Results with an add in flight, so a second tap cannot double-add. */
-  private adding = new Set<string>();
+  /** Result cards on screen, so Remove and Undo can swap one in place. */
+  private results = new Map<string, HTMLElement>();
+  /**
+   * Results removed by hand, until the next search.
+   *
+   * Session-only on purpose at this stage: the persistent blocklist and the
+   * Settings list that undoes it are stage two of the card-controls scope, and
+   * a button that only pretends to persist is worse than one that says so.
+   */
+  private removedResults = new Set<string>();
   /** Bumped per search, so a slow first page cannot land over a newer one. */
   private searchToken = 0;
 
@@ -613,6 +694,8 @@ export class HubView extends ItemView {
     private settings: () => HubSettings,
     /** What the toolbar's sync button runs. Null falls back to a feed poll. */
     private sync: (() => Promise<void>) | null = null,
+    /** Where playback got to, for the line under a thumbnail. */
+    private progressFor: ((videoId: string) => number) | null = null,
   ) {
     super(leaf);
   }
@@ -1164,7 +1247,7 @@ export class HubView extends ItemView {
     this.searchState = "idle";
     this.searchError = "";
     this.searchSkipped = 0;
-    this.adding.clear();
+    this.removedResults.clear();
     if (this.searchInputEl) this.searchInputEl.value = "";
   }
 
@@ -1188,7 +1271,7 @@ export class HubView extends ItemView {
     this.searchState = "loading";
     this.searchError = "";
     this.searchSkipped = 0;
-    this.adding.clear();
+    this.removedResults.clear();
     this.renderList();
     this.renderStatus();
 
@@ -1259,6 +1342,7 @@ export class HubView extends ItemView {
     if (!list) return;
     list.empty();
     this.cards.clear();
+    this.results.clear();
     this.primaryEl = null;
     this.relatedEl = null;
 
@@ -1288,9 +1372,10 @@ export class HubView extends ItemView {
     }
 
     // Two hosts, created up front and in this order, so an appended page lands
-    // in the right half without anything above it being redrawn.
-    this.primaryEl = list.createDiv({ cls: "ytfree-hub-results" });
-    this.relatedEl = list.createDiv({ cls: "ytfree-hub-results" });
+    // in the right half without anything above it being redrawn. Each is a card
+    // grid in its own right — two-up on a phone, a column on a desktop.
+    this.primaryEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
+    this.relatedEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
 
     const now = new Date();
     for (const result of this.searchResults) this.renderResult(result, now);
@@ -1327,94 +1412,127 @@ export class HubView extends ItemView {
   /**
    * A search result card.
    *
-   * It looks like a hub card and behaves like nothing else in the plugin: the
-   * only thing it can do is add itself. There is no link, no anchor, no
-   * `<video>`, and nothing here that a click can turn into playback — see
-   * `docs/V1-SCOPE-BROWSE.md`. Browse adds; the hub decides.
+   * The same card as the hub's, with the same four buttons in the same four
+   * positions, and different meanings underneath: Save adds to the Inbox and
+   * makes no note, Watch adds it as Kept and goes to the note, and Remove takes
+   * it out of the results rather than out of the hub. There is still no link,
+   * no anchor and no `<video>` here — see `docs/V1-SCOPE-BROWSE.md`.
    */
   private renderResult(result: SearchResult, now: Date): void {
     const host = this.resultHost(result);
     if (!host) return;
-    const card = host.createDiv({ cls: "ytfree-hub-card ytfree-hub-result" });
-
-    // Same wrapper as a hub card on a phone, and for the same reason: the
-    // picture, the title and the byline are laid out against each other, not
-    // against the card. A result has no dismiss column, so the card's grid is a
-    // single track — see the stylesheet.
-    const row = this.phone ? card.createDiv({ cls: "ytfree-hub-row" }) : card;
-
-    const thumb = row.createDiv({ cls: "ytfree-hub-thumb" });
-    if (result.thumbnail) {
-      const img = thumb.createEl("img");
-      img.src = result.thumbnail;
-      img.loading = "lazy";
-      img.alt = "";
-    }
-    // Duration is the one thing search knows that a channel feed does not, so
-    // it goes where a YouTube reader already looks for it. Created either way,
-    // so a missing one leaves the thumbnail exactly the same size.
-    thumb.createSpan({ cls: "ytfree-hub-duration", text: result.duration });
-
-    // Same split as a hub card: on a phone the marker is a badge on the
-    // thumbnail, because a phone row has no width to spend on a column.
-    const badge = this.phone ? thumb.createDiv({ cls: "ytfree-hub-marker" }) : null;
-
-    const meta = row.createDiv({ cls: "ytfree-hub-meta" });
-    meta.createDiv({ cls: "ytfree-hub-title", text: result.title });
-
-    // The view count is the segment a phone drops: the duration is already a
-    // badge on the thumbnail, and who made it and how old it is are what you
-    // scan a result by. Below the picture on a phone, beside it on a desktop.
-    if (this.phone) {
-      this.renderPhoneSub(row, result.channelTitle, result.publishedText);
-    } else {
-      meta.createDiv({
-        cls: "ytfree-hub-sub",
-        text: [result.channelTitle, result.publishedText, formatViews(result.views)]
-          .filter(Boolean)
-          .join(" · "),
-      });
+    if (this.removedResults.has(result.videoId)) {
+      host.appendChild(this.buildRemovedStrip(result));
+      return;
     }
 
-    const marker = badge ?? card.createDiv({ cls: "ytfree-hub-marker" });
-    this.paintResultMarker(marker, result.videoId);
+    const facts = (): CardFacts => ({
+      inHub: this.store.hasItem(result.videoId),
+      noteExists: this.store.hasNote(result.videoId),
+    });
 
-    card.addEventListener("click", () => this.addResult(result, marker));
+    const card = this.buildCard({
+      extraClass: "ytfree-hub-result",
+      videoId: result.videoId,
+      title: result.title,
+      thumbnail: result.thumbnail,
+      duration: result.duration,
+      // Search knows the view count; the hub's own feed does not. It is the
+      // segment a phone drops — see the byline below.
+      deskSubText: [result.channelTitle, result.publishedText, formatViews(result.views)]
+        .filter(Boolean)
+        .join(" · "),
+      phoneSub: { channel: result.channelTitle, trailing: result.publishedText },
+      watched: 0,
+      slots: () => searchSlots(facts()),
+      run: (key, repaint) => this.runResultAction(key, result, repaint),
+    });
+    // A search card is not tracked in `cards` — a results list is rebuilt whole
+    // — but Remove has to find this one element to swap it for the strip, and
+    // Undo has to swap it back without redrawing anything above it.
+    this.results.set(result.videoId, card);
+    host.appendChild(card);
   }
 
   /**
-   * Reserved space, filled three ways: addable, adding, already here. Same box
-   * whichever it is, so the answer arriving moves nothing.
+   * One search action, from the card or from inside the preview.
+   *
+   * Save and Watch both have to get the video into the hub first — a result is
+   * not an item until something adds it — so both go through `addSearchResult`
+   * and then look the item up by ID rather than holding the object across the
+   * round trip.
    */
-  private paintResultMarker(marker: HTMLElement, videoId: string): void {
-    marker.empty();
-    const inHub = this.store.hasItem(videoId);
-    const busy = this.adding.has(videoId);
-    marker.toggleClass("is-added", inHub);
-    marker.toggleClass("is-adding", busy);
-    setIcon(marker, busy ? "loader" : inHub ? "check" : "plus");
-    marker.setAttribute(
-      "aria-label",
-      busy ? "Adding…" : inHub ? "In your hub" : "Add to your hub",
-    );
-    marker.setAttribute("title", busy ? "Adding…" : inHub ? "In your hub" : "Add to your hub");
+  private async runResultAction(
+    key: CardActionKey,
+    result: SearchResult,
+    repaint: () => void,
+  ): Promise<void> {
+    if (key === "preview") {
+      this.openPreview(result.videoId, repaint);
+      return;
+    }
+    if (key === "remove") {
+      this.removeResult(result);
+      return;
+    }
+
+    await this.store.addSearchResult(result);
+    const item = this.store.itemFor(result.videoId);
+    if (!item) return;
+    if (key === "save") await this.store.saveItem(item);
+    else await this.store.openItem(item);
+    this.renderStatus();
   }
 
-  private addResult(result: SearchResult, marker: HTMLElement): void {
-    if (this.store.hasItem(result.videoId) || this.adding.has(result.videoId)) return;
-    this.adding.add(result.videoId);
-    this.paintResultMarker(marker, result.videoId);
+  /**
+   * Remove on a search card: session-only, and undoable where it happened.
+   *
+   * The card collapses in place to a strip of the same height, so removing the
+   * third result does not pull the fourth up under your thumb. It survives
+   * until the next search and no further — the persistent blocklist and the
+   * Settings list are stage two of `docs/V1-SCOPE-CARD-CONTROLS.md`.
+   */
+  private removeResult(result: SearchResult): void {
+    this.removedResults.add(result.videoId);
+    const card = this.results.get(result.videoId);
+    if (!card?.isConnected) return;
+    const strip = this.buildRemovedStrip(result);
+    // Measured, not guessed: "same height" is the whole point of the strip, and
+    // a card's height depends on how many lines its title took.
+    strip.style.height = `${card.offsetHeight}px`;
+    card.replaceWith(strip);
+    this.results.set(result.videoId, strip);
+  }
 
-    void this.store
-      .addSearchResult(result)
-      .catch((err: unknown) => {
-        new Notice(`YT Free: could not add that video — ${String(err)}`);
-      })
-      .then(() => {
-        this.adding.delete(result.videoId);
-        this.paintResultMarker(marker, result.videoId);
-        this.renderStatus();
-      });
+  /**
+   * "Removed — Undo", at the height of the card it replaced.
+   *
+   * Undo swaps the card straight back in rather than re-rendering the results:
+   * a redraw of the list under a finger that has just pressed Undo is the same
+   * reflow the strip exists to avoid.
+   */
+  private buildRemovedStrip(result: SearchResult): HTMLElement {
+    const strip = createDiv({ cls: "ytfree-hub-card ytfree-hub-removed" });
+    strip.createDiv({ cls: "ytfree-hub-removed-text", text: "Removed" });
+    const undo = strip.createEl("button", {
+      cls: "ytfree-hub-removed-undo",
+      text: "Undo",
+      attr: { type: "button" },
+    });
+    undo.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      this.removedResults.delete(result.videoId);
+      const host = strip.parentElement;
+      if (!host) return;
+      const marker = strip.nextSibling;
+      strip.remove();
+      this.results.delete(result.videoId);
+      this.renderResult(result, new Date());
+      // `renderResult` appends; put it back where the strip was.
+      const rebuilt = this.results.get(result.videoId);
+      if (rebuilt && marker) host.insertBefore(rebuilt, marker);
+    });
+    return strip;
   }
 
   private renderList(): void {
@@ -1426,6 +1544,8 @@ export class HubView extends ItemView {
     }
     list.empty();
     this.cards.clear();
+    this.stopSentinel();
+    this.pages = 1;
 
     const items = this.currentItems();
     if (items.length === 0) {
@@ -1438,7 +1558,67 @@ export class HubView extends ItemView {
       for (const item of items) this.renderHiddenRow(item, now);
       return;
     }
-    for (const item of items) this.renderCard(item, now);
+
+    // A two-up grid roughly triples the cards on a screen, so the list is
+    // drawn a page at a time. The grid is a real element rather than the list
+    // itself, because the sentinel below has to sit outside the columns.
+    const grid = list.createDiv({ cls: "ytfree-hub-grid" });
+    this.gridEl = grid;
+    for (const item of items.slice(0, shownCount(items.length, this.pages))) {
+      this.renderCard(item, now);
+    }
+    this.armSentinel(list, () => this.appendPage());
+  }
+
+  /**
+   * The next page of hub cards, appended.
+   *
+   * Re-reads `currentItems()` rather than closing over the array from the first
+   * render: a poll can land between two scrolls, and appending from a stale
+   * list would draw a card the current filter no longer contains.
+   */
+  private appendPage(): void {
+    const grid = this.gridEl;
+    if (!grid?.isConnected) return;
+    const items = this.currentItems();
+    const from = shownCount(items.length, this.pages);
+    if (from >= items.length) {
+      this.stopSentinel();
+      return;
+    }
+    this.pages += 1;
+    const now = new Date();
+    for (const item of items.slice(from, shownCount(items.length, this.pages))) {
+      this.renderCard(item, now);
+    }
+    if (shownCount(items.length, this.pages) >= items.length) this.stopSentinel();
+  }
+
+  /**
+   * A one-pixel element at the foot of the list, watched rather than polled.
+   *
+   * `root: list` because the hub's scroller is the list element, not the
+   * window: on a phone the view is inside Obsidian's own layout and the
+   * viewport never moves.
+   */
+  private armSentinel(list: HTMLElement, onSeen: () => void): void {
+    this.sentinelEl = list.createDiv({ cls: "ytfree-hub-sentinel" });
+    this.sentinel = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onSeen();
+      },
+      { root: list, rootMargin: "400px" },
+    );
+    this.sentinel.observe(this.sentinelEl);
+  }
+
+  /** Nothing may append into a list that has been replaced. */
+  private stopSentinel(): void {
+    this.sentinel?.disconnect();
+    this.sentinel = null;
+    this.sentinelEl?.remove();
+    this.sentinelEl = null;
+    this.gridEl = null;
   }
 
   private emptyMessage(): string {
@@ -1498,93 +1678,212 @@ export class HubView extends ItemView {
   /**
    * One video in the list.
    *
-   * The two platforms build different cards out of the same parts. A desktop
-   * card is a row: thumbnail, title, one line of facts, a marker column and a
-   * dismiss column, 90px tall. A phone card is the same row a size larger — a
-   * 128×72 thumbnail with the length on it, two lines of title, and
-   * `channel · age` — beside a dismiss column wide enough to hit with a thumb.
+   * The same card as a search result's, with the hub's meanings on the four
+   * buttons. The dismiss column, the marker column and the phone's badge are
+   * all gone: Remove is one of the four now, and what used to be a tick in a
+   * reserved column is a state on the button that caused it.
    */
   private renderCard(item: HubItem, now: Date): void {
-    const list = this.listEl;
-    if (!list) return;
-    const card = list.createDiv({ cls: "ytfree-hub-card" });
+    const grid = this.gridEl;
+    if (!grid) return;
+
+    const facts = (): CardFacts => ({
+      inHub: true,
+      noteExists: Boolean(this.store.itemFor(item.videoId)?.notePath),
+    });
+
+    // "Short" only where there is no length to state — a 45-second video says
+    // 0:45, which is the same fact more precisely.
+    const length = formatDuration(item.durationSeconds);
+    const { channel, trailing } = phoneSubParts(item, now);
+
+    const card = this.buildCard({
+      videoId: item.videoId,
+      title: item.title,
+      thumbnail: item.thumbnail,
+      duration: length || (item.isShort ? "Short" : ""),
+      deskSubText: deskSub(item, now),
+      phoneSub: { channel, trailing },
+      watched: watchedFraction(this.resumeAt(item.videoId), item.durationSeconds),
+      slots: () => hubSlots(facts()),
+      run: (key, repaint) => this.runItemAction(key, item, repaint),
+    });
+    card.toggleClass("is-watched", Boolean(item.watched));
+
     this.cards.set(item.videoId, card);
+    grid.appendChild(card);
+  }
 
-    // The phone's card is a grid — content in one column, the dismiss target in
-    // the other — so the content hangs off a wrapper rather than off the card.
-    const row = this.phone ? card.createDiv({ cls: "ytfree-hub-row" }) : card;
+  /** One hub action, from the card or from inside the preview. */
+  private async runItemAction(
+    key: CardActionKey,
+    item: HubItem,
+    repaint: () => void,
+  ): Promise<void> {
+    if (key === "preview") {
+      this.openPreview(item.videoId, repaint);
+      return;
+    }
+    if (key === "remove") {
+      this.store.hide(item);
+      const card = this.cards.get(item.videoId);
+      card?.remove();
+      this.cards.delete(item.videoId);
+      // The empty state is part of the list, so an emptied list is re-rendered
+      // rather than left blank.
+      if (this.cards.size === 0) this.renderList();
+      this.renderStatus();
+      return;
+    }
+    if (key === "save") {
+      // Saved, and the card stays where it is. Saving makes the video Kept, so
+      // it no longer belongs in the Inbox — but the finger that pressed Save is
+      // still on this list, and pulling the next card up under it is the reflow
+      // the whole layout is built to avoid. It goes at the next redraw. Watch
+      // is the opposite case: it has just taken you to the note.
+      await this.store.saveItem(item);
+      this.renderStatus();
+      return;
+    }
+    await this.store.openItem(item);
+    this.dropIfFiltered(item.videoId);
+    this.renderStatus();
+  }
 
-    const thumb = row.createDiv({ cls: "ytfree-hub-thumb" });
-    if (item.thumbnail) {
+  /**
+   * The card, once, for both lists.
+   *
+   * Picture, two lines of title, a byline and four buttons — see
+   * `docs/V1-SCOPE-CARD-CONTROLS.md`. The shape is identical on both surfaces
+   * and on both platforms; what differs is the stylesheet (two-up grid on a
+   * phone, a row on a desktop) and what the four buttons do, which the caller
+   * supplies. Nothing here knows what a hub item or a search result is.
+   */
+  private buildCard(spec: CardSpec): HTMLElement {
+    const card = createDiv({ cls: "ytfree-hub-card" });
+    if (spec.extraClass) card.addClass(spec.extraClass);
+
+    const thumb = card.createDiv({ cls: "ytfree-hub-thumb" });
+    if (spec.thumbnail) {
       const img = thumb.createEl("img");
-      img.src = item.thumbnail;
+      img.src = spec.thumbnail;
       img.loading = "lazy";
       img.alt = "";
     }
+    // Bottom-right of the picture, where a YouTube reader already looks. Empty
+    // is hidden rather than absent, so a video with no stated length leaves the
+    // thumbnail exactly the same size.
+    thumb.createSpan({ cls: "ytfree-hub-duration", text: spec.duration });
 
-    // Bottom-right of the thumbnail, exactly where a search result puts its
-    // own: how long it runs, and "Short" only when there is no length to state
-    // — a 45-second video says 0:45, which is the same fact more precisely.
-    // Created either way, so a video with neither leaves the card as it is.
-    if (this.phone) {
-      const length = formatDuration(item.durationSeconds);
-      thumb.createSpan({
-        cls: "ytfree-hub-duration",
-        text: length || (item.isShort ? "Short" : ""),
-      });
+    // How far in you got, as a line along the bottom edge of the thumbnail —
+    // YouTube's own convention, and the only progress indicator that costs a
+    // 178px card no height. Always drawn; a fresh video's line is zero wide.
+    const fill = thumb
+      .createDiv({ cls: "ytfree-hub-progress" })
+      .createDiv({ cls: "ytfree-hub-progress-fill" });
+    fill.style.width = `${Math.round(spec.watched * 100)}%`;
+
+    const meta = card.createDiv({ cls: "ytfree-hub-meta" });
+    meta.createDiv({ cls: "ytfree-hub-title", text: spec.title });
+    if (this.phone) this.renderPhoneSub(meta, spec.phoneSub.channel, spec.phoneSub.trailing);
+    else meta.createDiv({ cls: "ytfree-hub-sub", text: spec.deskSubText });
+
+    const actions = card.createDiv({ cls: "ytfree-card-actions" });
+    const buttons = new Map<CardActionKey, CardButton>();
+    const repaint = (): void => {
+      for (const slot of spec.slots()) buttons.get(slot.key)?.paint(slot);
+    };
+    for (const slot of spec.slots()) {
+      buttons.set(slot.key, this.buildAction(actions, slot, spec.run, repaint));
     }
+    repaint();
 
-    // A phone row has no width to spend on a marker column — the title is what
-    // that width is for. The badge sits on the thumbnail instead, absolutely
-    // positioned, so it still costs no layout when it appears.
-    const marker = this.phone
-      ? thumb.createDiv({ cls: "ytfree-hub-marker" })
-      : null;
-
-    const meta = row.createDiv({ cls: "ytfree-hub-meta" });
-    meta.createDiv({ cls: "ytfree-hub-title", text: item.title });
-
-    // The phone's byline hangs off the row, not off the title column: it sits
-    // under the thumbnail rather than beside it, so it gets the card's whole
-    // width instead of what the picture leaves over. That width is the fix for
-    // the clipped "3 weeks ago" — see the stylesheet.
-    if (this.phone) {
-      const { channel, trailing } = phoneSubParts(item, now);
-      this.renderPhoneSub(row, channel, trailing);
-    } else {
-      meta.createDiv({ cls: "ytfree-hub-sub", text: deskSub(item, now) });
-    }
-    card.toggleClass("is-watched", Boolean(item.watched));
-
-    // Fixed-width column, filled or not, so marking an item Kept moves nothing.
-    const stateMarker = marker ?? row.createDiv({ cls: "ytfree-hub-marker" });
-    this.paintMarker(stateMarker, item);
-
-    const dismiss = (this.phone ? card : row).createDiv({ cls: "ytfree-hub-dismiss" });
-    const button = new ButtonComponent(dismiss)
-      .setIcon("x")
-      .setTooltip("Hide — find it again under Hidden")
-      .onClick((evt) => {
-        evt.stopPropagation();
-        this.store.hide(item);
-        card.remove();
-        this.cards.delete(item.videoId);
-        // The empty state is part of the list, so an emptied list is re-rendered
-        // rather than left blank.
-        if (this.cards.size === 0) this.renderList();
-        this.renderStatus();
-      });
-    button.buttonEl.addClass("ytfree-hub-icon-button");
-
+    // The card body is Preview: the safe, reversible action gets the largest
+    // target on the screen, and the three consequential ones have their own
+    // buttons. A click that started on a button never reaches here — see
+    // `buildAction`.
     card.addEventListener("click", () => {
-      void this.store.openItem(item).then(
+      void Promise.resolve(spec.run("preview", repaint)).then(repaint, (err: unknown) => {
+        new Notice(`YT Free: ${String(err)}`);
+      });
+    });
+
+    return card;
+  }
+
+  /**
+   * One button, in the one shape every state of it shares.
+   *
+   * Idle, working and done are three layers stacked in a single grid cell and
+   * swapped with `visibility`, the border is present in all of them, and the
+   * done state is a checkmark with no label. That is the whole no-reflow story:
+   * a button cannot change its own size, so pressing one cannot move the card
+   * it is on or any card beside it.
+   */
+  private buildAction(
+    host: HTMLElement,
+    initial: CardSlot,
+    run: (key: CardActionKey, repaint: () => void) => Promise<void> | void,
+    repaint: () => void,
+  ): CardButton {
+    const button = host.createEl("button", {
+      cls: "ytfree-card-act",
+      attr: { type: "button" },
+    });
+
+    const idle = button.createSpan({ cls: "ytfree-card-state ytfree-card-idle" });
+    const icon = idle.createSpan({ cls: "ytfree-card-icon" });
+    const label = idle.createSpan({ cls: "ytfree-card-label" });
+
+    const busy = button.createSpan({ cls: "ytfree-card-state ytfree-card-busy" });
+    busy.createDiv({ cls: "ytfree-card-spinner" });
+
+    const done = button.createSpan({ cls: "ytfree-card-state ytfree-card-done" });
+    setIcon(done, "check");
+
+    let painted = "";
+    const paint = (slot: CardSlot): void => {
+      // Only a real change touches the DOM: a repaint runs on every action, and
+      // re-rendering an icon that has not changed is a needless reflow risk.
+      const key = `${slot.icon}|${slot.label}|${slot.done}`;
+      if (key !== painted) {
+        painted = key;
+        icon.empty();
+        setIcon(icon, slot.icon);
+        label.setText(slot.label);
+        button.toggleClass("is-done", slot.done);
+      }
+      button.toggleClass("is-danger", Boolean(slot.danger));
+      button.setAttribute("aria-label", slot.label);
+      button.setAttribute("title", slot.label);
+    };
+    paint(initial);
+
+    button.addEventListener("click", (evt) => {
+      // The card body is Preview, so every button has to stop its own click
+      // from also being a tap on the card.
+      evt.stopPropagation();
+      if (button.hasClass("is-busy")) return;
+      button.addClass("is-busy");
+      void Promise.resolve(run(initial.key, repaint)).then(
         () => {
-          this.paintMarker(stateMarker, item);
-          this.dropIfFiltered(item.videoId);
+          button.removeClass("is-busy");
+          repaint();
         },
-        (err: unknown) => new Notice(`YT Free: could not create the note — ${String(err)}`),
+        (err: unknown) => {
+          button.removeClass("is-busy");
+          repaint();
+          new Notice(`YT Free: ${String(err)}`);
+        },
       );
     });
+
+    return { paint };
+  }
+
+  /** Where playback got to on this video, in seconds. Zero if it has not. */
+  private resumeAt(videoId: string): number {
+    return this.progressFor?.(videoId) ?? 0;
   }
 
   /**
@@ -1634,10 +1933,162 @@ export class HubView extends ItemView {
     });
   }
 
-  private paintMarker(marker: HTMLElement, item: HubItem): void {
-    marker.empty();
-    if (item.state === "kept") setIcon(marker, "check");
-    else if (item.state === "dismissed") setIcon(marker, "minus");
+  /**
+   * Preview: everything the card had no room for, in a modal.
+   *
+   * A modal rather than an inline expansion or a second pane, and that is what
+   * keeps the list's scroll position — the list never unmounts, so previewing
+   * eight results in a row costs no re-scroll, which is also what makes the
+   * paging above safe.
+   *
+   * Info only at this stage. The player is stage three of
+   * `docs/V1-SCOPE-CARD-CONTROLS.md`; until it lands, Preview is "read the
+   * whole description and the numbers before you decide", which is the half of
+   * it that needs no engine.
+   */
+  private openPreview(videoId: string, repaintCard: () => void): void {
+    const item = this.store.itemFor(videoId);
+    const result = this.searchResults.find((entry) => entry.videoId === videoId) ?? null;
+    if (!item && !result) return;
+
+    const facts = (): CardFacts => ({
+      inHub: this.store.hasItem(videoId),
+      noteExists: this.store.hasNote(videoId),
+    });
+
+    new PreviewModal(this.app, {
+      title: item?.title ?? result?.title ?? "",
+      channel: item?.channelTitle ?? result?.channelTitle ?? "",
+      facts: [
+        item ? formatDuration(item.durationSeconds) : (result?.duration ?? ""),
+        result ? formatViews(result.views) : "",
+        item ? relativeAge(item.published, new Date()) : (result?.publishedText ?? ""),
+      ].filter(Boolean),
+      // A search result carries no description — search never returns one — so
+      // the modal fetches it once, on open, and says so until it lands.
+      description: item?.description ?? "",
+      fetchDescription: item?.description
+        ? null
+        : () => fetchVideoDetails(videoId).then((details) => details.description),
+      slots: () => (item ? hubSlots(facts()) : searchSlots(facts())),
+      run: async (key, repaint) => {
+        // Re-looked-up: the modal outlives the card that opened it, and a poll
+        // can replace the item object while it is open.
+        const live = this.store.itemFor(videoId);
+        if (live) await this.runItemAction(key, live, repaint);
+        else if (result) await this.runResultAction(key, result, repaint);
+        repaintCard();
+      },
+    }).open();
+  }
+}
+
+/**
+ * The preview sheet. Same four buttons at the foot as the card that opened it,
+ * so a decision can be made from in here without dismissing first.
+ */
+interface PreviewSpec {
+  title: string;
+  channel: string;
+  /** Length, views, age — whichever of them this video has. */
+  facts: string[];
+  description: string;
+  /** Fetches the description for a video that arrived without one. */
+  fetchDescription: (() => Promise<string>) | null;
+  slots: () => CardSlot[];
+  run: (key: CardActionKey, repaint: () => void) => Promise<void>;
+}
+
+class PreviewModal extends Modal {
+  constructor(
+    app: App,
+    private spec: PreviewSpec,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl, modalEl } = this;
+    modalEl.addClass("ytfree-preview-modal");
+    contentEl.empty();
+
+    contentEl.createDiv({ cls: "ytfree-preview-title", text: this.spec.title });
+    contentEl.createDiv({
+      cls: "ytfree-preview-facts",
+      text: [this.spec.channel, ...this.spec.facts].filter(Boolean).join(" · "),
+    });
+
+    const body = contentEl.createDiv({
+      cls: "ytfree-preview-description",
+      text: this.spec.description || (this.spec.fetchDescription ? "Loading…" : "No description."),
+    });
+    if (this.spec.fetchDescription) {
+      void this.spec.fetchDescription().then(
+        (text) => body.setText(text || "No description."),
+        () => body.setText("No description."),
+      );
+    }
+
+    const actions = contentEl.createDiv({ cls: "ytfree-card-actions ytfree-preview-actions" });
+    const buttons = new Map<CardActionKey, HTMLButtonElement>();
+    const repaint = (): void => {
+      for (const slot of this.spec.slots()) {
+        const button = buttons.get(slot.key);
+        if (!button) continue;
+        button.toggleClass("is-done", slot.done);
+        button.setAttribute("aria-label", slot.label);
+        button.setAttribute("title", slot.label);
+        const label = button.querySelector(".ytfree-card-label");
+        if (label) label.textContent = slot.label;
+        const icon = button.querySelector<HTMLElement>(".ytfree-card-icon");
+        if (icon) {
+          icon.empty();
+          setIcon(icon, slot.icon);
+        }
+      }
+    };
+
+    for (const slot of this.spec.slots()) {
+      // Preview is what you are already looking at, so it is not offered again.
+      if (slot.key === "preview") continue;
+      const button = actions.createEl("button", {
+        cls: "ytfree-card-act",
+        attr: { type: "button" },
+      });
+      button.toggleClass("is-danger", Boolean(slot.danger));
+      const idle = button.createSpan({ cls: "ytfree-card-state ytfree-card-idle" });
+      idle.createSpan({ cls: "ytfree-card-icon" });
+      idle.createSpan({ cls: "ytfree-card-label" });
+      const busy = button.createSpan({ cls: "ytfree-card-state ytfree-card-busy" });
+      busy.createDiv({ cls: "ytfree-card-spinner" });
+      setIcon(button.createSpan({ cls: "ytfree-card-state ytfree-card-done" }), "check");
+      buttons.set(slot.key, button);
+
+      button.addEventListener("click", () => {
+        if (button.hasClass("is-busy")) return;
+        button.addClass("is-busy");
+        void this.spec.run(slot.key, repaint).then(
+          () => {
+            button.removeClass("is-busy");
+            repaint();
+            // Watch has just opened a note behind this sheet, and Remove has
+            // just taken the video out of the list it was in. Neither leaves
+            // anything here worth reading.
+            if (slot.key === "watch" || slot.key === "remove") this.close();
+          },
+          (err: unknown) => {
+            button.removeClass("is-busy");
+            repaint();
+            new Notice(`YT Free: ${String(err)}`);
+          },
+        );
+      });
+    }
+    repaint();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }
 

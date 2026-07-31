@@ -1,6 +1,35 @@
 # HANDOFF
 
-## Status — 2026-07-30g: 022 complete, pending BarkernotBob's ears
+## Status — 2026-07-30h: 023 built — the cards have controls now
+
+Stage one of the card-controls scope: **383 unit tests pass, build clean.**
+Everything in [issues/023-card-controls-layout.md](issues/023-card-controls-layout.md)
+is written and typechecked; none of it has been seen on a screen yet, and the
+manual test in that issue is the next thing to run.
+
+- **One card definition, two lists.** `HubView.buildCard` takes facts, not
+  objects — it has never heard of `HubItem` or `SearchResult` — and both
+  `renderCard` and `renderResult` go through it. What differs between the two
+  surfaces is the four `run` handlers; what differs between the two platforms
+  is the stylesheet.
+- **The no-reflow machinery is in the CSS, not in the code.** Idle, working and
+  done are three layers in one grid cell swapped with `visibility`; the border
+  is present in every state; done is a checkmark with no label. A button
+  therefore cannot change its own size, so nothing it does can move a
+  neighbour. This is the rule most at risk from a later "just add a label"
+  change — see `.ytfree-card-act`.
+- **`openItem` is now `createNote` + open.** `saveItem` is the create half.
+  Kept still means exactly what it meant (a note exists), so no state was
+  added.
+- **What is deliberately not done**, all three written up in the issue: Hidden
+  is still text rows (a tombstone has no thumbnail), Save leaves the card in
+  the Inbox until the next redraw (the finger is still on the list), and
+  Preview has no player (stage three).
+- **Stage two is next**: the persistent search blocklist, the `⋯` Hide-channel
+  chip on search thumbnails, and the Settings lists that undo both. The
+  session-only `removedResults` set in `hub.ts` is the seam it plugs into.
+
+## Previous — 2026-07-30g: 022 complete, pending BarkernotBob's ears
 
 Workstreams 5, 6 and 7. **375 unit tests pass, build clean, all seven
 workstreams landed.** What is left is the four acceptance criteria that need a

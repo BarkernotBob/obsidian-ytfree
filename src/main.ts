@@ -799,7 +799,15 @@ export default class YtFreePlugin extends Plugin {
     this.registerView(
       HUB_VIEW_TYPE,
       (leaf) =>
-        new HubView(leaf, this.subscriptions, () => this.hubSettings(), () => this.syncNow()),
+        new HubView(
+          leaf,
+          this.subscriptions,
+          () => this.hubSettings(),
+          () => this.syncNow(),
+          // The line along the foot of a thumbnail. Read live rather than
+          // copied in: a card drawn now must show where playback got to now.
+          (videoId) => this.progress.resumeFor(videoId),
+        ),
     );
 
     registerIcons();
