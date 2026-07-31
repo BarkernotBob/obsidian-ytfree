@@ -1,0 +1,9 @@
+{
+  "id": "ytfree-fallback-spike",
+  "name": "YT Free — desktop fallback spike",
+  "version": "0.0.1",
+  "minAppVersion": "1.4.0",
+  "description": "Throwaway. Answers whether a <webview> can be the fallback player when yt-dlp is fully dead.",
+  "author": "spike",
+  "isDesktopOnly": true
+}

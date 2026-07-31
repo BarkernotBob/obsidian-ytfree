@@ -598,9 +598,9 @@
 /*
  * Notes · Description · Transcript — the note's own headings, one tap away.
  *
- * Its own surface under the control bar, in the wrapper's 4px gap. Three equal
- * columns rather than three widths, because they are one control with three
- * destinations and equal thirds are what says so.
+ * Its own surface under the control bar, in the wrapper's 4px gap. Equal
+ * columns rather than fitted widths, because they are one control with several
+ * destinations and equal shares are what says so.
  */
 .ytfree-sections {
   display: grid;
@@ -610,6 +610,13 @@
   border-radius: var(--radius-m);
   background: var(--background-secondary);
   box-sizing: border-box;
+}
+
+/* With "This moment" on the end. A column count, not a wrap: the row's height
+   is part of the player's fixed geometry, and a fourth link that dropped to a
+   second line would move the note under the tap that added it. */
+.ytfree-sections-four {
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .ytfree-sections .ytfree-section-link {
@@ -2243,6 +2250,33 @@ body.ytfree-immersive-open {
 
 .ytfree-preview-modal {
   width: min(640px, 92vw);
+}
+
+/*
+ * The sheet scrolls in one place, and the picture rides on top of it.
+ *
+ * Opening the transcript adds a box of text in the middle of the sheet, and a
+ * modal that grows is a modal that centres itself again — which pushed the
+ * video up and off the screen exactly when someone wanted to watch it while
+ * reading. So the content is the scroller, capped at the viewport, and the
+ * player is stuck to its top edge: the same deal a note's pinned player makes.
+ */
+.ytfree-preview-modal .modal-content {
+  display: flex;
+  flex-direction: column;
+  max-height: min(82vh, calc(100vh - 8em));
+  overflow-y: auto;
+}
+
+.ytfree-preview-modal .ytfree-preview-player {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* Opaque, or the transcript scrolls through the picture. The padding and the
+     pull-up cover the gap the modal's own top padding leaves above it. */
+  background: var(--background-primary);
+  margin-top: -0.4em;
+  padding-top: 0.4em;
 }
 
 /*

@@ -33,3 +33,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | 027 | Replay peaks skip the opening 10 seconds — every video led with 0:00 | Built 2026-07-31 — awaiting manual test |
 | [028](028-transcript-in-preview-and-jumps.md) | The transcript in Preview, and a jump from a peak to it | Built 2026-07-31 — awaiting manual test |
 | [029](029-share-a-video.md) | Share a video's URL, and share it at the current timestamp | Built 2026-07-31 — awaiting manual test |
+| [030](030-preview-transcript-share-and-moment.md) | Preview's transcript at note size, autoscroll you can stop, a share icon that isn't Download, and "this moment" | Built 2026-07-31 — awaiting manual test |

@@ -21,7 +21,7 @@ import {
   requestUrl,
   setIcon,
 } from "obsidian";
-import { YT_ICON } from "./icon";
+import { SHARE_ICON, YT_ICON } from "./icon";
 import type { HubFilter, HubItem, SubscriptionsState } from "./subscriptions";
 import {
   buildWatchLaterNote,
@@ -58,7 +58,8 @@ import { NOTES_HEADING } from "./sections";
 import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
 import { fetchTranscriptCues, fetchVideoDetails, searchYouTube } from "./innertube";
-import type { Cue } from "./transcript";
+import { groupCues } from "./transcript";
+import type { Paragraph } from "./transcript";
 import type { SearchPage, SearchResult } from "./search";
 import {
   DURATION_OPTIONS,
@@ -116,6 +117,13 @@ export interface HubSettings {
   showWatched: boolean;
   /** Which captions Preview asks for — the same setting the note fetch uses. */
   transcriptLanguage: string;
+  /**
+   * How long a transcript paragraph runs, in seconds — the same setting the
+   * note fetch groups by. Preview used to show raw caption cues, which is a
+   * line a second: unreadable, and nothing like the transcript the same video
+   * gets in a note.
+   */
+  transcriptIntervalSeconds: number;
 }
 
 /**
@@ -2073,7 +2081,14 @@ export class HubView extends ItemView {
       fetchDescription: item?.description
         ? null
         : () => fetchVideoDetails(videoId).then((details) => details.description),
-      fetchTranscript: () => fetchTranscriptCues(videoId, this.settings().transcriptLanguage),
+      // Grouped here rather than in the modal, and with the note's own setting:
+      // Preview's transcript and the note's transcript are the same text at the
+      // same granularity, so a paragraph you learned to read in one is the same
+      // shape in the other.
+      fetchTranscript: () =>
+        fetchTranscriptCues(videoId, this.settings().transcriptLanguage).then((cues) =>
+          groupCues(cues, this.settings().transcriptIntervalSeconds),
+        ),
       share: this.shareMenu,
       slots: () => (item ? hubSlots(facts()) : searchSlots(facts())),
       run: async (key, repaint) => {
@@ -2103,8 +2118,11 @@ interface PreviewSpec {
   description: string;
   /** Fetches the description for a video that arrived without one. */
   fetchDescription: (() => Promise<string>) | null;
-  /** Fetches the transcript. Started on open, not on expand — see `mountTranscript`. */
-  fetchTranscript: (() => Promise<Cue[]>) | null;
+  /**
+   * Fetches the transcript, already grouped into paragraphs. Started on open,
+   * not on expand — see `mountTranscript`.
+   */
+  fetchTranscript: (() => Promise<Paragraph[]>) | null;
   /** Opens the share menu. Null — no plugin behind the view — and no Share is drawn. */
   share: ShareMenu | null;
   slots: () => CardSlot[];
@@ -2121,10 +2139,22 @@ class PreviewModal extends Modal {
   private closed = false;
   /** The `setInterval` that lights the spoken line, while the transcript is open. */
   private tick: number | null = null;
-  /** One row per cue, in cue order, so the highlight is an index and not a search. */
+  /** One row per paragraph, in order, so the highlight is an index and not a search. */
   private cueRows: HTMLElement[] = [];
-  private cues: Cue[] = [];
+  private cues: Paragraph[] = [];
   private litRow = -1;
+  /** The scroller the rows live in — what autoscroll moves, and what a hand moves. */
+  private cueScroller: HTMLElement | null = null;
+  /**
+   * Whether the transcript still follows the video.
+   *
+   * On until a hand moves the list, off from then on, and back on when a
+   * paragraph is clicked. Scrolling away means "I am reading somewhere else",
+   * and a list that drags itself back four times a minute makes that
+   * impossible; clicking a line means "take me back to the video", which is
+   * exactly the moment following becomes wanted again.
+   */
+  private follow = true;
 
   constructor(
     app: App,
@@ -2231,7 +2261,7 @@ class PreviewModal extends Modal {
         attr: { type: "button" },
       });
       const idle = button.createSpan({ cls: "ytfree-card-state ytfree-card-idle" });
-      setIcon(idle.createSpan({ cls: "ytfree-card-icon" }), "share");
+      setIcon(idle.createSpan({ cls: "ytfree-card-icon" }), SHARE_ICON);
       idle.createSpan({ cls: "ytfree-card-label", text: "Share" });
       button.setAttribute("aria-label", "Share");
       button.setAttribute("title", "Share this video");
@@ -2321,7 +2351,7 @@ class PreviewModal extends Modal {
           header.setAttribute("disabled", "true");
           return;
         }
-        label.setText(`Transcript · ${cues.length} lines`);
+        label.setText(`Transcript · ${cues.length} sections`);
         this.fillTranscript(body, cues);
         if (section.hasClass("is-open")) this.startTicking();
       },
@@ -2334,9 +2364,22 @@ class PreviewModal extends Modal {
     );
   }
 
-  /** One row per cue: a timestamp that seeks, and the words that were said. */
-  private fillTranscript(body: HTMLElement, cues: Cue[]): void {
+  /** One row per paragraph: a timestamp that seeks, and the words that were said. */
+  private fillTranscript(body: HTMLElement, cues: Paragraph[]): void {
     body.empty();
+    this.cueScroller = body;
+
+    // Hand-driven scrolling, caught at the *input* rather than at the `scroll`
+    // event: our own autoscroll fires `scroll` too, and telling the two apart
+    // afterwards means guessing with a timer. A wheel, a drag and an arrow key
+    // are unambiguously a person.
+    const released = (): void => {
+      this.follow = false;
+    };
+    for (const event of ["wheel", "touchmove", "pointerdown", "keydown"]) {
+      body.addEventListener(event, released, { passive: true });
+    }
+
     this.cueRows = cues.map((cue) => {
       const row = body.createEl("button", {
         cls: "ytfree-preview-cue",
@@ -2344,7 +2387,13 @@ class PreviewModal extends Modal {
       });
       row.createSpan({ cls: "ytfree-preview-cue-time", text: formatDuration(cue.seconds) });
       row.createSpan({ cls: "ytfree-preview-cue-text", text: cue.text });
-      row.addEventListener("click", () => this.player?.seek(cue.seconds));
+      row.addEventListener("click", () => {
+        // Clicking a paragraph is asking to be where the video is, so following
+        // resumes — it is the way back from having scrolled off somewhere.
+        // After `released` above, which the same tap fires on pointerdown.
+        this.follow = true;
+        this.player?.seek(cue.seconds);
+      });
       return row;
     });
   }
@@ -2358,6 +2407,10 @@ class PreviewModal extends Modal {
    */
   private startTicking(): void {
     if (this.tick !== null || this.cueRows.length === 0) return;
+    // Opening the transcript is asking where the video is, so it follows again
+    // however it was left last time.
+    this.follow = true;
+    if (this.litRow >= 0) this.revealRow(this.cueRows[this.litRow]);
     const paint = (): void => {
       const at = this.player?.currentTime() ?? 0;
       let index = -1;
@@ -2368,10 +2421,26 @@ class PreviewModal extends Modal {
       if (index < 0) return;
       const row = this.cueRows[index];
       row.addClass("is-now");
-      row.scrollIntoView({ block: "nearest" });
+      if (this.follow) this.revealRow(row);
     };
     paint();
     this.tick = window.setInterval(paint, TRANSCRIPT_TICK_MS);
+  }
+
+  /**
+   * Put a row in the middle of the transcript box, moving nothing else.
+   *
+   * `scrollIntoView` was doing this before and it scrolls every ancestor that
+   * can scroll — including the sheet itself, which is what used to drag the
+   * video off the top of the screen. This touches one `scrollTop`, on the one
+   * element that is supposed to move.
+   */
+  private revealRow(row: HTMLElement): void {
+    const box = this.cueScroller;
+    if (!box) return;
+    const rowRect = row.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+    box.scrollTop += rowRect.top - boxRect.top - (boxRect.height - rowRect.height) / 2;
   }
 
   private stopTicking(): void {

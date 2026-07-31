@@ -777,6 +777,23 @@ export default class YtFreePlugin extends Plugin {
       callback: () => void this.fetchTranscriptForActiveNote(),
     });
 
+    // The transcript, at the second the video is at — not at the top of the
+    // section, and not at one of the five moments the crowd replayed. Loosest
+    // player lookup, like the stamp commands: someone who asks for this has a
+    // video playing somewhere and a "no player" Notice would be pedantry.
+    this.addCommand({
+      id: "jump-to-transcript-moment",
+      name: "Jump to this moment in the transcript",
+      callback: () => {
+        const entry = this.anyPlayer();
+        if (!entry) {
+          new Notice("YT Free: no player in this note yet. Play a video first.");
+          return;
+        }
+        this.jumpToTranscript(entry.player.currentTime);
+      },
+    });
+
     this.addCommand({
       id: "toggle-pinned-player",
       name: "Toggle pinned player for this note",
@@ -1031,6 +1048,7 @@ export default class YtFreePlugin extends Plugin {
       watchLaterFolder: this.settings.watchLaterFolder,
       showWatched: this.settings.accountShowWatched,
       transcriptLanguage: this.transcriptLanguage(),
+      transcriptIntervalSeconds: this.settings.transcriptIntervalSeconds,
     };
   }
 
@@ -2873,7 +2891,12 @@ export default class YtFreePlugin extends Plugin {
    */
   private shareMenuFor(anchor: HTMLElement, videoId: string, seconds: number): void {
     const verb = Platform.isDesktopApp ? "Copy link" : "Share link";
-    const at = Math.max(0, Math.floor(seconds));
+    // The same shift a typed timestamp gets, and for the same reason: you
+    // decide a moment is worth passing on a few seconds after hearing it, so a
+    // raw position always lands just past the thing being sent. The menu shows
+    // the shifted time rather than the playhead, because that is where the
+    // link goes and a menu that says one number and writes another is a lie.
+    const at = applyLookback(seconds, this.settings.lookbackSeconds);
     const menu = new Menu();
     menu.addItem((item) =>
       item
@@ -3078,6 +3101,13 @@ export default class YtFreePlugin extends Plugin {
           noteFile instanceof TFile
             ? (section) => this.jumpToSection(noteFile, section, videoId)
             : undefined,
+        // Same condition as the section links: a jump needs a note to scroll.
+        // No lookback here, unlike a stamp or a shared link: the target is a
+        // paragraph of about twenty seconds, so shifting the query back five
+        // would sometimes land on the paragraph *before* the words on screen,
+        // which is the one thing this control must never do.
+        onJumpToMoment:
+          noteFile instanceof TFile ? (seconds) => this.jumpToTranscript(seconds) : undefined,
         // Where you got to last time, and where you are getting to now. Read
         // through the store on each call rather than captured once, so a video
         // open in two panes agrees with itself.

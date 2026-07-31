@@ -1,6 +1,7 @@
 import Hls from "hls.js";
 import { setIcon } from "obsidian";
 import { formatTimestamp } from "./format.ts";
+import { SHARE_ICON } from "./icon.ts";
 import type { SectionName } from "./sections.ts";
 import { compressibleWindows, moveFor, secondsSaved, secondsSkipped } from "./silence.ts";
 import type { PlaybackWindow, SilenceSource } from "./silence.ts";
@@ -85,6 +86,16 @@ export interface PlayerOptions {
    * position to offer, and knows nothing about clipboards or share sheets.
    */
   share?: (anchor: HTMLElement, seconds: number) => void;
+  /**
+   * Jump the note to the transcript paragraph covering a moment in the video.
+   *
+   * The second row's "Transcript" link goes to the top of the section, which is
+   * the wrong end of a two-hour lecture; the peaks jump to their own moment,
+   * which only helps at the five moments the crowd happened to replay. This is
+   * the same jump for the moment you are actually at, so it takes the position
+   * as an argument — the host reads the note, the player knows the second.
+   */
+  onJumpToMoment?: (seconds: number) => void;
   /** The pop-out of per-video controls. Absent, there is no pop-out button. */
   quick?: QuickPanelOptions;
   /**
@@ -804,7 +815,7 @@ export class YtFreePlayer {
       // bar would be two thumb-sized targets for one decision, and the second
       // of them ("share at 12:04") would be a control whose meaning changes
       // every second it is not pressed.
-      const shareBtn = button("right", "Share", "share", "Share this video", () => {
+      const shareBtn = button("right", "Share", SHARE_ICON, "Share this video", () => {
         this.options.share?.(shareBtn, this.video.currentTime);
       });
       shareBtn.addClass("ytfree-btn-share");
@@ -919,16 +930,23 @@ export class YtFreePlayer {
   }
 
   /**
-   * Notes, Video Description, Video Transcript — where the note's own headings
-   * are, one tap away.
+   * Notes, Video Description, Video Transcript, This moment — where the note's
+   * own headings are, one tap away.
    *
    * A phone note with a docked player and a transcript in it is thousands of
    * lines long, and the only way to the description was to scroll past the
    * notes. Text rather than symbols, equal widths, and the same surface as the
    * bar above them so the two rows read as one control.
+   *
+   * "This moment" is here rather than up among the icons for two reasons: it
+   * navigates the *note*, which is what this row is for and what none of the
+   * icons above do, and the right-hand icon group on a phone is already four
+   * 40pt targets in half a screen — a fifth would not fit without shrinking the
+   * things a thumb reaches for while a video plays.
    */
   private buildSectionLinks(): void {
     const jump = this.options.onJump;
+    const moment = this.options.onJumpToMoment;
     if (!jump) return;
 
     const row = this.container.createDiv({ cls: "ytfree-sections" });
@@ -949,6 +967,22 @@ export class YtFreePlayer {
         jump(section);
       });
     }
+
+    if (!moment) return;
+    row.addClass("ytfree-sections-four");
+    const title = "Jump to this moment in the transcript";
+    const here = row.createEl("button", {
+      cls: "ytfree-section-link ytfree-section-moment",
+      text: "This moment",
+      attr: { title, "aria-label": title },
+    });
+    here.type = "button";
+    here.addEventListener("click", (e) => {
+      e.preventDefault();
+      // Read at the click, not captured: the whole point is where the video is
+      // now, and "now" is a different answer every time this is pressed.
+      moment(this.video.currentTime);
+    });
   }
 
   /**

@@ -1,6 +1,41 @@
 # HANDOFF
 
-## Status — 2026-07-31: deleting, peaks, the transcript in Preview, sharing
+## Status — 2026-07-31: six corrections after using 028 and 029 (030)
+
+**422 unit tests pass, `tsc` clean, build clean, installed to the vault.** Not
+yet used on a screen — the manual test in
+[030](issues/030-preview-transcript-share-and-moment.md) is the next thing to
+run, and the still-outstanding steps from 026, 028 and 029 (029's step 9 needs
+the iPhone) stand.
+
+- **Preview's transcript is grouped like the note's**, with the same
+  `transcriptIntervalSeconds`. The grouping happens in `openPreview`, not in the
+  modal: the sheet is handed `Paragraph[]` and does not know a cue exists.
+- **Autoscroll is caught at the input, not at `scroll`.** `wheel`, `touchmove`,
+  `pointerdown` and `keydown` on the transcript box turn following off; a
+  paragraph click (and reopening the section) turns it back on. Watching the
+  `scroll` event instead would mean telling our own autoscroll apart from a
+  hand with a timer, which is a guess.
+- **The sheet is one scroller with the player `sticky` at its top.** The video
+  used to slide away for two reasons at once — a modal that grows re-centres,
+  and `scrollIntoView` scrolls *every* scrollable ancestor. `revealRow` now
+  moves one `scrollTop`, on the transcript box alone.
+- **Share has its own icon** (`ytfree-share` in `icon.ts`, a curved arrow going
+  right). Lucide's `share` is a box with an arrow rising out of it, which at
+  20px is the same silhouette as `download` two buttons along. Lucide's
+  `forward` — the right shape — is not in Obsidian's bundled set, so we ship the
+  path, as with `youtube`.
+- **"This moment" is a fourth link on the section row, not a fifth icon.** It
+  navigates the note, which is what that row is for, and the right-hand icon
+  group on a phone is already four 40pt targets in half a screen. Same jump from
+  the command palette. No lookback on this one, deliberately: the target is a
+  ~20s paragraph, so shifting the query back 5s would sometimes land on the
+  paragraph *before* the words on screen.
+- **A shared timestamp carries the lookback**, and the menu shows the shifted
+  time rather than the playhead — a menu that says one number and writes another
+  is a lie.
+
+## Previous — 2026-07-31: deleting, peaks, the transcript in Preview, sharing
 
 BarkernotBob's five-item list, all of it built. **425 unit tests pass, `tsc` clean,
 build clean, installed to the vault.** None of it has been used on a screen yet;
