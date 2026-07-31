@@ -1,6 +1,41 @@
 # HANDOFF
 
-## Status — 2026-07-31: Preview plays (024)
+## Status — 2026-07-31: A ▶ on the dock icon (025)
+
+**402 unit tests pass, build clean, installed to the vault.** Obsidian's macOS
+dock icon now wears a ▶ badge while the app is making noise. Nothing has been
+seen on a screen yet — the manual test in
+[issues/025-dock-audio-badge.md](issues/025-dock-audio-badge.md) is the next
+thing to run, and it starts with a full ⌘Q relaunch.
+
+- **The signal is `WebContents.isCurrentlyAudible()`, not our `<video>`.** That
+  is the decision everything else follows from: muted playback correctly shows
+  no badge, audio in a popped-out window is seen (Obsidian popouts share a JS
+  context but have their own `WebContents`, so a `document` listener would have
+  missed the exact case that motivated the feature) — and **other plugins'
+  audio lights the badge too**. PodNotes playing is a badge. That is intended,
+  and [docs/V1-SCOPE-DOCK-BADGE.md](docs/V1-SCOPE-DOCK-BADGE.md) records the
+  cost: disabling YT Free disables the badge for everyone.
+- **Two rules about a dock tile shared with other vault windows.** While
+  audible it rewrites the badge on every 2 s sweep — that repeat write is not
+  waste, it is what lets a second window undo a closing window's clear. While
+  silent it clears only a badge that instance set, so loading the plugin never
+  wipes someone else's. Both are pinned by tests.
+- **The sweep is 2 s because every `@electron/remote` call is a synchronous IPC
+  round trip** on the UI thread. `audio-state-changed` on our own renderer
+  makes the ordinary case instant; the sweep only has to cover popouts and
+  webviews. Don't "improve" this to 200 ms.
+- **`src/desktop/dock-badge.ts`, reached only through `await import("./desktop")`.**
+  The esbuild guard already covered `@electron/remote`, so a top-level import
+  fails the build rather than killing the plugin on iOS. Off macOS
+  `createDockAudioBadge()` returns null and no caller branches on it.
+- **The module has no YT Free imports on purpose.** If the "it badges for
+  PodNotes too" coupling ever bites, it lifts out into its own plugin whole.
+- One build note that cost a test run: `node --test` strips types rather than
+  compiling them, so **constructor parameter properties do not work** in any
+  file a test imports. Plain field, assigned in the body.
+
+## Previous — 2026-07-31: Preview plays (024)
 
 Stage three of the card-controls scope. **391 unit tests pass, build clean,
 installed to the vault.** The Preview modal now holds a real ad-free player on

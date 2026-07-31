@@ -477,6 +477,7 @@ export default class YtFreePlugin extends Plugin {
     await this.silence.load();
     await this.setupSubscriptions();
     await this.setupAccount();
+    await this.setupDockBadge();
 
     this.registerMarkdownCodeBlockProcessor("ytfree", (source, el, ctx) =>
       this.renderBlock(source, el, ctx),
@@ -1074,6 +1075,28 @@ export default class YtFreePlugin extends Plugin {
         }
       }, 60_000),
     );
+  }
+
+  /**
+   * The ▶ on the dock icon (issue 025).
+   *
+   * Everything about it is in `desktop/dock-badge.ts`; this is the lifecycle.
+   * `register` rather than a line in `onunload` because the handle only exists
+   * on the platforms that returned one — disabling the plugin mid-episode has
+   * to take the badge down with it, and a null check in `onunload` is the kind
+   * of thing that gets dropped in a later edit.
+   */
+  private async setupDockBadge(): Promise<void> {
+    if (!Platform.isDesktopApp) return;
+    const { createDockAudioBadge, SWEEP_MS } = await desktop();
+    const badge = createDockAudioBadge();
+    if (!badge) return;
+
+    this.register(() => badge.dispose());
+    this.registerInterval(window.setInterval(() => badge.refresh(), SWEEP_MS));
+    // Enabling the plugin while something is already playing is the one moment
+    // no event will fire for.
+    badge.refresh();
   }
 
   async signIn(): Promise<void> {

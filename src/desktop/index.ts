@@ -17,6 +17,7 @@
 
 export * from "./account.ts";
 export * from "./calibrate.ts";
+export * from "./dock-badge.ts";
 export * from "./download.ts";
 export * from "./resolver.ts";
 export * from "./signin.ts";
