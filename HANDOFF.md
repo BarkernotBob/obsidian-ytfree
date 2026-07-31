@@ -1,6 +1,13 @@
 # HANDOFF
 
-## Status — 2026-07-30h: 023 built — the cards have controls now
+## Status — 2026-07-30i: 023 built and installed to the vault
+
+Note: the 023 build had never been copied into the vault — `./install.sh`, not
+`npm run build`, is what puts a change on screen. Run it after every change.
+Save now drops the card out of the Inbox the moment it is pressed (via
+`dropIfFiltered`, so Kept keeps it).
+
+## 2026-07-30h: 023 built — the cards have controls now
 
 Stage one of the card-controls scope: **383 unit tests pass, build clean.**
 Everything in [issues/023-card-controls-layout.md](issues/023-card-controls-layout.md)
@@ -21,10 +28,9 @@ manual test in that issue is the next thing to run.
 - **`openItem` is now `createNote` + open.** `saveItem` is the create half.
   Kept still means exactly what it meant (a note exists), so no state was
   added.
-- **What is deliberately not done**, all three written up in the issue: Hidden
-  is still text rows (a tombstone has no thumbnail), Save leaves the card in
-  the Inbox until the next redraw (the finger is still on the list), and
-  Preview has no player (stage three).
+- **What is deliberately not done**, both written up in the issue: Hidden is
+  still text rows (a tombstone has no thumbnail), and Preview has no player
+  (stage three).
 - **Stage two is next**: the persistent search blocklist, the `⋯` Hide-channel
   chip on search thumbnails, and the Settings lists that undo both. The
   session-only `removedResults` set in `hub.ts` is the seam it plugs into.
