@@ -111,10 +111,28 @@ export interface SubscriptionsState {
    * by the Mac's copy — the same bug the item stamps fix, one level up.
    */
   removedChannels?: Array<{ id: string; at: string }>;
+  /**
+   * Videos whose note you deleted, and when.
+   *
+   * A deletion takes the video out of every list at once, which a channel feed
+   * would undo on the next poll — the video is still inside the rolling 15-entry
+   * window, so `mergeItems` sees it as new. This is what stops that, and it is
+   * deliberately *not* the Hidden list: hiding says "never offer me this",
+   * deleting says "I am done with this one", and only the first should follow
+   * you into search later.
+   */
+  deletedVideos?: Array<{ id: string; at: string }>;
 }
 
 export function emptyState(): SubscriptionsState {
-  return { version: 1, channels: [], items: [], lastPolledAt: null, removedChannels: [] };
+  return {
+    version: 1,
+    channels: [],
+    items: [],
+    lastPolledAt: null,
+    removedChannels: [],
+    deletedVideos: [],
+  };
 }
 
 /**
@@ -142,7 +160,51 @@ export function normalizeState(raw: unknown): SubscriptionsState {
         Boolean(r) && typeof r.id === "string" && typeof r.at === "string",
     );
   }
+  if (Array.isArray(data.deletedVideos)) {
+    state.deletedVideos = data.deletedVideos.filter(
+      (r): r is { id: string; at: string } =>
+        Boolean(r) && typeof r.id === "string" && typeof r.at === "string",
+    );
+  }
   return state;
+}
+
+// ------------------------------------------------------------------ deleted
+
+/**
+ * How many deleted videos are remembered, oldest first off the end.
+ *
+ * The same reasoning as `HIDDEN_LIMIT`, and a smaller consequence: a tombstone
+ * that falls off means a video whose note you deleted long ago may reappear in
+ * the Inbox if its channel feed still carries it — which, at 15 entries per
+ * channel, it will not.
+ */
+export const DELETED_LIMIT = 500;
+
+/**
+ * Take a video out of every list, and remember that we did.
+ *
+ * Mutates in place, like `hideItem` and `keepItem`, because the store holds one
+ * live state object and the views read it directly.
+ */
+export function forgetVideo(state: SubscriptionsState, videoId: string, now: Date): void {
+  state.items = state.items.filter((item) => item.videoId !== videoId);
+  const rest = (state.deletedVideos ?? []).filter((entry) => entry.id !== videoId);
+  rest.push({ id: videoId, at: now.toISOString() });
+  state.deletedVideos = rest.slice(-DELETED_LIMIT);
+}
+
+/**
+ * Undo a tombstone, because the video is being added back on purpose.
+ *
+ * Every path that puts an item into the hub calls this. Without it, adding a
+ * previously deleted video from search would look like it worked and then lose
+ * it on the next merge — `mergeStates` drops an item its tombstone outlives,
+ * and a fresh search item carries no decision stamp to outlive it with.
+ */
+export function rememberVideo(state: SubscriptionsState, videoId: string): void {
+  if (!state.deletedVideos?.length) return;
+  state.deletedVideos = state.deletedVideos.filter((entry) => entry.id !== videoId);
 }
 
 // -------------------------------------------------------------------- merge
@@ -272,7 +334,24 @@ export function mergeStates(
   // in: every list in the hub sorts itself, so file order is not a promise.
   items.push(...theirsById.values());
 
+  // Deletions, unioned the same way. A device that has not merged yet still
+  // holds the item this device deleted, so the tombstone has to survive the
+  // union of the two item lists and be applied to the result.
+  const deletions = new Map<string, string>();
+  for (const list of [theirs.deletedVideos ?? [], mine.deletedVideos ?? []]) {
+    for (const entry of list) {
+      const seen = deletions.get(entry.id);
+      if (!seen || entry.at > seen) deletions.set(entry.id, entry.at);
+    }
+  }
+
   const kept = items.filter((item) => {
+    const deletedAt = deletions.get(item.videoId);
+    // A deletion counts unless the video was decided about again afterwards —
+    // added back from search, say. Kept does *not* exempt it: deleting the note
+    // is exactly what stops this being Kept.
+    if (deletedAt && !(new Date(decisionTime(item)).toISOString() > deletedAt)) return false;
+
     const removedAt = removals.get(item.channelId);
     if (!removedAt) return true;
     // Removing a channel removes what you had not kept — but not a decision you
@@ -281,6 +360,9 @@ export function mergeStates(
     return new Date(decisionTime(item)).toISOString() > removedAt;
   });
 
+  // A tombstone whose video is back in the list has done its job and lost;
+  // keeping it would drop the video again the next time the clocks disagree.
+  const live = new Set(kept.map((item) => item.videoId));
   const polled = [mine.lastPolledAt, theirs.lastPolledAt].filter(Boolean).sort();
   return {
     version: 1,
@@ -288,6 +370,10 @@ export function mergeStates(
     items: kept,
     lastPolledAt: polled.length ? polled[polled.length - 1] : null,
     removedChannels: [...removals].map(([id, at]) => ({ id, at })),
+    deletedVideos: [...deletions]
+      .filter(([id]) => !live.has(id))
+      .map(([id, at]) => ({ id, at }))
+      .slice(-DELETED_LIMIT),
   };
 }
 
@@ -592,8 +678,13 @@ export function mergeItems(
   channel: Channel,
   entries: FeedEntry[],
   now: Date,
+  deleted: ReadonlyArray<{ id: string; at: string }> = [],
 ): { items: HubItem[]; added: HubItem[] } {
   const known = new Set(existing.map((item) => item.videoId));
+  // A video whose note you deleted is still in the feed's rolling window for
+  // days. Filtered here rather than only in `mergeStates` so it never flashes
+  // into the Inbox and back out again on the save that follows the poll.
+  for (const entry of deleted) known.add(entry.id);
   const added: HubItem[] = [];
 
   for (const entry of entries) {
@@ -658,6 +749,10 @@ export function searchResultToItem(
     state: "new",
     seenAt: now.toISOString(),
     origin: "search",
+    // Adding a search hit is a decision, and it is stamped for the same reason
+    // hiding one is: it has to beat both a stale copy on the other device and a
+    // tombstone left by deleting this video's note earlier.
+    decidedAt: now.toISOString(),
   };
 }
 

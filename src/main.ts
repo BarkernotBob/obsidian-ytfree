@@ -703,6 +703,21 @@ export default class YtFreePlugin extends Plugin {
       );
     });
 
+    // Deleting a video note takes the video out of the hub — every list at
+    // once. `metadataCache.on("deleted")` rather than `vault.on("delete")`
+    // because by the time the vault fires there is no file to read frontmatter
+    // from, and the previous cache is the only copy left of what it said.
+    this.registerEvent(
+      this.app.metadataCache.on("deleted", (file, prevCache) => {
+        if (file.extension !== "md") return;
+        const videoId =
+          this.videoIdInFrontmatter(prevCache?.frontmatter) ??
+          this.subscriptions?.videoIdForNotePath(file.path) ??
+          null;
+        if (videoId) this.subscriptions?.forget(videoId);
+      }),
+    );
+
     // Templater renames a note after filling it in, so the path recorded at
     // create time is not the path the fetch will see.
     this.registerEvent(
@@ -1399,9 +1414,18 @@ export default class YtFreePlugin extends Plugin {
     if (!path) return null;
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) return null;
-    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    if (!fm) return null;
+    return this.videoIdInFrontmatter(this.app.metadataCache.getFileCache(file)?.frontmatter);
+  }
 
+  /**
+   * The video a frontmatter block names, or null.
+   *
+   * Split out from `videoIdForNote` because a deleted note has no file to look
+   * up any more — the only copy of its frontmatter is the cache Obsidian hands
+   * to the `deleted` event.
+   */
+  videoIdInFrontmatter(fm: Record<string, unknown> | undefined): string | null {
+    if (!fm) return null;
     for (const key of this.settings.pinnedFrontmatterKeys.split(",").map((k) => k.trim())) {
       if (!key) continue;
       const value = fm[key];

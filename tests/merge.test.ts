@@ -17,7 +17,10 @@ import assert from "node:assert/strict";
 import type { HubItem, SubscriptionsState } from "../src/subscriptions.ts";
 import {
   emptyState,
+  forgetVideo,
   hideItem,
+  mergeItems,
+  rememberVideo,
   keepItem,
   mergeStates,
   normalizeState,
@@ -282,4 +285,79 @@ test("a decision survives the trip through JSON and normalizeState", () => {
   // And the reread copy still wins against a device that never saw the hide.
   assert.equal(find(mergeStates(state([item("aaaaaaaaaaa")]), reread), "aaaaaaaaaaa").state,
     "dismissed");
+});
+
+// --------------------------------------------------- deleting a video note
+
+test("deleting a note takes the video out of every list", () => {
+  const mac = state([item("aaaaaaaaaaa", { state: "kept", notePath: "Watch Later/a.md" })]);
+  forgetVideo(mac, "aaaaaaaaaaa", new Date("2026-07-31T12:00:00Z"));
+
+  assert.deepEqual(mac.items, []);
+  assert.deepEqual(mac.deletedVideos, [{ id: "aaaaaaaaaaa", at: "2026-07-31T12:00:00.000Z" }]);
+});
+
+test("a deleted video is not handed back by a device that has not merged yet", () => {
+  // The exact shape of the hidden-videos bug, one level along: the phone still
+  // holds the Kept item, and Kept outranks every other state in `mergeItem`.
+  const phone = state([item("aaaaaaaaaaa", { state: "kept", notePath: "Watch Later/a.md" })]);
+  const mac = copy(phone);
+  forgetVideo(mac, "aaaaaaaaaaa", new Date("2026-07-31T12:00:00Z"));
+
+  assert.deepEqual(mergeStates(mac, phone).items, []);
+  assert.deepEqual(mergeStates(phone, mac).items, []);
+});
+
+test("a deleted video is not re-added by the next poll of its channel", () => {
+  const mac = state([item("aaaaaaaaaaa")]);
+  forgetVideo(mac, "aaaaaaaaaaa", new Date("2026-07-31T12:00:00Z"));
+
+  const entry = {
+    videoId: "aaaaaaaaaaa",
+    title: "Video aaaaaaaaaaa",
+    published: "2026-07-30T00:00:00.000Z",
+    thumbnail: "",
+    description: "words",
+    views: 100,
+  };
+  const merged = mergeItems(
+    mac.items,
+    mac.channels[0],
+    [entry],
+    new Date("2026-07-31T13:00:00Z"),
+    mac.deletedVideos ?? [],
+  );
+  assert.deepEqual(merged.added, []);
+});
+
+test("a deleted video can still be added back from search, and stays back", () => {
+  const mac = state([item("aaaaaaaaaaa")]);
+  forgetVideo(mac, "aaaaaaaaaaa", new Date("2026-07-31T12:00:00Z"));
+
+  // What `addSearchResult` does: clear the tombstone, then push a stamped item.
+  rememberVideo(mac, "aaaaaaaaaaa");
+  mac.items.push(item("aaaaaaaaaaa", {
+    origin: "search",
+    decidedAt: "2026-07-31T14:00:00.000Z",
+  }));
+
+  // The other device still holds the tombstone and nothing else.
+  const phone = state([], { deletedVideos: [{ id: "aaaaaaaaaaa", at: "2026-07-31T12:00:00.000Z" }] });
+  const merged = mergeStates(mac, phone);
+  assert.equal(merged.items.length, 1);
+  // And the losing tombstone is dropped, so it cannot win a later merge.
+  assert.deepEqual(merged.deletedVideos, []);
+});
+
+test("deleting a note the hub never knew about is not a decision about anything", () => {
+  const mac = state([item("aaaaaaaaaaa")]);
+  forgetVideo(mac, "bbbbbbbbbbb", new Date("2026-07-31T12:00:00Z"));
+  assert.equal(mac.items.length, 1);
+});
+
+test("deletions survive the trip through JSON", () => {
+  const mac = state([item("aaaaaaaaaaa")]);
+  forgetVideo(mac, "aaaaaaaaaaa", new Date("2026-07-31T12:00:00Z"));
+  const reread = normalizeState(JSON.parse(JSON.stringify(mac)));
+  assert.deepEqual(reread.deletedVideos, [{ id: "aaaaaaaaaaa", at: "2026-07-31T12:00:00.000Z" }]);
 });

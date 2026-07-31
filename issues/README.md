@@ -29,3 +29,7 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [023](023-card-controls-layout.md) | Four buttons on every card, and the layout that fits them | Built 2026-07-30 — awaiting manual test |
 | [024](024-preview-plays.md) | Preview plays: the standalone player inside the modal | Built 2026-07-31 — awaiting manual test |
 | [025](025-dock-audio-badge.md) | A ▶ on the macOS dock icon while audio is playing | Built 2026-07-31 — awaiting manual test |
+| [026](026-delete-removes-from-hub.md) | Deleting a note removes the video from the hub | Built 2026-07-31 — awaiting manual test |
+| 027 | Replay peaks skip the opening 10 seconds — every video led with 0:00 | Built 2026-07-31 — awaiting manual test |
+| 028 | Transcript in Preview, and a jump from a peak to the transcript | Scoped — needs a design decision, nothing built |
+| 029 | Share a video's URL, and share it at the current timestamp | Scoped — needs a design decision, nothing built |

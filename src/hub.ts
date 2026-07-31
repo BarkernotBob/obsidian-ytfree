@@ -28,6 +28,7 @@ import {
   deskSub,
   emptyState,
   extractChannelIdFromHtml,
+  forgetVideo,
   hideItem,
   keepItem,
   mergeStates,
@@ -47,6 +48,7 @@ import {
   parseChannelFeed,
   phoneSubParts,
   relativeAge,
+  rememberVideo,
   restoreItem,
   sanitizeFileName,
   searchResultToItem,
@@ -278,7 +280,13 @@ export class SubscriptionsStore {
           // The feed's own title is authoritative; a Takeout export goes stale.
           if (feed.channelTitle) channel.title = feed.channelTitle;
           noteFeedSuccess(channel);
-          const merged = mergeItems(this.state.items, channel, feed.entries, now);
+          const merged = mergeItems(
+            this.state.items,
+            channel,
+            feed.entries,
+            now,
+            this.state.deletedVideos ?? [],
+          );
           this.state.items = merged.items;
         } catch (err) {
           // Counted, and shown only after several polls running have failed. A
@@ -361,6 +369,11 @@ export class SubscriptionsStore {
     return this.state.items.find((item) => item.videoId === videoId) ?? null;
   }
 
+  /** The video whose note lives at this path, if the hub made one. */
+  videoIdForNotePath(path: string): string | null {
+    return this.state.items.find((item) => item.notePath === path)?.videoId ?? null;
+  }
+
   /** A note for this video exists — which is what Kept means. */
   hasNote(videoId: string): boolean {
     const item = this.itemFor(videoId);
@@ -382,6 +395,7 @@ export class SubscriptionsStore {
     // Checked again: the fetch is a round trip, and a poll or a second click
     // can land inside it. Never a duplicate.
     if (this.hasItem(result.videoId)) return "exists";
+    rememberVideo(this.state, result.videoId);
     this.state.items.push(
       searchResultToItem(result, details.description, new Date(), details.durationSeconds),
     );
@@ -523,6 +537,24 @@ export class SubscriptionsStore {
   }
 
   /**
+   * The note for this video was deleted, so the video leaves every list.
+   *
+   * Not hiding: hiding is a judgement on the video and follows it into search
+   * forever, and deleting a note is not that. The tombstone here only stops the
+   * channel feed handing the same video back on the next poll — search can
+   * still offer it, and adding it back from there clears the tombstone.
+   *
+   * A no-op when the video was never in the hub, so a deleted note that came
+   * from the Web Clipper or a template costs nothing.
+   */
+  forget(videoId: string): void {
+    if (!this.hasItem(videoId)) return;
+    forgetVideo(this.state, videoId, new Date());
+    this.emit();
+    void this.save();
+  }
+
+  /**
    * The item in the current state with this video's ID — which is not always
    * the object the caller is holding.
    *
@@ -538,6 +570,9 @@ export class SubscriptionsStore {
   private live(item: HubItem): HubItem {
     const found = this.state.items.find((i) => i.videoId === item.videoId);
     if (found) return found;
+    // Putting it back is a re-add, so any tombstone from a deleted note goes —
+    // otherwise the next merge would take it straight back out.
+    rememberVideo(this.state, item.videoId);
     this.state.items.push(item);
     return item;
   }
