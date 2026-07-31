@@ -388,6 +388,18 @@ export default class YtFreePlugin extends Plugin {
   settings: YtFreeSettings = DEFAULT_SETTINGS;
   private cache = new StreamCache();
   private players = new Map<string, PlayerEntry>();
+  /**
+   * The Preview modal's player, which is deliberately *not* in `players`.
+   *
+   * `players` is keyed by video ID and every note feature reaches through it —
+   * timestamp capture, the pinned player, section jumps. A preview of a video
+   * whose note is already open would evict that note's entry and quietly break
+   * all three, and closing the preview would then delete the note's player from
+   * the map as well. It is one field instead: at most one preview exists,
+   * nothing note-shaped can reach it, and the few places that legitimately want
+   * every live player go through `livePlayers()`.
+   */
+  private preview: PlayerEntry | null = null;
   private pinned = new Map<MarkdownView, PinnedEntry>();
   /**
    * The way back on. One per open video note whose pinned player is switched
@@ -807,6 +819,9 @@ export default class YtFreePlugin extends Plugin {
           // The line along the foot of a thumbnail. Read live rather than
           // copied in: a card drawn now must show where playback got to now.
           (videoId) => this.progress.resumeFor(videoId),
+          // The player inside Preview. The hub knows nothing about streams;
+          // this is the only thing it is given to build one with.
+          (host, videoId) => this.mountPreviewPlayer(host, videoId),
         ),
     );
 
@@ -1239,6 +1254,30 @@ export default class YtFreePlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
+  /**
+   * Every player that is alive right now, note-bound or preview.
+   *
+   * For the handful of things that are true of playback itself rather than of
+   * notes: a settings change that must reach whatever is on screen, and the
+   * teardown that has to flush every position.
+   */
+  private *livePlayers(): Generator<PlayerEntry> {
+    yield* this.players.values();
+    if (this.preview) yield this.preview;
+  }
+
+  /**
+   * The entry owning a given player object.
+   *
+   * Identity, not video ID: the same video can legitimately be open in a note
+   * and in the preview at once, and a lookup by ID alone would hand one's
+   * settings to the other.
+   */
+  private entryOf(player: YtFreePlayer): PlayerEntry | null {
+    for (const entry of this.livePlayers()) if (entry.player === player) return entry;
+    return null;
+  }
+
   onunload(): void {
     this.clearResumeTimer();
     for (const handle of this.downloads.values()) handle.cancel();
@@ -1247,8 +1286,9 @@ export default class YtFreePlugin extends Plugin {
     this.silenceJobs.clear();
     for (const view of [...this.pinned.keys()]) this.unmountPinned(view);
     for (const view of [...this.pinRestore.keys()]) this.syncPinRestore(view, false);
-    for (const entry of this.players.values()) entry.player.destroy();
+    for (const entry of this.livePlayers()) entry.player.destroy();
     this.players.clear();
+    this.preview = null;
     this.cache.clear();
     // After the players, not before: each `destroy` reports its final position,
     // and this is the write that gets those positions onto disk.
@@ -2650,11 +2690,19 @@ export default class YtFreePlugin extends Plugin {
    *
    * Returns null when the stream could not be resolved; the error is already
    * rendered into the wrapper by then.
+   *
+   * `preview` is the third caller: the hub's Preview modal, which has no note
+   * behind it. It is the full engine — recovery, Smart Speed, seek, speed,
+   * resume — minus everything that is note-shaped, and those are withheld
+   * because they have nothing to act on, not to make Preview feel lesser:
+   * download writes a path into frontmatter, section jumps need sections, the
+   * pin is a control over a note's own header.
    */
   private async buildPlayer(
     wrapper: HTMLElement,
     videoId: string,
     sourcePath: string,
+    preview = false,
   ): Promise<PlayerEntry | null> {
     const mobile = !Platform.isDesktopApp;
 
@@ -2689,12 +2737,18 @@ export default class YtFreePlugin extends Plugin {
       : this.desktopProvider(videoId);
 
     const noteFile = this.app.vault.getAbstractFileByPath(sourcePath);
+    // Held by the closures below and filled in immediately after construction.
+    // A local rather than a map lookup because a preview is not in `players`,
+    // and because "the entry this player belongs to" was never a question the
+    // map could answer twice for one video anyway.
+    let entry: PlayerEntry | null = null;
     const player = new YtFreePlayer(
       wrapper,
       provider,
       setStatus,
       // Downloading needs yt-dlp, so the button is desktop-only. A note file is
-      // also required — there is nowhere to record the path without one.
+      // also required — there is nowhere to record the path without one, which
+      // is also why a preview never offers it.
       !mobile && noteFile instanceof TFile
         ? () => void this.startDownload(videoId, noteFile)
         : undefined,
@@ -2713,9 +2767,7 @@ export default class YtFreePlugin extends Plugin {
         onToggleCollapse: mobile ? () => this.toggleCollapse(videoId) : undefined,
         // Reads `activate` at call time, not now: the lazy loader is attached
         // further down, after this player exists.
-        ensureLoaded: mobile
-          ? () => this.players.get(videoId)?.activate?.() ?? Promise.resolve()
-          : undefined,
+        ensureLoaded: mobile ? () => entry?.activate?.() ?? Promise.resolve() : undefined,
         // Only where there is a note to jump around in. A fenced block rendered
         // outside a file — a preview, an export — has no sections.
         onJump:
@@ -2726,17 +2778,27 @@ export default class YtFreePlugin extends Plugin {
         // through the store on each call rather than captured once, so a video
         // open in two panes agrees with itself.
         resumeAt: () => this.progress.resumeFor(videoId),
-        onProgress: (seconds, duration) => this.progress.record(videoId, seconds, duration),
+        // Preview records the position and not the watch stamp — see
+        // `ProgressStore.recordPosition`. The position is what makes a preview
+        // and a later watch one session; the stamp is what would make skimming
+        // look like viewing.
+        onProgress: preview
+          ? (seconds, duration) => this.progress.recordPosition(videoId, seconds, duration)
+          : (seconds, duration) => this.progress.record(videoId, seconds, duration),
         nowPlaying: () => this.nowPlayingFor(videoId, sourcePath),
         // Two ways out of the player and into its settings: the whole screen,
         // and the four dials you actually change while something is playing.
         onOpenSettings: () => this.openSettingsTab(),
         // The pinned player, from the player itself. A global switch, so it is
         // on the bar rather than in the pop-out, where everything is per-video.
-        pin: {
-          pinned: this.settings.pinnedPlayer,
-          onToggle: () => void this.togglePinnedPlayer(),
-        },
+        // A preview has no note to pin to, so the control is absent rather than
+        // dead.
+        pin: preview
+          ? undefined
+          : {
+              pinned: this.settings.pinnedPlayer,
+              onToggle: () => void this.togglePinnedPlayer(),
+            },
         quick: {
           // Only where the height variable is read — a fenced block sizes
           // itself, so a size control there would be a control that does
@@ -2744,14 +2806,13 @@ export default class YtFreePlugin extends Plugin {
           heightVh: wrapper.hasClass("ytfree-pinned") ? this.settings.pinnedHeightVh : undefined,
           onHeight: (vh) => wrapper.style.setProperty("--ytfree-pinned-height", `${vh}vh`),
           skipNonSpeech: this.settings.skipNonSpeech,
-          onSkipNonSpeech: (value) => this.setSkipNonSpeechFor(videoId, value),
+          onSkipNonSpeech: (value) => this.setSkipNonSpeechFor(entry?.player ?? null, value),
           // Per video, like everything else in the pop-out: "let this lecture
           // run while I write" is a decision about this lecture. The setting
           // screen is still where "never do this" is said.
           pauseWhileTyping: this.settings.pauseWhileTyping,
           onPauseWhileTyping: (value) => {
-            const target = this.players.get(videoId);
-            if (target) target.pauseWhileTyping = value;
+            if (entry) entry.pauseWhileTyping = value;
           },
         },
         smartSpeed: {
@@ -2765,7 +2826,7 @@ export default class YtFreePlugin extends Plugin {
         },
       },
     );
-    const entry: PlayerEntry = {
+    entry = {
       player,
       videoId,
       sourcePath,
@@ -2773,9 +2834,12 @@ export default class YtFreePlugin extends Plugin {
       collapsed: null,
       activate: null,
     };
-    this.players.set(videoId, entry);
+    if (preview) this.preview = entry;
+    else this.players.set(videoId, entry);
     player.video.addEventListener("play", () => {
-      this.lastActiveVideoId = videoId;
+      // A preview never claims this. It is what "the player a timestamp belongs
+      // to" falls back to, and a preview has no note to write one into.
+      if (!preview) this.lastActiveVideoId = videoId;
     });
 
     // A stored map costs nothing, so it is applied before anything plays — that
@@ -2817,7 +2881,8 @@ export default class YtFreePlugin extends Plugin {
       return entry;
     } catch (err) {
       player.destroy();
-      this.players.delete(videoId);
+      if (this.preview === entry) this.preview = null;
+      else if (this.players.get(videoId) === entry) this.players.delete(videoId);
       if (err instanceof YtDlpMissingError) {
         this.renderError(
           wrapper,
@@ -2833,6 +2898,61 @@ export default class YtFreePlugin extends Plugin {
       }
       return null;
     }
+  }
+
+  /**
+   * A player for the hub's Preview modal, in `host`, with no note behind it.
+   *
+   * The caller owns the teardown and must call `destroy` when the modal closes;
+   * nothing else will, because there is no `MarkdownRenderChild` watching a
+   * note that does not exist. `destroy` reports the final position before it
+   * lets go, which is what makes "preview a bit, then press Watch" resume where
+   * the preview stopped.
+   *
+   * One at a time. A second call tears the first down rather than queueing —
+   * two previews can only mean the modal was reopened, and two streams playing
+   * at once is never what was asked for.
+   */
+  async mountPreviewPlayer(host: HTMLElement, videoId: string): Promise<{ destroy: () => void }> {
+    this.destroyPreview();
+
+    // A note player for the same video is paused rather than torn down: it may
+    // be a pinned player in a note the reader is coming back to, and the whole
+    // point of a preview is that it costs nothing to change your mind.
+    this.players.get(videoId)?.player.pause();
+
+    // The player's own stylesheet hangs off `.ytfree-wrapper` — the control
+    // bar, the pop-out, and `--ytfree-purple` itself are all declared inside
+    // it — so the preview gets a real one rather than a lookalike, plus a class
+    // of its own for the two things that differ inside a modal.
+    const wrapper = host.createDiv({ cls: "ytfree-wrapper ytfree-preview-wrapper" });
+    const entry = await this.buildPlayer(wrapper, videoId, "", true);
+    // Failure has already drawn its own error into the host, and `buildPlayer`
+    // has already unregistered — so the handle tears down nothing. It is still
+    // a real handle, so the caller has one shape to hold and one thing to call.
+    return { destroy: () => (entry ? this.destroyPreview(entry) : undefined) };
+  }
+
+  /**
+   * Tear the preview player down, if there is one — and, when `only` is given,
+   * only if it is still that one. The guard is what stops a stale modal close
+   * from killing the preview that replaced it.
+   */
+  private destroyPreview(only?: PlayerEntry): void {
+    const entry = this.preview;
+    if (!entry) return;
+    if (only && only !== entry) return;
+    this.preview = null;
+    entry.player.destroy();
+    // Only if nothing else is watching that video: an ffmpeg analysis is keyed
+    // by video, and a note player for the same one is entitled to keep the job
+    // the preview happened to start.
+    if (!this.players.has(entry.videoId)) this.cancelSilence(entry.videoId);
+    // Not debounced away: pressing Watch opens the note within the same tick,
+    // and that note's player asks `resumeFor` immediately. The store keeps the
+    // position in memory, so this is only the disk half — but a crash between
+    // the two should not cost the position either.
+    void this.progress.flush();
   }
 
   /**
@@ -2897,8 +3017,10 @@ export default class YtFreePlugin extends Plugin {
     const combined = combineSilence({
       transcript,
       ffmpeg: ffmpeg ? { windows: ffmpeg.windows, analyzedTo: ffmpeg.analyzedTo } : null,
-      // The pop-out's answer for this video if it gave one, the setting if not.
-      skipNonSpeech: this.players.get(videoId)?.skipNonSpeech ?? this.settings.skipNonSpeech,
+      // The pop-out's answer for this player if it gave one, the setting if
+      // not. Keyed on the player rather than the video: a note and a preview of
+      // the same video are two pop-outs and two answers.
+      skipNonSpeech: this.entryOf(player)?.skipNonSpeech ?? this.settings.skipNonSpeech,
       // `rawMapFor`, not `transcript`: a caption map built at a coarser floor
       // than the setting now asks for cannot answer for the *windows*, but its
       // word instants are a record of when someone spoke and are true whatever
@@ -2918,11 +3040,11 @@ export default class YtFreePlugin extends Plugin {
    * is rebuilt from the stored maps. Nothing is refetched and nothing is
    * saved: the override lives as long as the note stays open.
    */
-  private setSkipNonSpeechFor(videoId: string, value: boolean): void {
-    const entry = this.players.get(videoId);
+  private setSkipNonSpeechFor(player: YtFreePlayer | null, value: boolean): void {
+    const entry = player ? this.entryOf(player) : null;
     if (!entry) return;
     entry.skipNonSpeech = value;
-    this.pushCombinedSilence(entry.player, videoId);
+    this.pushCombinedSilence(entry.player, entry.videoId);
   }
 
   /**
@@ -3152,7 +3274,9 @@ export default class YtFreePlugin extends Plugin {
     const windows: SilenceWindow[] = resumable ? [...(stored?.windows ?? [])] : [];
     let frontier = resumable ? (stored?.analyzedTo ?? 0) : 0;
     const feed = (): void => {
-      if (this.players.get(videoId)?.player === player) {
+      // Identity, not "the map still has this video": the player being fed has
+      // to be the one still on screen, and since 024 that can be the preview's.
+      if (this.entryOf(player)) {
         this.pushCombinedSilence(player, videoId, { windows: [...windows], analyzedTo: frontier });
       }
     };
@@ -3237,7 +3361,7 @@ export default class YtFreePlugin extends Plugin {
    * `isStale`.
    */
   refreshSmartSpeed(): void {
-    for (const entry of this.players.values()) {
+    for (const entry of this.livePlayers()) {
       entry.player.setSilenceSettings(this.settings.silenceMinGap, this.settings.silenceSpeed);
       // "Skip non-speech" changes which windows exist, not just how they are
       // filtered, so the combination is rebuilt. A running analysis re-feeds its
@@ -3255,7 +3379,7 @@ export default class YtFreePlugin extends Plugin {
     if (this.silenceRefreshTimer !== null) window.clearTimeout(this.silenceRefreshTimer);
     this.silenceRefreshTimer = window.setTimeout(() => {
       this.silenceRefreshTimer = null;
-      for (const entry of this.players.values()) {
+      for (const entry of this.livePlayers()) {
         // Only what is actually being watched. A note sitting open unplayed
         // keeps the same bargain it made at load: nothing is fetched for it.
         if (!entry.player.hasPlayed) continue;

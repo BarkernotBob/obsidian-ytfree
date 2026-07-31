@@ -2238,10 +2238,54 @@ body.ytfree-immersive-open {
 /* --------------------------------------------------------------- preview ---
    Everything the card had no room for. A modal rather than an inline expansion,
    which is what keeps the list's scroll position — see the note on
-   `openPreview`. Info only at this stage; the player is stage three. */
+   `openPreview`. Since 024 it plays, so the sheet is a player with the facts
+   under it rather than a page of text. */
 
 .ytfree-preview-modal {
   width: min(640px, 92vw);
+}
+
+/*
+ * The player's slot, sized before it holds a picture.
+ *
+ * A `<video>` with nothing loaded is zero pixels tall, so without the ratio the
+ * sheet would be a title and three buttons for as long as the stream took to
+ * resolve, and then grow underneath the pointer. The box is 16:9 of the modal's
+ * width from the moment it exists, and the picture is fitted into it — a
+ * portrait upload letterboxes rather than making the sheet taller than the
+ * screen.
+ */
+.ytfree-preview-player {
+  margin-bottom: 0.9em;
+}
+
+.ytfree-preview-wrapper .ytfree-stage,
+.ytfree-preview-wrapper .ytfree-media {
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+
+.ytfree-preview-wrapper .ytfree-video {
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  border-radius: 0;
+}
+
+/* The one message this box ever carries instead of a video. Same height as the
+   player it replaces, so a failure looks like a player that will not play
+   rather than like a sheet that lost a section. */
+.ytfree-preview-player-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
 }
 
 .ytfree-preview-title {
@@ -2258,9 +2302,10 @@ body.ytfree-immersive-open {
 
 /* Scrolls rather than grows: a 4,000-character description is a page of links,
    and the four buttons underneath must stay reachable without scrolling to
-   them. */
+   them. Shorter since the player took the top of the sheet — the picture plus
+   40vh of text put the buttons off the bottom of a laptop screen. */
 .ytfree-preview-description {
-  max-height: 40vh;
+  max-height: 22vh;
   overflow-y: auto;
   margin-top: 0.8em;
   font-size: var(--font-ui-small);

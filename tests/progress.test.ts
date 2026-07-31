@@ -180,3 +180,27 @@ test("prune drops stale watch stamps too", () => {
   assert.deepEqual(Object.keys(state.watched), [OTHER]);
   assert.equal(pruneProgress(state, NOW), false);
 });
+
+/*
+ * The preview's contract, at the level the rules can state it: Preview calls
+ * `recordPosition` and never `markWatched`, so a video you skimmed resumes
+ * where you left it and still does not count as watched. `ProgressStore` has a
+ * method per half for exactly this reason — see `recordPosition` there.
+ */
+test("a position recorded alone leaves no watch stamp", () => {
+  const state = emptyProgress();
+  recordPosition(state, ID, 300, 1800, NOW);
+  assert.equal(resumePoint(state, ID), 300);
+  assert.equal(watchedAt(state, ID), null);
+});
+
+test("a preview and a later watch are one session", () => {
+  const state = emptyProgress();
+  // The preview stops at five minutes...
+  recordPosition(state, ID, 300, 1800, NOW);
+  // ...and the note opens against the same key, not a note path.
+  assert.equal(resumePoint(state, ID), 300);
+  // Watching from there stamps it; previewing never did.
+  assert.equal(markWatched(state, ID, NOW), true);
+  assert.equal(watchedAt(state, ID), NOW.toISOString());
+});

@@ -27,3 +27,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [021](021-restore-pill-seek-drag-pending-play.md) | A way back, a line that lines up, and a Play button that never lies | Built 2026-07-30 — awaiting manual test |
 | [022](022-adaptive-silence-floor.md) | Adaptive silence floor: no chipmunks, no swallowed words | Built 2026-07-30 — awaiting manual test (needs BarkernotBob's ears) |
 | [023](023-card-controls-layout.md) | Four buttons on every card, and the layout that fits them | Built 2026-07-30 — awaiting manual test |
+| [024](024-preview-plays.md) | Preview plays: the standalone player inside the modal | Built 2026-07-31 — awaiting manual test |

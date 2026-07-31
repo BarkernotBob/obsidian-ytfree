@@ -69,6 +69,19 @@ import type { SearchFilters } from "./search-params";
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
 
+/**
+ * How the hub asks for a player without knowing what one is.
+ *
+ * The whole engine lives in the plugin — stream resolution, recovery, Smart
+ * Speed, the progress store — and the hub's business is cards and lists. This
+ * one function is the entire seam between them: give me a player for this video
+ * in this box, and give me back the way to stop it.
+ */
+export type PreviewMount = (
+  host: HTMLElement,
+  videoId: string,
+) => Promise<{ destroy: () => void }>;
+
 export interface HubSettings {
   pollMinutes: number;
   expiryDays: number;
@@ -710,6 +723,13 @@ export class HubView extends ItemView {
     private sync: (() => Promise<void>) | null = null,
     /** Where playback got to, for the line under a thumbnail. */
     private progressFor: ((videoId: string) => number) | null = null,
+    /**
+     * Puts an ad-free player inside the Preview modal, and hands back the way
+     * to tear it down. Null — no plugin behind this view, which is only ever
+     * the case in a test — and Preview is the information sheet it was before
+     * the player existed.
+     */
+    private mountPreview: PreviewMount | null = null,
   ) {
     super(leaf);
   }
@@ -1956,10 +1976,10 @@ export class HubView extends ItemView {
    * eight results in a row costs no re-scroll, which is also what makes the
    * paging above safe.
    *
-   * Info only at this stage. The player is stage three of
-   * `docs/V1-SCOPE-CARD-CONTROLS.md`; until it lands, Preview is "read the
-   * whole description and the numbers before you decide", which is the half of
-   * it that needs no engine.
+   * It plays, since 024. The full engine minus the note-coupled features —
+   * Smart Speed, silence skipping, seek and speed all work; transcript,
+   * timestamp capture and pinning do not, and withholding those is what keeps
+   * Watch worth pressing.
    */
   private openPreview(videoId: string, repaintCard: () => void): void {
     const item = this.store.itemFor(videoId);
@@ -1972,6 +1992,8 @@ export class HubView extends ItemView {
     });
 
     new PreviewModal(this.app, {
+      videoId,
+      mount: this.mountPreview,
       title: item?.title ?? result?.title ?? "",
       channel: item?.channelTitle ?? result?.channelTitle ?? "",
       facts: [
@@ -2003,6 +2025,9 @@ export class HubView extends ItemView {
  * so a decision can be made from in here without dismissing first.
  */
 interface PreviewSpec {
+  videoId: string;
+  /** Absent, the sheet is information only — see `PreviewMount`. */
+  mount: PreviewMount | null;
   title: string;
   channel: string;
   /** Length, views, age — whichever of them this video has. */
@@ -2015,6 +2040,11 @@ interface PreviewSpec {
 }
 
 class PreviewModal extends Modal {
+  /** The live player's teardown, once it has one. */
+  private stopPlayer: (() => void) | null = null;
+  /** Set by `onClose`, so a mount that lands after the sheet is gone is dropped. */
+  private closed = false;
+
   constructor(
     app: App,
     private spec: PreviewSpec,
@@ -2027,6 +2057,7 @@ class PreviewModal extends Modal {
     modalEl.addClass("ytfree-preview-modal");
     contentEl.empty();
 
+    this.mountPlayer(contentEl);
     contentEl.createDiv({ cls: "ytfree-preview-title", text: this.spec.title });
     contentEl.createDiv({
       cls: "ytfree-preview-facts",
@@ -2082,14 +2113,19 @@ class PreviewModal extends Modal {
       button.addEventListener("click", () => {
         if (button.hasClass("is-busy")) return;
         button.addClass("is-busy");
+        // Watch closes *first*, and that ordering is the whole of "one player
+        // at a time": closing tears this player down, and tearing it down is
+        // what writes the position the note's player is about to read. Run it
+        // the other way round and the note opens against a preview that is
+        // still playing, at the position the preview had five seconds ago.
+        if (slot.key === "watch") this.close();
         void this.spec.run(slot.key, repaint).then(
           () => {
             button.removeClass("is-busy");
             repaint();
-            // Watch has just opened a note behind this sheet, and Remove has
-            // just taken the video out of the list it was in. Neither leaves
-            // anything here worth reading.
-            if (slot.key === "watch" || slot.key === "remove") this.close();
+            // Remove has just taken the video out of the list it was in, so
+            // there is nothing here left worth reading either.
+            if (slot.key === "remove") this.close();
           },
           (err: unknown) => {
             button.removeClass("is-busy");
@@ -2102,7 +2138,37 @@ class PreviewModal extends Modal {
     repaint();
   }
 
+  /**
+   * The player, in a box that is the right size before it holds anything.
+   *
+   * The box is a fixed 16:9 slot at the top of the sheet, drawn whether the
+   * stream resolves or not: a player that appeared a second after the sheet did
+   * would push the title, the facts and the four buttons down the screen just
+   * as you reached for one of them.
+   */
+  private mountPlayer(contentEl: HTMLElement): void {
+    if (!this.spec.mount) return;
+    const stage = contentEl.createDiv({ cls: "ytfree-preview-player" });
+    void this.spec.mount(stage, this.spec.videoId).then(
+      (handle) => {
+        // Dismissed while the stream was resolving. Nobody will call the
+        // teardown later, so it is called now — otherwise a sheet closed during
+        // a slow resolve leaves a stream running for the rest of the session.
+        if (this.closed) handle.destroy();
+        else this.stopPlayer = handle.destroy;
+      },
+      (err: unknown) => {
+        console.error("YT Free: preview player could not be built.", err);
+        stage.setText("This video could not be played here.");
+        stage.addClass("ytfree-preview-player-failed");
+      },
+    );
+  }
+
   onClose(): void {
+    this.closed = true;
+    this.stopPlayer?.();
+    this.stopPlayer = null;
     this.contentEl.empty();
   }
 }

@@ -1,6 +1,39 @@
 # HANDOFF
 
-## Status — 2026-07-30j: feed failures are retried, and no longer sticky
+## Status — 2026-07-31: Preview plays (024)
+
+Stage three of the card-controls scope. **391 unit tests pass, build clean,
+installed to the vault.** The Preview modal now holds a real ad-free player on
+both search results and hub cards; nothing in it has been seen on a screen yet,
+and the manual test in [issues/024-preview-plays.md](issues/024-preview-plays.md)
+is the next thing to run.
+
+- **One engine, three surfaces.** `buildPlayer` grew a `preview` flag rather
+  than a second implementation, so the fence, the pinned player and the preview
+  cannot drift on recovery, quality or Smart Speed. What `preview` switches off
+  is exactly the note-coupled set — download, section jumps, pin — because each
+  needs a note to act on.
+- **The preview player is deliberately not in `players`.** That map is keyed by
+  video ID and every note feature reaches through it, so a preview of a video
+  whose note is open would evict its entry and break timestamp capture, the pin
+  and section jumps, then delete it again on close. It is the `preview` field
+  instead; `livePlayers()` is the iterator for things true of playback itself,
+  and `entryOf(player)` replaced two lookups that were keyed by video and are
+  now keyed by identity. **This is the invariant most at risk from a later
+  "just put it in the map" change.**
+- **Watch closes the sheet before it runs.** Closing destroys the player,
+  destroying reports the final position, and only then does the note open and
+  ask `resumeFor`. Reversing those two lines gives you two streams and a
+  position five seconds stale — the ordering is the feature.
+- **Preview records the position, never the watch stamp**
+  (`ProgressStore.recordPosition`). A preview that counted as a view would
+  punish previewing, and a hub that punishes previewing is one where you press
+  Watch on everything.
+- **What is still not built:** stage two — the persistent search blocklist, the
+  `⋯` Hide-channel chip, and the Settings lists that undo both. The session-only
+  `removedResults` set in `hub.ts` is still the seam it plugs into.
+
+## Previous — 2026-07-30j: feed failures are retried, and no longer sticky
 
 `youtube.com/feeds/videos.xml` fails at random — the same live channel answered
 404, 404, 404, 500, 404, 404, 404, 500 and then 200, with or without a browser

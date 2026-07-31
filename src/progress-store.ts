@@ -74,6 +74,20 @@ export class ProgressStore {
     if (moved || stamped) this.schedule();
   }
 
+  /**
+   * Note a position without saying the video was watched.
+   *
+   * What Preview reports. The two halves of `record` are separable for exactly
+   * this reason: a preview and a later watch are the same session in different
+   * containers, so the position has to carry over — but a preview that stamped
+   * `watched` would punish previewing, and a hub that punishes previewing is a
+   * hub where you press Watch on everything, which is the thing the preview
+   * exists to stop.
+   */
+  recordPosition(videoId: string, seconds: number, duration: number): void {
+    if (recordPosition(this.state, videoId, seconds, duration, new Date())) this.schedule();
+  }
+
   private schedule(): void {
     this.dirty = true;
     if (this.timer !== null) return;
