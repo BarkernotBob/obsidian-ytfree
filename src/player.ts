@@ -203,6 +203,19 @@ export class YtFreePlayer {
   private playbackRate = 1;
   /** True only while playback is paused *by us* because the user is typing. */
   private pausedByTyping = false;
+  /**
+   * True only while playback is paused *by the system* — the phone locked, the
+   * app was switched away from, the home screen appeared. Set from the `pause`
+   * event rather than from a call, because nothing on this side asked for it.
+   */
+  private pausedWhileHidden = false;
+  /**
+   * While `Date.now()` is under this, a `play` we did not ask for is WebKit
+   * undoing its own background pause, and gets undone in turn. Armed on the way
+   * back to visible and cleared by the first play either way, so a tap on the
+   * native controls a second later is the reader's and is left alone.
+   */
+  private resumeGuardUntil = 0;
   /** Has this player ever started? Stops an untouched note stamping 0:00. */
   private started = false;
   /**
@@ -270,6 +283,8 @@ export class YtFreePlayer {
   private smartTouchedRate = false;
   /** Kept so `destroy` can take it off `document`, which outlives this player. */
   private onVisibility: (() => void) | null = null;
+  /** Same, for the background-pause guard — it is registered unconditionally. */
+  private onBackgroundVisibility: (() => void) | null = null;
 
   constructor(
     private container: HTMLElement,
@@ -310,6 +325,7 @@ export class YtFreePlayer {
       this.started = true;
     });
 
+    this.trackBackgroundPause();
     this.trackProgress();
     this.trackNowPlaying();
   }
@@ -1210,6 +1226,53 @@ export class YtFreePlayer {
     document.addEventListener("visibilitychange", this.onVisibility);
   }
 
+  // ----------------------------------------------------- Background pausing
+
+  /**
+   * A pause the system caused stays paused.
+   *
+   * Locking the phone or switching apps pauses the video, which is right — the
+   * host has no background-audio session, so the sound stops either way. What
+   * is wrong is what WebKit does on the way back: it replays its own pause in
+   * reverse and starts the audio again, in a note the reader is no longer
+   * looking at, with no tap anywhere in the story. So mark the pause as ours
+   * the moment it arrives while the document is hidden, and undo the resume
+   * that follows it.
+   *
+   * Ownership is the same idea as `pausedByTyping`, and the same rule applies:
+   * the flag is only ever set for a pause this did not request, so a pause the
+   * reader performed themselves is never claimed and a play they perform
+   * themselves is never cancelled. `play()` clears both the flag and the guard
+   * before it starts anything, which is what keeps a lock-screen Play — the one
+   * play that legitimately arrives while hidden — from being undone.
+   */
+  private trackBackgroundPause(): void {
+    this.video.addEventListener("pause", () => {
+      if (document.hidden && !this.pausedByTyping) this.pausedWhileHidden = true;
+    });
+
+    this.video.addEventListener("play", () => {
+      const unrequested =
+        (document.hidden && this.pausedWhileHidden) || Date.now() < this.resumeGuardUntil;
+      if (!unrequested) return;
+      // One shot: whatever happens next is the reader's.
+      this.pausedWhileHidden = false;
+      this.resumeGuardUntil = 0;
+      this.video.pause();
+    });
+
+    // The resume can land either just before the document goes visible or just
+    // after it, so the guard covers both: the flag catches the early one, this
+    // window the late one. A second and a half is far longer than the gap and
+    // far shorter than a reader reaching for the screen.
+    this.onBackgroundVisibility = () => {
+      if (document.hidden || !this.pausedWhileHidden) return;
+      this.pausedWhileHidden = false;
+      this.resumeGuardUntil = Date.now() + 1500;
+    };
+    document.addEventListener("visibilitychange", this.onBackgroundVisibility);
+  }
+
   private startSmartLoop(): void {
     if (this.smartRaf !== null || this.destroyed) return;
     this.lastFrameAt = 0;
@@ -1868,6 +1931,10 @@ export class YtFreePlayer {
    */
   play(): void {
     if (this.destroyed) return;
+    // Asked for, so the background guard has no claim on it — including the
+    // lock-screen Play button, which arrives here while the document is hidden.
+    this.pausedWhileHidden = false;
+    this.resumeGuardUntil = 0;
     if (!this.hasSource) {
       this.setPendingPlay(true);
       return;
@@ -1908,6 +1975,7 @@ export class YtFreePlayer {
     if (this.destroyed) return;
     if (!this.pausedByTyping) return;
     this.pausedByTyping = false;
+    this.resumeGuardUntil = 0;
     void this.video.play().catch(() => { /* user gesture may be required */ });
   }
 
@@ -1955,6 +2023,10 @@ export class YtFreePlayer {
     if (this.onVisibility) {
       document.removeEventListener("visibilitychange", this.onVisibility);
       this.onVisibility = null;
+    }
+    if (this.onBackgroundVisibility) {
+      document.removeEventListener("visibilitychange", this.onBackgroundVisibility);
+      this.onBackgroundVisibility = null;
     }
     if (this.onDocPointer) {
       document.removeEventListener("pointerdown", this.onDocPointer, true);
