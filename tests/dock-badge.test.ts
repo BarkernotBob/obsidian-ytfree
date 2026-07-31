@@ -22,13 +22,18 @@ function source(audible: boolean, opts: { destroyed?: boolean; dead?: boolean } 
   };
 }
 
-function fakeDock(): DockLike & { writes: string[]; fail?: boolean } {
+function fakeDock(current = ""): DockLike & { writes: string[]; fail: boolean } {
   const dock = {
     writes: [] as string[],
     fail: false,
+    badge: current,
     setBadge(text: string) {
       if (dock.fail) throw new Error("dock is unavailable");
+      dock.badge = text;
       dock.writes.push(text);
+    },
+    getBadge() {
+      return dock.badge;
     },
   };
   return dock;
@@ -124,6 +129,52 @@ test("a failed write does not later clear a badge that was never shown", () => {
   audible = false;
   badge.refresh();
   assert.deepEqual(dock.writes, []);
+});
+
+test("adopt clears a ▶ left behind by a previous life", () => {
+  // A killed window, a mid-episode plugin reload, or a diagnostic that wrote
+  // one directly. Nothing else would ever clear it.
+  const dock = fakeDock(BADGE_TEXT);
+  const badge = new DockAudioBadge({ dock, allSources: () => [source(false)] });
+
+  badge.adopt();
+  assert.deepEqual(dock.writes, [""]);
+});
+
+test("adopt leaves a ▶ alone while something is still playing", () => {
+  // It belongs to a window that is still using it.
+  const dock = fakeDock(BADGE_TEXT);
+  const badge = new DockAudioBadge({ dock, allSources: () => [source(true)] });
+
+  badge.adopt();
+  assert.deepEqual(dock.writes, []);
+  assert.equal(dock.getBadge(), BADGE_TEXT);
+});
+
+test("adopt never touches a badge that is not ours", () => {
+  const dock = fakeDock("7");
+  const badge = new DockAudioBadge({ dock, allSources: () => [source(false)] });
+
+  badge.adopt();
+  assert.deepEqual(dock.writes, []);
+  assert.equal(dock.getBadge(), "7");
+});
+
+test("adopt does nothing when there is no badge and no getBadge", () => {
+  const dock = fakeDock();
+  const bare: DockLike = { setBadge: (t) => dock.setBadge(t) };
+  new DockAudioBadge({ dock, allSources: () => [source(false)] }).adopt();
+  new DockAudioBadge({ dock: bare, allSources: () => [source(false)] }).adopt();
+  assert.deepEqual(dock.writes, []);
+});
+
+test("an adopted badge does not make the instance think it owns one", () => {
+  const dock = fakeDock(BADGE_TEXT);
+  const badge = new DockAudioBadge({ dock, allSources: () => [source(false)] });
+
+  badge.adopt();
+  badge.clear();
+  assert.deepEqual(dock.writes, [""], "clear after adopt must not write twice");
 });
 
 test("the sweep is slow enough to be free and fast enough to be noticed", () => {

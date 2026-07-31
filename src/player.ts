@@ -78,6 +78,13 @@ export interface PlayerOptions {
    * in the pop-out: everything in there is "this video only".
    */
   pin?: PinOptions;
+  /**
+   * Share this video. One button on the bar, not two — the choice between a
+   * plain link and a link at this moment is made *after* pressing it, in a menu
+   * the host draws. The player supplies the anchor to draw it against and the
+   * position to offer, and knows nothing about clipboards or share sheets.
+   */
+  share?: (anchor: HTMLElement, seconds: number) => void;
   /** The pop-out of per-video controls. Absent, there is no pop-out button. */
   quick?: QuickPanelOptions;
   /**
@@ -790,6 +797,17 @@ export class YtFreePlayer {
         this.onDownload?.();
       });
       this.downloadBtn.addClass("ytfree-btn-download");
+    }
+
+    if (this.options.share) {
+      // One button, and the fork lives in the menu it opens. Two buttons on the
+      // bar would be two thumb-sized targets for one decision, and the second
+      // of them ("share at 12:04") would be a control whose meaning changes
+      // every second it is not pressed.
+      const shareBtn = button("right", "Share", "share", "Share this video", () => {
+        this.options.share?.(shareBtn, this.video.currentTime);
+      });
+      shareBtn.addClass("ytfree-btn-share");
     }
 
     if (this.options.pin) {

@@ -98,6 +98,15 @@ export interface PreviewHandle {
   currentTime: () => number;
 }
 
+/**
+ * Offer the two ways to share a video, against the control that was pressed.
+ *
+ * The same seam the player bar uses, so Preview's Share and the Share on a
+ * playing note's control bar are one behaviour with two buttons rather than
+ * two behaviours that have to be kept saying the same thing.
+ */
+export type ShareMenu = (anchor: HTMLElement, videoId: string, seconds: number) => void;
+
 export interface HubSettings {
   pollMinutes: number;
   expiryDays: number;
@@ -781,6 +790,12 @@ export class HubView extends ItemView {
      * the player existed.
      */
     private mountPreview: PreviewMount | null = null,
+    /**
+     * Opens the share menu against a control in the Preview sheet. The hub
+     * knows what to share; the plugin knows what "share" means on this
+     * platform — a clipboard, or the phone's own sheet.
+     */
+    private shareMenu: ShareMenu | null = null,
   ) {
     super(leaf);
   }
@@ -2059,6 +2074,7 @@ export class HubView extends ItemView {
         ? null
         : () => fetchVideoDetails(videoId).then((details) => details.description),
       fetchTranscript: () => fetchTranscriptCues(videoId, this.settings().transcriptLanguage),
+      share: this.shareMenu,
       slots: () => (item ? hubSlots(facts()) : searchSlots(facts())),
       run: async (key, repaint) => {
         // Re-looked-up: the modal outlives the card that opened it, and a poll
@@ -2089,6 +2105,8 @@ interface PreviewSpec {
   fetchDescription: (() => Promise<string>) | null;
   /** Fetches the transcript. Started on open, not on expand — see `mountTranscript`. */
   fetchTranscript: (() => Promise<Cue[]>) | null;
+  /** Opens the share menu. Null — no plugin behind the view — and no Share is drawn. */
+  share: ShareMenu | null;
   slots: () => CardSlot[];
   run: (key: CardActionKey, repaint: () => void) => Promise<void>;
 }

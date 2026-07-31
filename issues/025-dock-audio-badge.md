@@ -1,6 +1,20 @@
 # 025 — A ▶ on the dock icon while audio plays
 
-Status: **Built 2026-07-31 — awaiting manual test.**
+Status: **Built and verified working 2026-07-31.**
+
+Verified end to end by `ytfree:selftest-dock-badge`, which plays a real tone
+through WebAudio and reads the real dock tile back:
+
+| moment | `isCurrentlyAudible()` | dock badge |
+|---|---|---|
+| before | false | *(none)* |
+| tone +1s | true | ▶ |
+| tone +3.5s | true | ▶ |
+| silence +3s | false | *(cleared)* |
+
+macOS agrees: `lsappinfo info -only StatusLabel Obsidian` reports `"▶"` while
+the tone plays and `""` after. What remains for a human is only step 6
+(popped-out window) and step 10 (the phone).
 
 Scope: [docs/V1-SCOPE-DOCK-BADGE.md](../docs/V1-SCOPE-DOCK-BADGE.md).
 
@@ -46,7 +60,42 @@ like everything else that requires Node or Electron — the build guard in
 accidental top-level import fails the build instead of killing the plugin on
 iOS. Off macOS `createDockAudioBadge()` returns null and nothing branches on it.
 
-10 unit tests in `tests/dock-badge.test.ts`, 402 total, build clean.
+**A stale ▶ is reclaimed at startup.** Found while debugging the first "it is
+not showing" report, and a real bug: the badge is process state, so a window
+that is killed or a plugin reloaded mid-episode leaves a ▶ that the
+"only clear our own" rule would have left on the Dock forever. `adopt()` runs
+once at load and clears it — but only our exact glyph, and only while the app
+is silent, because a ▶ with sound playing belongs to a window still using it.
+
+**Two commands for when it does not work**, because every write in this file is
+inside a `try` and macOS ignores a badge it dislikes without saying so:
+
+- `YT Free: Diagnose the dock badge` — writes every link in the chain to
+  `dock-diagnostics.json` in the plugin folder: platform, remote, the dock
+  object, notification permission, `WebContents` count, audible count, and a
+  test write it puts back afterwards.
+- `YT Free: Self-test the dock badge (plays a tone)` — the end-to-end check
+  above. The only link that cannot be proved without sound existing.
+
+15 unit tests in `tests/dock-badge.test.ts`, 421 total, build clean.
+
+## What the first failure turned out to be
+
+Not the code, and not the two things that looked most likely. Recorded so the
+next person does not re-run the search:
+
+- **`dock.setBadge` does not need notification permission here**, despite the
+  Electron docs saying "you need to ensure that your application has the
+  permission to display notifications for this method to work". Obsidian has no
+  entry in `com.apple.ncprefs` at all — it has never registered with
+  Notification Center — and the badge displays regardless. Electron sets
+  `NSDockTile.badgeLabel`, which is plain AppKit.
+- **`@electron/remote` is fine.** `remote.app.dock` resolves, `setBadge` is a
+  function, and the write throws nothing. Obsidian's main process calls
+  `remote.initialize()` and `obsidian.asar` calls `remote.enable`.
+
+Both were checked before anything was changed. `lsappinfo info -only
+StatusLabel Obsidian` is the outside-the-app way to see the truth.
 
 ## What was not built
 

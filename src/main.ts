@@ -6,6 +6,7 @@ import {
   MarkdownPostProcessorContext,
   MarkdownRenderChild,
   MarkdownView,
+  Menu,
   Notice,
   editorLivePreviewField,
   Platform,
@@ -48,6 +49,7 @@ import {
 } from "./hub";
 import { YT_ICON, registerIcons } from "./icon";
 import { ProgressStore } from "./progress-store";
+import { shareUrl } from "./share";
 import { SilenceStore } from "./silence-store";
 import {
   combineSilence,
@@ -781,6 +783,37 @@ export default class YtFreePlugin extends Plugin {
       callback: () => void this.togglePinnedPlayer(),
     });
 
+    // Two commands rather than one with a prompt: the second one is the whole
+    // point of the pair — "listen to this bit" is a different message from
+    // "watch this" — and a command you have to answer a question after is a
+    // command you cannot put on a hotkey.
+    this.addCommand({
+      id: "share-video",
+      name: "Share this video",
+      callback: () => {
+        const videoId = this.shareTargetVideoId();
+        if (!videoId) {
+          new Notice("YT Free: no video in this note.");
+          return;
+        }
+        void this.shareVideo(videoId, null);
+      },
+    });
+
+    this.addCommand({
+      id: "share-video-at-time",
+      name: "Share this video at the current time",
+      callback: () => {
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        const entry = this.playerForPath(view?.file?.path) ?? this.anyPlayer();
+        if (!entry) {
+          new Notice("YT Free: no player in this note yet. Play a video first.");
+          return;
+        }
+        void this.shareVideo(entry.videoId, entry.player.currentTime);
+      },
+    });
+
     this.addCommand({
       id: "normalise-headings",
       name: "Rename this note's sections to Video Description / Video Transcript",
@@ -1129,6 +1162,12 @@ export default class YtFreePlugin extends Plugin {
       callback: () => void this.writeDockDiagnostics(),
     });
 
+    this.addCommand({
+      id: "selftest-dock-badge",
+      name: "Self-test the dock badge (plays a tone)",
+      callback: () => void this.selfTestDockBadge(),
+    });
+
     const badge = createDockAudioBadge();
     if (!badge) return;
 
@@ -1137,6 +1176,51 @@ export default class YtFreePlugin extends Plugin {
     // Enabling the plugin while something is already playing is the one moment
     // no event will fire for.
     badge.refresh();
+  }
+
+  /**
+   * The end-to-end self-test: make a real noise, watch the real Dock.
+   *
+   * Temporary. `isCurrentlyAudible()` is the one link in the chain that cannot
+   * be proved from the outside — everything else answers a question, this one
+   * needs sound to exist. A short tone through WebAudio is sound as far as
+   * Chromium is concerned, which is the whole point.
+   */
+  private async selfTestDockBadge(): Promise<void> {
+    const { readDockBadge, readAudible } = await desktop();
+    const wait = (ms: number) => new Promise((done) => window.setTimeout(done, ms));
+    const sample = (label: string) => ({
+      at: label,
+      audible: readAudible(),
+      badge: readDockBadge(),
+    });
+
+    const log: unknown[] = [sample("before")];
+
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.12;
+    osc.frequency.value = 440;
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+
+    await wait(1_000);
+    log.push(sample("tone +1s"));
+    await wait(2_500);
+    log.push(sample("tone +3.5s"));
+
+    osc.stop();
+    osc.disconnect();
+    gain.disconnect();
+    await ctx.close();
+
+    await wait(3_000);
+    log.push(sample("silence +3s"));
+
+    const path = `${this.pluginDir()}/dock-selftest.json`;
+    await this.app.vault.adapter.write(path, JSON.stringify(log, null, 2));
+    new Notice("YT Free: dock self-test finished.");
   }
 
   /** The diagnostics, written where they can be read without a console. */
@@ -2756,6 +2840,85 @@ export default class YtFreePlugin extends Plugin {
     return this.timestampText(entry.videoId, display, this.captureSeconds(entry.player));
   }
 
+  // ----------------------------------------------------------------- share
+
+  /**
+   * The video the share commands act on.
+   *
+   * The note's frontmatter first, because a plain link is about the video you
+   * are reading about, not the one that happens to be loaded. A fenced block in
+   * a note with no video property still has a player, so that is the fallback.
+   */
+  private shareTargetVideoId(): string | null {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const path = view?.file?.path;
+    return (
+      this.videoIdForNote(path) ??
+      this.playerForPath(path)?.videoId ??
+      this.anyPlayer()?.videoId ??
+      null
+    );
+  }
+
+  /**
+   * One button, two answers — drawn where it was pressed.
+   *
+   * Both items are always offered, including at 0:00, where "at the current
+   * time" is the same URL as the plain link. Hiding it there would make the
+   * menu change shape depending on how long you had been watching, and a menu
+   * whose items move is a menu you have to read every time.
+   */
+  private shareMenuFor(anchor: HTMLElement, videoId: string, seconds: number): void {
+    const verb = Platform.isDesktopApp ? "Copy link" : "Share link";
+    const at = Math.max(0, Math.floor(seconds));
+    const menu = new Menu();
+    menu.addItem((item) =>
+      item
+        .setTitle(verb)
+        .setIcon("link")
+        .onClick(() => void this.shareVideo(videoId, null)),
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle(`${verb} at ${formatTimestamp(at)}`)
+        .setIcon("clock")
+        .onClick(() => void this.shareVideo(videoId, at)),
+    );
+    const rect = anchor.getBoundingClientRect();
+    menu.showAtPosition({ x: rect.left, y: rect.top });
+  }
+
+  /**
+   * Hand a link over — to the phone's share sheet, or to the desktop clipboard.
+   *
+   * The share sheet is the right answer on a phone and the wrong one on a
+   * desktop, where it is either absent or a browser dialog nobody asked for.
+   * A share the reader cancels is not a failure and must not fall through to
+   * the clipboard: dismissing the sheet means "never mind", and quietly
+   * overwriting what they had copied is the opposite of that.
+   */
+  private async shareVideo(videoId: string, seconds: number | null): Promise<void> {
+    const url = shareUrl(videoId, seconds);
+    const share = navigator.share?.bind(navigator);
+    if (!Platform.isDesktopApp && share) {
+      try {
+        await share({ url });
+        return;
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") return;
+        // Anything else — no permission, no handler — falls through to the
+        // clipboard, which always works.
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      const at = seconds === null ? "" : ` at ${formatTimestamp(Math.max(0, Math.floor(seconds)))}`;
+      new Notice(`YT Free: link${at} copied.`);
+    } catch (err) {
+      new Notice(`YT Free: could not copy the link — ${String(err)}`);
+    }
+  }
+
   /** The player belonging to a specific note, or null. Never a fallback. */
   private playerForPath(path: string | undefined): PlayerEntry | null {
     if (!path) return null;
@@ -2937,6 +3100,9 @@ export default class YtFreePlugin extends Plugin {
               pinned: this.settings.pinnedPlayer,
               onToggle: () => void this.togglePinnedPlayer(),
             },
+        // Always. A preview has no note to pin to and nowhere to download to,
+        // but it has a video ID, and that is all a link is made of.
+        share: (anchor, seconds) => this.shareMenuFor(anchor, videoId, seconds),
         quick: {
           // Only where the height variable is read — a fenced block sizes
           // itself, so a size control there would be a control that does

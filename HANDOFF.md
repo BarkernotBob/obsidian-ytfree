@@ -2,11 +2,31 @@
 
 ## Status — 2026-07-31: A ▶ on the dock icon (025)
 
-**402 unit tests pass, build clean, installed to the vault.** Obsidian's macOS
-dock icon now wears a ▶ badge while the app is making noise. Nothing has been
-seen on a screen yet — the manual test in
-[issues/025-dock-audio-badge.md](issues/025-dock-audio-badge.md) is the next
-thing to run, and it starts with a full ⌘Q relaunch.
+**421 unit tests pass, build clean, installed to the vault, and verified
+working.** Obsidian's macOS dock icon now wears a ▶ badge while the app is
+making noise. `ytfree:selftest-dock-badge` plays a tone and watches the real
+dock tile: badge on within a second, off within three of the silence.
+`lsappinfo info -only StatusLabel Obsidian` agrees from outside the app. Only
+the popped-out-window step and the phone step in
+[issues/025-dock-audio-badge.md](issues/025-dock-audio-badge.md) still want a
+human.
+
+- **When it looks broken, run the two commands before changing anything.**
+  Every write in `dock-badge.ts` is inside a `try` and macOS ignores a badge it
+  dislikes without saying so, so "no badge" has half a dozen indistinguishable
+  causes. `Diagnose the dock badge` writes the whole chain to a JSON file in
+  the plugin folder; `Self-test the dock badge` proves the audible→badge loop
+  with real sound. The first report of "it is not showing" was chased to
+  ground with these two and a `lsappinfo` read, and the answer was that the
+  build was not loaded — **`./install.sh` does not reload the plugin.**
+- **Two dead ends, checked and disproved, do not re-run them:** `setBadge` does
+  *not* need notification permission here (Obsidian has no `com.apple.ncprefs`
+  entry at all and the badge draws anyway — Electron sets
+  `NSDockTile.badgeLabel`, plain AppKit), and `@electron/remote` resolves fine.
+- **A stale ▶ is now reclaimed at startup** (`adopt()`). The badge is process
+  state, so a killed window or a plugin reloaded mid-episode used to leave one
+  that the "only clear our own" rule would never take down. Narrow on purpose:
+  our exact glyph only, and only while the app is silent.
 
 - **The signal is `WebContents.isCurrentlyAudible()`, not our `<video>`.** That
   is the decision everything else follows from: muted playback correctly shows

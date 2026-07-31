@@ -1,0 +1,9 @@
+{
+  "id": "ytfree-lockspike",
+  "name": "YT Free Spike (lock audio)",
+  "version": "0.0.1",
+  "minAppVersion": "1.5.0",
+  "description": "Throwaway spike for the music hub: does a track transition fire and start playing while the phone is locked? Delete after answering.",
+  "author": "BarkernotBob",
+  "isDesktopOnly": false
+}

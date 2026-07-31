@@ -43,6 +43,8 @@ export interface AudibleSource {
 
 export interface DockLike {
   setBadge(text: string): void;
+  /** Present on macOS. Optional so a fake, and a future Electron, can omit it. */
+  getBadge?(): string;
 }
 
 export interface BadgeEnv {
@@ -108,6 +110,31 @@ export class DockAudioBadge {
     }
   }
 
+  /**
+   * Claim a badge left behind by a previous life, once, at startup.
+   *
+   * The badge is process state, so quitting clears it — but a window that was
+   * killed, a plugin that was reloaded mid-episode, or a diagnostic that wrote
+   * one directly all leave a ▶ that no live instance believes it set, and the
+   * "only clear our own" rule in `refresh` would leave it there forever.
+   *
+   * Narrow on purpose: only our exact glyph, and only while the app is silent.
+   * A ▶ with sound playing belongs to a window that is still using it, and a
+   * badge that is anything else was never ours to touch.
+   */
+  adopt(): void {
+    if (anyAudible(this.env.allSources())) return;
+    let current = "";
+    try {
+      current = this.env.dock.getBadge?.() ?? "";
+    } catch {
+      return;
+    }
+    if (current !== BADGE_TEXT) return;
+    this.shown = true;
+    this.clear();
+  }
+
   /** Take down a badge this instance put up. Safe to call twice. */
   clear(): void {
     if (!this.shown) return;
@@ -157,6 +184,26 @@ function getRemote(): RemoteApi | null {
   try {
     const electron = require("electron") as { remote?: RemoteApi };
     return electron?.remote ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** What the Dock is showing right now, or null if it cannot be asked. */
+export function readDockBadge(): string | null {
+  try {
+    return getRemote()?.app.dock?.getBadge?.() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Is anything in the app making sound right now? Null if it cannot be asked. */
+export function readAudible(): boolean | null {
+  try {
+    const remote = getRemote();
+    if (!remote) return null;
+    return anyAudible(remote.webContents.getAllWebContents());
   } catch {
     return null;
   }
@@ -224,15 +271,31 @@ export function diagnoseDockBadge(): Record<string, unknown> {
     report.webContents = `threw: ${String(err)}`;
   }
 
-  // The write itself, and then a read-back if macOS offers one.
+  // The write itself, a read-back, and then *put it back the way it was*.
+  // A diagnostic that leaves a badge on the Dock is a diagnostic that invents
+  // the bug it was run to explain — nothing in the sweep will clear a badge no
+  // `DockAudioBadge` instance believes it set.
   if (dock) {
+    const readable = dock as { getBadge?: () => string };
+    let before = "";
+    try {
+      before = readable.getBadge ? readable.getBadge() : "";
+    } catch {
+      before = "";
+    }
+    report.badgeBefore = before;
     try {
       dock.setBadge(BADGE_TEXT);
       report.setBadge = "no error";
-      const readable = dock as { getBadge?: () => string };
       report.badgeReadBack = readable.getBadge ? readable.getBadge() : "no getBadge";
     } catch (err) {
       report.setBadge = `threw: ${String(err)}`;
+    }
+    try {
+      dock.setBadge(before);
+      report.restored = before === "" ? "cleared" : before;
+    } catch (err) {
+      report.restored = `threw: ${String(err)}`;
     }
   }
 
@@ -263,6 +326,8 @@ export function createDockAudioBadge(): DockBadgeHandle | null {
       }
     },
   });
+
+  badge.adopt();
 
   // The event fires on our own renderer only, which covers every ordinary
   // case — our player, PodNotes, anything in the main window — and makes those
