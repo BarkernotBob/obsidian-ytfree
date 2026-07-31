@@ -19,10 +19,11 @@ import { parseSearchResponse } from "./search.ts";
 import type { SearchPage } from "./search.ts";
 import { defaultFilters, encodeSearchParams } from "./search-params.ts";
 import type { SearchFilters } from "./search-params.ts";
-import { parseHeatmapMarkers, pickPlayerCaptionTrack } from "./transcript.ts";
+import { parseHeatmapMarkers, parseJson3, pickPlayerCaptionTrack } from "./transcript.ts";
 import type {
   CaptionedPlayerResponse,
   CaptionTrack,
+  Cue,
   HeatmapResponse,
   VideoInfo,
 } from "./transcript.ts";
@@ -149,6 +150,21 @@ export async function fetchCaptionTrack(
 ): Promise<CaptionTrack | null> {
   const response = await callInnertube(PLAYER_URL, "android", playerBody(videoId));
   return pickPlayerCaptionTrack(response as CaptionedPlayerResponse, language);
+}
+
+/**
+ * The cues of a video's transcript, in one call.
+ *
+ * `fetchCaptionTrack` plus the fetch of the signed URL it hands back, which is
+ * two steps every caller was doing for itself. Answers `[]` rather than
+ * throwing when there are no captions in that language, because "this video has
+ * no transcript" is a thing to show, not an error to report.
+ */
+export async function fetchTranscriptCues(videoId: string, language: string): Promise<Cue[]> {
+  const track = await fetchCaptionTrack(videoId, language);
+  if (!track) return [];
+  const response = await requestUrl({ url: track.url, throw: true });
+  return parseJson3(response.text);
 }
 
 /**

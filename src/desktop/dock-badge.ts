@@ -163,6 +163,83 @@ function getRemote(): RemoteApi | null {
 }
 
 /**
+ * Everything the badge depends on, asked one question at a time.
+ *
+ * The badge fails silently by design — every write is in a `try` and macOS
+ * itself ignores `setBadge` under conditions it does not report — so "no badge"
+ * has half a dozen indistinguishable causes. This turns it into a list.
+ */
+export function diagnoseDockBadge(): Record<string, unknown> {
+  const report: Record<string, unknown> = {
+    at: new Date().toISOString(),
+    platform: process.platform,
+    electron: process.versions?.electron ?? null,
+  };
+
+  let remote: RemoteApi | null = null;
+  try {
+    remote = getRemote();
+    report.remote = remote ? "resolved" : "null";
+  } catch (err) {
+    report.remote = `threw: ${String(err)}`;
+  }
+  if (!remote) return report;
+
+  try {
+    report.appName = (remote.app as { getName?: () => string }).getName?.() ?? "no getName";
+  } catch (err) {
+    report.appName = `threw: ${String(err)}`;
+  }
+
+  const dock = (() => {
+    try {
+      return remote.app.dock ?? null;
+    } catch (err) {
+      report.dock = `threw: ${String(err)}`;
+      return null;
+    }
+  })();
+  report.dock = report.dock ?? (dock ? "present" : "absent");
+  report.setBadgeType = dock ? typeof dock.setBadge : "n/a";
+
+  // The documented caveat: "You need to ensure that your application has the
+  // permission to display notifications for this method to work."
+  try {
+    report.notificationPermission = typeof Notification === "undefined" ? "no API" : Notification.permission;
+  } catch (err) {
+    report.notificationPermission = `threw: ${String(err)}`;
+  }
+
+  try {
+    const all = remote.webContents.getAllWebContents();
+    report.webContents = all.length;
+    report.audible = all.filter((wc) => {
+      try {
+        return !wc.isDestroyed() && wc.isCurrentlyAudible();
+      } catch {
+        return false;
+      }
+    }).length;
+  } catch (err) {
+    report.webContents = `threw: ${String(err)}`;
+  }
+
+  // The write itself, and then a read-back if macOS offers one.
+  if (dock) {
+    try {
+      dock.setBadge(BADGE_TEXT);
+      report.setBadge = "no error";
+      const readable = dock as { getBadge?: () => string };
+      report.badgeReadBack = readable.getBadge ? readable.getBadge() : "no getBadge";
+    } catch (err) {
+      report.setBadge = `threw: ${String(err)}`;
+    }
+  }
+
+  return report;
+}
+
+/**
  * Wire the badge to Electron, or return null and leave the dock alone.
  *
  * Null is a normal answer, not a failure: it is what Windows, Linux and a

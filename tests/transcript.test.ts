@@ -14,6 +14,7 @@ import {
   renderHeatmap,
   renderTranscript,
   topPeaks,
+  transcriptLineFor,
   TRANSCRIPT_ALIASES,
   TRANSCRIPT_HEADING,
   upsertSection,
@@ -254,12 +255,18 @@ test("renderTranscript makes every section a seek link", () => {
 test("renderHeatmap lists labelled peaks, and nothing at all when there are none", () => {
   const cues: Cue[] = [{ seconds: 100, text: "the good part" }];
   const md = renderHeatmap([{ seconds: 100, value: 0.9 }], cues, ID);
-  assert.equal(md, "- **[1:40](ytfree:h0EGCnBjTVk:100)** — the good part");
+  assert.equal(
+    md,
+    "- **[1:40](ytfree:h0EGCnBjTVk:100)** [¶](ytfree:h0EGCnBjTVk:100:t) — the good part",
+  );
   assert.equal(renderHeatmap([], cues, ID), "");
 });
 
 test("renderHeatmap still lists a peak when there is no transcript to label it", () => {
-  assert.equal(renderHeatmap([{ seconds: 60, value: 1 }], [], ID), "- **[1:00](ytfree:h0EGCnBjTVk:60)**");
+  assert.equal(
+    renderHeatmap([{ seconds: 60, value: 1 }], [], ID),
+    "- **[1:00](ytfree:h0EGCnBjTVk:60)** [¶](ytfree:h0EGCnBjTVk:60:t)",
+  );
 });
 
 // ---------------------------------------------------------- innertube heatmap
@@ -473,4 +480,41 @@ test("ensureFooter leaves the note's own content alone", () => {
   const out = ensureFooter(NOTE);
   assert.match(out, /# Notes\n\nmy own note/);
   assert.match(out, /# Video Description\n0:00 something/);
+});
+
+// ------------------------------------------------- jumping to the transcript
+
+const JUMP_NOTE = [
+  "# Most replayed",
+  "",
+  `- **[1:40](ytfree:${ID}:100)** [¶](ytfree:${ID}:100:t) — the good part`,
+  "",
+  "# Video Transcript",
+  "",
+  `**[0:00](ytfree:${ID}:0)** opening words`,
+  "",
+  `**[1:20](ytfree:${ID}:80)** middle words`,
+  "",
+  `**[2:00](ytfree:${ID}:120)** later words`,
+].join("\n");
+
+test("transcriptLineFor lands on the paragraph covering the moment", () => {
+  // 100s is inside the paragraph that starts at 80, not the one that starts at 120.
+  assert.equal(transcriptLineFor(JUMP_NOTE, 100), 8);
+});
+
+test("transcriptLineFor takes the paragraph's own start exactly", () => {
+  assert.equal(transcriptLineFor(JUMP_NOTE, 80), 8);
+  assert.equal(transcriptLineFor(JUMP_NOTE, 120), 10);
+});
+
+test("transcriptLineFor ignores the peak list above it", () => {
+  // The peaks are list items, so they can never be mistaken for a paragraph —
+  // otherwise every jump would land back on the list it was clicked from.
+  assert.equal(transcriptLineFor(JUMP_NOTE, 0), 6);
+});
+
+test("transcriptLineFor answers null with no transcript, or before the first line", () => {
+  assert.equal(transcriptLineFor("# Notes\n\nnothing here", 100), null);
+  assert.equal(transcriptLineFor(`**[0:10](ytfree:${ID}:10)** words`, 5), null);
 });

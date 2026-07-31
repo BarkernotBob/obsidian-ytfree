@@ -5,6 +5,7 @@
  * anywhere.
  */
 
+import { TRANSCRIPT_LINK_SUFFIX } from "./description.ts";
 import { formatTimestamp } from "./format.ts";
 import type { TimedCue } from "./silence.ts";
 
@@ -425,14 +426,52 @@ export function renderTranscript(
   return [source, body].filter(Boolean).join("\n\n");
 }
 
+/** `[¶](ytfree:ID:754:t)` — go to this moment in the transcript, not in the video. */
+function transcriptLink(videoId: string, seconds: number): string {
+  return `[${TRANSCRIPT_JUMP_LABEL}](ytfree:${videoId}:${seconds}:${TRANSCRIPT_LINK_SUFFIX})`;
+}
+
+/**
+ * The character the jump wears in the note.
+ *
+ * A pilcrow, because the timestamp beside it is already the play control and
+ * the two have to be told apart at a glance in a list of eight.
+ */
+export const TRANSCRIPT_JUMP_LABEL = "¶";
+
 export function renderHeatmap(peaks: Peak[], cues: Cue[], videoId: string): string {
   if (peaks.length === 0) return "";
   return peaks
     .map((peak) => {
       const label = cueTextAt(cues, peak.seconds);
-      return `- **${seekLink(videoId, peak.seconds)}**${label ? ` — ${label}` : ""}`;
+      const jump = transcriptLink(videoId, peak.seconds);
+      return `- **${seekLink(videoId, peak.seconds)}** ${jump}${label ? ` — ${label}` : ""}`;
     })
     .join("\n");
+}
+
+/**
+ * Which line of a note holds the transcript covering `seconds`, or null.
+ *
+ * The last paragraph that starts at or before the moment asked for — the words
+ * being said then are inside it, and the paragraph after it has not happened
+ * yet. Zero-based, to match what an editor counts in.
+ *
+ * Reads the rendered note rather than the cues in memory because the note is
+ * the only copy that exists by the time someone clicks: transcripts are written
+ * once and the fetch is not repeated.
+ */
+export function transcriptLineFor(content: string, seconds: number): number | null {
+  const lines = content.split("\n");
+  let best: number | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const match = RENDERED_CUE_RE.exec(lines[i].trim());
+    if (!match) continue;
+    const at = Number(match[1]);
+    if (!Number.isFinite(at) || at > seconds) continue;
+    best = i;
+  }
+  return best;
 }
 
 /** `**[12:34](ytfree:ID:754)** the words` — one line of a rendered transcript. */

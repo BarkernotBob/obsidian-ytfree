@@ -35,12 +35,14 @@ import {
   stampInsertOffset,
 } from "./capture";
 import type { DownloadHandle } from "./desktop/download.ts";
-import { findTimestamps, seekLinkAt } from "./description";
+import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
+import type { SeekMode } from "./description";
 import { formatTimestamp } from "./format";
 import {
   HUB_VIEW_TYPE,
   HubSettings,
   HubView,
+  PreviewHandle,
   ImportSubscriptionsModal,
   SubscriptionsStore,
 } from "./hub";
@@ -66,6 +68,7 @@ import {
   parseJson3,
   parseJson3Timed,
   parseTranscriptCues,
+  transcriptLineFor,
   pickCaptionTrack,
   renderHeatmap,
   renderTranscript,
@@ -255,7 +258,10 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   collapseSections: true,
   linkifyTimestamps: true,
   transcriptLanguage: "en",
-  transcriptIntervalSeconds: 60,
+  // 20, not the 60 this shipped with: a peak's jump lands on a paragraph, so
+  // the paragraph is how close the jump can get. Notes written before this
+  // keep whatever they were built with.
+  transcriptIntervalSeconds: 20,
   autoFetchTranscript: true,
   heatmapPeaks: 8,
   // Blank means "wherever `defaultDownloadFolder()` says", which is
@@ -432,7 +438,7 @@ export default class YtFreePlugin extends Plugin {
   private autoFetchChain: Promise<void> = Promise.resolve();
   private lastActiveVideoId: string | null = null;
   /** Seek link under the mouse at mousedown, consumed by the matching click. */
-  private armedSeekLink: { videoId: string; seconds: number } | null = null;
+  private armedSeekLink: { videoId: string; seconds: number; mode: SeekMode } | null = null;
   /**
    * Where a touch started, so a scroll can be told from a tap.
    *
@@ -531,12 +537,19 @@ export default class YtFreePlugin extends Plugin {
             // A drag is a scroll or a selection, not a tap on a link.
             if (!touch || !withinTapSlop(origin, touch)) return false;
             const now = this.editorSeekLinkAt(touch, view, false);
-            if (!now || now.videoId !== armed.videoId || now.seconds !== armed.seconds) {
+            // The mode is part of the identity: a peak line carries a play
+            // link and a transcript jump at the same second, side by side.
+            if (
+              !now ||
+              now.videoId !== armed.videoId ||
+              now.seconds !== armed.seconds ||
+              now.mode !== armed.mode
+            ) {
               return false;
             }
 
             evt.preventDefault();
-            this.followSeekLink(armed.videoId, armed.seconds);
+            this.followSeekLink(armed.videoId, armed.seconds, armed.mode);
             return true;
           },
         }),
@@ -590,8 +603,9 @@ export default class YtFreePlugin extends Plugin {
         evt.preventDefault();
         evt.stopPropagation();
 
-        const [, videoId, seconds] = (anchor.getAttribute("href") ?? "").split(":");
-        this.followSeekLink(videoId, Number(seconds) || 0);
+        const href = anchor.getAttribute("href") ?? "";
+        const [, videoId, seconds] = href.split(":");
+        this.followSeekLink(videoId, Number(seconds) || 0, seekModeFromHref(href));
       },
       { capture: true },
     );
@@ -629,8 +643,9 @@ export default class YtFreePlugin extends Plugin {
         evt.preventDefault();
         evt.stopPropagation();
 
-        const [, videoId, seconds] = (armed.getAttribute("href") ?? "").split(":");
-        this.followSeekLink(videoId, Number(seconds) || 0);
+        const href = armed.getAttribute("href") ?? "";
+        const [, videoId, seconds] = href.split(":");
+        this.followSeekLink(videoId, Number(seconds) || 0, seekModeFromHref(href));
       },
       { capture: true },
     );
@@ -979,6 +994,7 @@ export default class YtFreePlugin extends Plugin {
       includeShorts: this.settings.subscriptionsIncludeShorts,
       watchLaterFolder: this.settings.watchLaterFolder,
       showWatched: this.settings.accountShowWatched,
+      transcriptLanguage: this.transcriptLanguage(),
     };
   }
 
@@ -1104,6 +1120,15 @@ export default class YtFreePlugin extends Plugin {
   private async setupDockBadge(): Promise<void> {
     if (!Platform.isDesktopApp) return;
     const { createDockAudioBadge, SWEEP_MS } = await desktop();
+
+    // Registered before the null check, not after: "there is no badge" is the
+    // state the diagnostics exist to explain, so the command has to survive it.
+    this.addCommand({
+      id: "diagnose-dock-badge",
+      name: "Diagnose the dock badge",
+      callback: () => void this.writeDockDiagnostics(),
+    });
+
     const badge = createDockAudioBadge();
     if (!badge) return;
 
@@ -1112,6 +1137,16 @@ export default class YtFreePlugin extends Plugin {
     // Enabling the plugin while something is already playing is the one moment
     // no event will fire for.
     badge.refresh();
+  }
+
+  /** The diagnostics, written where they can be read without a console. */
+  private async writeDockDiagnostics(): Promise<void> {
+    const { diagnoseDockBadge } = await desktop();
+    const report = diagnoseDockBadge();
+    const path = `${this.pluginDir()}/dock-diagnostics.json`;
+    await this.app.vault.adapter.write(path, JSON.stringify(report, null, 2));
+    console.log("YT Free dock badge diagnostics", report);
+    new Notice(`YT Free: dock diagnostics written to ${path}`);
   }
 
   async signIn(): Promise<void> {
@@ -2585,7 +2620,15 @@ export default class YtFreePlugin extends Plugin {
    * Seek the named player, claiming the user gesture first. Shared by the
    * Reading-view anchor handler and the Live Preview editor handler.
    */
-  private followSeekLink(videoId: string, seconds: number): void {
+  private followSeekLink(videoId: string, seconds: number, mode: SeekMode = "seek"): void {
+    // A transcript jump moves the note, not the video, so it works whether or
+    // not anything is playing — which is the point of having it beside the
+    // timestamp rather than instead of it.
+    if (mode === "transcript") {
+      this.jumpToTranscript(seconds);
+      return;
+    }
+
     const entry = this.players.get(videoId);
     if (!entry) {
       new Notice("YT Free: that video is not open in this note.");
@@ -2601,6 +2644,49 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
+   * Scroll the note in front of you to what was being said at `seconds`.
+   *
+   * The target is the transcript paragraph that covers the moment, found by
+   * reading the rendered note rather than any cue list in memory: the note is
+   * the only copy that still exists once the fetch has run, and it is what the
+   * reader is looking at.
+   *
+   * Both view modes are handled because a note is as often read as edited.
+   * The editor gets a cursor and a scroll; reading view gets `applyScroll`,
+   * which takes the same line number and is guarded because it is not in every
+   * build's public typings.
+   */
+  private jumpToTranscript(seconds: number): void {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view) return;
+
+    const line = transcriptLineFor(view.data, seconds);
+    if (line === null) {
+      new Notice("YT Free: this note has no transcript to jump to yet.");
+      return;
+    }
+
+    const preview = (
+      view as unknown as { previewMode?: { applyScroll?: (line: number) => void } }
+    ).previewMode;
+    if (view.getMode() === "preview") {
+      try {
+        preview?.applyScroll?.(line);
+      } catch (err) {
+        console.error("YT Free: could not scroll reading view to the transcript.", err);
+      }
+      return;
+    }
+
+    const editor = view.editor;
+    editor.setCursor({ line, ch: 0 });
+    // `center` false would leave the line at the very bottom of the viewport,
+    // with the words the peak is about scrolled off it.
+    editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } }, true);
+    editor.focus();
+  }
+
+  /**
    * The seekable link under a mouse event in Live Preview, or null.
    *
    * Null in source mode, and null when the selection already touches the link
@@ -2613,7 +2699,7 @@ export default class YtFreePlugin extends Plugin {
     at: { clientX: number; clientY: number },
     view: EditorView,
     guardSelection: boolean,
-  ): { videoId: string; seconds: number } | null {
+  ): { videoId: string; seconds: number; mode: SeekMode } | null {
     if (!view.state.field(editorLivePreviewField, false)) return null;
     const pos = view.posAtCoords({ x: at.clientX, y: at.clientY });
     if (pos === null) return null;
@@ -2629,7 +2715,7 @@ export default class YtFreePlugin extends Plugin {
         if (range.from <= linkTo && range.to >= linkFrom) return null;
       }
     }
-    return { videoId: link.videoId, seconds: link.seconds };
+    return { videoId: link.videoId, seconds: link.seconds, mode: link.mode };
   }
 
   /** Timestamp clicks in Live Preview, armed by the matching mousedown. */
@@ -2642,13 +2728,18 @@ export default class YtFreePlugin extends Plugin {
     // is a text selection, not a click. No selection guard here: by click
     // time CodeMirror may already have moved the cursor into the link.
     const now = this.editorSeekLinkAt(evt, view, false);
-    if (!now || now.videoId !== armed.videoId || now.seconds !== armed.seconds) {
+    if (
+      !now ||
+      now.videoId !== armed.videoId ||
+      now.seconds !== armed.seconds ||
+      now.mode !== armed.mode
+    ) {
       return false;
     }
 
     evt.preventDefault();
     evt.stopPropagation();
-    this.followSeekLink(armed.videoId, armed.seconds);
+    this.followSeekLink(armed.videoId, armed.seconds, armed.mode);
     return true;
   }
 
@@ -2960,7 +3051,7 @@ export default class YtFreePlugin extends Plugin {
    * two previews can only mean the modal was reopened, and two streams playing
    * at once is never what was asked for.
    */
-  async mountPreviewPlayer(host: HTMLElement, videoId: string): Promise<{ destroy: () => void }> {
+  async mountPreviewPlayer(host: HTMLElement, videoId: string): Promise<PreviewHandle> {
     this.destroyPreview();
 
     // A note player for the same video is paused rather than torn down: it may
@@ -2977,7 +3068,18 @@ export default class YtFreePlugin extends Plugin {
     // Failure has already drawn its own error into the host, and `buildPlayer`
     // has already unregistered — so the handle tears down nothing. It is still
     // a real handle, so the caller has one shape to hold and one thing to call.
-    return { destroy: () => (entry ? this.destroyPreview(entry) : undefined) };
+    return {
+      destroy: () => (entry ? this.destroyPreview(entry) : undefined),
+      // `primeForGesture` first, for the same reason a timestamp link does it:
+      // on iOS a seek that has to resolve a URL is no longer a user gesture by
+      // the time it returns, so the element has to be touched synchronously.
+      seek: (seconds) => {
+        if (!entry) return;
+        entry.player.primeForGesture();
+        void this.seekEntry(entry, seconds);
+      },
+      currentTime: () => entry?.player.currentTime ?? 0,
+    };
   }
 
   /**

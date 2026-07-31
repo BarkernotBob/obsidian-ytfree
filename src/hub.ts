@@ -57,7 +57,8 @@ import {
 import { NOTES_HEADING } from "./sections";
 import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
-import { fetchVideoDetails, searchYouTube } from "./innertube";
+import { fetchTranscriptCues, fetchVideoDetails, searchYouTube } from "./innertube";
+import type { Cue } from "./transcript";
 import type { SearchPage, SearchResult } from "./search";
 import {
   DURATION_OPTIONS,
@@ -82,7 +83,20 @@ export const HUB_VIEW_TYPE = "ytfree-hub";
 export type PreviewMount = (
   host: HTMLElement,
   videoId: string,
-) => Promise<{ destroy: () => void }>;
+) => Promise<PreviewHandle>;
+
+/**
+ * What the hub is allowed to do with the player it asked for.
+ *
+ * `destroy` is the contract that matters — nothing else will tear a preview
+ * down. `seek` and `currentTime` exist for the transcript beside it: a line is
+ * a place to jump to, and the line being spoken has to be the one lit up.
+ */
+export interface PreviewHandle {
+  destroy: () => void;
+  seek: (seconds: number) => void;
+  currentTime: () => number;
+}
 
 export interface HubSettings {
   pollMinutes: number;
@@ -91,6 +105,8 @@ export interface HubSettings {
   watchLaterFolder: string;
   /** Keep videos the account says were already watched in the Inbox. */
   showWatched: boolean;
+  /** Which captions Preview asks for — the same setting the note fetch uses. */
+  transcriptLanguage: string;
 }
 
 /**
@@ -2042,6 +2058,7 @@ export class HubView extends ItemView {
       fetchDescription: item?.description
         ? null
         : () => fetchVideoDetails(videoId).then((details) => details.description),
+      fetchTranscript: () => fetchTranscriptCues(videoId, this.settings().transcriptLanguage),
       slots: () => (item ? hubSlots(facts()) : searchSlots(facts())),
       run: async (key, repaint) => {
         // Re-looked-up: the modal outlives the card that opened it, and a poll
@@ -2070,15 +2087,26 @@ interface PreviewSpec {
   description: string;
   /** Fetches the description for a video that arrived without one. */
   fetchDescription: (() => Promise<string>) | null;
+  /** Fetches the transcript. Started on open, not on expand — see `mountTranscript`. */
+  fetchTranscript: (() => Promise<Cue[]>) | null;
   slots: () => CardSlot[];
   run: (key: CardActionKey, repaint: () => void) => Promise<void>;
 }
 
+/** How often the transcript re-checks which line is being spoken. */
+const TRANSCRIPT_TICK_MS = 400;
+
 class PreviewModal extends Modal {
-  /** The live player's teardown, once it has one. */
-  private stopPlayer: (() => void) | null = null;
+  /** The live player, once it has one. */
+  private player: PreviewHandle | null = null;
   /** Set by `onClose`, so a mount that lands after the sheet is gone is dropped. */
   private closed = false;
+  /** The `setInterval` that lights the spoken line, while the transcript is open. */
+  private tick: number | null = null;
+  /** One row per cue, in cue order, so the highlight is an index and not a search. */
+  private cueRows: HTMLElement[] = [];
+  private cues: Cue[] = [];
+  private litRow = -1;
 
   constructor(
     app: App,
@@ -2109,6 +2137,8 @@ class PreviewModal extends Modal {
         () => body.setText("No description."),
       );
     }
+
+    this.mountTranscript(contentEl);
 
     const actions = contentEl.createDiv({ cls: "ytfree-card-actions ytfree-preview-actions" });
     const buttons = new Map<CardActionKey, HTMLButtonElement>();
@@ -2190,7 +2220,7 @@ class PreviewModal extends Modal {
         // teardown later, so it is called now — otherwise a sheet closed during
         // a slow resolve leaves a stream running for the rest of the session.
         if (this.closed) handle.destroy();
-        else this.stopPlayer = handle.destroy;
+        else this.player = handle;
       },
       (err: unknown) => {
         console.error("YT Free: preview player could not be built.", err);
@@ -2200,10 +2230,118 @@ class PreviewModal extends Modal {
     );
   }
 
+  /**
+   * The transcript, under the description.
+   *
+   * **Fetched on open, shown on demand.** The two are deliberately not the same
+   * event: a transcript is two round trips and it is not what the sheet is for,
+   * so it must not be something you press a button and then wait for. It starts
+   * the moment the sheet does and lands while the stream is still resolving, so
+   * by the time anyone wants it, it is already there.
+   *
+   * The header is a full-width row that says the same thing at the same size in
+   * both states — only the chevron and the body's visibility change — so
+   * opening the transcript never moves the buttons under the pointer.
+   */
+  private mountTranscript(contentEl: HTMLElement): void {
+    if (!this.spec.fetchTranscript) return;
+
+    const section = contentEl.createDiv({ cls: "ytfree-preview-transcript" });
+    const header = section.createEl("button", {
+      cls: "ytfree-preview-transcript-head",
+      attr: { type: "button", "aria-expanded": "false" },
+    });
+    const chevron = header.createSpan({ cls: "ytfree-preview-transcript-chevron" });
+    setIcon(chevron, "chevron-right");
+    const label = header.createSpan({
+      cls: "ytfree-preview-transcript-label",
+      text: "Transcript",
+    });
+    const body = section.createDiv({ cls: "ytfree-preview-transcript-body" });
+
+    header.addEventListener("click", () => {
+      const open = section.hasClass("is-open");
+      section.toggleClass("is-open", !open);
+      header.setAttribute("aria-expanded", String(!open));
+      setIcon(chevron, open ? "chevron-right" : "chevron-down");
+      // The tick only runs while anyone can see what it lights up.
+      if (open) this.stopTicking();
+      else this.startTicking();
+    });
+
+    void this.spec.fetchTranscript().then(
+      (cues) => {
+        if (this.closed) return;
+        this.cues = cues;
+        if (cues.length === 0) {
+          label.setText("Transcript — none for this video");
+          header.setAttribute("disabled", "true");
+          return;
+        }
+        label.setText(`Transcript · ${cues.length} lines`);
+        this.fillTranscript(body, cues);
+        if (section.hasClass("is-open")) this.startTicking();
+      },
+      (err: unknown) => {
+        console.error("YT Free: preview transcript could not be fetched.", err);
+        if (this.closed) return;
+        label.setText("Transcript — could not be fetched");
+        header.setAttribute("disabled", "true");
+      },
+    );
+  }
+
+  /** One row per cue: a timestamp that seeks, and the words that were said. */
+  private fillTranscript(body: HTMLElement, cues: Cue[]): void {
+    body.empty();
+    this.cueRows = cues.map((cue) => {
+      const row = body.createEl("button", {
+        cls: "ytfree-preview-cue",
+        attr: { type: "button" },
+      });
+      row.createSpan({ cls: "ytfree-preview-cue-time", text: formatDuration(cue.seconds) });
+      row.createSpan({ cls: "ytfree-preview-cue-text", text: cue.text });
+      row.addEventListener("click", () => this.player?.seek(cue.seconds));
+      return row;
+    });
+  }
+
+  /**
+   * Light the line being spoken, and keep it in view.
+   *
+   * Polled rather than driven by `timeupdate`, because the handle the hub holds
+   * is deliberately three functions wide — the seam between the hub and the
+   * player engine is not a place to grow an event bus for one highlight.
+   */
+  private startTicking(): void {
+    if (this.tick !== null || this.cueRows.length === 0) return;
+    const paint = (): void => {
+      const at = this.player?.currentTime() ?? 0;
+      let index = -1;
+      for (let i = 0; i < this.cues.length && this.cues[i].seconds <= at; i++) index = i;
+      if (index === this.litRow) return;
+      if (this.litRow >= 0) this.cueRows[this.litRow]?.removeClass("is-now");
+      this.litRow = index;
+      if (index < 0) return;
+      const row = this.cueRows[index];
+      row.addClass("is-now");
+      row.scrollIntoView({ block: "nearest" });
+    };
+    paint();
+    this.tick = window.setInterval(paint, TRANSCRIPT_TICK_MS);
+  }
+
+  private stopTicking(): void {
+    if (this.tick === null) return;
+    window.clearInterval(this.tick);
+    this.tick = null;
+  }
+
   onClose(): void {
     this.closed = true;
-    this.stopPlayer?.();
-    this.stopPlayer = null;
+    this.stopTicking();
+    this.player?.destroy();
+    this.player = null;
     this.contentEl.empty();
   }
 }

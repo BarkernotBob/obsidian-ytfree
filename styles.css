@@ -2314,6 +2314,111 @@ body.ytfree-immersive-open {
   white-space: pre-wrap;
 }
 
+/*
+ * The transcript, under the description.
+ *
+ * The header row is a fixed height and says its piece at one size in both
+ * states, so opening the transcript moves the buttons below it and nothing
+ * else — the chevron rotates in place rather than being swapped for a wider
+ * glyph, and the label's text changes only when the fetch lands.
+ */
+.ytfree-preview-transcript {
+  margin-top: 0.8em;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ytfree-preview-transcript-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  width: 100%;
+  height: 34px;
+  padding: 0 0.2em;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ytfree-preview-transcript-head:hover:not([disabled]) {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ytfree-preview-transcript-head[disabled] {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.ytfree-preview-transcript-chevron {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.ytfree-preview-transcript-chevron .svg-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/*
+ * Collapsed is zero height rather than `display: none` so the rows keep their
+ * measured widths — reopening it must not reflow the sheet a second time.
+ */
+.ytfree-preview-transcript-body {
+  max-height: 0;
+  overflow: hidden;
+}
+
+.ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
+  max-height: 30vh;
+  overflow-y: auto;
+  padding-bottom: 0.4em;
+}
+
+.ytfree-preview-cue {
+  display: flex;
+  gap: 0.6em;
+  width: 100%;
+  padding: 0.25em 0.2em;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  box-shadow: none;
+  font-size: var(--font-ui-small);
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ytfree-preview-cue:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ytfree-preview-cue-time {
+  flex: 0 0 3.4em;
+  color: var(--ytfree-purple, var(--text-accent));
+  font-variant-numeric: tabular-nums;
+}
+
+.ytfree-preview-cue-text {
+  color: var(--text-muted);
+  white-space: normal;
+}
+
+/* The line being spoken. A background, not a weight — bold would reflow it. */
+.ytfree-preview-cue.is-now {
+  background: var(--background-modifier-active-hover);
+}
+
+.ytfree-preview-cue.is-now .ytfree-preview-cue-text {
+  color: var(--text-normal);
+}
+
 /* Three across, not four: Preview is what you are already looking at. */
 .ytfree-preview-actions {
   grid-template-columns: repeat(3, minmax(0, 1fr));

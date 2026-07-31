@@ -135,6 +135,18 @@ export function escapeDescription(text: string): string {
 }
 
 /**
+ * What a `ytfree:` link asks for.
+ *
+ * `seek` is every link the plugin has ever written — play this video here.
+ * `transcript` is the jump a replay peak offers: go to what was being said,
+ * in the note's own transcript, without moving the video at all.
+ */
+export type SeekMode = "seek" | "transcript";
+
+/** The trailing segment that makes a link a transcript jump. */
+export const TRANSCRIPT_LINK_SUFFIX = "t";
+
+/**
  * The `ytfree:` markdown link in `line` whose full `[text](url)` span covers
  * `offset`, or null.
  *
@@ -145,8 +157,12 @@ export function escapeDescription(text: string): string {
 export function seekLinkAt(
   line: string,
   offset: number,
-): { videoId: string; seconds: number; from: number; to: number } | null {
-  const re = /\[[^\]\n]*\]\(ytfree:([A-Za-z0-9_-]+):(\d+)\)/g;
+): { videoId: string; seconds: number; mode: SeekMode; from: number; to: number } | null {
+  // The mode rides on the same scheme rather than a second one: every click
+  // path in `main.ts` — reading view, Live Preview, and the two touch
+  // sequences — already recognises `ytfree:`, and a parallel scheme would mean
+  // four more places to keep in step.
+  const re = /\[[^\]\n]*\]\(ytfree:([A-Za-z0-9_-]+):(\d+)(?::([a-z]+))?\)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(line))) {
     if (offset < m.index) return null;
@@ -154,9 +170,15 @@ export function seekLinkAt(
     return {
       videoId: m[1],
       seconds: Number(m[2]),
+      mode: m[3] === TRANSCRIPT_LINK_SUFFIX ? "transcript" : "seek",
       from: m.index,
       to: m.index + m[0].length,
     };
   }
   return null;
+}
+
+/** The mode a rendered `href` asks for — the reading-view half of `seekLinkAt`. */
+export function seekModeFromHref(href: string): SeekMode {
+  return href.split(":")[3] === TRANSCRIPT_LINK_SUFFIX ? "transcript" : "seek";
 }

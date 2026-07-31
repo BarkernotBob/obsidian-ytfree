@@ -69,6 +69,7 @@ test("seekLinkAt finds the link whose span covers the offset", () => {
   assert.deepEqual(seekLinkAt(line, first + 2), {
     videoId: ID,
     seconds: 14,
+    mode: "seek",
     from: first,
     to: first + `[0:19](ytfree:${ID}:14)`.length,
   });
