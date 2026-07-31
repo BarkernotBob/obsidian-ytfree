@@ -32,4 +32,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [026](026-delete-removes-from-hub.md) | Deleting a note removes the video from the hub | Built 2026-07-31 — awaiting manual test |
 | 027 | Replay peaks skip the opening 10 seconds — every video led with 0:00 | Built 2026-07-31 — awaiting manual test |
 | [028](028-transcript-in-preview-and-jumps.md) | The transcript in Preview, and a jump from a peak to it | Built 2026-07-31 — awaiting manual test |
-| 029 | Share a video's URL, and share it at the current timestamp | Scoped — needs a design decision, nothing built |
+| [029](029-share-a-video.md) | Share a video's URL, and share it at the current timestamp | Built 2026-07-31 — awaiting manual test |

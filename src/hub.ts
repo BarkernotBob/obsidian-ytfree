@@ -2218,6 +2218,31 @@ class PreviewModal extends Modal {
         );
       });
     }
+
+    // Last, and outside the slot loop: Share does nothing to the video, so it
+    // has no busy state, no done tick and nothing to repaint. It is drawn as
+    // the same kind of button because it sits in the same row and a control
+    // that looks different for no reason reads as a control that does
+    // something different in kind.
+    const share = this.spec.share;
+    if (share) {
+      const button = actions.createEl("button", {
+        cls: "ytfree-card-act",
+        attr: { type: "button" },
+      });
+      const idle = button.createSpan({ cls: "ytfree-card-state ytfree-card-idle" });
+      setIcon(idle.createSpan({ cls: "ytfree-card-icon" }), "share");
+      idle.createSpan({ cls: "ytfree-card-label", text: "Share" });
+      button.setAttribute("aria-label", "Share");
+      button.setAttribute("title", "Share this video");
+      button.addEventListener("click", () => {
+        // Where the preview has got to, not zero: someone who presses Share
+        // forty seconds in is as likely to mean "this bit" as "this video",
+        // and the menu is where that is decided.
+        share(button, this.spec.videoId, this.player?.currentTime() ?? 0);
+      });
+    }
+
     repaint();
   }
 

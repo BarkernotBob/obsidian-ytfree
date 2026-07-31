@@ -1,6 +1,51 @@
 # HANDOFF
 
-## Status — 2026-07-31: A ▶ on the dock icon (025)
+## Status — 2026-07-31: deleting, peaks, the transcript in Preview, sharing
+
+BarkernotBob's five-item list, all of it built. **425 unit tests pass, `tsc` clean,
+build clean, installed to the vault.** None of it has been used on a screen yet;
+the manual tests in [026](issues/026-delete-removes-from-hub.md),
+[028](issues/028-transcript-in-preview-and-jumps.md) and
+[029](issues/029-share-a-video.md) are the next thing to run, and 029's step 9
+needs the iPhone.
+
+- **Deleting a note takes the video out of the hub (026), and a deletion is not
+  a hide.** Hidden is a permanent judgement that also blocks search; BarkernotBob's
+  ask was explicitly that a deleted video stays search-eligible. So
+  `deletedVideos` is its own tombstone list in `subscriptions.json`, blocking
+  only the feed poll. It had to be unioned and applied *inside* `mergeStates`,
+  the way `removedChannels` is: the other device still holds the item, and Kept
+  outranks everything in `mergeItem`, so a merge would hand it straight back.
+  The hook is `metadataCache.on("deleted")`, not `vault.on("delete")` — by the
+  time the vault fires there is no file to read frontmatter from.
+- **Peaks skip the first 10 seconds (027).** Every video was leading with 0:00,
+  which is the YouTube player's own scrub-back-to-the-start traffic and not a
+  moment anyone replayed. `LEAD_IN_SECONDS` in `transcript.ts`.
+- **The transcript is in Preview, and a peak jumps to it (028).** The fetch
+  starts on *open*, not on expand — that was BarkernotBob's correction and it is the
+  right one: a control you press and then wait for is a control you stop
+  pressing. `PreviewHandle` is three functions wide now (`destroy`, `seek`,
+  `currentTime`); the spoken-line highlight is polled off `currentTime` every
+  400 ms rather than driven by an event, deliberately, so the hub↔player seam
+  stays one small interface. `transcriptIntervalSeconds` 60 → 20.
+- **The `ytfree:` scheme carries a mode now** (`ytfree:ID:754:t`), rather than a
+  second scheme. There are four click paths for these links — reading view and
+  Live Preview, click and touch — and the mode is part of a tap's identity in
+  the arm-then-fire guards, because a peak line carries a play link and a jump
+  at the same second, side by side.
+- **Share (029): one button, and the fork is in the menu it opens.** That is
+  BarkernotBob's call and it applies to the control bar and to Preview's action row
+  alike; the command palette gets the two as separate commands, because a
+  command you answer a prompt after cannot go on a hotkey. Phone shares
+  (`navigator.share`), desktop copies. **A cancelled share sheet copies
+  nothing** — dismissing it means "never mind", and overwriting the clipboard
+  would be the opposite of that. `src/share.ts` is pure and holds the one rule
+  worth pinning: `?t=0` is never written.
+- Preview's action row is four across now, matching the card. Share is not a
+  card slot — it changes nothing about the video, so it has no busy state and no
+  done tick — but it is drawn as the same kind of button on purpose.
+
+## Previous — 2026-07-31: A ▶ on the dock icon (025)
 
 **421 unit tests pass, build clean, installed to the vault, and verified
 working.** Obsidian's macOS dock icon now wears a ▶ badge while the app is

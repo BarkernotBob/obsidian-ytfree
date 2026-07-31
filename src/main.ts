@@ -886,6 +886,9 @@ export default class YtFreePlugin extends Plugin {
           // The player inside Preview. The hub knows nothing about streams;
           // this is the only thing it is given to build one with.
           (host, videoId) => this.mountPreviewPlayer(host, videoId),
+          // Share, from the Preview sheet. The same menu the player's own
+          // Share button opens.
+          (anchor, videoId, seconds) => this.shareMenuFor(anchor, videoId, seconds),
         ),
     );
 
