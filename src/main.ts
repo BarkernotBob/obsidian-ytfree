@@ -2206,7 +2206,12 @@ export default class YtFreePlugin extends Plugin {
     // Marks the view for the CSS that has to override Obsidian's own — see the
     // `.ytfree-has-docked` rules in styles.css. A class beats `:has()` here
     // because it is exact and it is removed the moment the player goes.
-    if (mobile) this.holdDockedLayout(view);
+    // Both platforms: the height the player takes has to come out of the note
+    // body on desktop too, or `.view-content` (block, `height: 100%`,
+    // `overflow: hidden`) is one player taller than its box and the tail of the
+    // note is clipped with no way to scroll to it — worse the taller the player
+    // or the properties block above it.
+    this.holdDockedLayout(view);
 
     const record: PinnedEntry = { videoId, wrapper, entry: null };
     this.pinned.set(view, record);
