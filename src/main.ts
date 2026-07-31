@@ -1833,12 +1833,20 @@ export default class YtFreePlugin extends Plugin {
     }
 
     // The button's second job. Tapping Transcript when you are already reading
-    // the transcript has nowhere to take you, so it does the thing you wanted
-    // the room for instead: folds the video away, and gives it back on the tap
-    // after that.
-    if (videoId && this.inSection(file.path, view, content, section, line)) {
+    // the transcript has nowhere to take you, so it folds that section away
+    // instead — a five-thousand-line transcript is exactly what you want gone
+    // once you are done with it — and the tap after that opens it again.
+    //
+    // Notes is the exception: it is where the writing happens and folding it
+    // away mid-sentence is never what was meant, so there the second tap still
+    // folds the video and gives back the room that way.
+    if (this.inSection(file.path, view, content, section, line)) {
       this.lastJump.set(file.path, section);
-      this.toggleHeaderFor(videoId);
+      if (section === "notes") {
+        if (videoId) this.toggleHeaderFor(videoId);
+      } else {
+        this.toggleSectionFold(view, content, line);
+      }
       return;
     }
     this.lastJump.set(file.path, section);
@@ -1873,10 +1881,12 @@ export default class YtFreePlugin extends Plugin {
   /**
    * Is the reader already in this section?
    *
-   * The cursor is the honest answer where there is one — in source mode it is
-   * where the reader is working. Reading mode has no cursor, so the fallback is
-   * the last button they pressed: pressing the same one twice in a row means
-   * the first press already put them there.
+   * Two answers, either of which counts. The cursor is the honest one where
+   * there is one — in source mode it is where the reader is working. But a jump
+   * to anything but Notes deliberately leaves the cursor alone, so in source
+   * mode the cursor usually still sits wherever the last typing was; the last
+   * button pressed is what makes a second tap on the same button mean "I'm
+   * already here". Reading mode has only the second answer.
    */
   private inSection(
     path: string,
@@ -1885,15 +1895,39 @@ export default class YtFreePlugin extends Plugin {
     section: SectionName,
     line: number,
   ): boolean {
+    if (this.lastJump.get(path) === section) return true;
     if (view.getMode() === "source") {
       try {
         const cursor = view.editor.getCursor().line;
         return cursor >= line && cursor <= sectionEnd(content, line);
       } catch {
-        /* fall through to the last-button answer */
+        /* the last-button answer above was the only one available */
       }
     }
-    return this.lastJump.get(path) === section;
+    return false;
+  }
+
+  /**
+   * Fold a note's section shut, or open it again — the second tap on
+   * Description or Transcript.
+   *
+   * Written through `setFolds` rather than an editor command so it works the
+   * same in reading view, where there is no cursor to put on the heading first.
+   */
+  private toggleSectionFold(view: MarkdownView, content: string, line: number): void {
+    const info = this.foldsOf(view);
+    const folds = info?.folds ?? [];
+    const lines = content.split("\n").length;
+    const folded = folds.some((fold) => fold.from === line);
+    if (folded) {
+      this.setFolds(view, { folds: folds.filter((fold) => fold.from !== line), lines });
+      return;
+    }
+    const to = sectionEnd(content, line);
+    // An empty section has nothing to hide, and a fold record pointing at
+    // nothing is what Obsidian throws away on reload anyway.
+    if (to <= line) return;
+    this.setFolds(view, { folds: [...folds, { from: line, to }].sort((a, b) => a.from - b.from), lines });
   }
 
   /**
@@ -2757,9 +2791,10 @@ export default class YtFreePlugin extends Plugin {
    * reader is looking at.
    *
    * Both view modes are handled because a note is as often read as edited.
-   * The editor gets a cursor and a scroll; reading view gets `applyScroll`,
-   * which takes the same line number and is guarded because it is not in every
-   * build's public typings.
+   * Neither one gets a cursor: a cursor inside a `**[0:15](…)**` timestamp is
+   * what makes Live Preview drop out of rendering and show the raw markdown of
+   * the paragraph you just asked to read. The paragraph is marked the way
+   * Obsidian marks the target of any link instead — the yellow flash.
    */
   private jumpToTranscript(seconds: number): void {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -2771,24 +2806,62 @@ export default class YtFreePlugin extends Plugin {
       return;
     }
 
-    const preview = (
-      view as unknown as { previewMode?: { applyScroll?: (line: number) => void } }
-    ).previewMode;
     if (view.getMode() === "preview") {
       try {
-        preview?.applyScroll?.(line);
+        foldableMode(view).applyScroll?.(line);
       } catch (err) {
         console.error("YT Free: could not scroll reading view to the transcript.", err);
       }
+      this.flashLine(view, line);
       return;
     }
 
-    const editor = view.editor;
-    editor.setCursor({ line, ch: 0 });
     // `center` false would leave the line at the very bottom of the viewport,
     // with the words the peak is about scrolled off it.
-    editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } }, true);
-    editor.focus();
+    view.editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } }, true);
+    this.flashLine(view, line);
+  }
+
+  /**
+   * Paint a note's line yellow for a moment, the way Obsidian paints the target
+   * of a heading or block link.
+   *
+   * `is-flashing` is Obsidian's own class and carries its own fade, so this
+   * matches every other "you were sent here" highlight in the app rather than
+   * inventing a second look for it. Run a frame late: the scroll that precedes
+   * it is what puts the line in the DOM at all, and an off-screen line in the
+   * editor has no element to paint.
+   */
+  private flashLine(view: MarkdownView, line: number): void {
+    window.setTimeout(() => {
+      const el = this.lineElement(view, line);
+      if (!el) return;
+      el.addClass("is-flashing");
+      window.setTimeout(() => el.removeClass("is-flashing"), 750);
+    }, 50);
+  }
+
+  /** The rendered element for a note's line, in either mode, or null. */
+  private lineElement(view: MarkdownView, line: number): HTMLElement | null {
+    if (view.getMode() === "preview") {
+      const sections = (
+        view as unknown as {
+          previewMode?: { renderer?: { sections?: Array<{ lineStart: number; lineEnd: number; el?: HTMLElement }> } };
+        }
+      ).previewMode?.renderer?.sections;
+      const hit = sections?.find((s) => line >= s.lineStart && line <= s.lineEnd);
+      return hit?.el ?? null;
+    }
+    try {
+      const cm = (view.editor as unknown as { cm?: { domAtPos?: (pos: number) => { node: Node } } }).cm;
+      const offset = view.editor.posToOffset({ line, ch: 0 });
+      const node = cm?.domAtPos?.(offset)?.node;
+      if (!node) return null;
+      const start = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement);
+      return (start?.closest(".cm-line") as HTMLElement | null) ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -4622,11 +4695,11 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Section length")
       .setDesc(
-        "How much transcript sits under each seek link. Shorter means more precise links and a longer note. Timestamps land on real caption starts, so a section is never exactly this long.",
+        "How much transcript sits under each seek link. Shorter means more precise links and a longer note. Any whole number of seconds — timestamps land on that grid: 20 gives 0:00, 0:20, 0:40.",
       )
       .addSlider((slider) =>
         slider
-          .setLimits(15, 180, 15)
+          .setLimits(5, 180, 1)
           .setValue(this.plugin.settings.transcriptIntervalSeconds)
           .setDynamicTooltip()
           .onChange(async (value) => {

@@ -2414,8 +2414,21 @@ body.ytfree-immersive-open {
   padding-bottom: 0.4em;
 }
 
+/*
+ * A row is as tall as its own words.
+ *
+ * These are `<button>`s, and Obsidian's base rule gives every button
+ * `height: var(--input-height)` — one line's worth, fixed. A paragraph of a few
+ * words fitted it by luck; raise the section length and the text runs straight
+ * out of the box and over the row below. `height: auto` is the whole fix, and
+ * the alignment keeps the timestamp beside the first line of a wrapped
+ * paragraph rather than centred against the middle of it.
+ */
 .ytfree-preview-cue {
   display: flex;
+  align-items: flex-start;
+  height: auto;
+  min-height: 0;
   gap: 0.6em;
   width: 100%;
   padding: 0.25em 0.2em;
@@ -2439,7 +2452,11 @@ body.ytfree-immersive-open {
   font-variant-numeric: tabular-nums;
 }
 
+/* `min-width: 0` so a long paragraph wraps inside the row instead of forcing it
+   wider than the scroller. */
 .ytfree-preview-cue-text {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-muted);
   white-space: normal;
 }

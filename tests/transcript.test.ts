@@ -151,7 +151,7 @@ test("groupCues collects cues into sections of about the requested length", () =
   assert.equal(paragraphs[0].text, "line0 line1 line2 line3 line4 line5");
 });
 
-test("groupCues measures from the section start, so one long gap cannot double a section", () => {
+test("groupCues starts a new section after a long gap rather than stretching one", () => {
   // A 5-minute silence must start a new section, not stretch the previous one.
   const cues: Cue[] = [
     { seconds: 0, text: "a" },
@@ -162,13 +162,25 @@ test("groupCues measures from the section start, so one long gap cannot double a
   assert.deepEqual(paragraphs.map((p) => p.seconds), [0, 300]);
 });
 
-test("groupCues timestamps land on real cue starts, not on a round grid", () => {
+test("groupCues timestamps land on the grid, not on the first cue's start", () => {
   const cues: Cue[] = [
     { seconds: 0, text: "a" },
     { seconds: 73, text: "b" },
   ];
-  // 73, not 60: a link must land where someone is talking.
-  assert.deepEqual(groupCues(cues, 60).map((p) => p.seconds), [0, 73]);
+  // 60, not 73: "60 seconds" means 0:00, 1:00, 2:00.
+  assert.deepEqual(groupCues(cues, 60).map((p) => p.seconds), [0, 60]);
+});
+
+test("groupCues does not drift: 15 seconds gives 0, 15, 30, 45", () => {
+  // Captions never start on the boundary; measuring from each section's own
+  // first cue used to compound that into 0, 16, 32, 47.
+  const cues: Cue[] = [
+    { seconds: 1, text: "a" },
+    { seconds: 16, text: "b" },
+    { seconds: 31, text: "c" },
+    { seconds: 46, text: "d" },
+  ];
+  assert.deepEqual(groupCues(cues, 15).map((p) => p.seconds), [0, 15, 30, 45]);
 });
 
 test("groupCues handles an empty transcript", () => {

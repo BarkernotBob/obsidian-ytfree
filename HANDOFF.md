@@ -1,6 +1,26 @@
 # HANDOFF
 
-## Status — 2026-07-31: six corrections after using 028 and 029 (030)
+## Status — 2026-07-31: four transcript-navigation fixes
+
+**425 unit tests pass, `tsc` clean, build clean, installed to the vault.** Not
+yet used on a screen. Next: reload Obsidian, set Section length to 20, re-fetch
+a transcript, and check the four below.
+
+- **Section length is any whole number, 5–180.** The slider stepped in 15s, so
+  20 seconds was unreachable.
+- **Sections sit on a grid.** `groupCues` buckets by `floor(seconds/interval)`
+  and timestamps the bucket, not the first cue in it — 15s now gives 0:15,
+  0:30, 0:45 instead of the old compounding 0:16, 0:32, 0:47.
+- **"This moment" no longer places a cursor.** It scrolls and paints the
+  paragraph with Obsidian's own `is-flashing` yellow. The cursor was landing
+  inside `**[0:15](…)**`, which made Live Preview show the raw markdown.
+- **Second tap on Description/Transcript folds that section** instead of the
+  video header. Notes still folds the header — folding the writing away
+  mid-sentence is never what was meant. `inSection` now checks the last button
+  pressed *before* the cursor, because a jump to a non-Notes section
+  deliberately leaves the cursor where the typing was.
+
+## Previous — 2026-07-31: six corrections after using 028 and 029 (030)
 
 **422 unit tests pass, `tsc` clean, build clean, installed to the vault.** Not
 yet used on a screen — the manual test in

@@ -312,21 +312,26 @@ export function parseJson3Timed(text: string): TimedCue[] {
 }
 
 /**
- * Collect cues into paragraphs of roughly `intervalSeconds` each.
+ * Collect cues into paragraphs of `intervalSeconds` each.
  *
- * The boundary is measured from the paragraph's own start, not from a fixed
- * grid, so a long cue can't push a paragraph to double length. Timestamps stay
- * on real cue starts — a link must land where someone is actually talking, not
- * on a round number in the middle of a sentence.
+ * The boundary is a fixed grid measured from 0, and the timestamp is the grid
+ * line rather than the first cue's start. Measuring from each paragraph's own
+ * first cue instead made the drift compound — at 15 seconds a note read 0,
+ * 16, 32, 47, because captions never start exactly on the boundary. A reader
+ * picking "15 seconds" is asking for 0:15, 0:30, 0:45, and a seek a second
+ * early lands in the same breath anyway.
  */
 export function groupCues(cues: Cue[], intervalSeconds: number): Paragraph[] {
   const interval = Math.max(1, Math.floor(intervalSeconds));
   const groups: Array<{ seconds: number; parts: string[] }> = [];
+  let bucket: number | null = null;
 
   for (const cue of cues) {
     const current = groups[groups.length - 1];
-    if (!current || cue.seconds - current.seconds >= interval) {
-      groups.push({ seconds: cue.seconds, parts: [cue.text] });
+    const at = Math.floor(Math.max(0, cue.seconds) / interval);
+    if (!current || at !== bucket) {
+      groups.push({ seconds: at * interval, parts: [cue.text] });
+      bucket = at;
     } else {
       current.parts.push(cue.text);
     }
