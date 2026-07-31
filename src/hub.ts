@@ -1736,12 +1736,13 @@ export class HubView extends ItemView {
       return;
     }
     if (key === "save") {
-      // Saved, and the card stays where it is. Saving makes the video Kept, so
-      // it no longer belongs in the Inbox — but the finger that pressed Save is
-      // still on this list, and pulling the next card up under it is the reflow
-      // the whole layout is built to avoid. It goes at the next redraw. Watch
-      // is the opposite case: it has just taken you to the note.
+      // Saving makes the video Kept, so it no longer belongs in the Inbox and
+      // leaves it at once — same as Remove and Watch. A card that answers a
+      // filter it no longer matches is a lie about the list; the list is what
+      // it says it is, immediately. On the Kept list the item still matches, so
+      // `dropIfFiltered` leaves it alone.
       await this.store.saveItem(item);
+      this.dropIfFiltered(item.videoId);
       this.renderStatus();
       return;
     }

@@ -63,11 +63,10 @@ the list never unmounts, so there is no scroll position to restore.
   be a 160px hole and a fetch per row, and Restore is its only action. The
   scope's "in Hidden, Remove becomes Restore" is therefore not implemented;
   the existing restore button does that job.
-- **Save does not drop the card out of the Inbox.** Saving makes a video Kept,
-  so it no longer belongs in that list — but the finger that pressed Save is
-  still on the list, and pulling the next card up under it is the reflow the
-  layout exists to prevent. It goes at the next redraw. Watch still drops it,
-  because Watch has just taken you to the note.
+- **Save drops the card out of the Inbox at once**, the same as Remove and
+  Watch: saving makes a video Kept, so it no longer belongs in that list, and a
+  card left behind misstates what the list holds. On Kept the item still
+  matches the filter, so it stays put.
 - **Preview shows no player.** Stage three. It shows the full title, channel,
   length, views, age and the whole description, with three of the four buttons
   at the foot (Preview is what you are already looking at).
