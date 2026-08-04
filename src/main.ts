@@ -3181,11 +3181,20 @@ export default class YtFreePlugin extends Plugin {
         // Phones only. A desktop has a mouse on the native scrubber and no host
         // gesture to take the movement away in the first place.
         dragSeek: mobile,
-        // Phones only, and a phone rather than any mobile: a tablet's Preview
-        // modal is 640px wide, so its picture is 360pt tall and the popover has
-        // room above the bar. A phone's is 202pt and the popover does not — see
-        // `src/panel.ts`.
-        panelSheet: Platform.isPhone,
+        // A phone, and only inside the Preview sheet. Two conditions, two
+        // separate reasons:
+        //
+        // *A phone*, not any mobile — a tablet's Preview modal is 640px wide,
+        // so its picture is 360pt tall and the popover has room above the bar.
+        // A phone's is 202pt and it does not; see `src/panel.ts`.
+        //
+        // *In the modal*, because that is where absolute positioning is clipped
+        // by a scroller that is not the one the panel can scroll. A docked
+        // player in a note has the room and does not need it — and it is also
+        // the place a fixed bottom sheet would be the wrong shape, since a note
+        // lives under Obsidian's own mobile toolbar rather than over it the way
+        // a modal does.
+        panelSheet: preview && Platform.isPhone,
         // The entry this player belongs to, not "the note player for this video
         // ID". A preview is deliberately not in the `players` map (024), so the
         // lookup answered `undefined` and Collapse did nothing at all in the

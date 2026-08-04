@@ -2671,7 +2671,14 @@ body.ytfree-immersive-open {
 .is-phone .ytfree-preview-actions {
   position: sticky;
   bottom: 0;
-  z-index: 3;
+  /*
+   * Below the picture's 2, not above it. Both ends of the sheet are sticky and
+   * both make their own stacking context, so the number decides which wins
+   * where they meet — and the picture has to win, because the pop-out is a
+   * fixed sheet *inside* the picture's stacking context. At 3 this row would
+   * have been painted over the top of the menu it sits behind.
+   */
+  z-index: 1;
   /* Opaque, and its own padding, or the description scrolls through the row. */
   padding-bottom: 0.4em;
   background: var(--background-primary);
