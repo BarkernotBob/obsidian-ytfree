@@ -1,6 +1,33 @@
 # HANDOFF
 
-## Status — 2026-07-31: four transcript-navigation fixes
+## Status — 2026-08-03: the transcript follows in the note (035)
+
+**438 unit tests pass, `tsc` clean, build clean.** Not installed to the vault
+and not used on a screen — other agents were building in parallel, so the
+install was left to whoever merges. Next: the manual test in
+[035](issues/035-follow-unfold-cursor-progress.md), all four groups.
+
+- **The note's transcript follows the video.** 030's follow existed only in the
+  Preview sheet; this is the same behaviour where a transcript is actually read.
+  It has to be asked for — This moment, the Transcript button, or a tap on a
+  paragraph — because a note is one column and following it unasked would drag
+  the writer off their own notes. Stops at the input (`wheel`, `touchmove`,
+  `pointerdown`, `keydown`) rather than at `scroll`, and ignores input inside
+  `.ytfree-wrapper` so pausing the video does not end it. New **Follow the
+  video** setting, on by default.
+- **"This moment" unfolds before it scrolls.** `revealLine` drops only the fold
+  hiding the target line, then scrolls a tick later so the scroll is measured
+  against the height the note ends up at. Previously it scrolled to a paragraph
+  inside a folded section and looked like a dead link.
+- **The Notes button returns the cursor to the last thing typed** under that
+  note's `# Notes`, clamped to the line it lands on, falling back to the line
+  under the heading. Built on the existing `lastJump`/`inSection` path, plus one
+  `lastNotesCursor` map fed from `handleInput`.
+- **The progress line runs the full width of the picture.** 021's 16px inset is
+  now 0 at both ends; `--ytfree-progress-inset` still overrides. Verified at
+  375/390/430/700 and in immersive landscape with `tools/controls-harness.mjs`.
+
+## Previous — 2026-07-31: four transcript-navigation fixes
 
 **425 unit tests pass, `tsc` clean, build clean, installed to the vault.** Not
 yet used on a screen. Next: reload Obsidian, set Section length to 20, re-fetch
