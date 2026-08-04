@@ -2475,6 +2475,20 @@ body.ytfree-immersive-open {
   background: var(--background-modifier-active-hover);
 }
 
+/*
+ * The same thing in the note, while the transcript is following the video.
+ *
+ * The identical rule and the identical reason: background only. A border, a
+ * padding or a weight on the paragraph being spoken would move the words around
+ * it every twenty seconds, under the eye of someone reading them. It lands on a
+ * `.cm-line` in Live Preview and on a rendered block in reading view, so it
+ * carries no assumptions about either.
+ */
+.ytfree-following {
+  background: var(--background-modifier-active-hover);
+  border-radius: var(--radius-s);
+}
+
 .ytfree-preview-cue.is-now .ytfree-preview-cue-text {
   color: var(--text-normal);
 }

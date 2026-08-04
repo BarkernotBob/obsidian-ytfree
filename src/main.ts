@@ -70,6 +70,9 @@ import {
   parseJson3,
   parseJson3Timed,
   parseTranscriptCues,
+  isRenderedCueLine,
+  transcriptIndex,
+  transcriptLineAt,
   transcriptLineFor,
   pickCaptionTrack,
   renderHeatmap,
@@ -81,12 +84,15 @@ import {
   upsertSection,
 } from "./transcript";
 import { fetchCaptionTrack, fetchHeatmap } from "./innertube";
-import type { SectionName } from "./sections";
+import type { NotePosition, SectionName } from "./sections";
 import {
   SECTION_HEADINGS,
+  enclosingHeading,
   foldableRanges,
+  foldsRevealing,
   headingLine,
   normaliseHeadings,
+  notesCursorTarget,
   sectionEnd,
 } from "./sections";
 import { DEFAULT_TIDY_DAYS, notesToTidy } from "./tidy";
@@ -133,6 +139,12 @@ interface YtFreeSettings {
   linkifyTimestamps: boolean;
   transcriptLanguage: string;
   transcriptIntervalSeconds: number;
+  /**
+   * Whether the note's transcript keeps up with the video once you have gone to
+   * it — see `startFollowing`. Off means the jump is a jump and nothing moves
+   * afterwards, which is what this was before 035.
+   */
+  followTranscript: boolean;
   autoFetchTranscript: boolean;
   heatmapPeaks: number;
   downloadFolder: string;
@@ -238,6 +250,28 @@ function seekAnchorFor(target: EventTarget | null): HTMLAnchorElement | null {
   return anchor.getAttribute("href")?.startsWith("ytfree:") ? anchor : null;
 }
 
+/**
+ * Was this seek link clicked on a rendered transcript paragraph?
+ *
+ * Reading view's answer to `isRenderedCueLine`, which cannot be used here
+ * because there is no line of markdown to read — only the HTML it became.
+ * `**[0:20](…)** the words` renders as a bold link opening a paragraph, which
+ * is what this matches: the anchor's parent is a `<strong>`, and that `<strong>`
+ * is the first thing in a `<p>`. A most-replayed row is a list item and fails
+ * on the paragraph; a timestamp in the default stamp format is not bold and
+ * fails on the `<strong>`.
+ *
+ * Wrong only for someone who has set the stamp format to open a line with a
+ * bold link of their own, and then the cost is that the note follows the video
+ * until they scroll — which is one gesture away from undone.
+ */
+function isRenderedCueAnchor(anchor: HTMLAnchorElement): boolean {
+  const strong = anchor.parentElement;
+  if (!strong || strong.tagName !== "STRONG") return false;
+  const paragraph = strong.parentElement;
+  return !!paragraph && paragraph.tagName === "P" && paragraph.firstElementChild === strong;
+}
+
 function withinTapSlop(origin: { x: number; y: number }, touch: Touch): boolean {
   return (
     Math.abs(touch.clientX - origin.x) <= TAP_SLOP_PX &&
@@ -264,6 +298,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   // the paragraph is how close the jump can get. Notes written before this
   // keep whatever they were built with.
   transcriptIntervalSeconds: 20,
+  followTranscript: true,
   autoFetchTranscript: true,
   heatmapPeaks: 8,
   // Blank means "wherever `defaultDownloadFolder()` says", which is
@@ -392,6 +427,51 @@ function foldableMode(view: MarkdownView): FoldableMode {
   return view.currentMode as unknown as FoldableMode;
 }
 
+/**
+ * A seek link that has been clicked: what to do, and where it was clicked from.
+ *
+ * `transcript` is the last part: a click on a transcript paragraph is the
+ * Preview sheet's own "start following again", and a click on a timestamp you
+ * typed is a replay of your own note that must leave the view where it is.
+ */
+interface SeekTarget {
+  videoId: string;
+  seconds: number;
+  mode: SeekMode;
+  /** Clicked on a rendered transcript paragraph, rather than anywhere else. */
+  transcript: boolean;
+}
+
+/**
+ * How often the note's transcript re-checks which paragraph is being spoken.
+ *
+ * The same 400ms the Preview sheet polls at, and for the same reason: the
+ * player's position is read, not subscribed to, and a paragraph is twenty
+ * seconds long — anything faster is work nobody can see.
+ */
+const FOLLOW_TICK_MS = 400;
+
+/**
+ * A note whose transcript is keeping up with its video.
+ *
+ * At most one exists. Two notes following at once would mean two players
+ * playing at once, and the second one to be asked wins the screen anyway.
+ */
+interface TranscriptFollow {
+  path: string;
+  view: MarkdownView;
+  entry: PlayerEntry;
+  /** Paragraph starts, rebuilt when the note's length changes under us. */
+  index: ReturnType<typeof transcriptIndex>;
+  /** What `index` was built from — the cheap "has the note changed?" test. */
+  length: number;
+  /** The line last scrolled to, so an unchanged paragraph moves nothing. */
+  line: number;
+  timer: number;
+  /** Takes the "a hand moved this" listeners back off the note. */
+  release: () => void;
+}
+
 export default class YtFreePlugin extends Plugin {
   settings: YtFreeSettings = DEFAULT_SETTINGS;
   private cache = new StreamCache();
@@ -423,6 +503,16 @@ export default class YtFreePlugin extends Plugin {
    * can mean "I'm already here" — see `jumpToSection`.
    */
   private lastJump = new Map<string, SectionName>();
+  /**
+   * Where the writing was, per note — what the Notes button goes back to.
+   *
+   * Only ever written when the cursor is under that note's `# Notes`, so a
+   * click in the transcript or a stamp typed into the description cannot
+   * overwrite the place you were working. See `rememberNotesCursor`.
+   */
+  private lastNotesCursor = new Map<string, NotePosition>();
+  /** The note whose transcript is keeping up with its video, if any. */
+  private follow: TranscriptFollow | null = null;
   /** Scroll listeners pinning a docked view at the top — see holdDockedLayout. */
   private dockGuards = new Map<MarkdownView, () => void>();
   /**
@@ -440,7 +530,7 @@ export default class YtFreePlugin extends Plugin {
   private autoFetchChain: Promise<void> = Promise.resolve();
   private lastActiveVideoId: string | null = null;
   /** Seek link under the mouse at mousedown, consumed by the matching click. */
-  private armedSeekLink: { videoId: string; seconds: number; mode: SeekMode } | null = null;
+  private armedSeekLink: SeekTarget | null = null;
   /**
    * Where a touch started, so a scroll can be told from a tap.
    *
@@ -551,7 +641,7 @@ export default class YtFreePlugin extends Plugin {
             }
 
             evt.preventDefault();
-            this.followSeekLink(armed.videoId, armed.seconds, armed.mode);
+            this.followSeekLink(armed.videoId, armed.seconds, armed.mode, armed.transcript);
             return true;
           },
         }),
@@ -607,7 +697,12 @@ export default class YtFreePlugin extends Plugin {
 
         const href = anchor.getAttribute("href") ?? "";
         const [, videoId, seconds] = href.split(":");
-        this.followSeekLink(videoId, Number(seconds) || 0, seekModeFromHref(href));
+        this.followSeekLink(
+          videoId,
+          Number(seconds) || 0,
+          seekModeFromHref(href),
+          isRenderedCueAnchor(anchor),
+        );
       },
       { capture: true },
     );
@@ -647,7 +742,12 @@ export default class YtFreePlugin extends Plugin {
 
         const href = armed.getAttribute("href") ?? "";
         const [, videoId, seconds] = href.split(":");
-        this.followSeekLink(videoId, Number(seconds) || 0, seekModeFromHref(href));
+        this.followSeekLink(
+          videoId,
+          Number(seconds) || 0,
+          seekModeFromHref(href),
+          isRenderedCueAnchor(armed),
+        );
       },
       { capture: true },
     );
@@ -1458,6 +1558,9 @@ export default class YtFreePlugin extends Plugin {
 
   onunload(): void {
     this.clearResumeTimer();
+    // Before the players go: it holds an interval and a set of listeners on a
+    // note that outlives the plugin being disabled.
+    this.stopFollowing();
     for (const handle of this.downloads.values()) handle.cancel();
     this.downloads.clear();
     for (const job of this.silenceJobs.values()) job.cancel();
@@ -1832,6 +1935,12 @@ export default class YtFreePlugin extends Plugin {
       return;
     }
 
+    // Before anything moves: if the cursor is sitting in the Notes section
+    // right now, that is where the writing was, and it is what the Notes button
+    // has to come back to later. Every other button leaves the cursor alone, so
+    // this is the last moment the answer is still true.
+    this.rememberNotesCursor(view, content);
+
     // The button's second job. Tapping Transcript when you are already reading
     // the transcript has nowhere to take you, so it folds that section away
     // instead — a five-thousand-line transcript is exactly what you want gone
@@ -1845,11 +1954,18 @@ export default class YtFreePlugin extends Plugin {
       if (section === "notes") {
         if (videoId) this.toggleHeaderFor(videoId);
       } else {
+        // Folding the transcript away is the end of reading it, so it is also
+        // the end of the follow.
+        this.stopFollowing();
         this.toggleSectionFold(view, content, line);
       }
       return;
     }
     this.lastJump.set(file.path, section);
+
+    // Leaving the transcript for another section ends the follow; arriving at
+    // the transcript starts it, once the unfold below has been laid out.
+    this.stopFollowing();
 
     const folds = this.foldsOf(view);
     if (folds) {
@@ -1867,15 +1983,53 @@ export default class YtFreePlugin extends Plugin {
       // Tapping Notes is how you start writing, so put the cursor where the
       // typing goes. Only there: a cursor parked in the transcript would send
       // the next thing you type into someone else's words.
+      //
+      // *Where* the typing goes is the last place it went, not the top of the
+      // section — a note with a page of writing in it would otherwise send you
+      // to the first line every time and leave you scrolling to the end of your
+      // own paragraph. The line under the heading is the fallback, for a note
+      // never written in and for a remembered spot that has since been deleted.
       if (section === "notes" && view.getMode() === "source") {
         try {
-          view.editor.setCursor({ line: line + 1, ch: 0 });
+          const target = notesCursorTarget(content, line, this.lastNotesCursor.get(file.path) ?? null);
+          view.editor.setCursor(target);
           view.editor.focus();
+          // Written back, so a second visit goes to the same place: `setCursor`
+          // is not typing and nothing else would record it.
+          this.lastNotesCursor.set(file.path, target);
         } catch {
           /* reading mode, or no editor: the scroll was the point anyway */
         }
       }
+      if (section === "transcript") this.startFollowing(view, line);
     }, 0);
+  }
+
+  /**
+   * Record the cursor, if it is under this note's `# Notes`.
+   *
+   * The guard is the whole point: this is called from places where the cursor
+   * could be anywhere — a click in the transcript leaves it in the transcript —
+   * and remembering one of those would send the Notes button somewhere the
+   * reader has never written a word.
+   *
+   * `enclosingHeading` scans upwards and gives up after a few hundred lines, so
+   * a cursor deep inside a transcript costs a bounded scan rather than a read
+   * of the whole document.
+   */
+  private rememberNotesCursor(view: MarkdownView, content: string): void {
+    const path = view.file?.path;
+    if (!path || view.getMode() !== "source") return;
+    try {
+      const cursor = view.editor.getCursor();
+      const lines = content.split("\n");
+      const heading = enclosingHeading((line) => lines[line], cursor.line);
+      if (heading && SECTION_HEADINGS.notes.includes(heading)) {
+        this.lastNotesCursor.set(path, { line: cursor.line, ch: cursor.ch });
+      }
+    } catch {
+      /* no editor: there is no cursor to remember */
+    }
   }
 
   /**
@@ -2670,6 +2824,9 @@ export default class YtFreePlugin extends Plugin {
     // keymap command rather than an input, so it never reaches here — which is
     // the point: breaking a line is not typing, and must not stop the video.
     this.handleTyping();
+    // The other thing every keystroke says: this is where the writing is. It is
+    // what the Notes button comes back to — see `notesCursorTarget`.
+    this.rememberTypedSpot(view, from, text);
 
     try {
       if (!this.settings.autoStampNewLine) return false;
@@ -2703,6 +2860,35 @@ export default class YtFreePlugin extends Plugin {
     } catch (err) {
       console.error("YT Free: auto-stamp failed; typing the character normally.", err);
       return false;
+    }
+  }
+
+  /**
+   * Remember where a typed character landed, when it landed under `# Notes`.
+   *
+   * The honest answer to "where was I writing?", recorded at the one event that
+   * can only be a person writing. Runs on every keystroke, so it does no work
+   * beyond a bounded upward scan for the enclosing heading, and it never throws
+   * into the input path: a lost cursor memory is a button that goes to the top
+   * of the section, and an exception here would eat the character.
+   */
+  private rememberTypedSpot(view: EditorView, from: number, text: string): void {
+    try {
+      const path = this.app.workspace.getActiveViewOfType(MarkdownView)?.file?.path;
+      if (!path) return;
+      const doc = view.state.doc;
+      const line = doc.lineAt(from);
+      const heading = enclosingHeading(
+        (n) => (n >= 0 && n < doc.lines ? doc.line(n + 1).text : undefined),
+        line.number - 1,
+      );
+      if (!heading || !SECTION_HEADINGS.notes.includes(heading)) return;
+      this.lastNotesCursor.set(path, {
+        line: line.number - 1,
+        ch: from - line.from + text.length,
+      });
+    } catch {
+      /* the memory is a convenience; the keystroke is not */
     }
   }
 
@@ -2759,7 +2945,12 @@ export default class YtFreePlugin extends Plugin {
    * Seek the named player, claiming the user gesture first. Shared by the
    * Reading-view anchor handler and the Live Preview editor handler.
    */
-  private followSeekLink(videoId: string, seconds: number, mode: SeekMode = "seek"): void {
+  private followSeekLink(
+    videoId: string,
+    seconds: number,
+    mode: SeekMode = "seek",
+    fromTranscript = false,
+  ): void {
     // A transcript jump moves the note, not the video, so it works whether or
     // not anything is playing — which is the point of having it beside the
     // timestamp rather than instead of it.
@@ -2774,6 +2965,12 @@ export default class YtFreePlugin extends Plugin {
       return;
     }
     this.lastActiveVideoId = videoId;
+
+    // Preview's resume, in the note: clicking a paragraph is asking to be where
+    // the video is, and the video is about to be here. The tap's own
+    // `pointerdown` has already stopped whatever follow was running, so this is
+    // a restart rather than a second one.
+    if (fromTranscript) this.resumeFollowing(seconds);
 
     // Claim the tap now, synchronously. On mobile the player may still have
     // to resolve a URL, and by the time that returns iOS no longer counts
@@ -2800,26 +2997,222 @@ export default class YtFreePlugin extends Plugin {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view) return;
 
-    const line = transcriptLineFor(view.data, seconds);
+    const content = view.data;
+    const line = transcriptLineFor(content, seconds);
     if (line === null) {
       new Notice("YT Free: this note has no transcript to jump to yet.");
       return;
     }
 
+    // The transcript is folded by default and folded again by every second tap
+    // on its button, so most of the time this jump is into a section that is
+    // not on the screen at all. Unfolded first, and then scrolled a tick later:
+    // the scroll has to be measured against the height the note ends up at, not
+    // the one it had while the section was shut.
+    const unfolded = this.revealLine(view, line);
+    const land = (): void => {
+      this.scrollToLine(view, line);
+      this.flashLine(view, line);
+      // Where the follow starts on the note side: pressing "This moment" is the
+      // same sentence as clicking a paragraph in Preview — "put me where the
+      // video is" — and it means it for the rest of the video, not for one
+      // paragraph. See `startFollowing`.
+      this.startFollowing(view, line);
+    };
+    if (unfolded) window.setTimeout(land, 0);
+    else land();
+  }
+
+  /**
+   * Drop whichever fold is hiding `line`. True when one had to go.
+   *
+   * The other sections stay exactly as the reader left them — this is the
+   * narrowest possible unfold, and it is deliberate: a jump into the transcript
+   * is not a request to open the description as well.
+   */
+  private revealLine(view: MarkdownView, line: number): boolean {
+    const info = this.foldsOf(view);
+    if (!info) return false;
+    const kept = foldsRevealing(info.folds, line);
+    if (kept.length === info.folds.length) return false;
+    this.setFolds(view, { ...info, folds: kept });
+    return true;
+  }
+
+  /** Put a note's line in the middle of the screen, in whichever mode it is in. */
+  private scrollToLine(view: MarkdownView, line: number): void {
     if (view.getMode() === "preview") {
       try {
         foldableMode(view).applyScroll?.(line);
       } catch (err) {
         console.error("YT Free: could not scroll reading view to the transcript.", err);
       }
-      this.flashLine(view, line);
+      return;
+    }
+    try {
+      // `center` false would leave the line at the very bottom of the viewport,
+      // with the words the jump is about scrolled off it.
+      view.editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } }, true);
+    } catch {
+      /* no editor: reading mode handled itself above */
+    }
+  }
+
+  // ------------------------------------------------------ following the video
+
+  /**
+   * Keep the note on the paragraph being spoken, until a hand says otherwise.
+   *
+   * The Preview sheet has done this since 030; this is the same behaviour where
+   * the transcript actually gets read, which is in the note. Three differences,
+   * all forced by the note being a document rather than a box:
+   *
+   * - **It has to be asked for.** Preview can follow from the moment its
+   *   transcript section is opened, because the transcript is its own scroller
+   *   and following it moves nothing else. A note is one column: following it
+   *   from the moment a video plays would drag the writer off their own notes
+   *   and into the transcript. So it starts on the two gestures that mean "I am
+   *   reading the transcript now" — **This moment**, and the **Transcript**
+   *   button — and on a click on a transcript paragraph, which is Preview's own
+   *   resume.
+   * - **It stops at the input, not at the scroll event.** Our own scroll fires
+   *   `scroll` too. A wheel, a drag, a touch-move or a key is unambiguously a
+   *   person, and any of them means the reader has taken over.
+   * - **The paragraph list is built once.** `transcriptLineFor` scans the whole
+   *   note; twice a second on a note that is mostly transcript, that is real
+   *   work. The index is rebuilt only when the note's length changes.
+   */
+  private startFollowing(view: MarkdownView, line: number): void {
+    if (!this.settings.followTranscript) return;
+    const path = view.file?.path;
+    if (!path) return;
+    const entry = this.playerForPath(path) ?? this.anyPlayer();
+    if (!entry) return;
+
+    this.stopFollowing();
+
+    // The note itself, in whichever mode: `contentEl` is the parent of the
+    // CodeMirror scroller, the reading view, and the player inside them both.
+    const host = view.contentEl;
+    // Everything except the player. Preview's listeners sit on the transcript
+    // box alone, so pressing play there does not stop it following; here the
+    // only element wide enough to catch a scroll of the *note* is the whole
+    // view, and the player is inside it. Without this, pausing the video — or
+    // dragging the picture to seek, or pressing This moment — would silently
+    // end the follow that had just been asked for.
+    const released = (evt: Event): void => {
+      const target = evt.target;
+      if (target instanceof HTMLElement && target.closest(".ytfree-wrapper")) return;
+      this.stopFollowing();
+    };
+    const events = ["wheel", "touchmove", "pointerdown", "keydown"];
+    for (const event of events) {
+      host.addEventListener(event, released, { passive: true, capture: true });
+    }
+    const release = (): void => {
+      for (const event of events) {
+        host.removeEventListener(event, released, { capture: true });
+      }
+      this.markFollowedLine(view, null);
+    };
+
+    const content = view.data;
+    const follow: TranscriptFollow = {
+      path,
+      view,
+      entry,
+      index: transcriptIndex(content),
+      length: content.length,
+      line,
+      timer: window.setInterval(() => this.followTick(), FOLLOW_TICK_MS),
+      release,
+    };
+    this.follow = follow;
+    this.markFollowedLine(view, line);
+  }
+
+  /** One step of the follow: which paragraph now, and has it changed? */
+  private followTick(): void {
+    const follow = this.follow;
+    if (!follow) return;
+
+    // Every way this can end without anyone saying so: the note was closed or
+    // replaced in its pane, or the player it was following is gone.
+    // Identity, not the video ID alone: a note closed and reopened builds a new
+    // player for the same video, and the old one is nobody's.
+    if (
+      follow.view.file?.path !== follow.path ||
+      this.players.get(follow.entry.videoId) !== follow.entry
+    ) {
+      this.stopFollowing();
       return;
     }
 
-    // `center` false would leave the line at the very bottom of the viewport,
-    // with the words the peak is about scrolled off it.
-    view.editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } }, true);
-    this.flashLine(view, line);
+    const content = follow.view.data;
+    if (content.length !== follow.length) {
+      follow.index = transcriptIndex(content);
+      follow.length = content.length;
+    }
+
+    const line = transcriptLineAt(follow.index, follow.entry.player.currentTime);
+    if (line === null) return;
+    // Re-marked every tick rather than only on a change: CodeMirror rebuilds
+    // the lines it has scrolled past, and a class put on one of them does not
+    // survive that.
+    this.markFollowedLine(follow.view, line);
+    if (line === follow.line) return;
+    follow.line = line;
+    this.scrollToLine(follow.view, line);
+  }
+
+  /**
+   * Follow again from the paragraph just clicked, without scrolling to it.
+   *
+   * No scroll and no unfold: the paragraph is under the reader's own finger, so
+   * it is on screen by definition, and moving it would be moving the thing they
+   * are pointing at.
+   */
+  private resumeFollowing(seconds: number): void {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view) return;
+    const line = transcriptLineFor(view.data, seconds);
+    if (line === null) return;
+    this.startFollowing(view, line);
+  }
+
+  /** The settings screen's way in — see `stopFollowing`. */
+  stopFollowingTranscript(): void {
+    this.stopFollowing();
+  }
+
+  /** Stop following, wherever it was. Safe to call when nothing is. */
+  private stopFollowing(): void {
+    const follow = this.follow;
+    if (!follow) return;
+    this.follow = null;
+    window.clearInterval(follow.timer);
+    follow.release();
+  }
+
+  /**
+   * Tint the paragraph being spoken, and only that one.
+   *
+   * Background alone — no border, no padding, no weight. Everything else would
+   * move the words around it every twenty seconds, and a line of text that
+   * shifts under the eye while you are reading it is worse than no marker.
+   */
+  private markFollowedLine(view: MarkdownView, line: number | null): void {
+    try {
+      for (const el of Array.from(
+        view.contentEl.querySelectorAll<HTMLElement>(".ytfree-following"),
+      )) {
+        el.removeClass("ytfree-following");
+      }
+      if (line === null) return;
+      this.lineElement(view, line)?.addClass("ytfree-following");
+    } catch {
+      /* the marker is a courtesy; the scroll is the feature */
+    }
   }
 
   /**
@@ -2877,7 +3270,7 @@ export default class YtFreePlugin extends Plugin {
     at: { clientX: number; clientY: number },
     view: EditorView,
     guardSelection: boolean,
-  ): { videoId: string; seconds: number; mode: SeekMode } | null {
+  ): SeekTarget | null {
     if (!view.state.field(editorLivePreviewField, false)) return null;
     const pos = view.posAtCoords({ x: at.clientX, y: at.clientY });
     if (pos === null) return null;
@@ -2893,7 +3286,12 @@ export default class YtFreePlugin extends Plugin {
         if (range.from <= linkTo && range.to >= linkFrom) return null;
       }
     }
-    return { videoId: link.videoId, seconds: link.seconds, mode: link.mode };
+    return {
+      videoId: link.videoId,
+      seconds: link.seconds,
+      mode: link.mode,
+      transcript: isRenderedCueLine(line.text),
+    };
   }
 
   /** Timestamp clicks in Live Preview, armed by the matching mousedown. */
@@ -2917,7 +3315,7 @@ export default class YtFreePlugin extends Plugin {
 
     evt.preventDefault();
     evt.stopPropagation();
-    this.followSeekLink(armed.videoId, armed.seconds, armed.mode);
+    this.followSeekLink(armed.videoId, armed.seconds, armed.mode, armed.transcript);
     return true;
   }
 
@@ -4706,6 +5104,21 @@ class YtFreeSettingTab extends PluginSettingTab {
             this.plugin.settings.transcriptIntervalSeconds = value;
             await this.plugin.saveSettings();
           }),
+      );
+
+    new Setting(containerEl)
+      .setName("Follow the video")
+      .setDesc(
+        "Once you have gone to the transcript — with This moment, the Transcript button, or a tap on a paragraph — the note keeps up with the video, tinting the paragraph being spoken. Scrolling, typing or a tap anywhere else hands control back; going to the transcript again takes it up where the video is.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.followTranscript).onChange(async (value) => {
+          this.plugin.settings.followTranscript = value;
+          // Off means off now, not at the next note: something may be following
+          // this second.
+          if (!value) this.plugin.stopFollowingTranscript();
+          await this.plugin.saveSettings();
+        }),
       );
 
     new Setting(containerEl)
