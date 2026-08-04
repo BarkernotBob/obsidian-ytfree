@@ -308,6 +308,83 @@ already 220pt, and a second title line would push the note text below the fold.
 
 ---
 
+## 5. The Preview sheet — one scroller, and a pop-out that fits
+
+### A popover inside a modal has to become a sheet
+
+The quick panel is capped at the distance from the top of the screen down to the
+control bar. In a note that is the right number, because the panel's clipping
+ancestor really is the screen. In Preview it is not: the panel sits inside
+`.modal-content`, which scrolls, and a scrolling ancestor clips an absolutely
+positioned descendant. That box starts at the top of the video — 76pt down a
+390×844 screen — so the panel rendered at 30–280 lost its first two rows, and no
+`max-height` could have saved it. A box does not fit inside a shorter box.
+
+So on a phone, inside Preview, the panel stops being a popover:
+
+- `position: fixed` at the foot of the viewport, full width, `max-height: 62vh`
+  — the same height as the hub's disclosure panel (§1), scrolling internally,
+  44pt rows.
+- Fixed is the fix, not a workaround. A fixed element's containing block is the
+  viewport, so no scroller clips it. This only holds while nothing on the
+  ancestor chain has a `transform`, `filter`, `perspective` or `contain` —
+  any of those would pull the containing block back into the modal. Obsidian's
+  `.modal-container` and `.modal` set none today; if that changes, this breaks
+  silently, and `tools/preview-sheet-harness.mjs` is what catches it.
+- The docked player keeps its popover. A fixed bottom sheet is right inside
+  `.modal-container`, which sits above Obsidian's mobile toolbar; in a note it
+  would risk being covered by that toolbar, and the docked bar has room above it
+  anyway. Hence `panelSheet: preview && Platform.isPhone`.
+
+### A sheet over a modal needs a scrim
+
+A tap outside the panel has two possible meanings once there are two layers, and
+without a scrim it means both: the tap falls through to `.modal-bg` and closes
+Preview as well as the menu. The scrim closes the menu only.
+
+It closes on `click`, not `pointerdown`. A scrim that hides itself on
+`pointerdown` is gone by the time the browser picks a click target, so the click
+lands on whatever is underneath — which is exactly the bug the scrim exists to
+prevent. It is toggled with `visibility`/`opacity` and lives in the DOM from
+mount, so opening the menu inserts nothing and moves nothing.
+
+### Stacking: sticky siblings outrank a fixed descendant
+
+The pop-out is `position: fixed` but it lives inside the player, and the player
+is `position: sticky` with a `z-index` — which makes a stacking context. A fixed
+descendant is painted *inside* that context, so any sibling with a higher
+`z-index` paints over it, viewport-positioned or not. The phone's action row is
+also sticky and also makes a context; at `z-index: 3` it covered the pop-out. It
+sits at 1 now, under the player's 2.
+
+### The sheet is one scroller
+
+Two nested scrollers is what made the description unreadable: the title and
+facts sat in the outer one and never moved while eight lines crawled past a 22vh
+window. On a phone the description gives up its `max-height` and its `overflow`,
+so the sheet scrolls as one — the title scrolls away under the sticky picture
+(237pt of travel) and the description gets the screen.
+
+The 22vh cap existed to keep the four action buttons reachable. They are the
+sheet's sticky floor instead, which does that job without costing the
+description anything.
+
+Both overflow axes are stated explicitly wherever the sheet scrolls:
+`overflow-y: auto` with `overflow-x` left unstated computes x to `auto` too, and
+that is the whole of the "description scrolls sideways" bug. `overflow-wrap:
+anywhere` handles the rest — a bare playlist URL is one token to the line
+breaker.
+
+### Collapsing hides the picture without stopping it
+
+`display: none` on a playing `<video>` stops playback on iOS WebKit, and
+`visibility: hidden` does too. So a collapsed picture is a clipped one: the media
+box goes to `height: 0` with `overflow: hidden` while the video inside stays
+202pt tall, positioned absolutely, and keeps playing. Same technique as the
+docked player's collapse and the keep-alive host.
+
+---
+
 ## Manual test (for BarkernotBob)
 
 Nothing here has been run on a real iPhone — it is reasoned from Obsidian's own

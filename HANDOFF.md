@@ -1,6 +1,52 @@
 # HANDOFF
 
-## Status — 2026-07-31: four transcript-navigation fixes
+## Status — 2026-08-03: the Preview window on a phone (032)
+
+**432 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
+three other agents were building in parallel, so `./install.sh` was deliberately
+not run. Branch: `032-mobile-preview-window`.
+
+Next: merge, install, and run the manual test in
+[032](issues/032-mobile-preview-window.md) on the iPhone. Steps 13–15 are the
+ones that matter — the Picture-in-Picture path is built and reasoned but has
+never run on a device, and iOS implements none of the standard PiP API on a
+`<video>`.
+
+- **The phone's pop-out is a bottom sheet, not a popover.** The old cap was the
+  distance from the top of the screen to the control bar — a correct number
+  measured against the wrong box. In Preview the clipping ancestor is
+  `.modal-content`'s scroller, whose top edge is the top of the video, so the
+  panel was cut off at 30–280 inside a box running 76–768 and no `max-height`
+  could have helped. It is `position: fixed` now, which is the fix: the viewport
+  is its containing block, so no scroller clips it.
+- **A scrim comes with the sheet**, so a tap outside closes the menu without
+  also closing Preview. It closes on `click`, not `pointerdown` — a scrim that
+  hides itself on `pointerdown` is gone before the click target is picked, and
+  the tap falls through to `.modal-bg`.
+- **Both overflow axes are stated wherever the sheet scrolls.** `overflow-y:
+  auto` with `overflow-x` unstated computes x to `auto` as well; the pair cannot
+  disagree. Plus `overflow-wrap: anywhere`, so a bare playlist URL breaks instead
+  of being something to scroll to.
+- **Collapse works.** Two independent causes: the handler looked the player up by
+  video id and a preview player is deliberately not in `players` (024), and the
+  `.is-collapsed` rules only existed for `.ytfree-docked`. The picture goes to
+  zero height while the `<video>` stays 202pt and playing, clipped by
+  `.ytfree-media` — `display: none` stops playback on iOS WebKit.
+- **The sheet is one scroller on a phone.** The description drops its 22vh cap,
+  so the title scrolls away under the sticky picture; the four action buttons
+  become the sticky floor instead. The action row went to `z-index: 1` — at 3 it
+  painted over the fixed pop-out, since both it and the player are sticky and
+  both make stacking contexts.
+- **A preview in PiP survives its sheet closing**, into a 1pt clipped keep-alive
+  host on `document.body`; leaving PiP tears it down. Watch and Remove always
+  destroy — one player at a time, and the teardown writes the resume position.
+  The hand-off is a `close()` override, not `onClose`, so it runs while the
+  `<video>` is still in the page.
+- `src/panel.ts` and `src/preview.ts` hold the two decisions as pure functions
+  (9 new tests). `tools/preview-sheet-harness.mjs` measures the layout claims in
+  headless Chromium at 390×844 — it is not part of `npm test`.
+
+## Previous — 2026-07-31: four transcript-navigation fixes
 
 **425 unit tests pass, `tsc` clean, build clean, installed to the vault.** Not
 yet used on a screen. Next: reload Obsidian, set Section length to 20, re-fetch
