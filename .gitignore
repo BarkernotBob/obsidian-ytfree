@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 # Build output, at the repo root only. Unanchored, this also swallowed
 # spikes/*/main.js — which are hand-written sources, not build output.
 /main.js

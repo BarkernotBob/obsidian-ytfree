@@ -34,3 +34,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [028](028-transcript-in-preview-and-jumps.md) | The transcript in Preview, and a jump from a peak to it | Built 2026-07-31 — awaiting manual test |
 | [029](029-share-a-video.md) | Share a video's URL, and share it at the current timestamp | Built 2026-07-31 — awaiting manual test |
 | [030](030-preview-transcript-share-and-moment.md) | Preview's transcript at note size, autoscroll you can stop, a share icon that isn't Download, and "this moment" | Built 2026-07-31 — awaiting manual test |
+| [032](032-mobile-preview-window.md) | The Preview window on a phone: a pop-out that fits, no sideways scroll, a Collapse that works, one scroller, and PiP that survives closing | Built 2026-08-03 — awaiting manual test (PiP step needs the iPhone) |

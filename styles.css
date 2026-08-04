@@ -448,6 +448,81 @@
   pointer-events: auto;
 }
 
+/*
+ * The phone's shape: a sheet at the foot of the screen.
+ *
+ * `position: fixed`, and that is the fix rather than a preference. An
+ * absolutely positioned panel is clipped by the nearest scrolling ancestor, and
+ * inside the Preview modal that ancestor is the sheet's own scroller — whose
+ * top edge is the top of the video. Five rows and a footer is about 246px; a
+ * 92vw phone modal gives the video about 202px, so the top of the pop-out was
+ * cut off and could not be scrolled to, because the box that clipped it was not
+ * the box that scrolled. No max-height fits inside a box shorter than one row.
+ * A fixed element is not clipped by an ancestor's overflow at all.
+ *
+ * Nothing in Obsidian's modal chain has a transform, a filter or `contain`, so
+ * "fixed" here really does mean the viewport. Verified against app.css: neither
+ * `.modal-container` nor `.modal` sets one.
+ *
+ * 62vh is the hub disclosure panel's height (docs/MOBILE-UX.md §1) — one
+ * overlay shape for the phone, a fixed fraction of the screen whatever is in
+ * it, scrolling internally so switching sections cannot resize it under a thumb.
+ */
+.ytfree-panel.ytfree-panel-sheet {
+  position: fixed;
+  right: 0;
+  left: 0;
+  bottom: 0;
+  width: auto;
+  max-height: 62vh;
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l) var(--radius-l) 0 0;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+  z-index: 21;
+}
+
+/* 44pt rows, like every other list a thumb has to hit on a phone. */
+.ytfree-panel.ytfree-panel-sheet .ytfree-panel-row {
+  min-height: 44px;
+}
+
+.ytfree-panel.ytfree-panel-sheet .ytfree-panel-label {
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-panel.ytfree-panel-sheet .ytfree-panel-link {
+  height: 44px;
+}
+
+/*
+ * The tap-catcher behind the sheet.
+ *
+ * Without it, one tap outside the sheet closes the sheet *and* the Preview
+ * modal behind it: our own handler closes the pop-out, and the same tap goes on
+ * to Obsidian's `.modal-bg`. This is the thing the tap lands on instead. It is
+ * built with the panel and only its visibility changes, so it costs no layout
+ * and opening the menu still moves nothing.
+ */
+.ytfree-panel-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.32);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.ytfree-panel-scrim.is-open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* Fixed row height, label left, control right. Nothing in a row changes size
    when it is pressed, so the panel cannot grow under a finger. */
 .ytfree-panel-row {
@@ -2266,6 +2341,14 @@ body.ytfree-immersive-open {
   flex-direction: column;
   max-height: min(82vh, calc(100vh - 8em));
   overflow-y: auto;
+  /*
+   * Explicit, because it is not the default it looks like. A box with
+   * `overflow-y: auto` and `overflow-x: visible` computes the x axis to `auto`
+   * too — the pair cannot disagree — so every scroller in this sheet was
+   * silently a sideways scroller as well, waiting for one long word to make it
+   * real. Descriptions are full of them: bare URLs, hashtag runs, `====` rules.
+   */
+  overflow-x: hidden;
 }
 
 .ytfree-preview-modal .ytfree-preview-player {
@@ -2308,6 +2391,40 @@ body.ytfree-immersive-open {
   border-radius: 0;
 }
 
+/*
+ * Collapsed, in the Preview sheet.
+ *
+ * The same deal the docked player makes — the picture folds away and the player
+ * does not, so the position, the buffer and the audio all survive it — but the
+ * rules that made it happen were written against `.ytfree-docked` alone, so
+ * even once Collapse was wired up (it was reaching for a note player that a
+ * preview never has) nothing would have moved.
+ *
+ * It matters more here than in a note. The sheet's picture is `sticky`, so
+ * while it is showing it is 202pt of a phone screen that never scrolls away;
+ * folding it is what gives the description the sheet. The control bar stays,
+ * and Collapse turns into Show video, so the way back is the same button.
+ */
+.ytfree-preview-wrapper.is-collapsed .ytfree-media,
+.ytfree-preview-wrapper.is-collapsed .ytfree-stage {
+  aspect-ratio: auto;
+  height: 0;
+}
+
+/* Clipped inside a zero-height box, not hidden: `display: none` on a playing
+   `<video>` stops playback on iOS WebKit, which is the one thing collapsing
+   must not do. The height is the one the picture had — the sheet is
+   `min(640px, 92vw)` wide, so 16:9 of that. */
+.ytfree-preview-wrapper.is-collapsed .ytfree-video,
+.ytfree-preview-wrapper.is-collapsed .ytfree-poster,
+.ytfree-preview-wrapper.is-collapsed .ytfree-fallback {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: min(360px, 51.75vw);
+}
+
 /* The one message this box ever carries instead of a video. Same height as the
    player it replaces, so a failure looks like a player that will not play
    rather than like a sheet that lost a section. */
@@ -2326,6 +2443,9 @@ body.ytfree-immersive-open {
   font-size: var(--font-ui-large);
   line-height: 1.3;
   color: var(--text-normal);
+  /* A title can be one 60-character word — a URL, a hash, a German compound.
+     It wraps rather than widening the sheet. */
+  overflow-wrap: anywhere;
 }
 
 .ytfree-preview-facts {
@@ -2341,6 +2461,16 @@ body.ytfree-immersive-open {
 .ytfree-preview-description {
   max-height: 22vh;
   overflow-y: auto;
+  /*
+   * Never sideways. Two declarations because they answer two different
+   * questions: `overflow-wrap` breaks the 90-character playlist URL that a
+   * description opens with so it *fits*, and `overflow-x` is the backstop for
+   * whatever it cannot break — `pre-wrap` preserves the source's own runs of
+   * `─────` and box-drawing rules, and those are one token to the line breaker.
+   * A description that scrolls left and right is one you read a third of.
+   */
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
   margin-top: 0.8em;
   font-size: var(--font-ui-small);
   line-height: 1.5;
@@ -2411,6 +2541,7 @@ body.ytfree-immersive-open {
 .ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
   max-height: 30vh;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-bottom: 0.4em;
 }
 
@@ -2459,6 +2590,9 @@ body.ytfree-immersive-open {
   min-width: 0;
   color: var(--text-muted);
   white-space: normal;
+  /* Auto-captions run URLs and hyphenless compounds together. `min-width: 0`
+     lets the row shrink; this is what lets the *word* shrink with it. */
+  overflow-wrap: anywhere;
 }
 
 /* The line being spoken. A background, not a weight — bold would reflow it. */
@@ -2481,6 +2615,78 @@ body.ytfree-immersive-open {
   grid-auto-rows: 40px;
   justify-content: stretch;
   padding-top: 1em;
+}
+
+/*
+ * Where a preview plays on after its sheet has closed.
+ *
+ * Picture-in-Picture is a system window over a `<video>` that is still in the
+ * page: destroy the element and the window goes with it, which is why closing
+ * the sheet used to end PiP. The player's shell is re-parented here instead.
+ *
+ * A one-pixel clipped box, and every one of those words is load-bearing.
+ * `display: none` and `visibility: hidden` both stop playback on iOS WebKit,
+ * and a zero-sized element is treated as not rendered by some engines — so it
+ * keeps a pixel, clips the rest, and takes no pointer events. Nothing here is
+ * ever visible: what the reader sees is the floating window iOS is drawing.
+ */
+.ytfree-preview-keepalive {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0.01;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ------------------------------------------------- preview, on a phone ---
+ *
+ * One scroller, not three.
+ *
+ * On a laptop the description is a 22vh box with its own scrollbar and the
+ * sheet around it barely scrolls at all. On a phone that same box is about
+ * 160pt in the middle of the screen: a finger that lands on the description
+ * scrolls the *description*, so the title above it never moves and a 3,000
+ * character description is read through a letterbox — which is exactly what
+ * "the note header with the title doesn't scroll with the text" describes.
+ *
+ * So on a phone the description is not a scroller. The sheet is the scroller,
+ * the title and the facts scroll away under the picture like the first
+ * paragraph of anything else, and the description gets the whole height.
+ *
+ * The four buttons were what the 22vh cap was protecting — they must stay
+ * reachable without scrolling a page of links first — so they stop being the
+ * last thing in the flow and become the floor of the sheet instead. Sticky,
+ * with a fixed height they already had, so nothing about them moves when the
+ * text behind them does.
+ */
+.is-phone .ytfree-preview-description {
+  max-height: none;
+  overflow: visible;
+}
+
+.is-phone .ytfree-preview-actions {
+  position: sticky;
+  bottom: 0;
+  /*
+   * Below the picture's 2, not above it. Both ends of the sheet are sticky and
+   * both make their own stacking context, so the number decides which wins
+   * where they meet — and the picture has to win, because the pop-out is a
+   * fixed sheet *inside* the picture's stacking context. At 3 this row would
+   * have been painted over the top of the menu it sits behind.
+   */
+  z-index: 1;
+  /* Opaque, and its own padding, or the description scrolls through the row. */
+  padding-bottom: 0.4em;
+  background: var(--background-primary);
+}
+
+/* The picture is the one thing that stays. The title is not. */
+.is-phone .ytfree-preview-title {
+  font-size: var(--font-ui-medium);
 }
 
 /* ---------------------------------------------------------------- account */

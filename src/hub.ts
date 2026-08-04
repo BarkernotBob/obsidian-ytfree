@@ -95,6 +95,14 @@ export type PreviewMount = (
  */
 export interface PreviewHandle {
   destroy: () => void;
+  /**
+   * The sheet is closing. Tear the player down *unless* it is in
+   * Picture-in-Picture and nothing else is taking the video over, in which case
+   * it plays on and this answers `true` — the caller says so and stops holding
+   * the handle. `handingOver` is Watch or Remove: something else is about to
+   * own this video, so it never keeps playing. See `src/preview.ts`.
+   */
+  release: (handingOver: boolean) => boolean;
   seek: (seconds: number) => void;
   currentTime: () => number;
 }
@@ -2155,6 +2163,13 @@ class PreviewModal extends Modal {
    * exactly the moment following becomes wanted again.
    */
   private follow = true;
+  /**
+   * Set by the two buttons that close the sheet in order to hand the video to
+   * something else — Watch, which opens the note and mounts its own player, and
+   * Remove, which throws the video away. Either way the preview must stop, even
+   * if it is in Picture-in-Picture. See `previewCloseAction`.
+   */
+  private handingOver = false;
 
   constructor(
     app: App,
@@ -2231,14 +2246,20 @@ class PreviewModal extends Modal {
         // what writes the position the note's player is about to read. Run it
         // the other way round and the note opens against a preview that is
         // still playing, at the position the preview had five seconds ago.
-        if (slot.key === "watch") this.close();
+        if (slot.key === "watch") {
+          this.handingOver = true;
+          this.close();
+        }
         void this.spec.run(slot.key, repaint).then(
           () => {
             button.removeClass("is-busy");
             repaint();
             // Remove has just taken the video out of the list it was in, so
             // there is nothing here left worth reading either.
-            if (slot.key === "remove") this.close();
+            if (slot.key === "remove") {
+              this.handingOver = true;
+              this.close();
+            }
           },
           (err: unknown) => {
             button.removeClass("is-busy");
@@ -2449,12 +2470,45 @@ class PreviewModal extends Modal {
     this.tick = null;
   }
 
+  /**
+   * Closing, from any of the four ways there are: the X, Escape, the background,
+   * or one of the sheet's own buttons.
+   *
+   * Overridden rather than left to `onClose` because the ordering matters and
+   * `onClose` does not promise one: Picture-in-Picture is a window over an
+   * element that is still in the page, and handing that element over has to
+   * happen while it demonstrably still is. Every route into dismissal goes
+   * through `Modal.close()`, so this is the one place all four meet.
+   */
+  close(): void {
+    this.hand();
+    super.close();
+  }
+
   onClose(): void {
     this.closed = true;
     this.stopTicking();
-    this.player?.destroy();
-    this.player = null;
+    // The backstop, for a close that somehow did not come through `close()`.
+    // Idempotent: `hand` drops the handle, so a second call has nothing to do.
+    this.hand();
     this.contentEl.empty();
+  }
+
+  /**
+   * Give the player up — to Picture-in-Picture if it is in it, otherwise to the
+   * teardown. Runs once; after it the sheet no longer has a player.
+   */
+  private hand(): void {
+    const player = this.player;
+    if (!player) return;
+    this.player = null;
+    this.stopTicking();
+    if (player.release(this.handingOver)) {
+      // Said, because a floating window that outlives the sheet it came from is
+      // a surprise the first time, and because the way to stop it is now the
+      // window's own close button rather than anything in here.
+      new Notice("Still playing in Picture-in-Picture.");
+    }
   }
 }
 

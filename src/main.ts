@@ -48,6 +48,7 @@ import {
   SubscriptionsStore,
 } from "./hub";
 import { YT_ICON, registerIcons } from "./icon";
+import { previewCloseAction } from "./preview";
 import { ProgressStore } from "./progress-store";
 import { shareUrl } from "./share";
 import { SilenceStore } from "./silence-store";
@@ -408,6 +409,17 @@ export default class YtFreePlugin extends Plugin {
    * every live player go through `livePlayers()`.
    */
   private preview: PlayerEntry | null = null;
+  /**
+   * Where a preview's player lives on after its sheet has closed.
+   *
+   * A one-pixel box at the foot of the document, made once and kept. It exists
+   * because Picture-in-Picture is a window over the *element*: the system
+   * window belongs to a `<video>` that is still in the page, and the moment
+   * that element is destroyed the window goes with it. So a preview closed
+   * while it is in PiP is re-parented here rather than torn down. See
+   * `src/preview.ts` for when that is allowed and `releasePreview` for how.
+   */
+  private previewHost: HTMLElement | null = null;
   private pinned = new Map<MarkdownView, PinnedEntry>();
   /**
    * The way back on. One per open video note whose pinned player is switched
@@ -1467,6 +1479,11 @@ export default class YtFreePlugin extends Plugin {
     for (const entry of this.livePlayers()) entry.player.destroy();
     this.players.clear();
     this.preview = null;
+    // A preview left playing in Picture-in-Picture is reached by the loop above
+    // — it is still `this.preview` — but its shell is parked on `document.body`,
+    // which the plugin does not own and nothing else would clean up.
+    this.previewHost?.remove();
+    this.previewHost = null;
     this.cache.clear();
     // After the players, not before: each `destroy` reports its final position,
     // and this is the write that gets those positions onto disk.
@@ -3164,7 +3181,26 @@ export default class YtFreePlugin extends Plugin {
         // Phones only. A desktop has a mouse on the native scrubber and no host
         // gesture to take the movement away in the first place.
         dragSeek: mobile,
-        onToggleCollapse: mobile ? () => this.toggleCollapse(videoId) : undefined,
+        // A phone, and only inside the Preview sheet. Two conditions, two
+        // separate reasons:
+        //
+        // *A phone*, not any mobile — a tablet's Preview modal is 640px wide,
+        // so its picture is 360pt tall and the popover has room above the bar.
+        // A phone's is 202pt and it does not; see `src/panel.ts`.
+        //
+        // *In the modal*, because that is where absolute positioning is clipped
+        // by a scroller that is not the one the panel can scroll. A docked
+        // player in a note has the room and does not need it — and it is also
+        // the place a fixed bottom sheet would be the wrong shape, since a note
+        // lives under Obsidian's own mobile toolbar rather than over it the way
+        // a modal does.
+        panelSheet: preview && Platform.isPhone,
+        // The entry this player belongs to, not "the note player for this video
+        // ID". A preview is deliberately not in the `players` map (024), so the
+        // lookup answered `undefined` and Collapse did nothing at all in the
+        // Preview sheet — the same class of drift 024 fixed everywhere else by
+        // reaching for the player rather than for its video ID.
+        onToggleCollapse: mobile ? () => this.toggleCollapse(entry) : undefined,
         // Reads `activate` at call time, not now: the lazy loader is attached
         // further down, after this player exists.
         ensureLoaded: mobile ? () => entry?.activate?.() ?? Promise.resolve() : undefined,
@@ -3342,6 +3378,7 @@ export default class YtFreePlugin extends Plugin {
     // a real handle, so the caller has one shape to hold and one thing to call.
     return {
       destroy: () => (entry ? this.destroyPreview(entry) : undefined),
+      release: (handingOver) => (entry ? this.releasePreview(entry, handingOver) : false),
       // `primeForGesture` first, for the same reason a timestamp link does it:
       // on iOS a seek that has to resolve a URL is no longer a user gesture by
       // the time it returns, so the element has to be touched synchronously.
@@ -3355,6 +3392,40 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
+   * The sheet is closing. Keep the video if it is in Picture-in-Picture.
+   *
+   * PiP is a system window over a `<video>` that is still in the page, so the
+   * element has to survive the sheet: it is re-parented into a one-pixel host
+   * on `document.body` rather than destroyed. Clipped and not hidden, for the
+   * same reason a collapsed player is clipped — `display: none` on a playing
+   * `<video>` stops playback on iOS WebKit, which would make this a very
+   * elaborate way of doing nothing.
+   *
+   * It is still the one preview: `this.preview` keeps pointing at it, so
+   * opening the next preview tears it down the way it always did, and unload
+   * reaches it through `livePlayers()`. What ends it on its own is leaving PiP
+   * — the window's own close button, or another video claiming it.
+   *
+   * Answers whether the video is still playing, because the caller says so.
+   */
+  private releasePreview(entry: PlayerEntry, handingOver: boolean): boolean {
+    const action = previewCloseAction({
+      pictureInPicture: entry.player.inPictureInPicture(),
+      handingOver,
+    });
+    if (action === "destroy") {
+      this.destroyPreview(entry);
+      return false;
+    }
+    const host = (this.previewHost ??= document.body.createDiv({
+      cls: "ytfree-preview-keepalive",
+    }));
+    host.appendChild(entry.wrapper);
+    entry.player.onPictureInPictureEnd(() => this.destroyPreview(entry));
+    return true;
+  }
+
+  /**
    * Tear the preview player down, if there is one — and, when `only` is given,
    * only if it is still that one. The guard is what stops a stale modal close
    * from killing the preview that replaced it.
@@ -3365,6 +3436,10 @@ export default class YtFreePlugin extends Plugin {
     if (only && only !== entry) return;
     this.preview = null;
     entry.player.destroy();
+    // If this one was playing on after its sheet closed, its wrapper is parked
+    // in our host rather than in a modal that empties itself. `destroy` only
+    // empties the wrapper, so the shell would stay behind for the session.
+    this.previewHost?.empty();
     // Only if nothing else is watching that video: an ffmpeg analysis is keyed
     // by video, and a note player for the same one is entitled to keep the job
     // the preview happened to start.
@@ -4005,8 +4080,7 @@ export default class YtFreePlugin extends Plugin {
    * and any audio are all exactly where they were, and coming back is instant.
    * Collapsing by hand also pauses — you are putting the video away.
    */
-  private toggleCollapse(videoId: string): void {
-    const entry = this.players.get(videoId);
+  private toggleCollapse(entry: PlayerEntry | null): void {
     if (!entry) return;
     if (entry.collapsed) {
       this.setCollapsed(entry, null);
