@@ -45,6 +45,34 @@ never run on a device, and iOS implements none of the standard PiP API on a
 - `src/panel.ts` and `src/preview.ts` hold the two decisions as pure functions
   (9 new tests). `tools/preview-sheet-harness.mjs` measures the layout claims in
   headless Chromium at 390×844 — it is not part of `npm test`.
+## Status — 2026-08-03: the search button says Search, and the screen looks like one (033)
+
+**440 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
+built in a worktree alongside three other agents, so the branch
+`033-search-clarity` needs merging before `./install.sh`. Next: merge, install,
+then run the manual test in [033](issues/033-search-clarity.md).
+
+- **The search control is a labelled pill.** It was `YT_ICON` — the same badge
+  as the ribbon icon and the hub's tab icon, so nothing about it said "search".
+  It is now a new glyph (`ytfree-search-youtube`: a lens with a play triangle
+  in it) plus the words **Search YouTube**.
+- **There is a command now**: *Search YouTube for new videos*. Search had no
+  palette entry at all; it existed only as a button in one view's corner.
+- **The screen names itself**, the four filter dropdowns have standing labels
+  (Uploaded, Length, Type, Sort by), and a narrowed one is tinted with the
+  accent colour.
+- **Five drawn states** instead of one grey line — idle, searching, failed
+  (with **Try again**), nothing found, and "you already have all of these" —
+  all worded by `searchScreen()` in `src/search-screen.ts`, so the status strip
+  and the block behind it can no longer describe the same moment differently.
+  They did: `Nothing found for "x".` versus `No results.`
+- **Nothing moves on a click**, and this is measured rather than argued:
+  `tools/search-screen-harness.mjs` renders the screen under Obsidian's own
+  `app.css` at 390×844 and desktop size, sets filters, swaps all five states,
+  and reports any box that moved. It found the run button at 36px — the only
+  control under 40pt — which is fixed.
+- Left alone on purpose: `buildCard` (023's, and other agents are in it), the
+  hub's own "Filter these videos" box, and search itself. No new capability.
 
 ## Previous — 2026-07-31: four transcript-navigation fixes
 

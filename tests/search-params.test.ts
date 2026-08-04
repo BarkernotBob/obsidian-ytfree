@@ -9,6 +9,7 @@ import {
   defaultFilters,
   encodeSearchParams,
   isDefaultFilters,
+  nonDefaultFilters,
 } from "../src/search-params.ts";
 
 /**
@@ -92,6 +93,35 @@ test("isDefaultFilters knows when the bar has been touched", () => {
   assert.equal(isDefaultFilters(filters({ sort: "date" })), false);
   assert.equal(isDefaultFilters(filters({ uploadDate: "week" })), false);
   assert.equal(isDefaultFilters(filters({ feature: "hd" })), false);
+});
+
+test("nonDefaultFilters marks exactly the control that was changed", () => {
+  // The filter bar paints a `is-set` mark on a narrowed control so you can see
+  // why a search came back with three results. Marking the wrong one — or all
+  // four — would make the mark worth nothing.
+  assert.deepEqual(nonDefaultFilters(defaultFilters()), {
+    uploadDate: false,
+    duration: false,
+    sort: false,
+    feature: false,
+  });
+  assert.deepEqual(nonDefaultFilters(filters({ duration: "long" })), {
+    uploadDate: false,
+    duration: true,
+    sort: false,
+    feature: false,
+  });
+  assert.deepEqual(nonDefaultFilters(filters({ uploadDate: "week", sort: "views" })), {
+    uploadDate: true,
+    duration: false,
+    sort: true,
+    feature: false,
+  });
+});
+
+test("choosing the default value back again clears the mark", () => {
+  assert.equal(nonDefaultFilters(filters({ duration: "any" })).duration, false);
+  assert.equal(nonDefaultFilters(filters({ feature: "any" })).feature, false);
 });
 
 test("every option the control offers encodes to something", () => {

@@ -1524,6 +1524,16 @@ body.ytfree-immersive-open {
   text-overflow: ellipsis;
 }
 
+/* Lined up with the search field and the filter bar above it, which sit at
+   0.7em rather than the hub's 0.9em. A status line that starts three pixels
+   left of the box it describes is the kind of thing that reads as unfinished
+   without anyone being able to say why. */
+.ytfree-hub-status-browse {
+  height: 2em;
+  line-height: 2em;
+  padding: 0 0.75em;
+}
+
 .ytfree-hub-body {
   display: flex;
   flex: 1 1 auto;
@@ -1899,16 +1909,181 @@ body.ytfree-immersive-open {
   flex: 0 0 auto;
 }
 
+/*
+ * "Search YouTube", with the words on it.
+ *
+ * It was a bare YouTube badge — the same glyph as the ribbon icon and the hub's
+ * own tab icon, which said "YouTube" and never said "search". The width is
+ * whatever the label needs and the label never changes, so this is a fixed box
+ * next to the disclosure that truncates: the pill cannot be squeezed and cannot
+ * grow. See `src/icon.ts` for the glyph.
+ */
+.ytfree-hub-browse-button {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 32px;
+  padding: 0 0.7em;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--interactive-normal);
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-normal);
+  cursor: var(--cursor);
+  white-space: nowrap;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-browse-button:hover {
+    background: var(--interactive-hover);
+  }
+}
+
+.ytfree-hub-browse-icon {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-muted);
+  --icon-size: 16px;
+}
+
+.ytfree-hub-browse-label {
+  flex: 0 0 auto;
+}
+
+/* The back arrow on the search screen is not inside `.ytfree-hub-actions`, so
+   it had 0.3em of padding and nothing else — a ~22px target. Same fixed box the
+   action buttons get, for the same reason. */
+.ytfree-hub-back {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  flex: 0 0 auto;
+  border-radius: var(--radius-s);
+}
+
+.ytfree-hub-back .svg-icon {
+  width: var(--icon-m);
+  height: var(--icon-m);
+}
+
 /* Takes the space the filter chips have on the hub screen, so the back arrow
-   sits where the chips start and the header is the same height either side. */
+   sits where the chips start and the header is the same height either side.
+   The glyph is the one on the button that got you here — one symbol for one
+   journey. */
 .ytfree-hub-screen-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
   flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+
+.ytfree-hub-screen-icon {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-accent);
+  --icon-size: 18px;
+}
+
+.ytfree-hub-screen-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ------------------------------------------------ the search screen's field ---
+ * One box, not an input with a button parked beside it.
+ *
+ * The glyph, the box and the run control sit inside a single border that takes
+ * the focus ring, so the row reads as one control with a job rather than three
+ * things that happen to be adjacent. The ring is a `box-shadow`, which paints
+ * outside the layout — focusing the box cannot resize it or move the filters
+ * under it.
+ */
+.ytfree-hub-searchbar {
+  padding: 0.5em 0.7em 0.4em;
+  flex: 0 0 auto;
+}
+
+.ytfree-search-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 34px;
+  padding: 0 4px 0 0.6em;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-modifier-form-field);
+}
+
+.ytfree-search-field:focus-within {
+  border-color: var(--background-modifier-border-focus);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.ytfree-search-field-icon {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-faint);
+  --icon-size: 16px;
+}
+
+/* Stripped back to text on a transparent ground: the border, the background and
+   the focus ring all belong to the box around it now. */
+.ytfree-search-field-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-normal);
-  font-size: var(--font-ui-medium);
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-search-field-input:focus,
+.ytfree-search-field-input:focus-visible {
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+
+/* The one accented thing on the screen, because pressing it is the screen's
+   whole purpose. A fixed square, so nothing about it depends on its state. */
+.ytfree-search-field-go {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-s);
+  background: var(--interactive-accent);
+  box-shadow: none;
+  color: var(--text-on-accent);
+  cursor: var(--cursor);
+  --icon-size: 16px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-search-field-go:hover {
+    background: var(--interactive-accent-hover);
+  }
 }
 
 /* YouTube's filters, as a fixed four-column grid. A grid rather than a wrapping
@@ -1919,16 +2094,49 @@ body.ytfree-immersive-open {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 0.4em;
-  padding: 0.4em 0.7em;
+  padding: 0.2em 0.7em 0.5em;
   border-bottom: 1px solid var(--background-modifier-border);
   flex: 0 0 auto;
 }
 
+.ytfree-hub-filterbar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Static text, so it costs nothing and moves nothing. It exists because "Any
+   time" and "Any type" side by side are two dropdowns you have to open to find
+   out what they are. */
+.ytfree-hub-filterbar-label {
+  height: 14px;
+  line-height: 14px;
+  padding-left: 2px;
+  font-size: var(--font-ui-smaller);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ytfree-hub-filterbar-select {
   min-width: 0;
+  width: 100%;
   height: 32px;
   box-sizing: border-box;
   font-size: var(--font-ui-small);
+}
+
+/* A filter away from its default, marked so you can see why a search came back
+   with three results without opening four dropdowns. Colour only — the box was
+   already this size and this border width, so the mark cannot move the results
+   underneath it. */
+.ytfree-hub-filterbar-select.is-set {
+  border-color: var(--text-accent);
+  color: var(--text-accent);
 }
 
 /* Two hosts, both plain: the answer and the related material below it. They
@@ -1942,11 +2150,118 @@ body.ytfree-immersive-open {
    put the first related result beside its own title. */
 .ytfree-hub-results-heading {
   grid-column: 1 / -1;
-  padding: 1em 0.6em 0.4em;
+  padding: 0.9em 0.6em 0.5em;
   font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* The first heading on the screen sits directly under the status strip and
+   needs no space above it; the second is separating two sections and does. */
+.ytfree-hub-results:first-child > .ytfree-hub-results-heading {
+  padding-top: 0.3em;
+}
+
+/*
+ * A separator between results, at no cost in layout.
+ *
+ * An `inset` box-shadow paints inside the box without occupying a pixel of it,
+ * so the rule that a result must never change its own or its neighbours' size
+ * holds even while cards are being appended above and below. A real
+ * `border-top` would add 1px to every card after the first.
+ */
+.ytfree-hub-results > .ytfree-hub-card + .ytfree-hub-card {
+  box-shadow: inset 0 1px 0 var(--background-modifier-border);
+}
+
+/* Results are read in a column and clicked one at a time, so they get more room
+   between them than a hub list, which is scanned. */
+.ytfree-hub-result {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+/*
+ * Everything the screen shows when it is not showing results.
+ *
+ * A glyph, a headline and a line of what to do next — the first visit, the
+ * wait, the failure and the two kinds of nothing all get the same shape, so
+ * moving between them changes the words and nothing else. `min-height` is
+ * stated so the block does not grow and shrink under the filter bar as the
+ * copy changes.
+ */
+.ytfree-hub-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  min-height: 260px;
+  padding: 2em 1.5em;
+  text-align: center;
+}
+
+.ytfree-hub-state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--background-modifier-hover);
   color: var(--text-faint);
+  --icon-size: 24px;
+}
+
+.ytfree-hub-state.is-error .ytfree-hub-state-icon {
+  color: var(--text-error);
+}
+
+.ytfree-hub-state.is-allInHub .ytfree-hub-state-icon {
+  color: var(--text-success);
+}
+
+.ytfree-hub-state.is-idle .ytfree-hub-state-icon {
+  color: var(--text-accent);
+}
+
+/* The same keyframes the card spinner uses. Rotation only: the box is 48px
+   whether it is turning or not. */
+.ytfree-hub-state.is-loading .ytfree-hub-state-icon .svg-icon {
+  animation: ytfree-hub-spin 1s linear infinite;
+}
+
+.ytfree-hub-state-headline {
+  max-width: 30em;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+
+/* Reserved: a state with no help line has to leave the same hole as one with a
+   help line, or the glyph above it jumps between states. */
+.ytfree-hub-state-help {
+  min-height: 2.6em;
+  max-width: 28em;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+}
+
+/* Only the failure offers this. Reserved either way — `visibility`, not
+   `display`, so the two lines above it never move and a hidden button is out of
+   the tab order and out of hit testing. */
+.ytfree-hub-state-retry {
+  height: 32px;
+  padding: 0 1.2em;
+  font-size: var(--font-ui-small);
+  cursor: var(--cursor);
+}
+
+.ytfree-hub-state-retry.is-hidden {
+  visibility: hidden;
 }
 
 /* A hidden video stores no thumbnail — see `hideItem` — so its row is text and
@@ -1997,7 +2312,22 @@ body.ytfree-immersive-open {
 .ytfree-hub-more {
   display: block;
   width: 12em;
-  margin: 0.8em auto 1.4em;
+  height: 34px;
+  margin: 1.2em auto 1.6em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  cursor: var(--cursor);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-more:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
 }
 
 /* ----------------------------------------------------------- hub: phone ---
@@ -2292,23 +2622,99 @@ body.ytfree-immersive-open {
   font-size: 16px;
 }
 
+/* The search screen on a phone, sized for a thumb rather than scaled down from
+   the desktop: a 48px field, a 40px accent square inside it, 44px dropdowns,
+   and 16px on everything iOS can focus.
+   The run button was 36px inside a 44px field until the harness measured it —
+   the only control on the screen under 40pt. The field grew to 48 to hold a
+   40pt button with a 4px margin rather than the button shrinking the padding
+   to nothing. */
+.ytfree-hub.ytfree-phone .ytfree-hub-searchbar {
+  padding: 0.4em 0.5em 0.3em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-search-field {
+  height: 48px;
+  padding: 0 4px 0 0.7em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-search-field-input {
+  font-size: 16px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-search-field-go {
+  width: 40px;
+  height: 40px;
+  --icon-size: 18px;
+}
+
 /* Two by two, not four across: four selects on a 390pt screen leaves each one
    about 80pt wide, which truncates every label to its first word. Two rows of
    two, and the grid has the same shape whatever is chosen. */
 .ytfree-hub.ytfree-phone .ytfree-hub-filterbar {
   grid-template-columns: repeat(2, 1fr);
-  padding: 0.4em 0.5em;
+  padding: 0.2em 0.5em 0.4em;
+  row-gap: 0.5em;
 }
 
 /* 16px, for the same reason as the search box: a smaller font in a control iOS
    focuses is a zoom nothing ever takes back. */
 .ytfree-hub.ytfree-phone .ytfree-hub-filterbar-select {
-  height: 40px;
+  height: 44px;
   font-size: 16px;
 }
 
 .ytfree-hub.ytfree-phone .ytfree-hub-screen-title {
   font-size: var(--font-ui-small);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-back {
+  width: 44px;
+  height: 44px;
+}
+
+/* The header pill on a phone: a 40pt target, and the label stays — the word
+   "Search" is the one this button was missing, so it is not what gets dropped
+   when the screen is narrow. The disclosure beside it is `flex: 1; min-width: 0`
+   and truncates instead. */
+.ytfree-hub.ytfree-phone .ytfree-hub-browse-button {
+  height: 40px;
+  padding: 0 0.6em;
+  gap: 0.3em;
+}
+
+/* Cards on a phone are separate bordered boxes in a two-up grid, so the desktop
+   list's hairline between them has nothing to separate. */
+.ytfree-hub.ytfree-phone .ytfree-hub-results > .ytfree-hub-card + .ytfree-hub-card {
+  box-shadow: none;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-result {
+  padding: 0;
+}
+
+/* Shorter than the desktop block: on a 390pt screen 260px of empty state pushes
+   the whole message below the fold when the keyboard is up. */
+.ytfree-hub.ytfree-phone .ytfree-hub-state {
+  min-height: 200px;
+  padding: 1.5em 1em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-state-help {
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-state-retry {
+  height: 44px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-more {
+  height: 44px;
+}
+
+/* Lined up with the phone's 0.5em search field rather than the desktop's. */
+.ytfree-hub.ytfree-phone .ytfree-hub-status-browse {
+  padding: 0 0.55em;
 }
 
 /* Taller than the desktop row: the restore button is the only target on it and

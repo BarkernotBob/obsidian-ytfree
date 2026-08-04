@@ -54,14 +54,27 @@ export function defaultFilters(): SearchFilters {
   return { uploadDate: "any", duration: "any", sort: "relevance", feature: "any" };
 }
 
-export function isDefaultFilters(filters: SearchFilters): boolean {
+/**
+ * Which of the four are away from their default.
+ *
+ * The filter bar marks a narrowed control so you can see, without opening four
+ * dropdowns, why a search came back with three results. The mark is a colour
+ * change on a box whose size is already fixed — it cannot be a border that
+ * appears, or a label that goes bold, because either would re-measure the
+ * control and move the results underneath it.
+ */
+export function nonDefaultFilters(filters: SearchFilters): Record<keyof SearchFilters, boolean> {
   const base = defaultFilters();
-  return (
-    filters.uploadDate === base.uploadDate &&
-    filters.duration === base.duration &&
-    filters.sort === base.sort &&
-    filters.feature === base.feature
-  );
+  return {
+    uploadDate: filters.uploadDate !== base.uploadDate,
+    duration: filters.duration !== base.duration,
+    sort: filters.sort !== base.sort,
+    feature: filters.feature !== base.feature,
+  };
+}
+
+export function isDefaultFilters(filters: SearchFilters): boolean {
+  return !Object.values(nonDefaultFilters(filters)).some(Boolean);
 }
 
 /** Label, value — in the order the control offers them. */

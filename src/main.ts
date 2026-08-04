@@ -930,6 +930,15 @@ export default class YtFreePlugin extends Plugin {
       callback: () => void this.openHub(),
     });
 
+    // Findable by its name. The search screen was reachable only from a button
+    // in the corner of one view, so the palette — the place you go to look
+    // something up by what it is called — had no answer for "search".
+    this.addCommand({
+      id: "search-youtube",
+      name: "Search YouTube for new videos",
+      callback: () => void this.openHub("search"),
+    });
+
     this.addCommand({
       id: "import-subscriptions",
       name: "Import YouTube subscriptions",
@@ -1431,10 +1440,13 @@ export default class YtFreePlugin extends Plugin {
     }
   }
 
-  private async openHub(): Promise<void> {
+  private async openHub(screen: "hub" | "search" = "hub"): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE);
     if (existing.length > 0) {
       await this.app.workspace.revealLeaf(existing[0]);
+      if (screen === "search" && existing[0].view instanceof HubView) {
+        existing[0].view.showSearch();
+      }
       return;
     }
     // A full tab, not the sidebar: the hub is a grid of thumbnails and a
@@ -1442,6 +1454,7 @@ export default class YtFreePlugin extends Plugin {
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: HUB_VIEW_TYPE, active: true });
     await this.app.workspace.revealLeaf(leaf);
+    if (screen === "search" && leaf.view instanceof HubView) leaf.view.showSearch();
   }
 
   /**

@@ -21,7 +21,7 @@ import {
   requestUrl,
   setIcon,
 } from "obsidian";
-import { SHARE_ICON, YT_ICON } from "./icon";
+import { SEARCH_YT_ICON, SHARE_ICON, YT_ICON } from "./icon";
 import type { HubFilter, HubItem, SubscriptionsState } from "./subscriptions";
 import {
   buildWatchLaterNote,
@@ -68,8 +68,11 @@ import {
   UPLOAD_DATE_OPTIONS,
   defaultFilters,
   isDefaultFilters,
+  nonDefaultFilters,
 } from "./search-params";
 import type { SearchFilters } from "./search-params";
+import { searchScreen } from "./search-screen";
+import type { SearchScreenCopy, SearchScreenKind } from "./search-screen";
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
 
@@ -890,14 +893,25 @@ export class HubView extends ItemView {
 
     const actions = header.createDiv({ cls: "ytfree-hub-actions" });
 
-    // The way to YouTube. An icon rather than a box, because the thing it opens
-    // is a screen: putting a second text field next to the filter box was how
-    // the two jobs got confused with each other in the first place.
+    // The way to YouTube — a button with the words on it, not a bare glyph.
+    //
+    // It was the YouTube badge alone, which is the same shape as the ribbon
+    // icon and the hub's own tab icon: it said "YouTube", three times, and
+    // never said "search". Still not a second text field — the thing it opens
+    // is a screen, and two boxes side by side is how the two jobs got confused
+    // with each other in the first place (issue 008) — but a labelled control
+    // beside a box that says "Filter these videos" makes the pair read as what
+    // it is: narrow what I have, or go and get something new.
     const browse = actions.createEl("button", {
-      cls: "ytfree-hub-icon-button",
-      attr: { type: "button", "aria-label": "Search YouTube", title: "Search YouTube" },
+      cls: "ytfree-hub-browse-button",
+      attr: {
+        type: "button",
+        "aria-label": "Search YouTube for new videos",
+        title: "Search YouTube for new videos",
+      },
     });
-    setIcon(browse, YT_ICON);
+    setIcon(browse.createSpan({ cls: "ytfree-hub-browse-icon" }), SEARCH_YT_ICON);
+    browse.createSpan({ cls: "ytfree-hub-browse-label", text: "Search YouTube" });
     browse.addEventListener("click", () => this.setMode("browse"));
 
     // The same thing the settings pane's "Sync now" runs, notices included, so
@@ -1004,29 +1018,56 @@ export class HubView extends ItemView {
 
   // --------------------------------------------------------- the browse screen
 
+  /**
+   * The search screen: a titled header, one search field, four labelled
+   * filters, a reserved status line, and the results.
+   *
+   * Built phone-first, and the phone layout is not the desktop one narrowed:
+   * the filters are two rows of two, every control is 40pt or more, every font
+   * iOS can focus is 16px, and the field is one box rather than an input with a
+   * button parked beside it. The desktop gets four filters across and 32px
+   * controls from the same markup — see the `ytfree-phone` block in
+   * `styles.css`.
+   *
+   * Every size on this screen is stated and state-independent. Choosing a
+   * filter, typing, searching and failing all repaint inside boxes that were
+   * already the size they are.
+   */
   private buildBrowse(root: HTMLElement): void {
-    const header = root.createDiv({ cls: "ytfree-hub-header" });
+    const header = root.createDiv({ cls: "ytfree-hub-header ytfree-hub-header-browse" });
 
     const back = header.createEl("button", {
-      cls: "ytfree-hub-icon-button",
+      cls: "ytfree-hub-icon-button ytfree-hub-back",
       attr: { type: "button", "aria-label": "Back to your hub", title: "Back to your hub" },
     });
     setIcon(back, "arrow-left");
     back.addEventListener("click", () => this.setMode("hub"));
 
-    header.createDiv({ cls: "ytfree-hub-screen-title", text: "Search YouTube" });
+    // The screen's name, with the same glyph as the button that got you here,
+    // so the trip has one symbol from end to end.
+    const title = header.createDiv({ cls: "ytfree-hub-screen-title" });
+    setIcon(title.createSpan({ cls: "ytfree-hub-screen-icon" }), SEARCH_YT_ICON);
+    title.createSpan({ cls: "ytfree-hub-screen-name", text: "Search YouTube" });
 
-    const row = root.createDiv({ cls: "ytfree-hub-search" });
-    const input = row.createEl("input", {
-      cls: "ytfree-hub-search-input",
+    // One field, not an input and a button that happen to be adjacent: a
+    // leading glyph, the box, and the run control, all inside one border that
+    // takes the focus ring. The ring is a box-shadow, so focus cannot resize it.
+    const row = root.createDiv({ cls: "ytfree-hub-searchbar" });
+    const field = row.createDiv({ cls: "ytfree-search-field" });
+    setIcon(field.createSpan({ cls: "ytfree-search-field-icon" }), "search");
+
+    const input = field.createEl("input", {
+      cls: "ytfree-search-field-input",
       type: "search",
       attr: {
-        placeholder: "Search YouTube",
+        // Says what the box reaches, which is the difference between it and the
+        // hub's own box one screen back.
+        placeholder: "Search all of YouTube",
         enterkeyhint: "search",
         autocapitalize: "off",
         autocorrect: "off",
         spellcheck: "false",
-        "aria-label": "Search YouTube",
+        "aria-label": "Search all of YouTube",
       },
     });
     this.searchInputEl = input;
@@ -1047,15 +1088,15 @@ export class HubView extends ItemView {
       if (input.value.trim() === "" && this.searchQuery !== null) this.exitSearch();
     });
 
-    const go = row.createEl("button", {
-      cls: "ytfree-hub-icon-button",
-      attr: { type: "button", "aria-label": "Search", title: "Search" },
+    const go = field.createEl("button", {
+      cls: "ytfree-search-field-go",
+      attr: { type: "button", "aria-label": "Run this search", title: "Run this search" },
     });
-    setIcon(go, "search");
+    setIcon(go, "arrow-right");
     go.addEventListener("click", () => this.runSearch(input.value));
 
     this.buildSearchFilters(root);
-    this.statusEl = root.createDiv({ cls: "ytfree-hub-status" });
+    this.statusEl = root.createDiv({ cls: "ytfree-hub-status ytfree-hub-status-browse" });
 
     const body = root.createDiv({ cls: "ytfree-hub-body" });
     this.listEl = body.createDiv({ cls: "ytfree-hub-list" });
@@ -1074,17 +1115,27 @@ export class HubView extends ItemView {
    * filtered here out of a page we already fetched, which is the difference
    * between "over 20 minutes" meaning it and it meaning "the long ones out of
    * these twenty".
+   *
+   * Each one now carries its name above it. "Any time" and "Any type" sitting
+   * unlabelled in a row of four dropdowns is four controls you have to open to
+   * find out what they are; the label is static text, so it costs nothing and
+   * moves nothing. A control set away from its default is marked — a colour
+   * change on a box whose width and height are already fixed, never a border
+   * that appears or a label that goes bold.
    */
   private buildSearchFilters(root: HTMLElement): void {
     const bar = root.createDiv({ cls: "ytfree-hub-filterbar" });
 
     const select = <T extends string>(
       label: string,
+      key: keyof SearchFilters,
       options: Array<[T, string]>,
       current: T,
       onPick: (value: T) => void,
     ): void => {
-      const el = bar.createEl("select", {
+      const field = bar.createDiv({ cls: "ytfree-hub-filterbar-field" });
+      field.createDiv({ cls: "ytfree-hub-filterbar-label", text: label });
+      const el = field.createEl("select", {
         cls: "dropdown ytfree-hub-filterbar-select",
         attr: { "aria-label": label, title: label },
       });
@@ -1092,28 +1143,51 @@ export class HubView extends ItemView {
         el.createEl("option", { value, text });
       }
       el.value = current;
+      const mark = (): void => el.toggleClass("is-set", nonDefaultFilters(this.searchFilters)[key]);
+      mark();
       el.addEventListener("change", () => {
         onPick(el.value as T);
+        mark();
         // A filter change is a different search, not a different reading of the
         // one you already have — so it goes back to YouTube. Only if there is
         // something to search for: changing a filter with an empty box sets it
         // up for the query you have not typed yet.
         if (this.searchQuery) this.runSearch(this.searchQuery);
+        else this.renderStatus();
       });
     };
 
-    select("Upload date", UPLOAD_DATE_OPTIONS, this.searchFilters.uploadDate, (value) => {
-      this.searchFilters.uploadDate = value;
-    });
-    select("Duration", DURATION_OPTIONS, this.searchFilters.duration, (value) => {
+    select(
+      "Uploaded",
+      "uploadDate",
+      UPLOAD_DATE_OPTIONS,
+      this.searchFilters.uploadDate,
+      (value) => {
+        this.searchFilters.uploadDate = value;
+      },
+    );
+    select("Length", "duration", DURATION_OPTIONS, this.searchFilters.duration, (value) => {
       this.searchFilters.duration = value;
     });
-    select("Type", FEATURE_OPTIONS, this.searchFilters.feature, (value) => {
+    select("Type", "feature", FEATURE_OPTIONS, this.searchFilters.feature, (value) => {
       this.searchFilters.feature = value;
     });
-    select("Sort by", SORT_OPTIONS, this.searchFilters.sort, (value) => {
+    select("Sort by", "sort", SORT_OPTIONS, this.searchFilters.sort, (value) => {
       this.searchFilters.sort = value;
     });
+  }
+
+  /**
+   * Land on the search screen, from outside the view.
+   *
+   * The palette is where you look for a thing by its name, and "Search
+   * YouTube" was not findable there — it existed only as a button in a corner
+   * of one view. The cursor goes in the box unless this is a phone, where that
+   * would raise the keyboard over results you came back to read.
+   */
+  showSearch(): void {
+    this.setMode("browse");
+    if (!this.phone) this.searchInputEl?.focus();
   }
 
   /** Swap screens. Everything either one needs is in a field, so this is safe. */
@@ -1197,7 +1271,7 @@ export class HubView extends ItemView {
   private renderStatus(): void {
     if (!this.statusEl) return;
     if (this.mode === "browse") {
-      this.statusEl.setText(this.browseStatus());
+      this.statusEl.setText(this.searchCopy().status);
       return;
     }
 
@@ -1223,30 +1297,20 @@ export class HubView extends ItemView {
     this.statusEl.setText(parts.join(" · "));
   }
 
-  /** The search screen's own status line. */
-  private browseStatus(): string {
-    if (this.searchQuery === null) {
-      return isDefaultFilters(this.searchFilters)
-        ? "Type something and press Enter. Nothing here plays — a result can only be added to your hub."
-        : "Filters set. Type something and press Enter.";
-    }
-    if (this.searchState === "error") return `Search failed — ${this.searchError}`;
-    if (this.searchState === "loading" && this.searchResults.length === 0) {
-      return `Searching for “${this.searchQuery}”…`;
-    }
-
-    // Said out loud, because "nothing found" and "found nothing you have not
-    // already dealt with" are different answers and only one of them is worth
-    // rewording the query over.
-    const skipped = this.searchSkipped
-      ? ` · ${this.searchSkipped} already in your hub, not shown`
-      : "";
-    if (this.searchResults.length === 0) {
-      return this.searchSkipped
-        ? `Everything found for “${this.searchQuery}” is already in your hub.`
-        : `Nothing found for “${this.searchQuery}”.`;
-    }
-    return `${this.searchResults.length} results for “${this.searchQuery}”${skipped} · click one to add it`;
+  /**
+   * What the search screen says right now — the status strip and the block
+   * behind it, from one pure function so the two cannot disagree. They did:
+   * the strip said "Nothing found for “x”." while the block said "No results.".
+   */
+  private searchCopy(): SearchScreenCopy {
+    return searchScreen({
+      query: this.searchQuery,
+      state: this.searchState,
+      error: this.searchError,
+      results: this.searchResults.length,
+      skipped: this.searchSkipped,
+      filtersSet: !isDefaultFilters(this.searchFilters),
+    });
   }
 
   private renderChannels(): void {
@@ -1462,28 +1526,9 @@ export class HubView extends ItemView {
     this.primaryEl = null;
     this.relatedEl = null;
 
-    if (this.searchState === "error") {
-      list.createDiv({ cls: "ytfree-hub-empty", text: `Search failed — ${this.searchError}` });
-      return;
-    }
-    if (this.searchState === "loading" && this.searchResults.length === 0) {
-      list.createDiv({ cls: "ytfree-hub-empty", text: "Searching YouTube…" });
-      return;
-    }
-    if (this.searchQuery === null) {
-      list.createDiv({
-        cls: "ytfree-hub-empty",
-        text: "Nothing searched for yet.",
-      });
-      return;
-    }
-    if (this.searchResults.length === 0) {
-      list.createDiv({
-        cls: "ytfree-hub-empty",
-        text: this.searchSkipped
-          ? "Everything this found is already in your hub."
-          : "No results.",
-      });
+    const copy = this.searchCopy();
+    if (copy.kind !== "results") {
+      this.renderSearchState(list, copy);
       return;
     }
 
@@ -1507,22 +1552,82 @@ export class HubView extends ItemView {
   }
 
   /**
+   * Which glyph goes with each thing the screen can be saying.
+   *
+   * Deliberately drawn from the handful of Lucide names this plugin already
+   * uses successfully, plus our own. Obsidian ships a *subset* of Lucide and a
+   * name it does not know renders nothing at all — which is how the YouTube
+   * badge came to be shipped by hand in `icon.ts`. A blank 48px circle is worse
+   * than a plainer symbol, so the plainer symbol wins: `refresh-cw` spun by CSS
+   * for the wait, and colour carrying the difference between the rest.
+   */
+  private static readonly STATE_ICONS: Record<SearchScreenKind, string> = {
+    idle: SEARCH_YT_ICON,
+    loading: "refresh-cw",
+    error: "x",
+    none: "search",
+    allInHub: "check",
+    // Never drawn: `renderSearch` returns before this on "results".
+    results: SEARCH_YT_ICON,
+  };
+
+  /**
+   * Everything the screen shows when it is not showing results: the first
+   * visit, the wait, the failure, and the two kinds of nothing.
+   *
+   * One block with a glyph, a headline and a line of what to do next, rather
+   * than the single grey sentence all four used to be. It is centred in a box
+   * with a stated minimum height, so a search that fails after one that
+   * succeeded does not change the height of the region it lands in.
+   */
+  private renderSearchState(list: HTMLElement, copy: SearchScreenCopy): void {
+    const block = list.createDiv({ cls: "ytfree-hub-state" });
+    block.addClass(`is-${copy.kind}`);
+
+    const glyph = block.createDiv({ cls: "ytfree-hub-state-icon" });
+    setIcon(glyph, HubView.STATE_ICONS[copy.kind]);
+
+    block.createDiv({ cls: "ytfree-hub-state-headline", text: copy.headline });
+    // Always created, empty or not: a state with no help line must leave the
+    // same hole as one with a help line, or the glyph above it jumps.
+    block.createDiv({ cls: "ytfree-hub-state-help", text: copy.help });
+
+    // Reserved, not conditional. Only the failure offers a retry, and a button
+    // that arrives would push the two lines above it upward — `visibility`
+    // keeps the space, and takes it out of the tab order and out of hit
+    // testing while it is not on offer.
+    const retry = block.createEl("button", {
+      cls: "ytfree-hub-state-retry",
+      text: "Try again",
+      attr: { type: "button" },
+    });
+    retry.toggleClass("is-hidden", !copy.retry);
+    retry.addEventListener("click", () => {
+      if (this.searchQuery) this.runSearch(this.searchQuery);
+    });
+  }
+
+  /**
    * Where a result goes: the answer, or the related material below it.
    *
-   * The heading is created with the first related result rather than reserved,
-   * because it is at the bottom of a list that is being appended to — there is
-   * nothing below it to move.
+   * Each half gets a heading with its first result rather than up front,
+   * because a heading over an empty section is a promise the section did not
+   * keep — after the already-in-your-hub filter, either half can come back with
+   * nothing. Both are at the bottom of a list that is only appended to, so
+   * creating one moves nothing that was already on screen.
    */
   private resultHost(result: SearchResult): HTMLElement | null {
-    if (!result.secondary) return this.primaryEl;
-    const related = this.relatedEl;
-    if (related && related.childElementCount === 0) {
-      related.createDiv({
+    const host = result.secondary ? this.relatedEl : this.primaryEl;
+    if (host && host.childElementCount === 0) {
+      host.createDiv({
         cls: "ytfree-hub-results-heading",
-        text: "Related to your search",
+        // "Results" says the section below is the answer, which is only worth
+        // saying because "Related to your search" is a section too — YouTube's
+        // own related material, kept out of the answer rather than mixed in.
+        text: result.secondary ? "Related to your search" : "Results",
       });
     }
-    return related;
+    return host;
   }
 
   /**
