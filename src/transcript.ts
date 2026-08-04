@@ -467,20 +467,66 @@ export function renderHeatmap(peaks: Peak[], cues: Cue[], videoId: string): stri
  * once and the fetch is not repeated.
  */
 export function transcriptLineFor(content: string, seconds: number): number | null {
+  return transcriptLineAt(transcriptIndex(content), seconds);
+}
+
+/** Where one transcript paragraph starts: the second, and the note's line. */
+export interface TranscriptEntry {
+  seconds: number;
+  line: number;
+}
+
+/**
+ * Every transcript paragraph in a note, in the order they appear.
+ *
+ * Split out of `transcriptLineFor` for the follow (035): asking "which
+ * paragraph now?" twice a second means scanning a five-thousand-line document
+ * twice a second, and the answer only changes when the note does. Built once,
+ * kept until the note's length changes, and searched with `transcriptLineAt`.
+ */
+export function transcriptIndex(content: string): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = [];
   const lines = content.split("\n");
-  let best: number | null = null;
   for (let i = 0; i < lines.length; i++) {
     const match = RENDERED_CUE_RE.exec(lines[i].trim());
     if (!match) continue;
-    const at = Number(match[1]);
-    if (!Number.isFinite(at) || at > seconds) continue;
-    best = i;
+    const seconds = Number(match[1]);
+    if (!Number.isFinite(seconds)) continue;
+    entries.push({ seconds, line: i });
+  }
+  return entries;
+}
+
+/**
+ * The line of the last paragraph that starts at or before `seconds`, or null.
+ *
+ * A scan from the end rather than a binary search: paragraphs are written in
+ * order but nothing enforces it — a note edited by hand can carry a stray
+ * timestamp — and a sorted-input assumption that is wrong once is a jump that
+ * lands in the wrong place with no way to tell.
+ */
+export function transcriptLineAt(index: TranscriptEntry[], seconds: number): number | null {
+  let best: number | null = null;
+  for (const entry of index) {
+    if (entry.seconds > seconds) continue;
+    best = entry.line;
   }
   return best;
 }
 
 /** `**[12:34](ytfree:ID:754)** the words` — one line of a rendered transcript. */
 const RENDERED_CUE_RE = /^\*\*\[[^\]]*\]\(ytfree:[^:)]+:(\d+)\)\*\*\s*(.*)$/;
+
+/**
+ * Is this note line a transcript paragraph?
+ *
+ * What tells a click on the transcript apart from a click on a timestamp you
+ * typed: the first resumes the follow, the second is a replay of your own note
+ * and must leave the reader where they are.
+ */
+export function isRenderedCueLine(text: string): boolean {
+  return RENDERED_CUE_RE.test(text.trim());
+}
 
 /**
  * Read a rendered transcript back out of a note, as cues.

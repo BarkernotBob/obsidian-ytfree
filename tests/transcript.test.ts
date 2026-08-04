@@ -14,7 +14,10 @@ import {
   renderHeatmap,
   renderTranscript,
   topPeaks,
+  transcriptIndex,
+  transcriptLineAt,
   transcriptLineFor,
+  isRenderedCueLine,
   TRANSCRIPT_ALIASES,
   TRANSCRIPT_HEADING,
   upsertSection,
@@ -529,4 +532,35 @@ test("transcriptLineFor ignores the peak list above it", () => {
 test("transcriptLineFor answers null with no transcript, or before the first line", () => {
   assert.equal(transcriptLineFor("# Notes\n\nnothing here", 100), null);
   assert.equal(transcriptLineFor(`**[0:10](ytfree:${ID}:10)** words`, 5), null);
+});
+
+// --------------------------------------------- following the video in the note
+
+test("transcriptIndex reads every paragraph once, and no peak", () => {
+  assert.deepEqual(transcriptIndex(JUMP_NOTE), [
+    { seconds: 0, line: 6 },
+    { seconds: 80, line: 8 },
+    { seconds: 120, line: 10 },
+  ]);
+});
+
+test("transcriptIndex is empty for a note with no transcript", () => {
+  assert.deepEqual(transcriptIndex("# Notes\n\nnothing here"), []);
+});
+
+test("transcriptLineAt gives the same answers as a fresh scan of the note", () => {
+  const index = transcriptIndex(JUMP_NOTE);
+  for (const at of [0, 79, 80, 100, 119, 120, 9999]) {
+    assert.equal(transcriptLineAt(index, at), transcriptLineFor(JUMP_NOTE, at));
+  }
+  assert.equal(transcriptLineAt(index, -1), null);
+});
+
+test("isRenderedCueLine tells a transcript paragraph from a timestamp you typed", () => {
+  assert.equal(isRenderedCueLine(`**[1:20](ytfree:${ID}:80)** middle words`), true);
+  // The default stamp format: a bare link, no bold.
+  assert.equal(isRenderedCueLine(`[1:20](ytfree:${ID}:80) my own note`), false);
+  // A most-replayed row, which is a list item.
+  assert.equal(isRenderedCueLine(`- **[1:40](ytfree:${ID}:100)** — the good part`), false);
+  assert.equal(isRenderedCueLine("# Video Transcript"), false);
 });
