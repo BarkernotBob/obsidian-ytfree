@@ -227,11 +227,11 @@ const measure = () => {
       );
     })(),
     /*
-     * [left, right], and both must be 16 — the inset Chromium's own
-     * `-webkit-media-controls-timeline` uses, measured off screenshots of the
-     * native controls at 400/640/900px and constant at all three. That is what
-     * puts the purple line directly under the platform's scrubber instead of
-     * running a half-inch wider at each end.
+     * [left, right], and both must be 0 — the line runs the full width of the
+     * picture (035). It was 16 between 021 and 035, to sit under Chromium's own
+     * `-webkit-media-controls-timeline`; that alignment only ever paid while the
+     * native scrubber was on screen, and the rest of the time the line stopped
+     * short of the picture at both ends.
      */
     progressInset: (() => {
       const a = document.querySelector(".ytfree-progress").getBoundingClientRect();

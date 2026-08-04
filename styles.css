@@ -67,17 +67,26 @@
   position: absolute;
   z-index: 2;
   /*
-   * Inset to the same 16px the platform's own scrubber is, so the two lines
-   * share their left and right ends and purple sits directly under the native
-   * track whenever both are on screen. Measured, not guessed: Chromium's
-   * media-controls timeline is 16px from each edge of the video at every width
-   * (400 / 640 / 900 all give exactly 16), and it does not scale.
+   * Edge to edge, the full width of the picture.
+   *
+   * 021 inset it by 16px to line up with Chromium's own
+   * `-webkit-media-controls-timeline`, which is 16px from each edge at every
+   * width. That alignment only pays while the native scrubber is on screen —
+   * which on a phone is the few seconds after a tap, and never during playback
+   * on iOS — and the rest of the time it read as a line that stopped short of
+   * the picture at both ends. Full width is the answer to "how far along am I"
+   * that needs no reference line beside it. The variable stays, so a snippet
+   * can put the 16 back.
    */
-  left: var(--ytfree-progress-inset, 16px);
-  right: var(--ytfree-progress-inset, 16px);
+  left: var(--ytfree-progress-inset, 0px);
+  right: var(--ytfree-progress-inset, 0px);
   bottom: 0;
   height: 3px;
-  border-radius: 2px;
+  /* The picture's own bottom corners, not a pill: at full width the ends of the
+     line are the ends of the video, and a square corner there would sit outside
+     the rounded desktop picture. Mobile's media box is square and loses under
+     two pixels at each extreme end of a three-pixel line — invisible on black. */
+  border-radius: 0 0 var(--radius-m) var(--radius-m);
   overflow: hidden;
   pointer-events: none;
   background: rgba(255, 255, 255, 0.16);
