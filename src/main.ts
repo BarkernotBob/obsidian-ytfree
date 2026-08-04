@@ -228,6 +228,16 @@ const SILENCE_REFRESH_DEBOUNCE_MS = 1200;
 /** How long after the workspace settles the first tidy sweep runs, and how
  * often it runs after that. Nothing here is urgent: the youngest note it can
  * touch is a month old. */
+/**
+ * How long a "note deleted" is given to turn out to be a note that moved.
+ *
+ * Forgetting a video writes a tombstone both devices obey, so it is worth a few
+ * seconds of patience. An iCloud vault replaces a file by removing it and
+ * putting it back, and a plugin that acts on the first half of that permanently
+ * loses the video. A real deletion is not urgent; nothing is watching for it.
+ */
+const DELETE_CONFIRM_MS = 5_000;
+
 const TIDY_SETTLE_MS = 60_000;
 const TIDY_INTERVAL_MS = 24 * 3600_000;
 
@@ -433,6 +443,13 @@ export default class YtFreePlugin extends Plugin {
   private pendingSeek = new Map<string, number>();
   /** Notes created since startup — the only ones eligible for an auto-fetch. */
   private createdThisSession = new Set<string>();
+  /**
+   * Notes the tidy sweep just trashed, so the `deleted` handler can tell the
+   * plugin's own housekeeping from the user throwing a video away.
+   */
+  private tidied = new Set<string>();
+  /** Deletions waiting to be confirmed — see `confirmNoteDeleted`. */
+  private pendingDeletes = new Map<string, number>();
   private autoFetchAttempted = new Set<string>();
   /** Notes whose missing heatmap has already been chased this session. */
   private backfillAttempted = new Set<string>();
@@ -724,16 +741,30 @@ export default class YtFreePlugin extends Plugin {
     // once. `metadataCache.on("deleted")` rather than `vault.on("delete")`
     // because by the time the vault fires there is no file to read frontmatter
     // from, and the previous cache is the only copy left of what it said.
-    this.registerEvent(
-      this.app.metadataCache.on("deleted", (file, prevCache) => {
-        if (file.extension !== "md") return;
-        const videoId =
-          this.videoIdInFrontmatter(prevCache?.frontmatter) ??
-          this.subscriptions?.videoIdForNotePath(file.path) ??
-          null;
-        if (videoId) this.subscriptions?.forget(videoId);
-      }),
-    );
+    //
+    // Inside `onLayoutReady` for the same reason as `create` above, and with
+    // more at stake: forgetting a video writes a tombstone that the other
+    // device honours forever. A vault in iCloud does not hand Obsidian a
+    // complete folder at startup — notes arrive as they download — so a handler
+    // live during startup reads "not here yet" as "the user deleted this" and
+    // quietly empties Kept on both devices. That is issue 034's second defect.
+    this.app.workspace.onLayoutReady(() => {
+      this.registerEvent(
+        this.app.metadataCache.on("deleted", (file, prevCache) => {
+          if (file.extension !== "md") return;
+          // The plugin's own tidy sweep. A note it trashed was empty and its
+          // video was watched — that is not the user throwing the video away,
+          // and per issue 018 the item stays Kept with a path pointing at
+          // nothing, which `openItem` re-creates on demand.
+          if (this.tidied.delete(file.path)) return;
+          const videoId =
+            this.videoIdInFrontmatter(prevCache?.frontmatter) ??
+            this.subscriptions?.videoIdForNotePath(file.path) ??
+            null;
+          if (videoId) this.confirmNoteDeleted(file.path, videoId);
+        }),
+      );
+    });
 
     // Templater renames a note after filling it in, so the path recorded at
     // create time is not the path the fetch will see.
@@ -1021,6 +1052,11 @@ export default class YtFreePlugin extends Plugin {
   async syncNow(): Promise<void> {
     const signedIn =
       Platform.isDesktopApp && this.settings.accountSession.status === "signed-in";
+    // First, before anything goes out to YouTube: the button's job as anyone
+    // pressing it understands it is "agree with my other device", and the
+    // answer to that is already in the vault. It also means the account sync
+    // below starts from the current file rather than from a morning-old copy.
+    await this.subscriptions.refreshFromDisk();
     if (signedIn) await this.syncAccount(true);
     await this.subscriptions.poll();
     this.refreshHub();
@@ -1103,10 +1139,15 @@ export default class YtFreePlugin extends Plugin {
       const file = this.app.vault.getAbstractFileByPath(candidate.path);
       if (!(file instanceof TFile)) continue;
       try {
+        // Claimed before the trash, not after: the `deleted` event lands inside
+        // the await, and a claim that arrives second is a claim that arrives
+        // too late to stop the video being forgotten.
+        this.tidied.add(candidate.path);
         await this.app.fileManager.trashFile(file);
         console.info(`YT Free: trashed empty video note ${candidate.path}`);
         removed++;
       } catch (err) {
+        this.tidied.delete(candidate.path);
         console.error(`YT Free: could not trash ${candidate.path}.`, err);
       }
     }
@@ -1119,6 +1160,33 @@ export default class YtFreePlugin extends Plugin {
       new Notice("YT Free: nothing to tidy.");
     }
     return removed;
+  }
+
+  /**
+   * Forget a video, but only once its note is really gone.
+   *
+   * `forget` is the one destructive thing the plugin does to its own state: the
+   * item leaves every list and a tombstone stops any device handing it back. It
+   * should cost a deliberate delete and nothing else — and before this, it also
+   * cost an iCloud file being replaced, an on-demand note being evicted, or a
+   * vault whose notes had not finished downloading when Obsidian started.
+   *
+   * So the event only proposes; this checks. If the path is occupied again when
+   * the timer fires the note moved rather than left, and nothing happens.
+   */
+  private confirmNoteDeleted(path: string, videoId: string): void {
+    const existing = this.pendingDeletes.get(path);
+    if (existing !== undefined) window.clearTimeout(existing);
+    const timer = window.setTimeout(() => {
+      this.pendingDeletes.delete(path);
+      if (this.app.vault.getAbstractFileByPath(path)) return;
+      // The user may have deleted one of two notes for the same video. Only the
+      // recorded one speaks for the hub item.
+      const recorded = this.subscriptions?.videoIdForNotePath(path);
+      if (recorded && recorded !== videoId) return;
+      this.subscriptions?.forget(videoId);
+    }, DELETE_CONFIRM_MS);
+    this.pendingDeletes.set(path, timer);
   }
 
   // --------------------------------------------------------------- account
@@ -1458,6 +1526,11 @@ export default class YtFreePlugin extends Plugin {
 
   onunload(): void {
     this.clearResumeTimer();
+    // A deletion that has not been confirmed by now never will be — and acting
+    // on one during teardown would be acting after the last chance to check.
+    for (const timer of this.pendingDeletes.values()) window.clearTimeout(timer);
+    this.pendingDeletes.clear();
+    this.subscriptions?.dispose();
     for (const handle of this.downloads.values()) handle.cancel();
     this.downloads.clear();
     for (const job of this.silenceJobs.values()) job.cancel();

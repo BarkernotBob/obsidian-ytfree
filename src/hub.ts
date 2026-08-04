@@ -31,7 +31,6 @@ import {
   forgetVideo,
   hideItem,
   keepItem,
-  mergeStates,
   parseChannelInput,
   parseSubscriptionsCsv,
   expireItems,
@@ -54,6 +53,13 @@ import {
   searchResultToItem,
   visibleItems,
 } from "./subscriptions";
+import type { DiskRead } from "./state-sync";
+import {
+  SAVE_READ_ATTEMPTS,
+  SAVE_READ_BACKOFF_MS,
+  planRefresh,
+  planSave,
+} from "./state-sync";
 import { NOTES_HEADING } from "./sections";
 import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
@@ -140,6 +146,24 @@ const DURATION_BACKFILL_PER_POLL = 40;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * How long a save waits before trying again after refusing to write.
+ *
+ * Long enough that an iCloud download has finished, short enough that a device
+ * nobody touches again still gets its change out.
+ */
+const SAVE_RETRY_MS = 20_000;
+
+/**
+ * How often an open hub re-reads the state file.
+ *
+ * The poll is hourly, which is the right interval for asking YouTube what is
+ * new and far too long for noticing that the phone removed something a minute
+ * ago. A stat every twenty seconds costs nothing and is the difference between
+ * "the two devices agree" and "the two devices agree eventually".
+ */
+export const HUB_REFRESH_MS = 20_000;
+
 /** Run `worker` over `items`, at most `limit` in flight. */
 async function mapLimit<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
   const queue = [...items];
@@ -151,13 +175,30 @@ async function mapLimit<T>(items: T[], limit: number, worker: (item: T) => Promi
   await Promise.all(runners);
 }
 
+/**
+ * Why a listener is being told to redraw.
+ *
+ * A local click already updated its own card, and redrawing the whole list
+ * under the finger that clicked it is the one thing the UI must never do. A
+ * merge is different: the change came from the other device, nothing on screen
+ * reflects it, and the list is exactly what has to be rebuilt. The view needs to
+ * tell them apart, so it is told.
+ */
+export type ChangeReason = "local" | "merge";
+
 export class SubscriptionsStore {
   state: SubscriptionsState = emptyState();
   polling = false;
-  /** Bumped on every change so open views can redraw without being told what. */
-  private listeners = new Set<() => void>();
+  /** Bumped on every change so open views can redraw — see `ChangeReason`. */
+  private listeners = new Set<(reason: ChangeReason) => void>();
   private saving: Promise<void> = Promise.resolve();
-  /** mtime of the last state file we read or wrote — see `refreshFromDisk`. */
+  /**
+   * mtime of the last state file we *successfully read* or wrote.
+   *
+   * The qualifier is the fix in 034: a failed read must not advance this, or
+   * that version of the file is treated as already seen and this device never
+   * looks at it again — one blip becoming a permanent disagreement.
+   */
   private diskTime = 0;
 
   constructor(
@@ -166,40 +207,68 @@ export class SubscriptionsStore {
     private settings: () => HubSettings,
   ) {}
 
-  onChange(listener: () => void): () => void {
+  onChange(listener: (reason: ChangeReason) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  private emit(): void {
-    for (const listener of this.listeners) listener();
+  private emit(reason: ChangeReason = "local"): void {
+    for (const listener of this.listeners) listener(reason);
   }
 
   async load(): Promise<void> {
-    const disk = await this.readDisk();
-    if (disk) this.state = disk;
+    const read = await this.readDisk();
+    // At load — and only at load — an unreadable file is survivable: starting
+    // empty means the plugin opens, and the first refresh that reads the file
+    // merges everything back. Saving is what must never assume it.
+    if (read.kind === "state") this.state = read.state;
     await this.noteDiskTime();
   }
 
-  /** What is in the file this instant, or null if there is nothing readable. */
-  private async readDisk(): Promise<SubscriptionsState | null> {
+  /**
+   * What is in the file this instant.
+   *
+   * Three answers, not two. "There is no file" and "there is a file I could not
+   * read" used to collapse into the same `null`, and the caller could only ask
+   * whether it got a state — so a save treated a half-synced file, the most
+   * likely kind on a vault in iCloud, as permission to overwrite it.
+   */
+  private async readDisk(): Promise<DiskRead> {
     try {
-      if (!(await this.app.vault.adapter.exists(this.statePath))) return null;
-      return normalizeState(JSON.parse(await this.app.vault.adapter.read(this.statePath)));
+      if (!(await this.app.vault.adapter.exists(this.statePath))) return { kind: "absent" };
+      const raw = await this.app.vault.adapter.read(this.statePath);
+      return { kind: "state", state: normalizeState(JSON.parse(raw)) };
     } catch (err) {
-      // Starting empty is right at load and wrong at save — a half-synced file
-      // must never be treated as "the other device decided nothing".
       console.error("YT Free: subscriptions state unreadable.", err);
-      return null;
+      return { kind: "unreadable" };
+    }
+  }
+
+  /**
+   * Read, retrying briefly.
+   *
+   * The failures worth retrying last milliseconds — a file being replaced under
+   * us — so two short waits turn nearly all of them into an ordinary merge, and
+   * what is left is handled by not writing.
+   */
+  private async readDiskForSave(): Promise<DiskRead> {
+    for (let attempt = 0; ; attempt += 1) {
+      const read = await this.readDisk();
+      if (read.kind !== "unreadable" || attempt >= SAVE_READ_ATTEMPTS - 1) return read;
+      await sleep(SAVE_READ_BACKOFF_MS[attempt] ?? 600);
     }
   }
 
   private async noteDiskTime(): Promise<void> {
-    this.diskTime = (await this.app.vault.adapter.stat(this.statePath))?.mtime ?? 0;
+    try {
+      this.diskTime = (await this.app.vault.adapter.stat(this.statePath))?.mtime ?? 0;
+    } catch {
+      // Leave the watermark alone: a stat we could not take is not evidence.
+    }
   }
 
   /**
-   * Write the state — by merging into what is on disk, never by replacing it.
+   * Write the state — by merging into what is on disk, or not at all.
    *
    * The file is synced by iCloud and both devices hold it open, so a plain
    * write means the last device to save wins the entire file. That is how
@@ -207,29 +276,60 @@ export class SubscriptionsStore {
    * the snapshot it loaded hours earlier. Re-reading here costs one file read
    * per save and makes the file the union of both devices' decisions instead.
    *
+   * And when the read fails, nothing is written. That was the hole left in 014:
+   * the merge was skipped and this device's whole snapshot went out anyway,
+   * which is the original bug with an extra condition on it. The change is
+   * still in memory and the next save carries it — a save deferred costs
+   * seconds, a save that overwrites an unread file costs the other device's
+   * decisions.
+   *
    * Serialized: a poll and a click can both finish inside the same tick, and
    * two merges must not interleave with each other's reads.
    */
   save(): Promise<void> {
     this.saving = this.saving
       .then(async () => {
-        const disk = await this.readDisk();
-        if (disk) this.state = mergeStates(this.state, disk);
+        const plan = planSave(this.state, await this.readDiskForSave());
+        if (!plan.write) {
+          console.error("YT Free: state file unreadable, not overwriting it. Will retry.");
+          // Nudge the next tick to try again rather than waiting on a click.
+          this.scheduleRetry();
+          return;
+        }
+        this.state = plan.state;
         await this.app.vault.adapter.write(this.statePath, JSON.stringify(this.state));
         await this.noteDiskTime();
-        if (disk) this.emit();
+        if (plan.merged) this.emit("merge");
       })
       .catch((err) => console.error("YT Free: could not write subscriptions state.", err));
     return this.saving;
+  }
+
+  /** Set when a save was refused, so an unattended device still catches up. */
+  private retry: number | null = null;
+
+  private scheduleRetry(): void {
+    if (this.retry !== null) return;
+    this.retry = window.setTimeout(() => {
+      this.retry = null;
+      void this.save();
+    }, SAVE_RETRY_MS);
+  }
+
+  /** Stop the retry timer — the plugin is unloading. */
+  dispose(): void {
+    if (this.retry !== null) window.clearTimeout(this.retry);
+    this.retry = null;
   }
 
   /**
    * Pick up decisions made on the other device, without waiting for a save.
    *
    * A stat, and a read only when the file has actually moved — cheap enough to
-   * call on every hub open and every poll tick. Without it a Mac left open all
-   * day would keep showing videos the phone hid hours ago, and would keep
-   * merging against a copy of the file that gets staler by the hour.
+   * call on every hub open, every poll tick, and on a timer while the hub is
+   * open. Without it a Mac left open all day would keep showing videos the
+   * phone hid hours ago, and would keep merging against a copy of the file that
+   * gets staler by the hour.
    */
   async refreshFromDisk(): Promise<void> {
     let mtime: number;
@@ -239,12 +339,13 @@ export class SubscriptionsStore {
       return;
     }
     if (mtime === this.diskTime) return;
-    this.diskTime = mtime;
 
-    const disk = await this.readDisk();
-    if (!disk) return;
-    this.state = mergeStates(this.state, disk);
-    this.emit();
+    const plan = planRefresh(this.state, await this.readDisk());
+    // Only a read that answered may say this version has been seen.
+    if (!plan.seen) return;
+    this.diskTime = mtime;
+    this.state = plan.state;
+    if (plan.changed) this.emit("merge");
   }
 
   // ------------------------------------------------------------- channels
@@ -728,6 +829,8 @@ export class HubView extends ItemView {
   /** The hub's own box: free text over the list you are looking at. */
   private itemQuery = "";
   private unsubscribe: (() => void) | null = null;
+  /** Re-reads the state file while this view is open — see `HUB_REFRESH_MS`. */
+  private refreshTimer: number | null = null;
   // Nullable, and re-assigned on every `build()`: a rebuilt view must not be
   // able to draw into the elements of the screen it replaced.
   private listEl: HTMLElement | null = null;
@@ -822,21 +925,37 @@ export class HubView extends ItemView {
 
   async onOpen(): Promise<void> {
     // Only the parts that change are redrawn — see the note on the class.
-    this.unsubscribe = this.store.onChange(() => {
+    this.unsubscribe = this.store.onChange((reason) => {
       this.renderStatus();
       this.renderChannels();
       this.renderMenuLabel();
+      // A local click has already swapped its own card, and rebuilding the grid
+      // under the finger that clicked it is the one thing this UI must never
+      // do. A merge is the opposite case: those changes were made on the other
+      // device, no card on screen reflects them, and the list is stale until it
+      // is rebuilt. Without this the Mac merged the phone's removals correctly
+      // and then went on showing the removed videos until something else forced
+      // a full redraw — which read, to anyone using it, exactly like the sync
+      // having failed.
+      if (reason === "merge") this.renderList(true);
     });
     this.build();
     this.renderAll();
     // The phone may have hidden something since this window last looked. Cheap
     // — a stat — and it redraws itself through `onChange` if anything moved.
     void this.store.refreshFromDisk();
+    // And keep looking. The poll is hourly; a removal made on the other device
+    // should not wait an hour, or a click, to show up here.
+    this.refreshTimer = window.setInterval(() => {
+      void this.store.refreshFromDisk();
+    }, HUB_REFRESH_MS);
   }
 
   async onClose(): Promise<void> {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    if (this.refreshTimer !== null) window.clearInterval(this.refreshTimer);
+    this.refreshTimer = null;
   }
 
   private build(): void {
@@ -1643,7 +1762,16 @@ export class HubView extends ItemView {
     return strip;
   }
 
-  private renderList(): void {
+  /**
+   * Draw the list.
+   *
+   * `keepPages` is for the one caller that is not a deliberate navigation: a
+   * merge arriving from the other device. Everything else — a filter, a tab, a
+   * channel — means "show me the start of a different list", but a merge means
+   * "the list you are looking at was slightly wrong", and dropping someone
+   * eight pages down back to the top for it would be worse than the staleness.
+   */
+  private renderList(keepPages = false): void {
     const list = this.listEl;
     if (!list) return;
     if (this.mode === "browse") {
@@ -1653,7 +1781,7 @@ export class HubView extends ItemView {
     list.empty();
     this.cards.clear();
     this.stopSentinel();
-    this.pages = 1;
+    if (!keepPages) this.pages = 1;
 
     const items = this.currentItems();
     if (items.length === 0) {
