@@ -3169,7 +3169,12 @@ export default class YtFreePlugin extends Plugin {
         // room above the bar. A phone's is 202pt and the popover does not — see
         // `src/panel.ts`.
         panelSheet: Platform.isPhone,
-        onToggleCollapse: mobile ? () => this.toggleCollapse(videoId) : undefined,
+        // The entry this player belongs to, not "the note player for this video
+        // ID". A preview is deliberately not in the `players` map (024), so the
+        // lookup answered `undefined` and Collapse did nothing at all in the
+        // Preview sheet — the same class of drift 024 fixed everywhere else by
+        // reaching for the player rather than for its video ID.
+        onToggleCollapse: mobile ? () => this.toggleCollapse(entry) : undefined,
         // Reads `activate` at call time, not now: the lazy loader is attached
         // further down, after this player exists.
         ensureLoaded: mobile ? () => entry?.activate?.() ?? Promise.resolve() : undefined,
@@ -4010,8 +4015,7 @@ export default class YtFreePlugin extends Plugin {
    * and any audio are all exactly where they were, and coming back is instant.
    * Collapsing by hand also pauses — you are putting the video away.
    */
-  private toggleCollapse(videoId: string): void {
-    const entry = this.players.get(videoId);
+  private toggleCollapse(entry: PlayerEntry | null): void {
     if (!entry) return;
     if (entry.collapsed) {
       this.setCollapsed(entry, null);

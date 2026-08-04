@@ -2391,6 +2391,40 @@ body.ytfree-immersive-open {
   border-radius: 0;
 }
 
+/*
+ * Collapsed, in the Preview sheet.
+ *
+ * The same deal the docked player makes — the picture folds away and the player
+ * does not, so the position, the buffer and the audio all survive it — but the
+ * rules that made it happen were written against `.ytfree-docked` alone, so
+ * even once Collapse was wired up (it was reaching for a note player that a
+ * preview never has) nothing would have moved.
+ *
+ * It matters more here than in a note. The sheet's picture is `sticky`, so
+ * while it is showing it is 202pt of a phone screen that never scrolls away;
+ * folding it is what gives the description the sheet. The control bar stays,
+ * and Collapse turns into Show video, so the way back is the same button.
+ */
+.ytfree-preview-wrapper.is-collapsed .ytfree-media,
+.ytfree-preview-wrapper.is-collapsed .ytfree-stage {
+  aspect-ratio: auto;
+  height: 0;
+}
+
+/* Clipped inside a zero-height box, not hidden: `display: none` on a playing
+   `<video>` stops playback on iOS WebKit, which is the one thing collapsing
+   must not do. The height is the one the picture had — the sheet is
+   `min(640px, 92vw)` wide, so 16:9 of that. */
+.ytfree-preview-wrapper.is-collapsed .ytfree-video,
+.ytfree-preview-wrapper.is-collapsed .ytfree-poster,
+.ytfree-preview-wrapper.is-collapsed .ytfree-fallback {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: min(360px, 51.75vw);
+}
+
 /* The one message this box ever carries instead of a video. Same height as the
    player it replaces, so a failure looks like a player that will not play
    rather than like a sheet that lost a section. */
