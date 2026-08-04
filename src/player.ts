@@ -1699,6 +1699,39 @@ export class YtFreePlayer {
   }
 
   /**
+   * Does this video own the Picture-in-Picture window right now?
+   *
+   * Both engines, for the same reason `togglePip` needs both: iOS implements
+   * none of the standard API on a `<video>`, and answers with WebKit's
+   * presentation mode instead. Asked at the moment a Preview sheet closes, to
+   * decide whether closing it should also stop the video — see `src/preview.ts`.
+   */
+  inPictureInPicture(): boolean {
+    if (document.pictureInPictureElement === this.video) return true;
+    const el = this.video as HTMLVideoElement & { webkitPresentationMode?: string };
+    return el.webkitPresentationMode === "picture-in-picture";
+  }
+
+  /**
+   * Call `done` once this video has left Picture-in-Picture.
+   *
+   * The signal that a kept-alive preview is finished with. Both engines again,
+   * and both are checked rather than trusted: `webkitpresentationmodechanged`
+   * fires on the way *into* PiP and on the way into fullscreen as well, so the
+   * mode is read back before anything is torn down.
+   */
+  onPictureInPictureEnd(done: () => void): void {
+    const fire = (): void => {
+      if (this.inPictureInPicture()) return;
+      this.video.removeEventListener("leavepictureinpicture", fire);
+      this.video.removeEventListener("webkitpresentationmodechanged", fire);
+      done();
+    };
+    this.video.addEventListener("leavepictureinpicture", fire);
+    this.video.addEventListener("webkitpresentationmodechanged", fire);
+  }
+
+  /**
    * Fullscreen, on both engines.
    *
    * An iPhone has no element-level Fullscreen API at all — only the video's own

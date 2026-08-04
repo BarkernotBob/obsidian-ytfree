@@ -2617,6 +2617,31 @@ body.ytfree-immersive-open {
   padding-top: 1em;
 }
 
+/*
+ * Where a preview plays on after its sheet has closed.
+ *
+ * Picture-in-Picture is a system window over a `<video>` that is still in the
+ * page: destroy the element and the window goes with it, which is why closing
+ * the sheet used to end PiP. The player's shell is re-parented here instead.
+ *
+ * A one-pixel clipped box, and every one of those words is load-bearing.
+ * `display: none` and `visibility: hidden` both stop playback on iOS WebKit,
+ * and a zero-sized element is treated as not rendered by some engines — so it
+ * keeps a pixel, clips the rest, and takes no pointer events. Nothing here is
+ * ever visible: what the reader sees is the floating window iOS is drawing.
+ */
+.ytfree-preview-keepalive {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0.01;
+  pointer-events: none;
+  z-index: -1;
+}
+
 /* ------------------------------------------------- preview, on a phone ---
  *
  * One scroller, not three.
