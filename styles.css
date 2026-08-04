@@ -3174,6 +3174,22 @@ body.ytfree-immersive-open {
   min-width: 7.5em;
 }
 
+/* Reserved line: it reports on the webhook and then on the last test, which
+   are three different lengths of sentence. Two lines of room and a fixed
+   height, so pressing Send test never moves the rows under it. */
+.ytfree-notify-status {
+  min-height: 3.2em;
+  line-height: 1.6em;
+  margin-top: 0.4em;
+  color: var(--text-accent);
+}
+
+/* Its label does not change, but a fixed width keeps it aligned with the other
+   buttons in the pane rather than sizing itself to two words. */
+.ytfree-notify-button {
+  min-width: 7.5em;
+}
+
 /* Already seen elsewhere — dimmed, never hidden outside the New filter. */
 .ytfree-hub-card.is-watched .ytfree-hub-thumb {
   opacity: 0.55;

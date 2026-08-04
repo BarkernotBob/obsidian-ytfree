@@ -38,3 +38,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [033](033-search-clarity.md) | A button that says Search, and a screen that looks like one | Built 2026-08-03 — awaiting manual test |
 | [034](034-state-that-disagrees-between-devices.md) | State that disagrees between devices: removals that did not cross, and Kept losing watched videos | Built 2026-08-03 — awaiting manual test |
 | [035](035-follow-unfold-cursor-progress.md) | The note's transcript follows the video, "this moment" unfolds first, Notes returns to the cursor, and a progress line that reaches both corners | Built 2026-08-03 — awaiting manual test |
+| [036](036-notify-when-a-video-lands.md) | A notification when a new video lands in the Inbox — one webhook URL, one push per check | Built 2026-08-03 ([docs/V1-SCOPE-NOTIFICATIONS.md](../docs/V1-SCOPE-NOTIFICATIONS.md)) — awaiting manual test. **Needs a webhook URL before it does anything** — see the issue. |

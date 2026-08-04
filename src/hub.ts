@@ -60,6 +60,16 @@ import {
   planRefresh,
   planSave,
 } from "./state-sync";
+import {
+  buildPayload,
+  notificationsReady,
+  pickNotifiable,
+  rememberNotified,
+  sendNotification,
+  testPayload,
+  unclaimed,
+} from "./notify";
+import type { NotificationSettings, Post, SendOutcome } from "./notify";
 import { NOTES_HEADING } from "./sections";
 import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
@@ -141,7 +151,31 @@ export interface HubSettings {
    * gets in a note.
    */
   transcriptIntervalSeconds: number;
+  /** Where a poll announces new Inbox videos, and whether it does at all. */
+  notifications: NotificationSettings;
 }
+
+/**
+ * The webhook POST, through Obsidian's own request layer.
+ *
+ * `requestUrl` rather than `fetch` for the reason everything else here uses it:
+ * it is not subject to the origin checks a renderer's `fetch` is, so an
+ * arbitrary user-supplied URL works on the phone as well as the Mac.
+ *
+ * `throw: true` on purpose — a 4xx or 5xx from the webhook is a failure worth
+ * reporting to the test button, and `sendNotification` is what turns any throw
+ * from here into a logged line rather than a broken poll.
+ */
+const postWebhook: Post = async ({ url, body, contentType, headers }) => {
+  await requestUrl({
+    url,
+    method: "POST",
+    contentType,
+    headers: { ...headers, "Content-Type": contentType },
+    body,
+    throw: true,
+  });
+};
 
 /**
  * How many durations one poll will go and fetch.
@@ -202,7 +236,7 @@ export class SubscriptionsStore {
   polling = false;
   /** Bumped on every change so open views can redraw — see `ChangeReason`. */
   private listeners = new Set<(reason: ChangeReason) => void>();
-  private saving: Promise<void> = Promise.resolve();
+  private saving: Promise<SubscriptionsState | null> = Promise.resolve(null);
   /**
    * mtime of the last state file we *successfully read* or wrote.
    *
@@ -296,23 +330,35 @@ export class SubscriptionsStore {
    *
    * Serialized: a poll and a click can both finish inside the same tick, and
    * two merges must not interleave with each other's reads.
+   *
+   * Returns the copy that was on disk *before* the merge, or null if there was
+   * none. That is the only place a caller can learn what the other device had
+   * decided while it was busy — which is how a poll knows whether the Mac has
+   * already sent the notification it was about to send. See `notifyNewItems`.
    */
-  save(): Promise<void> {
+  save(): Promise<SubscriptionsState | null> {
     this.saving = this.saving
       .then(async () => {
-        const plan = planSave(this.state, await this.readDiskForSave());
+        const read = await this.readDiskForSave();
+        const plan = planSave(this.state, read);
         if (!plan.write) {
           console.error("YT Free: state file unreadable, not overwriting it. Will retry.");
           // Nudge the next tick to try again rather than waiting on a click.
           this.scheduleRetry();
-          return;
+          // Null, not the unread file: a caller that claims work on the strength
+          // of a read that never happened is exactly the race 036 avoids.
+          return null;
         }
         this.state = plan.state;
         await this.app.vault.adapter.write(this.statePath, JSON.stringify(this.state));
         await this.noteDiskTime();
         if (plan.merged) this.emit("merge");
+        return read.kind === "state" ? read.state : null;
       })
-      .catch((err) => console.error("YT Free: could not write subscriptions state.", err));
+      .catch((err) => {
+        console.error("YT Free: could not write subscriptions state.", err);
+        return null;
+      });
     return this.saving;
   }
 
@@ -411,6 +457,11 @@ export class SubscriptionsStore {
     this.emit();
 
     const now = new Date();
+    // A device that has never polled seeds its notified list without sending:
+    // a fresh install importing three hundred channels should not announce
+    // itself with a push about fifteen hundred videos it just discovered.
+    const seeding = this.state.lastPolledAt === null;
+    const added: HubItem[] = [];
     try {
       await mapLimit(this.state.channels, 5, async (channel) => {
         try {
@@ -433,6 +484,7 @@ export class SubscriptionsStore {
             this.state.deletedVideos ?? [],
           );
           this.state.items = merged.items;
+          added.push(...merged.added);
         } catch (err) {
           // Counted, and shown only after several polls running have failed. A
           // channel that is genuinely gone still surfaces; a bad afternoon at
@@ -465,8 +517,55 @@ export class SubscriptionsStore {
     } finally {
       this.polling = false;
       this.emit();
-      await this.save();
+      // The claim and the send both live here, after the save, so that a feed
+      // that threw halfway through still writes what it did get — and so that
+      // nothing about a notification can decide whether a poll succeeded.
+      await this.notifyNewItems(added, seeding);
     }
+  }
+
+  /**
+   * Tell whatever is on the other end of the webhook that the Inbox moved.
+   *
+   * Order matters and is the whole dedupe story. The claim is written into
+   * `notifiedVideos` *before* the save, and the save returns the copy that was
+   * on disk before it merged — so anything the other device had already claimed
+   * while this one was fetching feeds is dropped here rather than sent twice.
+   * The rules are pure and live in `notify.ts`; this is only the plumbing.
+   *
+   * Nothing in here can fail the poll. `sendNotification` resolves on every
+   * path, and the two awaits around it are the ones the poll was making anyway.
+   */
+  private async notifyNewItems(added: HubItem[], seeding: boolean): Promise<void> {
+    const settings = this.settings();
+    const candidates = added.length
+      ? pickNotifiable(added, this.state.items, this.state.notifiedVideos ?? [], {
+          showWatched: settings.showWatched,
+          includeShorts: settings.includeShorts,
+        })
+      : [];
+
+    if (candidates.length) {
+      this.state.notifiedVideos = rememberNotified(
+        this.state.notifiedVideos ?? [],
+        candidates.map((item) => item.videoId),
+        new Date(),
+      );
+    }
+
+    const disk = await this.save();
+
+    if (seeding || !candidates.length || !notificationsReady(settings.notifications)) return;
+
+    const mine = unclaimed(candidates, disk?.notifiedVideos ?? []);
+    if (!mine.length) return;
+
+    await sendNotification(settings.notifications, buildPayload(mine, new Date()), postWebhook);
+  }
+
+  /** Prove a webhook URL without waiting for a channel to publish something. */
+  async sendTestNotification(): Promise<SendOutcome> {
+    return sendNotification(this.settings().notifications, testPayload(new Date()), postWebhook);
   }
 
   /**
