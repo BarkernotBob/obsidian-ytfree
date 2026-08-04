@@ -1,6 +1,42 @@
 # HANDOFF
 
-## Status — 2026-07-31: four transcript-navigation fixes
+## Status — 2026-08-03: a notification when a video lands in the Inbox (036)
+
+**459 unit tests pass, `tsc` clean, build clean. Not installed to the vault**
+(four agents were building in parallel; `install.sh` was deliberately not run).
+Next: install, then **set up a webhook URL** — until one exists this feature
+does nothing at all, by design. The steps for ntfy.sh and for Apple Shortcuts
+are in [issue 036](issues/036-notify-when-a-video-lands.md) under *Setting this
+up*.
+
+- **Obsidian on iOS cannot raise an iOS notification**, so the device that polls
+  POSTs to a URL you supply and whatever is on the other end does the pushing.
+  A plain webhook rather than a provider integration: ntfy.sh, Pushover, an
+  Apple Shortcuts automation and anything else all take a POST, and changing
+  your mind later is a text field instead of a code change. Scope and the
+  rejected alternative are in [docs/V1-SCOPE-NOTIFICATIONS.md](docs/V1-SCOPE-NOTIFICATIONS.md).
+- **One message per check, never one per video.** Fifteen new videos is one
+  POST — one title if there is one video, a short list for two or three, a count
+  and the channel names for a burst.
+- **A video is announced once, on any device.** `notifiedVideos` in
+  `subscriptions.json`, unioned by `mergeStates` like `deletedVideos`. The
+  cross-device half is the interesting part: `save()` now returns the copy that
+  was on disk *before* it merged, so a device can see that the other one already
+  claimed the video while it was fetching feeds and stay quiet. `unclaimed` in
+  `notify.ts` is that check, and it is tested.
+- **Nothing about a notification can fail a poll.** `sendNotification` resolves
+  on every path — a dead host or a 500 is one console line and the Inbox fills
+  as normal.
+- **Off by default in both senses**: no URL, and the send toggle off. Empty URL
+  means no outbound request of any kind ever happens.
+- New: `src/notify.ts` (all the rules, pure, no Obsidian import) and
+  `tests/notify.test.ts` (36 tests, written as scenarios). The wire format was
+  proved against a **local stub server**; nothing was POSTed to the internet.
+- Settings → *New-video notifications*: URL, on/off, JSON-or-Text, and a **Send
+  test** button. Text format exists for ntfy.sh, which renders the request body
+  verbatim on the lock screen.
+
+## Previous — 2026-07-31: four transcript-navigation fixes
 
 **425 unit tests pass, `tsc` clean, build clean, installed to the vault.** Not
 yet used on a screen. Next: reload Obsidian, set Section length to 20, re-fetch

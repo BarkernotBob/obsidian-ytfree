@@ -34,3 +34,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [028](028-transcript-in-preview-and-jumps.md) | The transcript in Preview, and a jump from a peak to it | Built 2026-07-31 — awaiting manual test |
 | [029](029-share-a-video.md) | Share a video's URL, and share it at the current timestamp | Built 2026-07-31 — awaiting manual test |
 | [030](030-preview-transcript-share-and-moment.md) | Preview's transcript at note size, autoscroll you can stop, a share icon that isn't Download, and "this moment" | Built 2026-07-31 — awaiting manual test |
+| [036](036-notify-when-a-video-lands.md) | A notification when a new video lands in the Inbox — one webhook URL, one push per check | Built 2026-08-03 ([docs/V1-SCOPE-NOTIFICATIONS.md](../docs/V1-SCOPE-NOTIFICATIONS.md)) — awaiting manual test. **Needs a webhook URL before it does anything** — see the issue. |
