@@ -3164,6 +3164,11 @@ export default class YtFreePlugin extends Plugin {
         // Phones only. A desktop has a mouse on the native scrubber and no host
         // gesture to take the movement away in the first place.
         dragSeek: mobile,
+        // Phones only, and a phone rather than any mobile: a tablet's Preview
+        // modal is 640px wide, so its picture is 360pt tall and the popover has
+        // room above the bar. A phone's is 202pt and the popover does not — see
+        // `src/panel.ts`.
+        panelSheet: Platform.isPhone,
         onToggleCollapse: mobile ? () => this.toggleCollapse(videoId) : undefined,
         // Reads `activate` at call time, not now: the lazy loader is attached
         // further down, after this player exists.

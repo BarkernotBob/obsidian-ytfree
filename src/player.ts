@@ -2,6 +2,7 @@ import Hls from "hls.js";
 import { setIcon } from "obsidian";
 import { formatTimestamp } from "./format.ts";
 import { SHARE_ICON } from "./icon.ts";
+import { panelPlacement } from "./panel.ts";
 import type { SectionName } from "./sections.ts";
 import { compressibleWindows, moveFor, secondsSaved, secondsSkipped } from "./silence.ts";
 import type { PlaybackWindow, SilenceSource } from "./silence.ts";
@@ -98,6 +99,12 @@ export interface PlayerOptions {
   onJumpToMoment?: (seconds: number) => void;
   /** The pop-out of per-video controls. Absent, there is no pop-out button. */
   quick?: QuickPanelOptions;
+  /**
+   * The pop-out is a sheet at the foot of the screen rather than a popover over
+   * the picture. Phones only — see `src/panel.ts` for why a popover cannot be
+   * made to fit inside the Preview sheet at any height.
+   */
+  panelSheet?: boolean;
   /**
    * Dragging left and right across the picture seeks. Mobile only: on a phone
    * a horizontal swipe belongs to the host app, and over a video it should not.
@@ -267,6 +274,13 @@ export class YtFreePlayer {
   private panel: HTMLElement | null = null;
   private panelBtn: HTMLButtonElement | null = null;
   private panelOpen = false;
+  /**
+   * The tap-catcher behind the sheet. Built with the panel and never inserted
+   * or removed on a click — only its `visibility` changes, so a menu opening
+   * cannot move anything, and a tap meant for "close the menu" cannot fall
+   * through to the modal underneath and close that too.
+   */
+  private panelScrim: HTMLElement | null = null;
   private smartSwitch: HTMLButtonElement | null = null;
   private pinBtn: HTMLButtonElement | null = null;
   /** The plugin's own fullscreen — see `setImmersive`. */
@@ -1000,10 +1014,32 @@ export class YtFreePlayer {
    * geometry whether it is open or shut.
    */
   private buildQuickPanel(bar: HTMLElement, quick: QuickPanelOptions): void {
+    // The scrim first, so it is behind the panel in paint order without either
+    // needing a z-index against the other. Sheet mode only: a popover is small
+    // and beside its own button, and the desktop's tap-outside already works.
+    if (this.options.panelSheet) {
+      const scrim = bar.createDiv({ cls: "ytfree-panel-scrim" });
+      this.panelScrim = scrim;
+      // On `click`, not `pointerdown`. The scrim's whole job is to be the thing
+      // the tap lands on, and a scrim that hides itself on pointerdown is gone
+      // by the time the browser picks a click target — the tap then falls
+      // through to the modal's own background and closes the Preview as well.
+      scrim.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.togglePanel(false);
+      });
+      scrim.addEventListener("pointerdown", (event) => event.stopPropagation());
+    }
+
     const panel = bar.createDiv({
       cls: "ytfree-panel",
       attr: { role: "dialog", "aria-label": "This video's settings" },
     });
+    // Decided once, at construction: the shape of the pop-out is a property of
+    // the device, not of the click that opens it, and a class added on a click
+    // is a layout change on a click.
+    if (this.options.panelSheet) panel.addClass("ytfree-panel-sheet");
     this.panel = panel;
 
     const row = (label: string): HTMLElement => {
@@ -1174,6 +1210,9 @@ export class YtFreePlayer {
       if (!this.panelOpen) return;
       const target = event.target as Node | null;
       if (target && (panel.contains(target) || this.panelBtn?.contains(target))) return;
+      // The scrim closes itself, on `click`, and it has to stay on screen until
+      // then — see above. Closing it here would defeat the point of having it.
+      if (target && this.panelScrim?.contains(target)) return;
       this.togglePanel(false);
     };
     this.onDocKey = (event: KeyboardEvent) => {
@@ -1192,14 +1231,23 @@ export class YtFreePlayer {
     if (!panel) return;
     this.panelOpen = open ?? !this.panelOpen;
     if (this.panelOpen) {
-      // The panel opens upwards from the control bar, and it has grown: seven
-      // rows on a phone whose player starts a couple of hundred points down the
+      // A popover opens upwards from the control bar and has grown: seven rows
+      // on a phone whose player starts a couple of hundred points down the
       // screen would run off the top of it. Capped at the room there actually
       // is, measured at the moment it opens — the bar has a different height in
       // portrait, in landscape and in the immersive view. It scrolls past that.
-      const barTop = (panel.parentElement ?? this.container).getBoundingClientRect().top;
-      panel.style.maxHeight = `${Math.max(160, Math.round(barTop) - 12)}px`;
+      //
+      // A sheet is measured against nothing: it is fixed to the foot of the
+      // screen and the stylesheet caps it. The inline height is cleared rather
+      // than left behind, or a player that started life as a popover would
+      // carry that cap into the sheet.
+      const placement = panelPlacement({
+        sheet: Boolean(this.options.panelSheet),
+        barTop: (panel.parentElement ?? this.container).getBoundingClientRect().top,
+      });
+      panel.style.maxHeight = placement.mode === "sheet" ? "" : `${placement.maxHeight}px`;
     }
+    this.panelScrim?.toggleClass("is-open", this.panelOpen);
     panel.toggleClass("is-open", this.panelOpen);
     this.panelBtn?.toggleClass("is-active", this.panelOpen);
     this.panelBtn?.setAttribute("aria-expanded", String(this.panelOpen));
