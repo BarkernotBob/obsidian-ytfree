@@ -1,6 +1,49 @@
 # HANDOFF
 
-## Status — 2026-08-03: the Preview window on a phone (032)
+## Status — 2026-08-03: five branches merged (032–036)
+
+**512 unit tests pass, `tsc` clean, build clean. Not installed to the vault.**
+Next: `./install.sh`, reload Obsidian, then work the manual tests in 032–036.
+
+Five issues were built in parallel worktrees and merged into `main` in numeric
+order. Each branch's own write-up is kept below, demoted to *Previous*; this
+section records only what the merge itself decided.
+
+- **032** the Preview window on a phone — pop-out that fits, no sideways
+  scroll, a Collapse that works, one scroller, PiP that survives closing.
+  *PiP is unverified on a device: iOS implements none of the standard PiP API
+  on a `<video>`, so step 13 of 032's manual test is the real gate.*
+- **033** a search control that says Search, and a screen that looks like one.
+- **034** state that disagrees between devices. The merge was never the bug —
+  the plumbing around it was, three ways.
+- **035** the note's transcript follows the video, "this moment" unfolds first,
+  Notes returns to the cursor, a progress line that reaches both corners.
+- **036** a notification when a video lands in the Inbox. **Does nothing until a
+  webhook URL is set** — see the issue.
+
+**The one merge decision worth knowing.** 034 and 036 both rewrote
+`SubscriptionsStore`, and their contracts pull opposite ways: 034 says a save
+must *never* write over a file it could not read, 036 needs `save()` to hand
+back the pre-merge disk copy so a poll can tell whether the other device
+already claimed the notification. Both now hold. A refused save returns `null`
+rather than the unread file — a caller that claimed work on the strength of a
+read that never happened is precisely the race 036 exists to avoid. `listeners`
+keeps 034's `ChangeReason`, and the emit stays conditional on `plan.merged`
+rather than 036's "emit whenever there was a disk copy", because not redrawing
+needlessly is 034's whole point.
+
+`src/main.ts`'s `onunload` took both teardown steps — the pending-delete timers
+from 034 and `stopFollowing()` from 035 — which are independent.
+
+**Two loose threads, neither fixed:**
+- `src/progress-store.ts` still whole-file overwrites `progress.json` with no
+  merge. Same family of bug as 014, for watch positions and watched stamps. It
+  will bite the same way eventually.
+- 018 (what Watch Later is for) is still undecided, and a separate design
+  conversation is open about the *vault's* Watch Later — the home-page query,
+  not YouTube's playlist. Nothing here depends on either.
+
+## Previous — 2026-08-03: the Preview window on a phone (032)
 
 **432 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
 three other agents were building in parallel, so `./install.sh` was deliberately
@@ -45,7 +88,7 @@ never run on a device, and iOS implements none of the standard PiP API on a
 - `src/panel.ts` and `src/preview.ts` hold the two decisions as pure functions
   (9 new tests). `tools/preview-sheet-harness.mjs` measures the layout claims in
   headless Chromium at 390×844 — it is not part of `npm test`.
-## Status — 2026-08-03: the search button says Search, and the screen looks like one (033)
+## Previous — 2026-08-03: the search button says Search, and the screen looks like one (033)
 
 **440 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
 built in a worktree alongside three other agents, so the branch
@@ -73,7 +116,7 @@ then run the manual test in [033](issues/033-search-clarity.md).
   control under 40pt — which is fixed.
 - Left alone on purpose: `buildCard` (023's, and other agents are in it), the
   hub's own "Filter these videos" box, and search itself. No new capability.
-## Status — 2026-08-03: state that disagrees between devices (034)
+## Previous — 2026-08-03: state that disagrees between devices (034)
 
 **435 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
 other agents were working in parallel, so `./install.sh` was deliberately not
@@ -120,7 +163,7 @@ demand — six of its twelve tests fail against the old behaviour. **No new
 fields in `subscriptions.json`, so no migration.**
 
 Next: merge the branch, install, and run 034's manual test on both devices.
-## Status — 2026-08-03: the transcript follows in the note (035)
+## Previous — 2026-08-03: the transcript follows in the note (035)
 
 **438 unit tests pass, `tsc` clean, build clean.** Not installed to the vault
 and not used on a screen — other agents were building in parallel, so the
@@ -146,7 +189,7 @@ install was left to whoever merges. Next: the manual test in
 - **The progress line runs the full width of the picture.** 021's 16px inset is
   now 0 at both ends; `--ytfree-progress-inset` still overrides. Verified at
   375/390/430/700 and in immersive landscape with `tools/controls-harness.mjs`.
-## Status — 2026-08-03: a notification when a video lands in the Inbox (036)
+## Previous — 2026-08-03: a notification when a video lands in the Inbox (036)
 
 **459 unit tests pass, `tsc` clean, build clean. Not installed to the vault**
 (four agents were building in parallel; `install.sh` was deliberately not run).
