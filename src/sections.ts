@@ -94,6 +94,73 @@ export function foldableRanges(content: string, headings: string[][]): SectionRa
 }
 
 /**
+ * Drop the folds that would hide `line`, keeping every other one.
+ *
+ * What a jump into a section has to do before it scrolls: land on a folded
+ * heading and the paragraph you asked for is not on screen at all, which reads
+ * as a link that did nothing. A fold whose heading *is* the target is left
+ * alone — that is the heading itself, and it is visible either way.
+ */
+export function foldsRevealing(folds: SectionRange[], line: number): SectionRange[] {
+  return folds.filter((fold) => line <= fold.from || line > fold.to);
+}
+
+/**
+ * The heading `line` sits under, or null.
+ *
+ * Scans upwards, so the answer costs a few lines inside a section you are
+ * writing in and stops rather than reading a whole transcript backwards.
+ * `maxScan` is that stop: a cursor a thousand lines below its heading is in the
+ * middle of a transcript, and "which section is this?" is not a question worth
+ * a full-document scan on every keystroke to answer.
+ */
+export function enclosingHeading(
+  lineAt: (line: number) => string | undefined,
+  from: number,
+  maxScan = 400,
+): string | null {
+  const stop = Math.max(0, from - maxScan);
+  for (let i = from; i >= stop; i--) {
+    const text = lineAt(i);
+    if (text === undefined) continue;
+    if (HEADING_RE.test(text)) return text.trim();
+  }
+  return null;
+}
+
+/** A place in a note, the way an editor counts them. */
+export interface NotePosition {
+  line: number;
+  ch: number;
+}
+
+/**
+ * Where the cursor goes when the Notes button is pressed.
+ *
+ * `remembered` — the last place typing happened under this note's `# Notes` —
+ * when it is still inside the section, and the line under the heading when it
+ * is not. Coming back to a note should put you at the end of the sentence you
+ * left, not at the top of a page of writing you then have to scroll through.
+ *
+ * The column is clamped to the line it lands on: notes are edited between
+ * visits, and a `ch` past the end of a shortened line is a cursor Obsidian
+ * puts somewhere of its own choosing.
+ */
+export function notesCursorTarget(
+  content: string,
+  headingLine: number,
+  remembered: NotePosition | null,
+): NotePosition {
+  const lines = content.split("\n");
+  const end = sectionEnd(content, headingLine);
+  const start = { line: Math.min(headingLine + 1, lines.length - 1), ch: 0 };
+  if (!remembered) return start;
+  if (remembered.line <= headingLine || remembered.line > end) return start;
+  const text = lines[remembered.line] ?? "";
+  return { line: remembered.line, ch: Math.min(Math.max(0, remembered.ch), text.length) };
+}
+
+/**
  * Rewrite a note's legacy headings to the level-one names.
  *
  * Only ever run from the command of the same name — see `main.ts`. It touches
