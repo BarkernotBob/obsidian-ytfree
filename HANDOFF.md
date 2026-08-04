@@ -73,6 +73,53 @@ then run the manual test in [033](issues/033-search-clarity.md).
   control under 40pt — which is fixed.
 - Left alone on purpose: `buildCard` (023's, and other agents are in it), the
   hub's own "Filter these videos" box, and search itself. No new capability.
+## Status — 2026-08-03: state that disagrees between devices (034)
+
+**435 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
+other agents were working in parallel, so `./install.sh` was deliberately not
+run. Branch `034-state-sync`. The manual test in
+[034](issues/034-state-that-disagrees-between-devices.md) needs both the Mac and
+the iPhone.
+
+The merge was never the bug. `mergeStates` has been right since 014; what was
+wrong is everything around it.
+
+- **A save that could not read the state file wrote over it anyway.**
+  `readDisk` answered `null` for both "no file" and "unreadable file", so a
+  half-synced copy — the normal state of a file in iCloud at the exact moment
+  the other device has just saved to it — was treated as permission to
+  overwrite. That is 014's original bug with one extra condition on it. A save
+  now retries the read briefly and then, if it still cannot read the file,
+  writes nothing and retries in 20s. The change stays in memory; nothing is
+  lost.
+- **A failed read still counted as having read the file.** `refreshFromDisk`
+  stamped the file's mtime *before* reading it, so one blip marked that version
+  permanently seen and the device stayed stale indefinitely. The watermark now
+  moves only after a read that answered.
+- **The hub merged and did not redraw.** `onChange` redrew the status line, the
+  channels and the menu label, never the video list — deliberately, because
+  redrawing under a finger that just clicked breaks the no-reflow rule. But a
+  change from the *other* device has no card to swap. Listeners are now told
+  *why* (`ChangeReason`), and a `"merge"` rebuilds the list, keeping the scroll
+  depth. This is the whole of "I removed it on one and the other never
+  changed".
+- **The hub re-reads the file every 20s while open**, and the sync button
+  refreshes from disk before it talks to YouTube.
+- **Kept stopped losing watched videos.** Any event Obsidian called a note
+  deletion wrote a tombstone both devices obey. The handler was registered at
+  `onload` with no check the file was gone, so it fired for notes that had not
+  finished downloading at startup, and for notes the plugin's own tidy sweep
+  trashed — and being watched is exactly what makes a note eligible for
+  tidying. It now waits for layout, skips its own sweep (per 018 the item stays
+  Kept with a dead `notePath`), and confirms the path is still empty five
+  seconds later. A deliberate delete still removes the video: 026 holds.
+
+The decisions are pure and live in `src/state-sync.ts`, so
+`tests/state-sync.test.ts` can run two devices against a disk that fails on
+demand — six of its twelve tests fail against the old behaviour. **No new
+fields in `subscriptions.json`, so no migration.**
+
+Next: merge the branch, install, and run 034's manual test on both devices.
 
 ## Previous — 2026-07-31: four transcript-navigation fixes
 
