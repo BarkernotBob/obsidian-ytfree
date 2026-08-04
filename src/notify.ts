@@ -155,6 +155,27 @@ export function mergeNotified(
     .slice(-limit);
 }
 
+/**
+ * Of the videos this device claimed, the ones the other device had not.
+ *
+ * `diskNotified` is the claim list as it stood on disk *before* this device's
+ * save merged into it — which `SubscriptionsStore.save` hands back for exactly
+ * this purpose. Both devices poll the same feeds off the same iCloud file, so
+ * without this the Mac and the phone would each send their own push for the
+ * same video within a minute of each other.
+ *
+ * The remaining race is the window between one device's read and its write.
+ * It is serialized per device and measured in milliseconds, and closing it
+ * properly needs a server rather than a shared file.
+ */
+export function unclaimed(
+  candidates: readonly HubItem[],
+  diskNotified: ReadonlyArray<{ id: string; at: string }>,
+): HubItem[] {
+  const claimed = new Set(diskNotified.map((entry) => entry.id));
+  return candidates.filter((item) => !claimed.has(item.videoId));
+}
+
 /** "1 new video", "6 new videos" — the notification's own headline. */
 export function notificationTitle(count: number): string {
   return `YT Free: ${count} new video${count === 1 ? "" : "s"}`;

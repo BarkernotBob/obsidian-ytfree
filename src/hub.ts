@@ -61,6 +61,7 @@ import {
   rememberNotified,
   sendNotification,
   testPayload,
+  unclaimed,
 } from "./notify";
 import type { NotificationSettings, Post, SendOutcome } from "./notify";
 import { NOTES_HEADING } from "./sections";
@@ -441,8 +442,7 @@ export class SubscriptionsStore {
 
     if (seeding || !candidates.length || !notificationsReady(settings.notifications)) return;
 
-    const claimed = new Set((disk?.notifiedVideos ?? []).map((entry) => entry.id));
-    const mine = candidates.filter((item) => !claimed.has(item.videoId));
+    const mine = unclaimed(candidates, disk?.notifiedVideos ?? []);
     if (!mine.length) return;
 
     await sendNotification(settings.notifications, buildPayload(mine, new Date()), postWebhook);
