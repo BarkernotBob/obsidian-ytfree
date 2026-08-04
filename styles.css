@@ -2341,6 +2341,14 @@ body.ytfree-immersive-open {
   flex-direction: column;
   max-height: min(82vh, calc(100vh - 8em));
   overflow-y: auto;
+  /*
+   * Explicit, because it is not the default it looks like. A box with
+   * `overflow-y: auto` and `overflow-x: visible` computes the x axis to `auto`
+   * too — the pair cannot disagree — so every scroller in this sheet was
+   * silently a sideways scroller as well, waiting for one long word to make it
+   * real. Descriptions are full of them: bare URLs, hashtag runs, `====` rules.
+   */
+  overflow-x: hidden;
 }
 
 .ytfree-preview-modal .ytfree-preview-player {
@@ -2401,6 +2409,9 @@ body.ytfree-immersive-open {
   font-size: var(--font-ui-large);
   line-height: 1.3;
   color: var(--text-normal);
+  /* A title can be one 60-character word — a URL, a hash, a German compound.
+     It wraps rather than widening the sheet. */
+  overflow-wrap: anywhere;
 }
 
 .ytfree-preview-facts {
@@ -2416,6 +2427,16 @@ body.ytfree-immersive-open {
 .ytfree-preview-description {
   max-height: 22vh;
   overflow-y: auto;
+  /*
+   * Never sideways. Two declarations because they answer two different
+   * questions: `overflow-wrap` breaks the 90-character playlist URL that a
+   * description opens with so it *fits*, and `overflow-x` is the backstop for
+   * whatever it cannot break — `pre-wrap` preserves the source's own runs of
+   * `─────` and box-drawing rules, and those are one token to the line breaker.
+   * A description that scrolls left and right is one you read a third of.
+   */
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
   margin-top: 0.8em;
   font-size: var(--font-ui-small);
   line-height: 1.5;
@@ -2486,6 +2507,7 @@ body.ytfree-immersive-open {
 .ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
   max-height: 30vh;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-bottom: 0.4em;
 }
 
@@ -2534,6 +2556,9 @@ body.ytfree-immersive-open {
   min-width: 0;
   color: var(--text-muted);
   white-space: normal;
+  /* Auto-captions run URLs and hyphenless compounds together. `min-width: 0`
+     lets the row shrink; this is what lets the *word* shrink with it. */
+  overflow-wrap: anywhere;
 }
 
 /* The line being spoken. A background, not a weight — bold would reflow it. */
@@ -2556,6 +2581,46 @@ body.ytfree-immersive-open {
   grid-auto-rows: 40px;
   justify-content: stretch;
   padding-top: 1em;
+}
+
+/* ------------------------------------------------- preview, on a phone ---
+ *
+ * One scroller, not three.
+ *
+ * On a laptop the description is a 22vh box with its own scrollbar and the
+ * sheet around it barely scrolls at all. On a phone that same box is about
+ * 160pt in the middle of the screen: a finger that lands on the description
+ * scrolls the *description*, so the title above it never moves and a 3,000
+ * character description is read through a letterbox — which is exactly what
+ * "the note header with the title doesn't scroll with the text" describes.
+ *
+ * So on a phone the description is not a scroller. The sheet is the scroller,
+ * the title and the facts scroll away under the picture like the first
+ * paragraph of anything else, and the description gets the whole height.
+ *
+ * The four buttons were what the 22vh cap was protecting — they must stay
+ * reachable without scrolling a page of links first — so they stop being the
+ * last thing in the flow and become the floor of the sheet instead. Sticky,
+ * with a fixed height they already had, so nothing about them moves when the
+ * text behind them does.
+ */
+.is-phone .ytfree-preview-description {
+  max-height: none;
+  overflow: visible;
+}
+
+.is-phone .ytfree-preview-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  /* Opaque, and its own padding, or the description scrolls through the row. */
+  padding-bottom: 0.4em;
+  background: var(--background-primary);
+}
+
+/* The picture is the one thing that stays. The title is not. */
+.is-phone .ytfree-preview-title {
+  font-size: var(--font-ui-medium);
 }
 
 /* ---------------------------------------------------------------- account */
