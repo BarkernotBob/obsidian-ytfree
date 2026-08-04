@@ -12,6 +12,7 @@
  */
 
 import { escapeDescription, linkifyTimestamps } from "./description.ts";
+import { mergeNotified } from "./notify.ts";
 import { DESCRIPTION_HEADING, NOTES_HEADING } from "./sections.ts";
 import type { SearchResult } from "./search.ts";
 
@@ -122,6 +123,17 @@ export interface SubscriptionsState {
    * you into search later.
    */
   deletedVideos?: Array<{ id: string; at: string }>;
+  /**
+   * Videos a notification has already gone out for, and when it went.
+   *
+   * The thing that stops the same video buzzing your phone twice. It has to
+   * live in the state file rather than in settings for the same reason
+   * `deletedVideos` does: both devices poll, both would otherwise see the video
+   * as new, and this file is the only thing they share. Merged by
+   * `mergeNotified` — earliest stamp wins, because that is when the push
+   * actually went out. See `docs/V1-SCOPE-NOTIFICATIONS.md`.
+   */
+  notifiedVideos?: Array<{ id: string; at: string }>;
 }
 
 export function emptyState(): SubscriptionsState {
@@ -132,6 +144,7 @@ export function emptyState(): SubscriptionsState {
     lastPolledAt: null,
     removedChannels: [],
     deletedVideos: [],
+    notifiedVideos: [],
   };
 }
 
@@ -162,6 +175,12 @@ export function normalizeState(raw: unknown): SubscriptionsState {
   }
   if (Array.isArray(data.deletedVideos)) {
     state.deletedVideos = data.deletedVideos.filter(
+      (r): r is { id: string; at: string } =>
+        Boolean(r) && typeof r.id === "string" && typeof r.at === "string",
+    );
+  }
+  if (Array.isArray(data.notifiedVideos)) {
+    state.notifiedVideos = data.notifiedVideos.filter(
       (r): r is { id: string; at: string } =>
         Boolean(r) && typeof r.id === "string" && typeof r.at === "string",
     );
@@ -370,6 +389,11 @@ export function mergeStates(
     items: kept,
     lastPolledAt: polled.length ? polled[polled.length - 1] : null,
     removedChannels: [...removals].map(([id, at]) => ({ id, at })),
+    // Unioned and never pruned against the live list, unlike the deletions
+    // above: a tombstone whose video is back has lost its argument, but a video
+    // you have already been told about is still a video you have already been
+    // told about.
+    notifiedVideos: mergeNotified(mine.notifiedVideos ?? [], theirs.notifiedVideos ?? []),
     deletedVideos: [...deletions]
       .filter(([id]) => !live.has(id))
       .map(([id, at]) => ({ id, at }))

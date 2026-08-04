@@ -48,6 +48,8 @@ import {
   SubscriptionsStore,
 } from "./hub";
 import { YT_ICON, registerIcons } from "./icon";
+import { describeTestOutcome, describeWebhook } from "./notify";
+import type { NotificationFormat } from "./notify";
 import { ProgressStore } from "./progress-store";
 import { shareUrl } from "./share";
 import { SilenceStore } from "./silence-store";
@@ -140,6 +142,24 @@ interface YtFreeSettings {
   subscriptionsPollMinutes: number;
   subscriptionsExpiryDays: number;
   subscriptionsIncludeShorts: boolean;
+  /**
+   * Where a poll POSTs when new videos land in the Inbox. Blank is the default
+   * and switches the whole feature off.
+   *
+   * Deliberately a bare URL rather than a provider integration: Obsidian mobile
+   * cannot raise an iOS notification itself, so *something* off-device has to,
+   * and which something is not ours to choose. ntfy.sh, Pushover, an Apple
+   * Shortcut — all of them take a plain POST. See
+   * `docs/V1-SCOPE-NOTIFICATIONS.md`.
+   */
+  notificationWebhook: string;
+  /** Pause the pushes without having to delete the URL to do it. */
+  notificationsEnabled: boolean;
+  /**
+   * `json` for anything that parses a body; `text` for ntfy.sh, which renders
+   * the request body verbatim on the lock screen.
+   */
+  notificationFormat: NotificationFormat;
   /**
    * Days a watched video note may sit with nothing written in it before it is
    * moved to the trash. Zero switches the sweep off entirely. See `tidy.ts` for
@@ -275,6 +295,11 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   subscriptionsPollMinutes: 60,
   subscriptionsExpiryDays: 0,
   subscriptionsIncludeShorts: false,
+  // Off, and blank. A plugin that starts POSTing somewhere on its own would be
+  // a different kind of software than this one.
+  notificationWebhook: "",
+  notificationsEnabled: false,
+  notificationFormat: "json",
   tidyEmptyNoteDays: DEFAULT_TIDY_DAYS,
   watchLaterFolder: "Watch Later",
   // 12 hours, because yt-dlp's own documentation warns that recurring
@@ -1049,6 +1074,11 @@ export default class YtFreePlugin extends Plugin {
       showWatched: this.settings.accountShowWatched,
       transcriptLanguage: this.transcriptLanguage(),
       transcriptIntervalSeconds: this.settings.transcriptIntervalSeconds,
+      notifications: {
+        webhook: this.settings.notificationWebhook,
+        enabled: this.settings.notificationsEnabled,
+        format: this.settings.notificationFormat,
+      },
     };
   }
 
@@ -4132,6 +4162,8 @@ class YtFreeSettingTab extends PluginSettingTab {
    */
   private accountStatusEl: HTMLElement | null = null;
   private accountButtonEl: HTMLElement | null = null;
+  /** The reserved line under the webhook field — see `setNotifyStatus`. */
+  private notifyStatusEl: HTMLElement | null = null;
 
   constructor(app: App, private plugin: YtFreePlugin) {
     super(app, plugin);
@@ -4147,6 +4179,7 @@ class YtFreeSettingTab extends PluginSettingTab {
   hide(): void {
     this.accountStatusEl = null;
     this.accountButtonEl = null;
+    this.notifyStatusEl = null;
   }
 
   /**
@@ -4255,6 +4288,97 @@ class YtFreeSettingTab extends PluginSettingTab {
             await plugin.saveSettings();
           }),
       );
+  }
+
+  /**
+   * The push that tells your phone a video landed in the Inbox.
+   *
+   * Everything in here is drawn unconditionally — the toggle does not add or
+   * remove a row, and the button's label never changes width. A settings pane
+   * that reflows under the finger that clicked it is the one thing this section
+   * was not allowed to do.
+   *
+   * Shown on the phone as well as the Mac, even though the Mac is almost always
+   * the device that polls: the settings are one file synced by iCloud, and a
+   * section that is invisible on the device you happen to be holding reads as a
+   * missing feature rather than as a deliberate absence.
+   */
+  private displayNotifications(containerEl: HTMLElement): void {
+    const plugin = this.plugin;
+    new Setting(containerEl).setName("New-video notifications").setHeading();
+
+    const webhook = new Setting(containerEl)
+      .setName("Notification webhook")
+      .setDesc(
+        "An https URL this plugin POSTs to when a check finds new videos — one message per check, never one per video. " +
+          "Obsidian on iOS cannot raise a notification by itself, so the device running the check has to hand it to something that can: " +
+          "ntfy.sh, Pushover, an Apple Shortcuts automation, anything that accepts a POST. Blank switches this off entirely.",
+      );
+
+    // Its own reserved line. It says whether the URL parses, then what the last
+    // test did — three different lengths of text in the same fixed height.
+    this.notifyStatusEl = webhook.descEl.createDiv({ cls: "ytfree-notify-status" });
+    this.setNotifyStatus(describeWebhook(plugin.hubSettings().notifications));
+
+    webhook.addText((text) =>
+      text
+        .setPlaceholder("https://ntfy.sh/your-random-topic")
+        .setValue(plugin.settings.notificationWebhook)
+        .onChange(async (value) => {
+          plugin.settings.notificationWebhook = value.trim();
+          await plugin.saveSettings();
+          this.setNotifyStatus(describeWebhook(plugin.hubSettings().notifications));
+        }),
+    );
+
+    new Setting(containerEl)
+      .setName("Send notifications")
+      .setDesc("Pause the messages without losing the URL. Off by default.")
+      .addToggle((toggle) =>
+        toggle.setValue(plugin.settings.notificationsEnabled).onChange(async (value) => {
+          plugin.settings.notificationsEnabled = value;
+          await plugin.saveSettings();
+          this.setNotifyStatus(describeWebhook(plugin.hubSettings().notifications));
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Message format")
+      .setDesc(
+        "JSON carries the count, the channels, the titles and the video links — what a Shortcut or an automation wants. " +
+          "Text sends the sentence on its own: choose it for ntfy.sh, which shows whatever you POST as the notification body.",
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("json", "JSON")
+          .addOption("text", "Text")
+          .setValue(plugin.settings.notificationFormat)
+          .onChange(async (value) => {
+            plugin.settings.notificationFormat = value === "text" ? "text" : "json";
+            await plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Send a test notification")
+      .setDesc("Posts one message right now, so the URL can be proved without waiting for a channel to publish something.")
+      .addButton((button) => {
+        // Fixed width, and a label that never changes: the result is reported on
+        // the reserved line above, not by rewriting the thing that was pressed.
+        button.buttonEl.addClass("ytfree-notify-button");
+        button.setButtonText("Send test").onClick(async () => {
+          this.setNotifyStatus("Sending…");
+          const outcome = await plugin.subscriptions.sendTestNotification();
+          this.setNotifyStatus(describeTestOutcome(outcome));
+        });
+      });
+  }
+
+  /** The one line that reports on the webhook, kept at a constant height. */
+  private setNotifyStatus(text: string): void {
+    // A non-breaking space rather than an empty string: an empty div collapses,
+    // and this line sits between two settings rows that must not move.
+    this.notifyStatusEl?.setText(text || " ");
   }
 
   display(): void {
@@ -4409,6 +4533,8 @@ class YtFreeSettingTab extends PluginSettingTab {
           this.plugin.refreshHub();
         }),
       );
+
+    this.displayNotifications(containerEl);
 
     // Downloading needs yt-dlp and a filesystem, so on mobile this whole
     // section would only be settings for something that cannot happen.
