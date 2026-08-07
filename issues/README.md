@@ -34,8 +34,14 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [028](028-transcript-in-preview-and-jumps.md) | The transcript in Preview, and a jump from a peak to it | Built 2026-07-31 — awaiting manual test |
 | [029](029-share-a-video.md) | Share a video's URL, and share it at the current timestamp | Built 2026-07-31 — awaiting manual test |
 | [030](030-preview-transcript-share-and-moment.md) | Preview's transcript at note size, autoscroll you can stop, a share icon that isn't Download, and "this moment" | Built 2026-07-31 — awaiting manual test |
-| [032](032-mobile-preview-window.md) | The Preview window on a phone: a pop-out that fits, no sideways scroll, a Collapse that works, one scroller, and PiP that survives closing | Built 2026-08-03 — awaiting manual test (PiP step needs the iPhone) |
+| [032](032-mobile-preview-window.md) | The Preview window on a phone: a pop-out that fits, no sideways scroll, a Collapse that works, one scroller, and PiP that survives closing | Tested 2026-08-06 — clipping fixed, but the sheet is the wrong shape → [037](037-popover-not-a-sheet.md), scroll order → [039](039-transcript-pinned.md) |
 | [033](033-search-clarity.md) | A button that says Search, and a screen that looks like one | Built 2026-08-03 — awaiting manual test |
 | [034](034-state-that-disagrees-between-devices.md) | State that disagrees between devices: removals that did not cross, and Kept losing watched videos | Built 2026-08-03 — awaiting manual test |
-| [035](035-follow-unfold-cursor-progress.md) | The note's transcript follows the video, "this moment" unfolds first, Notes returns to the cursor, and a progress line that reaches both corners | Built 2026-08-03 — awaiting manual test |
+| [035](035-follow-unfold-cursor-progress.md) | The note's transcript follows the video, "this moment" unfolds first, Notes returns to the cursor, and a progress line that reaches both corners | Tested 2026-08-06 — follow and unfold work; resting position → [040](040-this-moment-lands-at-the-top.md), mobile cursor/keyboard → [041](041-notes-button-cursor-and-keyboard.md) |
 | [036](036-notify-when-a-video-lands.md) | A notification when a new video lands in the Inbox — one webhook URL, one push per check | Built 2026-08-03 ([docs/V1-SCOPE-NOTIFICATIONS.md](../docs/V1-SCOPE-NOTIFICATIONS.md)) — awaiting manual test. **Needs a webhook URL before it does anything** — see the issue. |
+| [037](037-popover-not-a-sheet.md) | The phone pop-out is a popover again, and still does not clip | Scoped 2026-08-06 — not built. From the 032 manual test |
+| [038](038-fullscreen-before-play.md) | Fullscreen pressed before playback starts | Scoped 2026-08-06 — not built. **Regression**, iPhone, Preview and note |
+| [039](039-transcript-pinned.md) | The transcript stays reachable, instead of living under the description | Scoped 2026-08-06 — not built. Depends on 037 |
+| [040](040-this-moment-lands-at-the-top.md) | "This moment" lands the current line at the top, not the middle | Scoped 2026-08-06 — not built. From the 035 manual test |
+| [041](041-notes-button-cursor-and-keyboard.md) | The Notes button gives you a cursor and a keyboard on the phone | Scoped 2026-08-06 — not built. Mobile only; 035 works on desktop |
+| [042](042-tidy-clears-kept.md) | A tidied note takes its hub item with it | Scoped 2026-08-06 — not built |
