@@ -1,6 +1,70 @@
 # HANDOFF
 
-## Status — 2026-08-03: five branches merged (032–036)
+## Status — 2026-08-06: the iPhone test run, and six issues off it
+
+**Nothing built this session. Issues 037–042 written, index updated.** The
+032–036 build is installed in the vault (`main.js` hash matches the repo) and
+BarkernotBob ran the mobile test plan against it.
+
+**What passed:** the pop-out no longer clips (032). The transcript scrolls and
+follows playback (035). "This moment" jumps and unfolds (035).
+
+**What it found — [037](issues/037-popover-not-a-sheet.md) through
+[041](issues/041-notes-button-cursor-and-keyboard.md):**
+- **037** 032 fixed the clipping by making the phone pop-out a bottom sheet. The
+  clipping is gone and so is the popover; it reads as an unrelated surface laid
+  over the Preview panel. Fix is to portal it out of the clipping ancestor, not
+  to re-shape it.
+- **038** **a regression, and the sharpest one.** Fullscreen fails *only* when
+  pressed before playback has started — Preview and note both. `enterFullscreen`
+  already documents why (`webkitEnterFullscreen` refuses without loaded media),
+  but the likelier dominant cause is that `await ensureLoaded()` spends the user
+  gesture on a cold player. Instrument on the device before patching: the two
+  causes need different fixes and only one tap distinguishes them.
+- **039** the transcript sits below an arbitrarily long description, so
+  follow-mode autoscrolls something that is off screen. Depends on 037 — both
+  re-lay the Preview sheet.
+- **040** "this moment" rests mid-viewport; it should rest just under the action
+  bar, offset measured from the real chrome rather than hard-coded.
+- **041** the Notes button scrolls but places no caret and raises no keyboard on
+  iOS. Same gesture-lifetime family as 038, in a different control.
+
+**Plus [042](issues/042-tidy-clears-kept.md), asked for directly:** a note the
+tidy sweep trashes should take its hub item out of Kept in the same
+transaction, as a tombstone rather than a deletion. Today the item stays Kept
+with a dead `notePath` and `openItem` rebuilds the note — the video you decided
+against a month ago comes back looking like one you meant to keep.
+
+**Untested still:** 033 (search), 034 (two-device sync), 036 (needs a webhook
+URL before it does anything).
+
+**Decisions taken this session, not yet issues:**
+- An **In progress** hub chip, fourth after Inbox/Kept/All. Floor: 10% of
+  duration or 2 minutes, whichever is smaller; drops off at `isFinished()`.
+  Backed by `progress.json`, which already holds positions. Explicitly *not* a
+  Dataview query over note frontmatter.
+- A **channel screen**: browse that channel's whole catalogue (InnerTube browse
+  with continuation, not the 15-item RSS feed) with a search box over it,
+  reachable from a preview and from a video note.
+- **Subscribe** opens the channel in the external browser. Nothing else needed —
+  account sync already reads `/feed/channels`, the subscription manager, so the
+  next manual sync picks the channel up. Desktop only, since it needs cookies.
+- **Watch Later ([018](issues/018-watch-later.md)) is deferred** — BarkernotBob did not
+  want to decide it yet. Still blocked on the same question.
+
+**One thing that looked like a bug and is not.** The "collab video skipped from
+the hub" report: `-X4ZD3fisSs` is ****REMOVED***
+a collab video*, uploaded to **a channel**, which is not one of the 16
+channels in `subscriptions.json`. The guest's channel is subscribed but did not upload
+it. Per-channel RSS lists only that channel's own uploads and never a guest's
+collaborations, so nothing was skipped. Catching these would mean abandoning RSS
+for InnerTube channel browsing on every channel every poll — much slower, for a
+handful of videos a year. Not recommended; the answer is to subscribe to RBN.
+
+**Next:** 038 first — a fullscreen regression outranks the layout complaints, and
+it plausibly shares a root cause with 041.
+
+## Previous — 2026-08-03: five branches merged (032–036)
 
 **512 unit tests pass, `tsc` clean, build clean. Not installed to the vault.**
 Next: `./install.sh`, reload Obsidian, then work the manual tests in 032–036.
