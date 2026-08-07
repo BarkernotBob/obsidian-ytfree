@@ -1,7 +1,7 @@
 # 037 — The phone pop-out is a popover again, and still does not clip
 
-Status: **Scoped 2026-08-06 — not built.** From BarkernotBob's manual test of
-[032](032-mobile-preview-window.md):
+Status: **Built 2026-08-06 — not yet tested on the phone.** From BarkernotBob's manual
+test of [032](032-mobile-preview-window.md):
 
 > "1 doesn't clip anymore, but now it sits in the window real weird. I still
 > want it to popover like it was, just without clipping."
@@ -68,9 +68,52 @@ and does not change.
 - [ ] Desktop is unchanged.
 - [ ] `tsc` clean, build clean, unit tests pass.
 
+## How it was built
+
+`panelPlacement` in `src/panel.ts` grew a second mode. Docked (the desktop) is
+what it always was: a cap on the height, measured from the control bar to the
+top of the screen. Anchored (any phone, Preview or note) takes the button's
+rectangle, the panel's own measured size and the visual viewport, and returns
+`left`/`top`/`width`/`maxHeight` plus which side it opened on. It stays
+`position: fixed`, because that is the thing that actually escaped the clipping
+ancestor in 032 — the sheet was never what fixed the clipping.
+
+Rules the placement follows, all covered by `tests/panel.test.ts`:
+
+- it hangs off the button, right edges aligned, and is clamped so no edge leaves
+  the screen in either orientation;
+- it opens upward when there is room above, downward when there is not, and
+  upward when both would fit — covering the picture costs less than covering the
+  text;
+- when neither side fits it takes the bigger one and says so with a `maxHeight`
+  it will scroll inside;
+- the visual viewport, not `innerHeight`, so a raised keyboard shrinks the room
+  rather than being ignored.
+
+Because a fixed node does not travel with its anchor, the player watches
+`scroll` (capture phase — scroll does not bubble), `resize` and the visual
+viewport while the panel is open, re-places it on each, and closes it outright
+once the button is off screen or under the chrome. The scrim is transparent
+rather than dimmed: a popover is not a modal.
+
 ## Manual test (for BarkernotBob)
 
-_Written when this is built._
+On the iPhone, in the Preview sheet:
+
+1. Open any video's Preview and tap the pop-out button (the rightmost of the
+   three on the right of the control bar).
+2. The menu should appear **attached to that button** — hanging just above it,
+   right edges lined up — not sitting at the foot of the screen.
+3. Every row should be readable. Nothing cut off at the top or the bottom.
+4. Tap the pop-out button again. It closes.
+5. Open it again and scroll the sheet behind it. The menu should either follow
+   the button or close when the button goes off screen — it must never sit
+   still while the button moves away underneath it.
+6. Turn the phone sideways with the menu open, then open it again. Same
+   attached-to-the-button behaviour, nothing off the edge.
+7. Open a video note (Watch), and do 1–5 again on the note's player.
+8. On the Mac, open a Preview and the same pop-out. It should be exactly as it
+   was — docked above the control bar, no change.
 
 ## Deliberately left alone
 

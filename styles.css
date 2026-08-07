@@ -449,6 +449,10 @@
      height at it; this is what makes the overflow reachable rather than lost. */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* The menu scrolls, not the page behind it. Without this a drag that reaches
+     the end of the panel is handed to the Preview sheet underneath, which
+     scrolls the anchor out from under a panel that cannot follow it. */
+  overscroll-behavior: contain;
 }
 
 .ytfree-panel.is-open {
@@ -458,7 +462,7 @@
 }
 
 /*
- * The phone's shape: a sheet at the foot of the screen.
+ * The phone's shape: the same popover, positioned against the viewport.
  *
  * `position: fixed`, and that is the fix rather than a preference. An
  * absolutely positioned panel is clipped by the nearest scrolling ancestor, and
@@ -473,53 +477,61 @@
  * "fixed" here really does mean the viewport. Verified against app.css: neither
  * `.modal-container` nor `.modal` sets one.
  *
- * 62vh is the hub disclosure panel's height (docs/MOBILE-UX.md §1) — one
- * overlay shape for the phone, a fixed fraction of the screen whatever is in
- * it, scrolling internally so switching sections cannot resize it under a thumb.
+ * What it is *not* is a bottom sheet. 032 made it one — anything fixed to the
+ * foot of the screen is unclippable by construction — and 037 is the report
+ * that it lost the meaning along with the bug: a sheet says nothing about which
+ * button opened it, and inside a Preview window that is itself a panel, it
+ * reads as an unrelated second surface. So `top`, `left`, `width` and
+ * `max-height` are all set inline from the button's rect by `placePanel`, and
+ * this rule only says what is true whichever way it opens.
  */
-.ytfree-panel.ytfree-panel-sheet {
+.ytfree-panel.ytfree-panel-anchored {
   position: fixed;
-  right: 0;
+  right: auto;
+  bottom: auto;
+  /* Overwritten inline the moment it opens; here so a panel that somehow
+     escapes measurement is still on screen rather than at 0,0 behind the bar. */
+  top: 0;
   left: 0;
-  bottom: 0;
-  width: auto;
-  max-height: 62vh;
-  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
-  border: none;
-  border-top: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-l) var(--radius-l) 0 0;
+  max-width: calc(100vw - 16px);
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom) * 0.5);
+  border-radius: var(--radius-m);
   background: var(--background-primary);
   box-shadow: var(--shadow-l);
   z-index: 21;
 }
 
 /* 44pt rows, like every other list a thumb has to hit on a phone. */
-.ytfree-panel.ytfree-panel-sheet .ytfree-panel-row {
+.ytfree-panel.ytfree-panel-anchored .ytfree-panel-row {
   min-height: 44px;
 }
 
-.ytfree-panel.ytfree-panel-sheet .ytfree-panel-label {
+.ytfree-panel.ytfree-panel-anchored .ytfree-panel-label {
   font-size: var(--font-ui-small);
 }
 
-.ytfree-panel.ytfree-panel-sheet .ytfree-panel-link {
+.ytfree-panel.ytfree-panel-anchored .ytfree-panel-link {
   height: 44px;
 }
 
 /*
- * The tap-catcher behind the sheet.
+ * The tap-catcher behind the pop-out.
  *
- * Without it, one tap outside the sheet closes the sheet *and* the Preview
+ * Without it, one tap outside the panel closes the panel *and* the Preview
  * modal behind it: our own handler closes the pop-out, and the same tap goes on
  * to Obsidian's `.modal-bg`. This is the thing the tap lands on instead. It is
  * built with the panel and only its visibility changes, so it costs no layout
  * and opening the menu still moves nothing.
+ *
+ * Transparent since 037. It was dimmed while the pop-out was a bottom sheet,
+ * which is the right treatment for a surface that takes over the screen and the
+ * wrong one for a menu hanging off a button.
  */
 .ytfree-panel-scrim {
   position: fixed;
   inset: 0;
   z-index: 20;
-  background: rgba(0, 0, 0, 0.32);
+  background: transparent;
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
@@ -2906,7 +2918,8 @@ body.ytfree-immersive-open {
   border-top: 1px solid var(--background-modifier-border);
 }
 
-.ytfree-preview-transcript-head {
+.ytfree-preview-transcript-head,
+.ytfree-preview-disclose {
   display: flex;
   align-items: center;
   gap: 0.4em;
@@ -2923,7 +2936,8 @@ body.ytfree-immersive-open {
   cursor: pointer;
 }
 
-.ytfree-preview-transcript-head:hover:not([disabled]) {
+.ytfree-preview-transcript-head:hover:not([disabled]),
+.ytfree-preview-disclose:hover:not([disabled]) {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
 }
@@ -2933,13 +2947,15 @@ body.ytfree-immersive-open {
   opacity: 0.6;
 }
 
-.ytfree-preview-transcript-chevron {
+.ytfree-preview-transcript-chevron,
+.ytfree-preview-disclose-chevron {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
 }
 
-.ytfree-preview-transcript-chevron .svg-icon {
+.ytfree-preview-transcript-chevron .svg-icon,
+.ytfree-preview-disclose-chevron .svg-icon {
   width: 16px;
   height: 16px;
 }
@@ -3097,6 +3113,108 @@ body.ytfree-immersive-open {
   overflow: visible;
 }
 
+/* ------------------------------------ the transcript's own region — 039 ---
+ *
+ * Running order was the bug. 032 gave the sheet one scroller and left the
+ * order it inherited — picture, description, transcript — and a description is
+ * arbitrarily long, so the transcript began a screen and a half down and got
+ * further away the more the creator wrote. Since 035 it also follows playback,
+ * which is worthless if you cannot see it and worse than worthless if it is
+ * autoscrolling out of sight.
+ *
+ * So on a phone the sheet is three fixed things and one elastic one: the
+ * picture at the top, the buttons at the foot, the description as a shut
+ * disclosure, and the transcript taking whatever is left. Written as flex on
+ * the same element that scrolls — which is not a contradiction, because a flex
+ * column only distributes *free* space: with the description shut there is
+ * free space and the transcript fills it, and with the description open there
+ * is none, the sheet scrolls exactly as 032 left it, and the transcript falls
+ * back to its floor.
+ *
+ * `height`, not `max-height`, is what makes the first half of that true — free
+ * space needs a definite container height to be free space in, and a
+ * content-sized box has none to give.
+ */
+.is-phone .ytfree-preview-modal .modal-content {
+  /*
+   * A height, not a cap. A percentage would not do: the modal above it is
+   * content-sized, and a percentage of `auto` is `auto` — which is how a sheet
+   * with `height: 100%` still comes out exactly as tall as its own contents and
+   * has no free space to give anyone.
+   *
+   * Nearly the whole screen, where the laptop's rule is 82vh. The 82 is about a
+   * modal floating on a desktop with its own backdrop showing round the edges;
+   * a phone's Preview is full-width and edge-to-edge already, and every point
+   * not spent here is a point of transcript.
+   */
+  height: calc(100vh - var(--safe-area-inset-top, 0px) - 2em);
+  max-height: none;
+}
+
+/*
+ * The picture takes a share of the sheet, not a share of the width.
+ *
+ * 16:9 of a phone held sideways is 400-odd points of picture on a 390pt screen:
+ * the player alone was taller than the sheet, so the transcript and the buttons
+ * were both below the fold before anything else was measured. Capping the
+ * *width* rather than the height is what keeps it a 16:9 picture instead of a
+ * pillarboxed one — the height follows from the ratio.
+ */
+.is-phone .ytfree-preview-wrapper {
+  max-width: calc(42vh * 16 / 9);
+  margin-inline: auto;
+}
+
+.is-phone .ytfree-preview-describe {
+  flex: 0 0 auto;
+}
+
+/*
+ * Shut is zero height and hidden, not `display: none`: the description is a
+ * page of unbreakable URLs and hashtag runs, and a box that has never been laid
+ * out has never wrapped them — opening it would then reflow the sheet under the
+ * finger that opened it, which is the one thing the sheet must never do.
+ */
+.is-phone .ytfree-preview-describe:not(.is-open) .ytfree-preview-description {
+  max-height: 0;
+  margin-top: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+.is-phone .ytfree-preview-transcript {
+  display: flex;
+  flex-direction: column;
+  /*
+   * `flex-basis: 0`, so the region asks for the leftover space rather than for
+   * the height of its own 63 paragraphs. With `auto` a long transcript would
+   * size the region, the sheet would grow past the screen, and we would be back
+   * to scrolling to find the words.
+   */
+  flex: 1 1 0;
+  /* A floor, so a two-line transcript is still a transcript and not a seam. */
+  min-height: 7em;
+}
+
+/* Shut, or empty, or unfetchable: it claims nothing and the description gets
+   the sheet back. `is-open` is the whole of "this region is in use". */
+.is-phone .ytfree-preview-transcript:not(.is-open) {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
+  /* The region decides the height; `min-height: 0` is what lets a flex item be
+     shorter than its contents at all, and without it the box would refuse to
+     shrink and push the buttons off the bottom. */
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  /* A drag that runs out of transcript stops there rather than handing the rest
+     of the gesture to the sheet behind it — which would move the picture. */
+  overscroll-behavior: contain;
+}
+
 .is-phone .ytfree-preview-actions {
   position: sticky;
   bottom: 0;
@@ -3116,6 +3234,117 @@ body.ytfree-immersive-open {
 /* The picture is the one thing that stays. The title is not. */
 .is-phone .ytfree-preview-title {
   font-size: var(--font-ui-medium);
+}
+
+/* ------------------------------------------ the phone, held sideways — 039 ---
+ *
+ * Landscape is the same sheet with the two resources swapped: 844 points of
+ * width and 390 of height, where portrait has the opposite. Stacked, it does
+ * not fit at any picture size worth watching — picture, title, facts,
+ * disclosure and four buttons come to more than the screen before the
+ * transcript asks for anything — so the answer is not a smaller picture, it is
+ * the other axis. The picture and the facts take the left half, the transcript
+ * takes the right half at full height, and the buttons run along the foot.
+ *
+ * `max-height` rather than an orientation query, because the thing that decides
+ * this is how much vertical room there is: a split-screen or a hardware
+ * keyboard produces the same shortage the same way.
+ */
+@media (max-height: 520px) {
+  .is-phone .ytfree-preview-modal .modal-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    /*
+     * Picture, title, facts, then the description, and the buttons under both
+     * columns. `minmax(auto, 1fr)` on the description's row rather than
+     * `minmax(0, 1fr)`: shut it is a 34pt header and the row takes the spare
+     * space, which is what gives the transcript beside it the full height;
+     * open, it is taller than the spare space and the row is allowed to say so
+     * rather than clipping the text. The sheet scrolls at that point — see the
+     * description's own cap below, which is where that trade is written down.
+     */
+    grid-template-rows: auto auto auto minmax(auto, 1fr) auto;
+    column-gap: 0.9em;
+  }
+
+  .is-phone .ytfree-preview-modal .ytfree-preview-player {
+    grid-area: 1 / 1;
+  }
+
+  .is-phone .ytfree-preview-title {
+    grid-area: 2 / 1;
+    /* One line and an ellipsis. A long title in a half-width column is four
+       lines, and on a 390pt screen each one of them comes out of the picture
+       above it — the title is also the first thing in the description, and the
+       sheet was opened from a card that had it in full.
+       `nowrap`, not `-webkit-line-clamp`: a clamped `-webkit-box` reports a
+       min-content height of zero to the grid, so the row it is in collapses to
+       nothing the moment anything else on the sheet asks for space. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* `overflow: hidden` sets a grid item's automatic minimum size to zero, and
+       a row whose only item can be zero tall *is* zero tall as soon as the sheet
+       is over-constrained — which is exactly the moment the description opens.
+       One line, said out loud. */
+    min-height: 1.3em;
+  }
+
+  .is-phone .ytfree-preview-facts {
+    grid-area: 3 / 1;
+  }
+
+  .is-phone .ytfree-preview-describe {
+    grid-area: 4 / 1;
+    display: flex;
+    flex-direction: column;
+    /* Deliberately *not* `min-height: 0`. That is the usual incantation for a
+       flex item in a bounded box, and here it is the bug: it tells the grid the
+       section can be nothing tall, so the row stays the size it was and the
+       opened description spills over the buttons instead of pushing the sheet
+       into being scrollable. */
+  }
+
+  /*
+   * Bounded, unlike portrait — and this is where landscape's one honest
+   * shortage is written down. Picture, title, facts, a readable description and
+   * a full-height transcript do not all fit in 390 points: at rest the
+   * transcript wins and the description is a header, and opening it buys 30vh
+   * of text at the price of the sheet scrolling while it is open. Shutting it
+   * puts everything back.
+   */
+  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-description {
+    /* A height rather than a cap, and no shrinking: the row it is in is allowed
+       to grow past the sheet, but only if the box in it insists on a size. Told
+       it may shrink, it shrinks to the 20 points the row had spare and the tap
+       appears to do nothing. */
+    flex: 0 0 30vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .is-phone .ytfree-preview-transcript {
+    grid-area: 1 / 2 / 5 / 3;
+    margin-top: 0;
+    border-top: none;
+  }
+
+  .is-phone .ytfree-preview-actions {
+    grid-area: 5 / 1 / 6 / 3;
+  }
+
+  /*
+   * Still capped, and much lower than portrait's 42vh — this is the number the
+   * whole left column is spent on. Half the width of a phone held sideways is
+   * 16:9 of 420 points, which is 60% of the screen's height on its own: at
+   * anything above about a quarter of the height the description's row is left
+   * with single figures, and opening the description opens an empty box. A
+   * small picture with the words next to it is what landscape is for; if you
+   * want the picture, fullscreen is one button away.
+   */
+  .is-phone .ytfree-preview-wrapper {
+    max-width: calc(24vh * 16 / 9);
+  }
 }
 
 /* ---------------------------------------------------------------- account */

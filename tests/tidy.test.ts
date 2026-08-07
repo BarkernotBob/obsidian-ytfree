@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_TIDY_DAYS, hasWriting, notesToTidy, tidyable } from "../src/tidy.ts";
+import { DEFAULT_TIDY_DAYS, hasWriting, notesToTidy, sweepNote, tidyable } from "../src/tidy.ts";
 import type { TidyCandidate } from "../src/tidy.ts";
 
 const NOW = new Date("2026-07-30T12:00:00.000Z");
@@ -139,4 +139,104 @@ test("notesToTidy picks only the ones that qualify", () => {
     picked.map((note) => note.path),
     ["a.md"],
   );
+});
+
+// ----------------------------------------------------- the removal, issue 042
+
+/**
+ * The sweep's two halves, and what happens when one of them fails.
+ *
+ * The rules above decide *whether* a note goes; these decide that the note and
+ * its hub item go together. They never used to: the note was trashed and the
+ * item stayed `kept` with a `notePath` pointing at nothing, which `openItem`
+ * reads as damage and repairs by rebuilding the note. The video you decided
+ * against a month ago came back on the next click.
+ */
+
+/** A hub that records what it was asked, and can be told to refuse. */
+function fakeHub(over: Partial<{ known: boolean; refuse: boolean }> = {}) {
+  const known = over.known ?? true;
+  const calls: string[] = [];
+  return {
+    calls,
+    tombstone: async (videoId: string) => {
+      calls.push(`tombstone ${videoId}`);
+      if (!known) return "absent" as const;
+      return over.refuse ? ("refused" as const) : ("tombstoned" as const);
+    },
+    untombstone: async (videoId: string) => {
+      calls.push(`untombstone ${videoId}`);
+    },
+  };
+}
+
+const NOTE = { path: "Watch Later/Some video.md", videoId: ID };
+
+test("a swept note takes its hub item with it", async () => {
+  const hub = fakeHub();
+  const trashed: string[] = [];
+
+  const outcome = await sweepNote(NOTE, hub, async (path) => void trashed.push(path));
+
+  assert.equal(outcome, "swept");
+  assert.deepEqual(trashed, [NOTE.path]);
+  assert.deepEqual(hub.calls, [`tombstone ${ID}`]);
+});
+
+test("the item is tombstoned before the file is trashed", async () => {
+  // Order matters because only the hub can refuse. Trash first and a refused
+  // write leaves exactly the dead-path state this exists to remove.
+  const order: string[] = [];
+  const hub = {
+    tombstone: async () => {
+      order.push("hub");
+      return "tombstoned" as const;
+    },
+    untombstone: async () => void order.push("undo"),
+  };
+
+  await sweepNote(NOTE, hub, async () => void order.push("trash"));
+
+  assert.deepEqual(order, ["hub", "trash"]);
+});
+
+test("a refused hub write leaves the note where it is", async () => {
+  const hub = fakeHub({ refuse: true });
+  const trashed: string[] = [];
+
+  const outcome = await sweepNote(NOTE, hub, async (path) => void trashed.push(path));
+
+  assert.equal(outcome, "refused");
+  assert.deepEqual(trashed, [], "the note must not be trashed without the tombstone");
+  assert.deepEqual(hub.calls, [`tombstone ${ID}`], "nothing to undo — nothing was written");
+});
+
+test("a failed trash puts the tombstone back", async () => {
+  const hub = fakeHub();
+
+  const outcome = await sweepNote(NOTE, hub, async () => {
+    throw new Error("read-only vault");
+  });
+
+  assert.equal(outcome, "kept");
+  assert.deepEqual(hub.calls, [`tombstone ${ID}`, `untombstone ${ID}`]);
+});
+
+test("a note the hub never knew about is still swept", async () => {
+  // A video note from the Web Clipper or a template has no hub row. That is an
+  // ordinary answer, not a failure, and it must not hold the note back.
+  const hub = fakeHub({ known: false });
+  const trashed: string[] = [];
+
+  const outcome = await sweepNote(NOTE, hub, async (path) => void trashed.push(path));
+
+  assert.equal(outcome, "swept");
+  assert.deepEqual(trashed, [NOTE.path]);
+});
+
+test("a note with writing in it never reaches the sweep at all", async () => {
+  // The guard is `notesToTidy`, not `sweepNote` — worth pinning, because the
+  // hub half is destructive and this is the only thing standing in front of it.
+  const written = candidate({ content: noteWith("the bit I actually wanted") });
+  assert.deepEqual(notesToTidy([written], NOW, DEFAULT_TIDY_DAYS), []);
 });

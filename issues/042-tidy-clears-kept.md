@@ -1,6 +1,7 @@
 # 042 — A tidied note takes its hub item with it
 
-Status: **Scoped 2026-08-06 — not built.** Asked for by BarkernotBob:
+Status: **Built 2026-08-06 — not yet tested on the phone.** Asked for by
+BarkernotBob:
 
 > "another issue that removes videos from kept at the same time they get added
 > to tidy empty notes"
@@ -74,6 +75,47 @@ Points that need to hold:
       write, and a note with writing.
 - [ ] `tsc` clean, build clean, unit tests pass.
 
+## How it was built
+
+The sweep does the two writes in a fixed order, and the order is the whole
+design: the hub goes first, because the hub is the only one of the two that can
+*refuse*. `SubscriptionsStore.sweepAway` marks the item dismissed and reports
+whether the write actually landed — which needed `save()` to grow a variant that
+says so, since the old return value conflated "no state file yet" with "the
+state file could not be read, so nothing was written" (034).
+
+- Hub refused → the note is left alone, and the sweep logs why. Nothing
+  diverges, because nothing changed.
+- Hub written, trash failed → the tombstone is rolled back and the item returns
+  to Kept exactly as it was.
+
+That rollback puts back a verbatim snapshot rather than calling `restoreItem`,
+which would stamp a fresh `decidedAt` — a new decision would beat the Kept row
+still sitting on another device's copy and demote it at the next merge, and
+would set off a description re-fetch for a video nobody touched.
+
+The decision itself is `sweepNote` in `src/tidy.ts`, which takes the hub and the
+trash as arguments so both orderings and both failures are tested without a
+vault (`tests/tidy.test.ts`). The item becomes a tombstone, not a deletion:
+`tests/subscriptions.test.ts` pins that the next poll does not resurrect it,
+that it is out of Kept and in the hidden list, that Restore brings it back with
+its note path intact, and that it ages out under the same limit as everything
+else.
+
 ## Manual test (for BarkernotBob)
 
-_Written when this is built._
+1. In the hub, Keep a video you do not care about. A note is written for it.
+2. Open the note and delete everything you wrote under **Notes**, leaving the
+   section empty. (A note that was never written in is fine too.)
+3. Wait for the tidy sweep — or restart Obsidian, which runs it on load. The
+   note should be in the trash.
+4. Go back to the hub and look at **Kept**. The video should be **gone** from
+   it, in the same pass — not still sitting there with a note that no longer
+   exists.
+5. Check **Hidden/Dismissed**. It should be there, and **Restore** should bring
+   it back to Kept.
+6. Let the channel poll run again (or press Refresh). The video must *not*
+   reappear in the list on its own.
+7. Only if you want to see the refusal path: on a second device with the vault
+   mid-sync, an unreadable state file means the note is left alone and the
+   console says so — nothing is half-done.

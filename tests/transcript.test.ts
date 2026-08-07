@@ -20,6 +20,8 @@ import {
   isRenderedCueLine,
   TRANSCRIPT_ALIASES,
   TRANSCRIPT_HEADING,
+  TRANSCRIPT_REST_MARGIN_PX,
+  restingScrollTop,
   upsertSection,
   ensureFooter,
 } from "../src/transcript.ts";
@@ -563,4 +565,47 @@ test("isRenderedCueLine tells a transcript paragraph from a timestamp you typed"
   // A most-replayed row, which is a list item.
   assert.equal(isRenderedCueLine(`- **[1:40](ytfree:${ID}:100)** — the good part`), false);
   assert.equal(isRenderedCueLine("# Video Transcript"), false);
+});
+
+// ------------------------------------------- where the current line comes to rest
+
+/** A transcript region: 400pt of window onto 4000pt of paragraphs. */
+const REGION = { scrollTop: 0, scrollHeight: 4000, clientHeight: 400 };
+
+test("the current line rests just under the top of its region, not in the middle", () => {
+  // 040: the line was being centred, which spends the upper half of the region
+  // on words already heard. `offsetFromTop` is measured from the region's own
+  // top edge, so whatever is pinned above it is already accounted for.
+  const box = { ...REGION, scrollTop: 1000 };
+  assert.equal(restingScrollTop(box, 250), 1000 + 250 - TRANSCRIPT_REST_MARGIN_PX);
+});
+
+test("a line already at the top does not jump", () => {
+  const box = { ...REGION, scrollTop: 1000 };
+  assert.equal(restingScrollTop(box, TRANSCRIPT_REST_MARGIN_PX), 1000);
+});
+
+test("a line above the region scrolls back up to it", () => {
+  const box = { ...REGION, scrollTop: 1000 };
+  assert.equal(restingScrollTop(box, -300), 1000 - 300 - TRANSCRIPT_REST_MARGIN_PX);
+});
+
+test("it bottoms out cleanly rather than scrolling past the end", () => {
+  // The last paragraphs cannot reach the top — there is nothing behind them to
+  // scroll up. Asking for it must land on the last full screen, not on blank
+  // space below the transcript.
+  const box = { ...REGION, scrollTop: 3500 };
+  assert.equal(restingScrollTop(box, 380), 4000 - 400);
+});
+
+test("it never goes above the start of the transcript", () => {
+  assert.equal(restingScrollTop({ ...REGION, scrollTop: 0 }, 0), 0);
+  assert.equal(restingScrollTop({ ...REGION, scrollTop: 4 }, 0), 0);
+});
+
+test("a region shorter than its contents is not scrolled at all", () => {
+  // A three-line transcript in a tall region: nothing to scroll, and the answer
+  // is 0 rather than a negative scrollTop the browser would silently clamp.
+  const short = { scrollTop: 0, scrollHeight: 300, clientHeight: 400 };
+  assert.equal(restingScrollTop(short, 120), 0);
 });

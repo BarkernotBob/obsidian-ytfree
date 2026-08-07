@@ -607,3 +607,82 @@ test("one good poll clears both the run of failures and the message", () => {
   noteFeedFailure(channel, "Request failed, status 500");
   assert.equal(channel.error, null);
 });
+
+// ------------------------------------------------------ the tidy sweep, 042
+
+/**
+ * What a swept item has to survive.
+ *
+ * The sweep tombstones rather than deletes, and these are the two reasons why:
+ * a deleted row is back in the Inbox within the hour, and a tombstone is the
+ * only version of "gone" you can undo. `tidy.test.ts` covers the ordering; this
+ * covers what the tombstone itself has to be worth.
+ */
+
+const SWEPT_AT = new Date("2026-07-27T12:00:00Z");
+
+test("a swept item is a tombstone the next poll does not undo", () => {
+  const swept = item({ state: "kept", notePath: "Watch Later/A video.md" });
+  hideItem(swept, SWEPT_AT);
+
+  const { items, added } = mergeItems(
+    [swept],
+    { id: CHANNEL, title: "SmarterEveryDay", addedAt: NOW.toISOString() },
+    [
+      {
+        videoId: swept.videoId,
+        title: "A video",
+        published: swept.published,
+        thumbnail: "t",
+        description: "still in the feed's window",
+        views: 1000,
+      },
+    ],
+    NOW,
+  );
+
+  assert.equal(added.length, 0, "the video is back in the Inbox");
+  assert.equal(items[0].state, "dismissed");
+  assert.equal(items[0].dismissedAt, SWEPT_AT.toISOString());
+  assert.equal(items[0].description, "", "a tombstone that kept its description");
+});
+
+test("a swept item is in Hidden, not in Kept, and comes back from there", () => {
+  const swept = item({ state: "kept", notePath: "Watch Later/A video.md" });
+  hideItem(swept, SWEPT_AT);
+
+  assert.deepEqual(
+    visibleItems([swept], { filter: "kept" }).map((i) => i.videoId),
+    [],
+  );
+  assert.deepEqual(
+    hiddenItems([swept]).map((i) => i.videoId),
+    [swept.videoId],
+  );
+
+  // The way back. `notePath` is left on the tombstone on purpose: restoring
+  // gives `openItem` a path, and a path pointing at a trashed file is the case
+  // it already repairs by rebuilding the note.
+  restoreItem(swept, new Date("2026-07-28T12:00:00Z"));
+  assert.equal(swept.state, "new");
+  assert.equal(swept.dismissedAt, undefined);
+  assert.equal(swept.notePath, "Watch Later/A video.md");
+});
+
+test("swept items age out of the tombstone cap like any other", () => {
+  // They compete with videos hidden by hand for the same 500 rows — the sweep
+  // is now a second producer of tombstones, and the cap is unchanged.
+  const many = Array.from({ length: HIDDEN_LIMIT + 5 }, (_, i) => {
+    const one = item({ videoId: `swept${String(i).padStart(6, "0")}` });
+    hideItem(one, new Date(SWEPT_AT.getTime() + i * 1000));
+    return one;
+  });
+  const { items } = expireItems(many, 30, NOW);
+  assert.equal(items.length, HIDDEN_LIMIT);
+  assert.equal(items.every((i) => i.state === "dismissed"), true);
+  // Oldest off the end: the five earliest sweeps are the ones that go.
+  assert.equal(
+    items.some((i) => i.videoId === "swept000000"),
+    false,
+  );
+});

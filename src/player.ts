@@ -2,7 +2,7 @@ import Hls from "hls.js";
 import { setIcon } from "obsidian";
 import { formatTimestamp } from "./format.ts";
 import { SHARE_ICON } from "./icon.ts";
-import { panelPlacement } from "./panel.ts";
+import { anchorVisible, panelPlacement } from "./panel.ts";
 import type { SectionName } from "./sections.ts";
 import { compressibleWindows, moveFor, secondsSaved, secondsSkipped } from "./silence.ts";
 import type { PlaybackWindow, SilenceSource } from "./silence.ts";
@@ -100,11 +100,11 @@ export interface PlayerOptions {
   /** The pop-out of per-video controls. Absent, there is no pop-out button. */
   quick?: QuickPanelOptions;
   /**
-   * The pop-out is a sheet at the foot of the screen rather than a popover over
-   * the picture. Phones only — see `src/panel.ts` for why a popover cannot be
-   * made to fit inside the Preview sheet at any height.
+   * The pop-out is positioned against the viewport rather than against the
+   * control bar. Phones only — see `src/panel.ts` for why the bar's own
+   * coordinate space cannot hold it inside the Preview sheet at any height.
    */
-  panelSheet?: boolean;
+  panelAnchored?: boolean;
   /**
    * Dragging left and right across the picture seeks. Mobile only: on a phone
    * a horizontal swipe belongs to the host app, and over a video it should not.
@@ -275,12 +275,17 @@ export class YtFreePlayer {
   private panelBtn: HTMLButtonElement | null = null;
   private panelOpen = false;
   /**
-   * The tap-catcher behind the sheet. Built with the panel and never inserted
+   * The tap-catcher behind the pop-out. Built with the panel and never inserted
    * or removed on a click — only its `visibility` changes, so a menu opening
    * cannot move anything, and a tap meant for "close the menu" cannot fall
    * through to the modal underneath and close that too.
    */
   private panelScrim: HTMLElement | null = null;
+  /**
+   * Kept so an open anchored panel can be re-placed while the surface behind it
+   * scrolls, and taken off again the moment it closes. See `placePanel`.
+   */
+  private onPanelReflow: (() => void) | null = null;
   private smartSwitch: HTMLButtonElement | null = null;
   private pinBtn: HTMLButtonElement | null = null;
   /** The plugin's own fullscreen — see `setImmersive`. */
@@ -1015,9 +1020,14 @@ export class YtFreePlayer {
    */
   private buildQuickPanel(bar: HTMLElement, quick: QuickPanelOptions): void {
     // The scrim first, so it is behind the panel in paint order without either
-    // needing a z-index against the other. Sheet mode only: a popover is small
-    // and beside its own button, and the desktop's tap-outside already works.
-    if (this.options.panelSheet) {
+    // needing a z-index against the other. Phones only: on a desktop the panel
+    // is small and beside its own button, and click-outside already works.
+    //
+    // Invisible on purpose. It is a tap-catcher, not a modal backdrop: with the
+    // pop-out anchored to its button rather than rising from the foot of the
+    // screen, dimming everything behind it would claim the whole screen for a
+    // menu that only owns a corner of it.
+    if (this.options.panelAnchored) {
       const scrim = bar.createDiv({ cls: "ytfree-panel-scrim" });
       this.panelScrim = scrim;
       // On `click`, not `pointerdown`. The scrim's whole job is to be the thing
@@ -1039,7 +1049,7 @@ export class YtFreePlayer {
     // Decided once, at construction: the shape of the pop-out is a property of
     // the device, not of the click that opens it, and a class added on a click
     // is a layout change on a click.
-    if (this.options.panelSheet) panel.addClass("ytfree-panel-sheet");
+    if (this.options.panelAnchored) panel.addClass("ytfree-panel-anchored");
     this.panel = panel;
 
     const row = (label: string): HTMLElement => {
@@ -1230,27 +1240,122 @@ export class YtFreePlayer {
     const panel = this.panel;
     if (!panel) return;
     this.panelOpen = open ?? !this.panelOpen;
+
     if (this.panelOpen) {
-      // A popover opens upwards from the control bar and has grown: seven rows
-      // on a phone whose player starts a couple of hundred points down the
-      // screen would run off the top of it. Capped at the room there actually
-      // is, measured at the moment it opens — the bar has a different height in
-      // portrait, in landscape and in the immersive view. It scrolls past that.
-      //
-      // A sheet is measured against nothing: it is fixed to the foot of the
-      // screen and the stylesheet caps it. The inline height is cleared rather
-      // than left behind, or a player that started life as a popover would
-      // carry that cap into the sheet.
-      const placement = panelPlacement({
-        sheet: Boolean(this.options.panelSheet),
-        barTop: (panel.parentElement ?? this.container).getBoundingClientRect().top,
-      });
-      panel.style.maxHeight = placement.mode === "sheet" ? "" : `${placement.maxHeight}px`;
+      this.placePanel();
+      this.watchPanelAnchor(true);
+    } else {
+      this.watchPanelAnchor(false);
     }
+
     this.panelScrim?.toggleClass("is-open", this.panelOpen);
     panel.toggleClass("is-open", this.panelOpen);
     this.panelBtn?.toggleClass("is-active", this.panelOpen);
     this.panelBtn?.setAttribute("aria-expanded", String(this.panelOpen));
+  }
+
+  /**
+   * Put the pop-out where it belongs, against whatever it is measured against.
+   *
+   * Docked (the desktop): the panel is a child of the bar and hangs off it in
+   * the bar's own coordinates, so the only measurement is the ceiling. Seven
+   * rows on a player a couple of hundred points down the screen would run off
+   * the top of it, so it is capped at the room there actually is — measured at
+   * the moment it opens, because the bar has a different height in portrait, in
+   * landscape and in the immersive view. It scrolls past that.
+   *
+   * Anchored (the phone): the panel is fixed to the viewport, so everything is
+   * measured — which way it opens, how wide it is, and where its left edge sits
+   * — from the button's rect and the visible viewport. The inline properties are
+   * cleared first: a cap left over from the last open is a cap the natural
+   * height would be measured through, and the panel would ratchet smaller every
+   * time it was opened lower down the screen.
+   *
+   * Called again on scroll and resize, which is why it is idempotent and why it
+   * measures rather than remembers.
+   */
+  private placePanel(): void {
+    const panel = this.panel;
+    if (!panel) return;
+
+    if (!this.options.panelAnchored) {
+      const placement = panelPlacement({
+        anchored: false,
+        barTop: (panel.parentElement ?? this.container).getBoundingClientRect().top,
+      });
+      panel.style.maxHeight = placement.mode === "docked" ? `${placement.maxHeight}px` : "";
+      return;
+    }
+
+    const button = this.panelBtn;
+    if (!button) return;
+    const anchor = button.getBoundingClientRect();
+
+    // The visual viewport, when there is one: on iOS the keyboard and the URL
+    // bar shrink what you can see without changing `innerHeight`, and a panel
+    // placed against the layout viewport is placed behind them.
+    const visual = window.visualViewport;
+    const viewport = {
+      width: visual?.width ?? window.innerWidth,
+      height: visual?.height ?? window.innerHeight,
+    };
+
+    if (!anchorVisible(anchor, viewport)) {
+      // Scrolled past. Repositioning would park the menu over unrelated content
+      // with nothing on screen to say where it came from.
+      if (this.panelOpen) this.togglePanel(false);
+      return;
+    }
+
+    panel.style.maxHeight = "";
+    panel.style.width = "";
+    const natural = panel.getBoundingClientRect();
+
+    const placement = panelPlacement({
+      anchored: true,
+      anchor,
+      panel: { width: natural.width, height: natural.height },
+      viewport,
+    });
+    if (placement.mode !== "anchored") return;
+
+    panel.style.left = `${placement.left}px`;
+    panel.style.top = `${placement.top}px`;
+    panel.style.width = `${placement.width}px`;
+    panel.style.maxHeight = `${placement.maxHeight}px`;
+    panel.toggleClass("is-below", placement.side === "down");
+  }
+
+  /**
+   * Follow the button while the pop-out is open, or stop following it.
+   *
+   * The price of leaving the ancestor's coordinate space: a fixed panel does not
+   * move when the Preview sheet scrolls under it. `scroll` is listened for in
+   * the capture phase because scroll does not bubble — the sheet's own scroller
+   * is the element that fires it, not the window.
+   *
+   * Nothing here runs while the panel is shut, and `destroy` cannot leave one
+   * behind: `togglePanel(false)` is the only way out and it always unhooks.
+   */
+  private watchPanelAnchor(on: boolean): void {
+    if (on) {
+      if (this.onPanelReflow || !this.options.panelAnchored) return;
+      const reflow = () => this.placePanel();
+      this.onPanelReflow = reflow;
+      window.addEventListener("scroll", reflow, true);
+      window.addEventListener("resize", reflow);
+      window.visualViewport?.addEventListener("resize", reflow);
+      window.visualViewport?.addEventListener("scroll", reflow);
+      return;
+    }
+
+    const reflow = this.onPanelReflow;
+    if (!reflow) return;
+    window.removeEventListener("scroll", reflow, true);
+    window.removeEventListener("resize", reflow);
+    window.visualViewport?.removeEventListener("resize", reflow);
+    window.visualViewport?.removeEventListener("scroll", reflow);
+    this.onPanelReflow = null;
   }
 
   /**
@@ -2169,6 +2274,10 @@ export class YtFreePlayer {
       document.removeEventListener("keydown", this.onDocKey);
       this.onDocKey = null;
     }
+    // A player torn down with its pop-out open — closing the Preview sheet is
+    // exactly that — would otherwise leave a scroll listener on the window
+    // measuring a button that no longer exists.
+    this.watchPanelAnchor(false);
     this.clearNowPlaying();
     this.teardownHls();
     this.video.removeAttribute("src");

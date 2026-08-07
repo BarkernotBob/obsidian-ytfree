@@ -84,6 +84,7 @@ import {
   topPeaks,
   TRANSCRIPT_ALIASES,
   TRANSCRIPT_HEADING,
+  TRANSCRIPT_REST_MARGIN_PX,
   upsertSection,
 } from "./transcript";
 import { fetchCaptionTrack, fetchHeatmap } from "./innertube";
@@ -98,8 +99,8 @@ import {
   notesCursorTarget,
   sectionEnd,
 } from "./sections";
-import { DEFAULT_TIDY_DAYS, notesToTidy } from "./tidy";
-import type { TidyCandidate } from "./tidy";
+import { DEFAULT_TIDY_DAYS, notesToTidy, sweepNote } from "./tidy";
+import type { SweepHub, TidyCandidate } from "./tidy";
 import { YtFreePlayer } from "./player";
 import type { NowPlaying } from "./player";
 import {
@@ -1285,22 +1286,49 @@ export default class YtFreePlugin extends Plugin {
       });
     }
 
+    const now = new Date();
+    const hub = this.subscriptions;
+    // The hub half of the sweep, as `sweepNote` wants it. Without a store —
+    // the hub is optional — every note answers `absent` and the sweep is what
+    // it was before 042: a trash and nothing else.
+    const sweepHub: SweepHub = {
+      tombstone: (videoId) => hub?.sweepAway(videoId, now) ?? Promise.resolve("absent" as const),
+      untombstone: async (videoId) => {
+        await hub?.unsweep(videoId);
+      },
+    };
+
     let removed = 0;
-    for (const candidate of notesToTidy(candidates, new Date(), days)) {
+    let refused = 0;
+    for (const candidate of notesToTidy(candidates, now, days)) {
       const file = this.app.vault.getAbstractFileByPath(candidate.path);
       if (!(file instanceof TFile)) continue;
-      try {
+
+      const outcome = await sweepNote(candidate, sweepHub, async (path) => {
         // Claimed before the trash, not after: the `deleted` event lands inside
         // the await, and a claim that arrives second is a claim that arrives
         // too late to stop the video being forgotten.
-        this.tidied.add(candidate.path);
-        await this.app.fileManager.trashFile(file);
+        this.tidied.add(path);
+        try {
+          await this.app.fileManager.trashFile(file);
+        } catch (err) {
+          this.tidied.delete(path);
+          throw err;
+        }
+      });
+
+      if (outcome === "swept") {
         console.info(`YT Free: trashed empty video note ${candidate.path}`);
         removed++;
-      } catch (err) {
-        this.tidied.delete(candidate.path);
-        console.error(`YT Free: could not trash ${candidate.path}.`, err);
+      } else if (outcome === "refused") {
+        refused++;
       }
+    }
+
+    if (refused > 0) {
+      console.warn(
+        `YT Free: left ${refused} empty video note${refused === 1 ? "" : "s"} alone — the hub state file could not be read, and the note and the hub item go together.`,
+      );
     }
 
     if (removed > 0) {
@@ -3172,10 +3200,24 @@ export default class YtFreePlugin extends Plugin {
     return true;
   }
 
-  /** Put a note's line in the middle of the screen, in whichever mode it is in. */
+  /**
+   * Bring a note's line to the top of the note, in whichever mode it is in.
+   *
+   * The top, since 040 — it used to be the middle, which spends the upper half
+   * of the screen on transcript already heard. "The top" is the top of the
+   * *scrolling region*, which on a note is already below everything pinned: the
+   * player is a sibling of the scroller inside `.view-content`, not a sticky
+   * element inside it, so the offset that clears it is the scroller's own top
+   * edge plus a margin rather than a number about the player.
+   *
+   * The same resting place is used by the "This moment" jump and by follow
+   * mode's own autoscroll, because two resting places for one line reads as the
+   * transcript drifting on its own.
+   */
   private scrollToLine(view: MarkdownView, line: number): void {
     if (view.getMode() === "preview") {
       try {
+        // Reading view's own scroll-to-line, which puts the block at the top.
         foldableMode(view).applyScroll?.(line);
       } catch (err) {
         console.error("YT Free: could not scroll reading view to the transcript.", err);
@@ -3183,8 +3225,24 @@ export default class YtFreePlugin extends Plugin {
       return;
     }
     try {
-      // `center` false would leave the line at the very bottom of the viewport,
-      // with the words the jump is about scrolled off it.
+      const cm = (view.editor as unknown as { cm?: EditorView }).cm;
+      if (cm) {
+        // CodeMirror's own, because `Editor.scrollIntoView` only offers centred
+        // or "just barely on screen" — and "just barely" from below leaves the
+        // line on the very last row of the viewport, which is the same defect
+        // pointing the other way. `y: "start"` with a margin is the thing both
+        // of those are approximations of.
+        const pos = cm.state.doc.line(Math.min(line + 1, cm.state.doc.lines)).from;
+        cm.dispatch({
+          effects: EditorView.scrollIntoView(pos, {
+            y: "start",
+            yMargin: TRANSCRIPT_REST_MARGIN_PX,
+          }),
+        });
+        return;
+      }
+      // No CodeMirror handle — an Obsidian that stopped exposing `cm`. Centred
+      // is worse than the top and better than nothing.
       view.editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } }, true);
     } catch {
       /* no editor: reading mode handled itself above */
@@ -3695,20 +3753,14 @@ export default class YtFreePlugin extends Plugin {
         // Phones only. A desktop has a mouse on the native scrubber and no host
         // gesture to take the movement away in the first place.
         dragSeek: mobile,
-        // A phone, and only inside the Preview sheet. Two conditions, two
-        // separate reasons:
-        //
-        // *A phone*, not any mobile — a tablet's Preview modal is 640px wide,
-        // so its picture is 360pt tall and the popover has room above the bar.
-        // A phone's is 202pt and it does not; see `src/panel.ts`.
-        //
-        // *In the modal*, because that is where absolute positioning is clipped
-        // by a scroller that is not the one the panel can scroll. A docked
-        // player in a note has the room and does not need it — and it is also
-        // the place a fixed bottom sheet would be the wrong shape, since a note
-        // lives under Obsidian's own mobile toolbar rather than over it the way
-        // a modal does.
-        panelSheet: preview && Platform.isPhone,
+        // A phone, wherever the player is. It used to be a phone *and* the
+        // Preview modal, because the modal is where a bar-relative popover is
+        // clipped by a scroller the panel cannot scroll — but a note on a phone
+        // has the same shortage of room above the bar and the same scrolling
+        // ancestors, and 037's report is that both were wrong. A tablet keeps
+        // the docked popover: its Preview modal is 640px wide, so its picture is
+        // 360pt tall and there is room above the bar; a phone's is 202pt.
+        panelAnchored: Platform.isPhone,
         // The entry this player belongs to, not "the note player for this video
         // ID". A preview is deliberately not in the `players` map (024), so the
         // lookup answered `undefined` and Collapse did nothing at all in the

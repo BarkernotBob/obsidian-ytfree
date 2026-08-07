@@ -92,3 +92,60 @@ export function notesToTidy(
 ): TidyCandidate[] {
   return candidates.filter((candidate) => tidyable(candidate, now, days));
 }
+
+// ------------------------------------------------------------- the removal
+
+/**
+ * What the hub can be asked to do with the video behind a note being swept.
+ *
+ * `tombstone` marks the item dismissed and gets that as far as disk; `absent`
+ * is its answer for a video the hub has never heard of, which is an ordinary
+ * outcome — a note from the Web Clipper or a template has no hub row to take
+ * out. `refused` is 034's rule surfacing: the state file could not be read, so
+ * nothing was written.
+ */
+export interface SweepHub {
+  tombstone(videoId: string): Promise<"tombstoned" | "absent" | "refused">;
+  /** Undo a tombstone this sweep wrote, because the note survived after all. */
+  untombstone(videoId: string): Promise<void>;
+}
+
+/** What became of one note the rules chose. */
+export type SweepOutcome = "swept" | "kept" | "refused";
+
+/**
+ * Remove one note, and its hub item, or neither.
+ *
+ * The two stores have to agree or the sweep re-creates the problem it exists to
+ * solve. A note trashed while its item stays `kept` leaves a Kept row pointing
+ * at nothing, and `openItem` reads a dead path as damage to repair — so the
+ * video you decided against a month ago is rebuilt by the next click on it. An
+ * item tombstoned while its note survives is the same disagreement mirrored: a
+ * live note you can no longer find from the hub.
+ *
+ * So the hub goes first, because it is the half that can refuse. A write the
+ * state file would not accept leaves the note where it is and the sweep tries
+ * again on its next pass; a trash that then fails puts the tombstone back. The
+ * only orders that can diverge are the ones where the second step's failure has
+ * nowhere to go, and this is not one of them.
+ *
+ * Injected rather than imported so the sequence is testable: everything here is
+ * about ordering and failure, and neither needs a vault.
+ */
+export async function sweepNote(
+  note: { path: string; videoId: string },
+  hub: SweepHub,
+  trash: (path: string) => Promise<void>,
+): Promise<SweepOutcome> {
+  const marked = await hub.tombstone(note.videoId);
+  if (marked === "refused") return "refused";
+
+  try {
+    await trash(note.path);
+  } catch (err) {
+    console.error(`YT Free: could not trash ${note.path}.`, err);
+    if (marked === "tombstoned") await hub.untombstone(note.videoId);
+    return "kept";
+  }
+  return "swept";
+}

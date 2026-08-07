@@ -74,7 +74,7 @@ import { NOTES_HEADING } from "./sections";
 import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
 import { fetchTranscriptCues, fetchVideoDetails, searchYouTube } from "./innertube";
-import { groupCues } from "./transcript";
+import { groupCues, restingScrollTop } from "./transcript";
 import type { Paragraph } from "./transcript";
 import type { SearchPage, SearchResult } from "./search";
 import {
@@ -231,12 +231,23 @@ async function mapLimit<T>(items: T[], limit: number, worker: (item: T) => Promi
  */
 export type ChangeReason = "local" | "merge";
 
+/**
+ * What one save did: whether it reached disk, and what was there before it.
+ *
+ * Two facts rather than one, because they answer different questions and the
+ * old single answer conflated them — see `saveReporting`.
+ */
+interface SaveOutcome {
+  written: boolean;
+  disk: SubscriptionsState | null;
+}
+
 export class SubscriptionsStore {
   state: SubscriptionsState = emptyState();
   polling = false;
   /** Bumped on every change so open views can redraw — see `ChangeReason`. */
   private listeners = new Set<(reason: ChangeReason) => void>();
-  private saving: Promise<SubscriptionsState | null> = Promise.resolve(null);
+  private saving: Promise<SaveOutcome> = Promise.resolve({ written: false, disk: null });
   /**
    * mtime of the last state file we *successfully read* or wrote.
    *
@@ -337,8 +348,21 @@ export class SubscriptionsStore {
    * already sent the notification it was about to send. See `notifyNewItems`.
    */
   save(): Promise<SubscriptionsState | null> {
+    return this.saveReporting().then((outcome) => outcome.disk);
+  }
+
+  /**
+   * The same save, for the one caller that has to know whether it landed.
+   *
+   * `save` answers null for both "there was no file" and "the write was
+   * refused", which is enough for everything that only wants the other device's
+   * copy. The tidy sweep cannot use that: it trashes a note on the strength of
+   * the tombstone reaching disk, and "refused" read as "no file yet" is exactly
+   * the divergence issue 042 exists to prevent. See `sweepAway`.
+   */
+  private saveReporting(): Promise<SaveOutcome> {
     this.saving = this.saving
-      .then(async () => {
+      .then(async (): Promise<SaveOutcome> => {
         const read = await this.readDiskForSave();
         const plan = planSave(this.state, read);
         if (!plan.write) {
@@ -347,17 +371,17 @@ export class SubscriptionsStore {
           this.scheduleRetry();
           // Null, not the unread file: a caller that claims work on the strength
           // of a read that never happened is exactly the race 036 avoids.
-          return null;
+          return { written: false, disk: null };
         }
         this.state = plan.state;
         await this.app.vault.adapter.write(this.statePath, JSON.stringify(this.state));
         await this.noteDiskTime();
         if (plan.merged) this.emit("merge");
-        return read.kind === "state" ? read.state : null;
+        return { written: true, disk: read.kind === "state" ? read.state : null };
       })
       .catch((err) => {
         console.error("YT Free: could not write subscriptions state.", err);
-        return null;
+        return { written: false, disk: null };
       });
     return this.saving;
   }
@@ -778,6 +802,66 @@ export class SubscriptionsStore {
     hideItem(this.live(item), new Date());
     this.emit();
     void this.save();
+  }
+
+  /**
+   * The tidy sweep is about to trash this video's note — take it out of Kept.
+   *
+   * Dismissed, not deleted, and the distinction is the whole design. A deleted
+   * row is not a decision, so the next poll finds the video in the channel feed
+   * with nothing to say it was ever seen and puts it back in the Inbox within
+   * the hour. A tombstone survives that, and it puts the video in the Hidden
+   * list, so a sweep that took something wanted has a way back — which a
+   * deletion would not.
+   *
+   * `hideItem` stamps `dismissedAt` from the clock passed in, so a swept item
+   * ages out of the tombstone cap exactly like one hidden by hand.
+   *
+   * Awaits the write and reports it, because the caller trashes a file on the
+   * strength of the answer. `absent` for a video the hub never had: an ordinary
+   * outcome for a note that came from somewhere other than the hub, and one
+   * that still lets the note go.
+   */
+  async sweepAway(videoId: string, now = new Date()): Promise<"tombstoned" | "absent" | "refused"> {
+    const found = this.itemFor(videoId);
+    if (!found) return "absent";
+
+    const live = this.live(found);
+    // Copied before the mutation and put back verbatim if the write is refused
+    // — not `restoreItem`, which stamps a fresh decision. A refused save wrote
+    // nothing, so there is nothing on disk to out-decide, and a new stamp would
+    // beat the Kept row still sitting in the file and demote it on the next
+    // merge. The right undo for a write that never happened is no decision at
+    // all. Safe to hold the reference: a refused save leaves `state` untouched,
+    // so nothing replaces this object underneath us.
+    const before = { ...live };
+
+    hideItem(live, now);
+    this.emit();
+    const outcome = await this.saveReporting();
+    if (outcome.written) return "tombstoned";
+
+    // Put the copy back in place of the object we mutated rather than assigning
+    // over it: `hideItem` adds `dismissedAt` where there was none, and an
+    // assignment cannot take a key away again. A merge replaces item objects
+    // for the same reason, and the views re-look-up by video ID after one.
+    const at = this.state.items.indexOf(live);
+    if (at >= 0) this.state.items[at] = before;
+    this.emit();
+    return "refused";
+  }
+
+  /**
+   * The trash failed after the tombstone was written, so undo the tombstone.
+   *
+   * Back to the Inbox rather than back to Kept: `restoreItem` is the one path
+   * that clears `dismissedAt` and stamps a fresh decision, and an item whose
+   * note still exists is picked back up as Kept by `noteOpened` the next time
+   * it is opened.
+   */
+  async unsweep(videoId: string): Promise<void> {
+    const item = this.itemFor(videoId);
+    if (item) await this.restore(item);
   }
 
   /**
@@ -2522,16 +2606,7 @@ class PreviewModal extends Modal {
       text: [this.spec.channel, ...this.spec.facts].filter(Boolean).join(" · "),
     });
 
-    const body = contentEl.createDiv({
-      cls: "ytfree-preview-description",
-      text: this.spec.description || (this.spec.fetchDescription ? "Loading…" : "No description."),
-    });
-    if (this.spec.fetchDescription) {
-      void this.spec.fetchDescription().then(
-        (text) => body.setText(text || "No description."),
-        () => body.setText("No description."),
-      );
-    }
+    this.mountDescription(contentEl);
 
     this.mountTranscript(contentEl);
 
@@ -2657,6 +2732,51 @@ class PreviewModal extends Modal {
   }
 
   /**
+   * The description — a paragraph on a laptop, a disclosure on a phone.
+   *
+   * 039: the description is arbitrarily long, and on a phone it was the thing
+   * between the picture and the transcript. A sponsor block, a chapter list and
+   * a wall of hashtags is several screens, and every one of them is a screen
+   * between you and the words being spoken. So on a phone it starts shut and
+   * opens with one tap, which is the whole of "reachable but not in the way".
+   *
+   * On a laptop there is room for both and nothing to solve, so it stays what it
+   * was: a scrolling paragraph, always open, no header.
+   */
+  private mountDescription(contentEl: HTMLElement): void {
+    const section = contentEl.createDiv({ cls: "ytfree-preview-describe" });
+    let body: HTMLElement;
+
+    if (Platform.isPhone) {
+      const header = section.createEl("button", {
+        cls: "ytfree-preview-disclose",
+        attr: { type: "button", "aria-expanded": "false" },
+      });
+      const chevron = header.createSpan({ cls: "ytfree-preview-disclose-chevron" });
+      setIcon(chevron, "chevron-right");
+      header.createSpan({ cls: "ytfree-preview-disclose-label", text: "Description" });
+      body = section.createDiv({ cls: "ytfree-preview-description" });
+      header.addEventListener("click", () => {
+        const open = section.hasClass("is-open");
+        section.toggleClass("is-open", !open);
+        header.setAttribute("aria-expanded", String(!open));
+        setIcon(chevron, open ? "chevron-right" : "chevron-down");
+      });
+    } else {
+      section.addClass("is-open");
+      body = section.createDiv({ cls: "ytfree-preview-description" });
+    }
+
+    body.setText(this.spec.description || (this.spec.fetchDescription ? "Loading…" : "No description."));
+    if (this.spec.fetchDescription) {
+      void this.spec.fetchDescription().then(
+        (text) => body.setText(text || "No description."),
+        () => body.setText("No description."),
+      );
+    }
+  }
+
+  /**
    * The transcript, under the description.
    *
    * **Fetched on open, shown on demand.** The two are deliberately not the same
@@ -2672,13 +2792,21 @@ class PreviewModal extends Modal {
   private mountTranscript(contentEl: HTMLElement): void {
     if (!this.spec.fetchTranscript) return;
 
+    // Open from the start on a phone (039). The transcript is the reason the
+    // sheet has a region for it at all, and a region you have to open before it
+    // fills the screen is one that reflows the sheet the first time you use it.
+    // On a laptop the sheet is not short of room and shut is still the polite
+    // default — a transcript is a lot of text to put in front of someone who
+    // opened a preview to read the description.
+    const start = Platform.isPhone;
     const section = contentEl.createDiv({ cls: "ytfree-preview-transcript" });
+    section.toggleClass("is-open", start);
     const header = section.createEl("button", {
       cls: "ytfree-preview-transcript-head",
-      attr: { type: "button", "aria-expanded": "false" },
+      attr: { type: "button", "aria-expanded": String(start) },
     });
     const chevron = header.createSpan({ cls: "ytfree-preview-transcript-chevron" });
-    setIcon(chevron, "chevron-right");
+    setIcon(chevron, start ? "chevron-down" : "chevron-right");
     const label = header.createSpan({
       cls: "ytfree-preview-transcript-label",
       text: "Transcript",
@@ -2695,13 +2823,23 @@ class PreviewModal extends Modal {
       else this.startTicking();
     });
 
+    // Nothing to show: shut the section rather than leaving a phone's filling
+    // region holding an empty box. `is-open` is what claims the space (039), so
+    // dropping it hands the sheet back to the description in one move.
+    const nothing = (why: string): void => {
+      label.setText(why);
+      header.setAttribute("disabled", "true");
+      header.setAttribute("aria-expanded", "false");
+      section.removeClass("is-open");
+      setIcon(chevron, "chevron-right");
+    };
+
     void this.spec.fetchTranscript().then(
       (cues) => {
         if (this.closed) return;
         this.cues = cues;
         if (cues.length === 0) {
-          label.setText("Transcript — none for this video");
-          header.setAttribute("disabled", "true");
+          nothing("Transcript — none for this video");
           return;
         }
         label.setText(`Transcript · ${cues.length} sections`);
@@ -2711,8 +2849,7 @@ class PreviewModal extends Modal {
       (err: unknown) => {
         console.error("YT Free: preview transcript could not be fetched.", err);
         if (this.closed) return;
-        label.setText("Transcript — could not be fetched");
-        header.setAttribute("disabled", "true");
+        nothing("Transcript — could not be fetched");
       },
     );
   }
@@ -2781,19 +2918,22 @@ class PreviewModal extends Modal {
   }
 
   /**
-   * Put a row in the middle of the transcript box, moving nothing else.
+   * Bring a row to the top of the transcript box, moving nothing else.
    *
    * `scrollIntoView` was doing this before and it scrolls every ancestor that
    * can scroll — including the sheet itself, which is what used to drag the
    * video off the top of the screen. This touches one `scrollTop`, on the one
    * element that is supposed to move.
+   *
+   * The middle of the box was the resting place until 040. See
+   * `restingScrollTop` for why the top is the right one, and why the end of a
+   * transcript is allowed to simply bottom out.
    */
   private revealRow(row: HTMLElement): void {
     const box = this.cueScroller;
     if (!box) return;
-    const rowRect = row.getBoundingClientRect();
-    const boxRect = box.getBoundingClientRect();
-    box.scrollTop += rowRect.top - boxRect.top - (boxRect.height - rowRect.height) / 2;
+    const offset = row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    box.scrollTop = restingScrollTop(box, offset);
   }
 
   private stopTicking(): void {

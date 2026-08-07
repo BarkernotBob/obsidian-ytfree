@@ -1,6 +1,7 @@
 # 040 — "This moment" lands the current line at the top, not the middle
 
-Status: **Scoped 2026-08-06 — not built.** From BarkernotBob's manual test of
+Status: **Built 2026-08-06 — not yet tested on the phone.** From BarkernotBob's
+manual test of
 [035](035-follow-unfold-cursor-progress.md):
 
 > "Clicking this moment makes the transcript follow, but the current section is
@@ -51,6 +52,40 @@ Details that decide whether it feels right:
 - [ ] "This moment" still unfolds a collapsed transcript before scrolling.
 - [ ] `tsc` clean, build clean, unit tests pass.
 
+## How it was built
+
+One rule, `restingScrollTop` in `src/transcript.ts`, used by both halves: take
+the line's offset from the top of the scrolling region, subtract a small
+breathing margin, and clamp to what there is to scroll. The clamp is what makes
+the end of a transcript bottom out cleanly instead of asking for blank space
+below the last paragraph.
+
+In Preview the region is the transcript's own box, so `revealRow` sets one
+`scrollTop` and moves nothing else on the sheet. In a note the pinned player is
+a *sibling* of the editor's scroller rather than something sticky inside it, so
+"immediately below the action bar" is the scroller's own top edge plus that
+margin — no number about the player appears anywhere. `scrollToLine` asks
+CodeMirror for `y: "start"` with a margin, because Obsidian's own
+`Editor.scrollIntoView` offers only centred or barely-on-screen, and
+barely-on-screen from below is the same defect pointing the other way.
+
+Both the "This moment" jump and follow mode's autoscroll go through
+`scrollToLine`, so there is one resting place rather than two.
+
 ## Manual test (for BarkernotBob)
 
-_Written when this is built._
+In a video note with a transcript:
+
+1. Play the video and let it run a couple of minutes in.
+2. Tap **This moment**. The paragraph being spoken should land just under the
+   player and the action bar — near the top of the text, not halfway down the
+   screen with the last two minutes above it.
+3. Keep watching without touching anything. As the transcript follows along,
+   each new paragraph should come to rest in that same place.
+4. Skip to the last minute of the video and tap **This moment** again. The
+   transcript should stop at the end of the text — no empty space scrolled in
+   below the final paragraph.
+5. Switch the note to Reading view and repeat step 2.
+6. In Preview, open the transcript and play. The current paragraph should rest
+   near the top of the transcript box, and the same "no blank space at the end"
+   applies.

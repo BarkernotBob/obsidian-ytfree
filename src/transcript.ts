@@ -632,3 +632,41 @@ export function upsertSection(
   const merged = [...before, ...replacement, ...after].join("\n");
   return merged.replace(/\n{3,}/g, "\n\n");
 }
+
+// ---------------------------------------------------- where a jump comes to rest
+
+/**
+ * Air between the current line and whatever is pinned above it.
+ *
+ * Small on purpose: it is there so the line does not touch the chrome, not to
+ * reserve space. Anything larger starts costing lookahead again, which is the
+ * whole complaint 040 is about.
+ */
+export const TRANSCRIPT_REST_MARGIN_PX = 8;
+
+/**
+ * Where a scroller has to be so the current line rests at the top of it.
+ *
+ * Top, not centre. Centring spends the whole upper half of the screen on
+ * transcript you have already heard and leaves half a screen of what is coming
+ * — which is the half you read. On a phone that is a few lines of lookahead
+ * where there could be twice as many.
+ *
+ * The offset is *measured*: `offsetFromTop` is the row's position relative to
+ * the visible top of its scroller, so whatever is pinned above the scrolling
+ * region — a sticky picture in the Preview sheet, a docked player in a note —
+ * is accounted for by the geometry rather than by a number written down here.
+ *
+ * Clamped at both ends, which is what makes the end of a transcript behave: the
+ * last lines cannot be brought to the top, and the honest answer is to let the
+ * scroll bottom out rather than to fake it with padding that leaves a blank
+ * screen. The highlight still says which line is current.
+ */
+export function restingScrollTop(
+  box: { scrollTop: number; scrollHeight: number; clientHeight: number },
+  offsetFromTop: number,
+  margin = TRANSCRIPT_REST_MARGIN_PX,
+): number {
+  const most = Math.max(0, box.scrollHeight - box.clientHeight);
+  return Math.max(0, Math.min(most, box.scrollTop + offsetFromTop - margin));
+}
