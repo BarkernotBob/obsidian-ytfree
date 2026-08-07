@@ -244,6 +244,30 @@ interface YtFreeSettings {
    * behaviour and the answer for someone who wants the music left alone.
    */
   skipNonSpeech: boolean;
+  /**
+   * Print what the phone is actually doing, to the console.
+   *
+   * Off, and not a preference — a switch for one job. Two of the bugs this
+   * plugin has had (038, 041) are the same invisible failure: iOS declines a
+   * fullscreen or a keyboard because the user gesture has lapsed, and declines
+   * it *silently*. Nothing about that can be reasoned out from a screenshot, so
+   * the alternative to this toggle is guessing. See `debug`.
+   */
+  debugLogs: boolean;
+  /**
+   * Phone only: resolve the stream when the player mounts, instead of waiting
+   * for the first tap.
+   *
+   * `deferMobileLoad` exists because opening a note should not cost a video,
+   * and that is still true of the *video* — this fetches metadata, not the
+   * film. What it buys is 038: `webkitEnterFullscreen` is refused until there
+   * is loaded media, and the resolve cannot happen inside the tap that wants
+   * fullscreen, so the only way the first press can be the real thing is for
+   * the resolve to have already happened. On, for that reason; off gives back
+   * the old mount-now-resolve-later behaviour for anyone on a metered
+   * connection.
+   */
+  warmOnOpen: boolean;
 }
 
 /** Frontmatter key holding the path to a downloaded copy. */
@@ -368,6 +392,8 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   silenceFloorMargin: FLOOR_MARGIN_DB,
   silenceWordPad: WORD_PAD,
   skipNonSpeech: true,
+  debugLogs: false,
+  warmOnOpen: true,
 };
 
 /**
@@ -2102,6 +2128,13 @@ export default class YtFreePlugin extends Plugin {
     // this is the last moment the answer is still true.
     this.rememberNotesCursor(view, content);
 
+    // And before anything is deferred: the keyboard (041). This is inside the
+    // tap that called us, and iOS raises a keyboard only for a focus that
+    // happens in the task which handled the gesture — one `await`, one
+    // `setTimeout`, and the request is silently declined. Everything else the
+    // button does can wait a tick; this cannot.
+    if (section === "notes") this.openForWriting(view);
+
     // The button's second job. Tapping Transcript when you are already reading
     // the transcript has nowhere to take you, so it folds that section away
     // instead — a five-thousand-line transcript is exactly what you want gone
@@ -2164,6 +2197,54 @@ export default class YtFreePlugin extends Plugin {
       }
       if (section === "transcript") this.startFollowing(view, line);
     }, 0);
+  }
+
+  /**
+   * Put the note in a state where typing is possible, synchronously — 041.
+   *
+   * Three things have to be true before a keyboard appears on a phone, and the
+   * third is the one that was missing:
+   *
+   * 1. the note is in edit mode, because reading mode has no editable node to
+   *    put a caret in;
+   * 2. the editable node has focus — on mobile a view can be scrolled without
+   *    the editor holding focus at all, and `setCursor` on an unfocused editor
+   *    sets a position nothing is looking at;
+   * 3. that focus happened *inside the gesture*.
+   *
+   * Hence no `await` anywhere in here. `setState` returns a promise and the
+   * promise is deliberately dropped: Obsidian swaps the mode synchronously and
+   * resolves afterwards, so the editable node exists by the next line, and
+   * waiting for the promise would cost exactly the thing being protected.
+   *
+   * The caret's *position* is not set here. It needs the unfold and the scroll
+   * to have been laid out first, and moving a caret inside an already-focused
+   * editor does not need a gesture — see the end of `jumpToSection`.
+   *
+   * Known edge: coming from reading mode the editable node is built during the
+   * swap, so the focus on the next line can land on a node that is not in the
+   * document yet. The deferred block focuses again, so the caret is always
+   * placed; the keyboard, on that one path, may want a second tap. A note being
+   * read rather than edited is the rarer way to press Notes, and the alternative
+   * — awaiting the swap — loses the keyboard on *every* path.
+   *
+   * The mode switch is mobile-only. On a desktop, reading mode is a deliberate
+   * state a keyboard is not waiting behind, and 041's remit was the phone.
+   */
+  private openForWriting(view: MarkdownView): void {
+    try {
+      if (view.getMode() !== "source" && !Platform.isDesktopApp) {
+        void view.setState({ ...(view.getState() as object), mode: "source" }, { history: false });
+      }
+      view.editor.focus();
+      this.debug("notes: focused for writing", {
+        mode: view.getMode(),
+        active: document.activeElement?.className ?? "(none)",
+      });
+    } catch (err) {
+      // No editor at all. The scroll below is still worth doing.
+      this.debug("notes: could not focus", err);
+    }
   }
 
   /**
@@ -3770,6 +3851,8 @@ export default class YtFreePlugin extends Plugin {
         // Reads `activate` at call time, not now: the lazy loader is attached
         // further down, after this player exists.
         ensureLoaded: mobile ? () => entry?.activate?.() ?? Promise.resolve() : undefined,
+        // Silent unless Troubleshooting is on. See `debug`.
+        debug: (message, extra) => this.debug(message, extra),
         // Only where there is a note to jump around in. A fenced block rendered
         // outside a file — a preview, an export — has no sections.
         onJump:
@@ -4519,13 +4602,36 @@ export default class YtFreePlugin extends Plugin {
     }
 
     let started: Promise<void> | null = null;
+    /**
+     * The resolve on its own, without the play (038).
+     *
+     * `activate` used to be both, which made "there is loaded media" and "the
+     * video is playing" the same event — and fullscreen needs the first without
+     * the second. Shared between the two so a poster tap during the warm-up
+     * waits on the resolve already in flight rather than starting a second one.
+     */
+    let resolved: Promise<void> | null = null;
+    const resolve = (): Promise<void> => (resolved ??= player.load(false));
+
+    // Metadata now, so the first press of Fullscreen is the phone's own
+    // fullscreen rather than our substitute. Failures are swallowed: nothing
+    // was asked for yet, so a dead connection here has nothing to report — the
+    // poster is still there and its tap reports for itself.
+    if (this.settings.warmOnOpen) {
+      window.setTimeout(() => {
+        if (started) return;
+        void resolve().catch((err: unknown) => {
+          resolved = null;
+          this.debug("warm-up failed; the poster will try again", err);
+        });
+      }, 0);
+    }
 
     const activate = (): Promise<void> => {
       if (started) return started;
       poster.disabled = true;
       setStatus("Resolving stream…");
-      started = player
-        .load(false)
+      started = resolve()
         .then(() => {
           poster.remove();
           media.querySelector(".ytfree-fallback")?.remove();
@@ -4536,7 +4642,10 @@ export default class YtFreePlugin extends Plugin {
           // Reset, so a failure caused by a dead connection can be tried again.
           // The retry has to be a control inside the fallback: the fallback
           // covers the media box, and therefore covers the poster underneath.
+          // Both of them: a rejected promise kept in `resolved` would re-throw
+          // the same dead connection at every retry without asking the network.
           started = null;
+          resolved = null;
           poster.disabled = false;
           setStatus(null);
           // A Play pressed while this was resolving is waiting on a stream that
@@ -4728,6 +4837,21 @@ export default class YtFreePlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  /**
+   * A line in the console, when the debug switch is on.
+   *
+   * Prefixed and gated in one place so the calls at the sites that need it are
+   * one line each and cost nothing when it is off. Not a `Notice`: what this
+   * reports is a sequence — gesture, focus, readyState, what iOS did a quarter
+   * of a second later — and a sequence has to be read as a list, side by side
+   * with the timestamps the console puts on it.
+   */
+  debug(message: string, extra?: unknown): void {
+    if (!this.settings.debugLogs) return;
+    if (extra === undefined) console.info(`YT Free [debug]: ${message}`);
+    else console.info(`YT Free [debug]: ${message}`, extra);
   }
 
   /**
@@ -5553,5 +5677,36 @@ class YtFreeSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }),
     );
+
+    // Mobile only, and drawn only there: on a desktop the stream is resolved at
+    // mount already, so the control would do nothing at all.
+    if (!Platform.isDesktopApp) {
+      new Setting(containerEl)
+        .setName("Get the video ready when a note opens")
+        .setDesc(
+          "Fetches the stream (not the video) as soon as a player appears, so Full screen, PiP and the transport work on the first press rather than the second. Off, nothing is fetched until you tap — the phone's own full screen then needs the video playing first.",
+        )
+        .addToggle((toggle) =>
+          toggle.setValue(this.plugin.settings.warmOnOpen).onChange(async (value) => {
+            this.plugin.settings.warmOnOpen = value;
+            await this.plugin.saveSettings();
+          }),
+        );
+    }
+
+    new Setting(containerEl).setName("Troubleshooting").setHeading();
+
+    new Setting(containerEl)
+      .setName("Log what the player is doing")
+      .setDesc(
+        "Prints the fullscreen and keyboard decisions to the developer console, which is the only way to see them: iOS refuses both silently when the tap that asked for them has already finished. Turn on before reproducing a problem on the phone, and off afterwards.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.debugLogs).onChange(async (value) => {
+          this.plugin.settings.debugLogs = value;
+          await this.plugin.saveSettings();
+          this.plugin.refreshPinnedPlayers();
+        }),
+      );
   }
 }

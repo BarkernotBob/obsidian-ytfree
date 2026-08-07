@@ -37,6 +37,13 @@ export interface PlayerOptions {
    */
   ensureLoaded?: () => Promise<void>;
   /**
+   * Somewhere to say what the player just did, when the reader has asked for it
+   * (Settings → Troubleshooting). Absent, nothing is logged — this exists for
+   * the fullscreen and keyboard paths (038, 041), which fail by doing nothing
+   * on a device with no console attached.
+   */
+  debug?: (message: string, extra?: unknown) => void;
+  /**
    * Jump the note to one of its own sections. Draws the second row of the
    * control bar; absent, there is no second row at all — a fenced block in a
    * note with no video frontmatter has no sections to offer.
@@ -798,7 +805,7 @@ export class YtFreePlayer {
     });
 
     button("left", "Fullscreen", "maximize", "Fullscreen", () => {
-      void this.withMedia(() => this.toggleFullscreen());
+      this.fullscreenPressed();
     });
 
     // Right is what this player does to the *note*: keep a copy of it, pin it,
@@ -1837,6 +1844,44 @@ export class YtFreePlayer {
   }
 
   /**
+   * The Fullscreen button, and the one control that must not go through
+   * `withMedia` (038).
+   *
+   * `webkitEnterFullscreen` is honoured only inside the task that handled the
+   * tap. On a warm player `withMedia` never awaits, which is why Fullscreen
+   * always worked mid-playback; on a cold one it awaits a network round trip,
+   * the gesture is long gone by the time the call is made, and the press landed
+   * silently in the CSS fallback instead. So: warm players go straight through,
+   * with nothing in front of the call, and a cold player is told what it is
+   * getting rather than being quietly given the other thing.
+   */
+  private fullscreenPressed(): void {
+    const el = this.video as HTMLVideoElement & { webkitSupportsFullscreen?: boolean };
+    this.options.debug?.("fullscreen: pressed", {
+      readyState: this.video.readyState,
+      webkitSupportsFullscreen: el.webkitSupportsFullscreen ?? null,
+      hasRequestFullscreen: typeof this.video.requestFullscreen === "function",
+      immersive: this.immersive,
+    });
+
+    // On the way out, or already warm: inside the gesture, no await in front.
+    if (this.immersive || document.fullscreenElement || this.video.readyState > 0) {
+      void this.toggleFullscreen();
+      return;
+    }
+
+    // Cold. The resolve outlives the tap, so the native call would be refused;
+    // start the video anyway — the press is still a request to watch it — and
+    // enter our own fullscreen, having said which one this is.
+    this.options.debug?.("fullscreen: cold press, resolving first");
+    this.onStatus("Full screen in the app — press it again once it is playing for the phone's own");
+    window.setTimeout(() => this.onStatus(null), 4000);
+    void this.withMedia(() => {
+      this.setImmersive(true);
+    });
+  }
+
+  /**
    * Fullscreen, on both engines.
    *
    * An iPhone has no element-level Fullscreen API at all — only the video's own
@@ -1896,19 +1941,50 @@ export class YtFreePlayer {
     try {
       if (el.webkitSupportsFullscreen) {
         el.webkitEnterFullscreen?.();
+        this.options.debug?.("fullscreen: called webkitEnterFullscreen", {
+          readyState: this.video.readyState,
+        });
         // It reports failure by doing nothing, so ask a frame later whether it
         // actually happened and cover the case where it did not.
         window.setTimeout(() => {
           if (this.destroyed) return;
-          if (el.webkitDisplayingFullscreen || el.webkitPresentationMode === "fullscreen") return;
-          this.setImmersive(true);
+          const native = el.webkitDisplayingFullscreen || el.webkitPresentationMode === "fullscreen";
+          this.options.debug?.("fullscreen: 250ms later", {
+            webkitDisplayingFullscreen: el.webkitDisplayingFullscreen ?? null,
+            webkitPresentationMode: el.webkitPresentationMode ?? null,
+          });
+          if (native) return;
+          this.substitute();
         }, 250);
         return;
       }
     } catch {
       // Media not loaded yet, or no gesture behind this call.
     }
+    this.options.debug?.("fullscreen: no native path", {
+      readyState: this.video.readyState,
+      webkitSupportsFullscreen: el.webkitSupportsFullscreen ?? null,
+      hasWebkitEnter: typeof el.webkitEnterFullscreen === "function",
+    });
+    this.substitute();
+  }
+
+  /**
+   * The CSS fullscreen, entered where the phone's own was wanted (038).
+   *
+   * Landing here is reasonable; landing here without being told is not — the
+   * two look different enough that the reader thinks the button is broken. The
+   * message is only for the phone: on a desktop, where `requestFullscreen`
+   * exists and works, this is never reached as a substitute.
+   */
+  private substitute(): void {
     this.setImmersive(true);
+    const el = this.video as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+    if (typeof el.webkitEnterFullscreen !== "function") return;
+    this.onStatus("Full screen in the app — the phone's own needs the video playing first");
+    window.setTimeout(() => {
+      if (!this.destroyed) this.onStatus(null);
+    }, 4000);
   }
 
   /**
@@ -2153,6 +2229,11 @@ export class YtFreePlayer {
    */
   primeForGesture(): void {
     if (this.destroyed) return;
+    // Nothing to claim, and something to lose: `load()` on an element that
+    // already has media restarts it from the beginning, which since 038's
+    // warm-up is the ordinary state of a player nobody has played yet. The
+    // gesture only has to be claimed when the media is still to come.
+    if (this.video.readyState > 0) return;
     try {
       this.video.load();
     } catch {

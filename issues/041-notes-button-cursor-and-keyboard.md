@@ -1,6 +1,6 @@
 # 041 — The Notes button gives you a cursor and a keyboard on the phone
 
-Status: **Scoped 2026-08-06 — not built.** From BarkernotBob's manual test of
+Status: **Built 2026-08-06 — not yet tested on the phone.** From BarkernotBob's manual test of
 [035](035-follow-unfold-cursor-progress.md):
 
 > "Clicking notes collapses and expands the video player, but on mobile my
@@ -65,6 +65,52 @@ but say so in the issue write-up rather than leaving it implied.
 - [ ] Whatever the button does to the player is deliberate and stated.
 - [ ] `tsc` clean, build clean, unit tests pass.
 
+## How it was built
+
+The order was the cause, and the fix is the order. `jumpToSection` now calls
+`openForWriting` — edit mode if it is not in it, then `editor.focus()` — as its
+first act, before the fold, the scroll and the collapse, and with no `await` in
+front of it. Everything else the button does still happens in the deferred block
+it always did; only the focus was moved, because only the focus needs the
+gesture.
+
+The caret's *position* stayed where it was, at the end of that deferred block.
+Moving a caret inside an already-focused editor needs no gesture, and it needs
+the unfold and the scroll to have been laid out first or it sets a position
+against stale geometry. So: focus inside the tap, position afterwards.
+
+Two things worth knowing:
+
+- **Reading mode is best-effort.** The mode swap builds the editable node, so
+  the focus on the very next line can land on a node that is not in the document
+  yet. The deferred block focuses again, so the caret is always placed; the
+  keyboard on that one path may want a second tap. Awaiting the swap instead
+  would lose the keyboard on *every* path, which is the trade the other way
+  round. The swap is mobile-only — on a desktop, reading mode is a deliberate
+  state and 041 is about the phone.
+- **Collapsing the player is deliberate**, per the question the issue raised.
+  Notes is pressed in order to type, and a keyboard plus a player plus a
+  transcript does not fit on a phone. The tap that follows expands it again.
+
+`setState`'s promise is dropped on purpose, and iOS refuses a focus outside the
+gesture silently, so both are logged behind Settings → Troubleshooting → "Log
+what the player is doing" rather than being invisible when this is wrong again.
+
 ## Manual test (for BarkernotBob)
 
-_Written when this is built._
+On the iPhone, in a video note, with the video playing:
+
+1. Tap **Notes**. The keyboard should come up **on that tap**, with a blinking
+   caret in the Notes section — not after a second tap on the text.
+2. Type a word straight away, without touching the screen again. It should land
+   in the note, where the caret was.
+3. Tap **Transcript**, then **Notes** again. It should come back to the end of
+   what you just typed, keyboard and all.
+4. Do it in a note whose Notes section is **empty**. Same: caret on the empty
+   line under the heading, keyboard up.
+5. Switch the note to **Reading view** and tap Notes. It should flip to editing
+   with the caret in place — the keyboard may need one extra tap here, which is
+   known and is the only path where that is true.
+6. On the Mac, press Notes in a note you are editing. Same as it was: cursor
+   back where you were writing. In Reading view it should *stay* in Reading
+   view, as before.
