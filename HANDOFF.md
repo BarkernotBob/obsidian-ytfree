@@ -1,6 +1,66 @@
 # HANDOFF
 
-## Status — 2026-08-06: the iPhone test run, and six issues off it
+## Status — 2026-08-06: 037–042 all built
+
+**537 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
+`./install.sh` and a reload are the next thing, then the six Manual test
+sections. Every one of the six issues now carries a *How it was built* and a
+numbered manual test; all six say **not yet tested on the phone**, which is
+exactly what they are.
+
+- **037** the phone pop-out is a popover again. `panelPlacement` grew an
+  *anchored* mode beside the desktop's *docked* one; `position: fixed` is what
+  escaped the clipping ancestor (the bottom sheet never was), and the player
+  re-places it on capture-phase `scroll`, `resize` and `visualViewport`, closing
+  when the button leaves the screen.
+- **038** Fullscreen from a cold player. Two causes, both addressed: the press no
+  longer goes through `withMedia`'s `await` (that is the gesture half), and the
+  stream is resolved at mount rather than at the first tap (that is the loaded-
+  media half) — `deferMobileLoad` now separates resolving from playing, behind a
+  new phone-only setting, *Get the video ready when a note opens*, default on.
+  Falling into the CSS fullscreen now says so on the status line instead of
+  substituting silently.
+- **039** the Preview sheet on a phone is three fixed regions and one elastic
+  one, written as flex on the element that scrolls. The description is a shut
+  disclosure; the transcript takes what is left. Landscape is a two-column grid
+  below 520pt of height — stacked does not fit at any picture size worth
+  watching. `tools/preview-sheet-harness.mjs` measures every claim in that
+  sentence at 390×844 and 844×390.
+- **040** one rule, `restingScrollTop`, for both surfaces: line offset minus a
+  margin, clamped, so the end of a transcript bottoms out instead of asking for
+  blank space. In a note it goes through CodeMirror's `y: "start"`, because
+  Obsidian's own `Editor.scrollIntoView` offers only centred.
+- **041** the Notes button focuses the editor **first**, synchronously, before
+  the fold, the scroll and the collapse — iOS raises a keyboard only for a focus
+  inside the task that handled the tap. The caret's position still happens in
+  the deferred block, where the geometry is settled.
+- **042** a note the tidy sweep trashes takes its hub item out of Kept in the
+  same transaction, as a tombstone. The hub is written first because it is the
+  only one of the two that can refuse; a failed trash rolls the tombstone back
+  verbatim rather than through `restoreItem`, which would stamp a fresh
+  `decidedAt`.
+
+**One new switch, and it is the answer to "it fails silently on the phone":**
+Settings → Troubleshooting → *Log what the player is doing*. Off by default,
+logs the fullscreen and focus decisions that iOS declines without a word. 038
+and 041 are both that class of bug and both log through it.
+
+**Known limitations, stated rather than hidden:**
+- 041 in **reading mode** places the caret but may want a second tap for the
+  keyboard — the mode swap builds the editable node, so the synchronous focus
+  can land on a node not yet in the document. Awaiting the swap would lose the
+  keyboard on every path instead of one.
+- 038 with the warm-up **off** cannot give native fullscreen cold. It gives the
+  in-app one and says so.
+- 039's landscape shortage is real: picture, title, facts, a readable
+  description and a full-height transcript do not fit in 390pt. At rest the
+  transcript wins.
+
+**Next:** install, reload, and work the six manual tests on the iPhone. 038's
+steps 1–4 and 041's steps 1–2 are the ones that decide whether the gesture
+reasoning holds on a device — nothing here has run on hardware.
+
+## Previous — 2026-08-06: the iPhone test run, and six issues off it
 
 **Nothing built this session. Issues 037–042 written, index updated.** The
 032–036 build is installed in the vault (`main.js` hash matches the repo) and
