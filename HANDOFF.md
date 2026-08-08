@@ -45,6 +45,13 @@ own explanation.
   accent, so that is now the whole of it. A row of identical ticks could not say
   which of four squares had been pressed. The cell is 96px whatever is in it, so
   nothing reflows.
+- **…and keep their words, too.** Falling out of the line above: Save's label
+  and icon used to change with the state — *Open note* on a Kept card, *In your
+  hub* on a search result — which was invisible while a checkmark sat over it.
+  With the label on screen it clipped in the 96px cell and read as a different
+  button. Both slots now say **Save** with `bookmark-plus` in every state, and
+  only the colour moves. What the button *does* is unchanged: on a Kept card it
+  still opens the note rather than making a second one.
 
 **Manual test (for BarkernotBob), on the phone unless it says otherwise:**
 1. Open a video note, press the purple Play button. The picture starts with the
@@ -58,8 +65,9 @@ own explanation.
 5. Preview a video. Open Transcript: it fills the bottom and Description shuts.
    Open Description: the reverse. Rotate to landscape and repeat.
 6. **Desktop:** Preview a video. The window is about 80% of Obsidian, both ways.
-7. On a hub card press Save (or Add note). The button keeps its text and turns
-   purple; nothing on the card or beside it moves.
+7. On a hub card press Save. The button keeps its text and its icon and turns
+   purple; nothing on the card or beside it moves, and the word does not clip.
+   Press it again — the note opens.
 
 ## Previous — 2026-08-06: 037–042 all built
 

@@ -36,29 +36,38 @@ test("a hub card with no note offers Save, and does not read as done", () => {
   assert.equal(watch.done, false);
 });
 
-test("a Kept video's Save slot becomes Open note", () => {
+test("a Kept video's Save slot reads done without changing its words", () => {
+  // It opens the note rather than making one, but the label and the icon are
+  // the same ones — the accent colour is the whole of the difference. The
+  // label is on screen in every state now, so a longer word in a 96px cell
+  // both clips and reads as a different button.
   const [, watch, save] = hubSlots({ inHub: true, noteExists: true });
-  assert.equal(save.label, "Open note");
+  const [, , idle] = hubSlots({ inHub: true, noteExists: false });
+  assert.equal(save.label, "Save");
+  assert.equal(save.label, idle.label);
+  assert.equal(save.icon, idle.icon);
   assert.equal(save.done, true);
-  // Watch carries the checkmark for the same fact — a note exists.
+  // Watch reads done for the same fact — a note exists.
   assert.equal(watch.done, true);
 });
 
-test("a search result already in the hub says so on the Save slot", () => {
+test("a search result already in the hub reads done on the Save slot", () => {
   const notThere = searchSlots({ inHub: false, noteExists: false });
   assert.equal(notThere[2].label, "Save");
   assert.equal(notThere[2].done, false);
 
   const there = searchSlots({ inHub: true, noteExists: false });
-  assert.equal(there[2].label, "In your hub");
+  assert.equal(there[2].label, "Save");
+  assert.equal(there[2].icon, notThere[2].icon);
   assert.equal(there[2].done, true);
 });
 
 /**
- * `plus` and `check` are deliberately not idle icons: both now mean done, and
- * an idle button wearing one would claim something that has not happened.
+ * An icon no longer changes with the state, so no icon may *be* a state: a bare
+ * `plus` or `check` on a button that has not been pressed claims something that
+ * has not happened.
  */
-test("no idle icon is plus or check", () => {
+test("no icon is a bare plus or check", () => {
   for (const facts of [
     { inHub: false, noteExists: false },
     { inHub: true, noteExists: true },

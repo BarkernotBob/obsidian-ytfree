@@ -104,25 +104,31 @@ trailing 2×2 block that would have kept the existing 90px card: this grows it t
 ~132px, about seven cards visible instead of ten, and buys left-to-right
 scanning consistent with the rest of the card.
 
-**Nothing reflows on click.** Every button state — idle, spinner, done,
-disabled — is a stacked layer in one grid cell, with the border present in all
-of them and `overflow: hidden` on the button. The prototype found the one trap:
-a done-state label wider than the idle label pushes anyway, so done states are
-checkmark-only.
+**Nothing reflows on click.** Idle and spinner are stacked layers in one grid
+cell, with the border present in both and `overflow: hidden` on the button. The
+prototype found the trap: a done state that swaps the label for something wider
+pushes anyway. It was checkmark-only for that reason, and is now *nothing at
+all* — the label and icon do not change and only their colour does, which cannot
+push by construction.
 
-**State lives in the buttons.** Watch carries a checkmark when a note exists,
-Save when the video is in the hub. The separate marker column and badge are
-deleted. Watched progress is a bar along the bottom edge of the thumbnail —
-YouTube's own convention, zero layout cost, legible at 178px.
+**State lives in the buttons.** Watch reads done when a note exists, Save when
+the video is in the hub: text and border go accent, the words stay. The separate
+marker column and badge are deleted. Watched progress is a bar along the bottom
+edge of the thumbnail — YouTube's own convention, zero layout cost, legible at
+178px.
 
-Icons, all Lucide: Preview `eye`, Watch `play`, Save `bookmark-plus` →
-`bookmark-check`, Remove `x`. `plus` and `check` are deliberately not idle
-icons, because they now mean done.
+Icons, all Lucide and fixed per slot: Preview `eye`, Watch `play`, Save
+`bookmark-plus`, Remove `x`. No icon may be a bare `plus` or `check` — that
+would claim a state on a button nobody has pressed.
 
-**Per-filter slot meanings.** The four positions never move; two of them change
-meaning where the default would be a no-op — in Kept, Save becomes Open note; in
-Hidden, Remove becomes Restore. Disabling them instead would waste a quarter of
-the control area in half the filters.
+**Per-filter slot meanings.** The four positions never move, and neither do
+their words. Two slots change what they *do* where the default would be a no-op
+— in Kept, Save opens the note it would otherwise create; in Hidden, Remove
+restores. Disabling them instead would waste a quarter of the control area in
+half the filters. The labels used to change with them, which was affordable
+while done was a checkmark covering the label; with the label showing in every
+state, "Open note" clips in a 96px cell and reads as a different button rather
+than the same one further along.
 
 ## Rendering
 

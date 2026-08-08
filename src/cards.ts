@@ -12,9 +12,9 @@ export type CardActionKey = "preview" | "watch" | "save" | "remove";
 
 export interface CardSlot {
   key: CardActionKey;
-  /** Lucide icon for the idle state. `check` and `plus` are never idle icons. */
+  /** Lucide icon. The same one in every state; `check` is never one of them. */
   icon: string;
-  /** The idle label. Also the accessible name, in every state. */
+  /** The label, in every state. Also the accessible name. */
   label: string;
   /**
    * Already true of this video. The label stays where it is and only takes the
@@ -38,10 +38,13 @@ export interface CardFacts {
 /**
  * A hub card's four.
  *
- * The positions never move. Save is the one slot that changes meaning, and only
- * where the default would be a no-op: on a Kept video the note is already
- * there, so "create it and do not open it" becomes "open it". Disabling it
- * instead would waste a quarter of the control area in half the filters.
+ * The positions never move, and neither do the words. Save changes what it
+ * *does* on a Kept video — the note is already there, so "create it and do not
+ * open it" becomes "open it" — but it goes on saying Save, in accent. The label
+ * used to change with it, back when done was drawn as a checkmark and the words
+ * were never on screen at the same time as the state; with the label showing in
+ * every state, "Open note" is a longer word in a 96px cell and it reads as a
+ * different button rather than the same one, further along.
  */
 export function hubSlots(facts: CardFacts): CardSlot[] {
   return [
@@ -49,8 +52,8 @@ export function hubSlots(facts: CardFacts): CardSlot[] {
     { key: "watch", icon: "play", label: "Watch", done: facts.noteExists },
     {
       key: "save",
-      icon: facts.noteExists ? "file-text" : "bookmark-plus",
-      label: facts.noteExists ? "Open note" : "Save",
+      icon: "bookmark-plus",
+      label: "Save",
       done: facts.noteExists,
     },
     { key: "remove", icon: "x", label: "Remove", done: false, danger: true },
@@ -61,6 +64,9 @@ export function hubSlots(facts: CardFacts): CardSlot[] {
  * A search result's four. Same positions, different meanings underneath:
  * Save adds to the Inbox and makes no note, and Remove hides the result from
  * search rather than from the hub.
+ *
+ * Fixed words for the same reason as the hub's — "In your hub" was written to
+ * be read instead of a checkmark, not beside one.
  */
 export function searchSlots(facts: CardFacts): CardSlot[] {
   return [
@@ -68,8 +74,8 @@ export function searchSlots(facts: CardFacts): CardSlot[] {
     { key: "watch", icon: "play", label: "Watch", done: facts.noteExists },
     {
       key: "save",
-      icon: facts.inHub ? "bookmark-check" : "bookmark-plus",
-      label: facts.inHub ? "In your hub" : "Save",
+      icon: "bookmark-plus",
+      label: "Save",
       done: facts.inHub,
     },
     { key: "remove", icon: "x", label: "Remove", done: false, danger: true },
