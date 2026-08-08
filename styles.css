@@ -2815,6 +2815,29 @@ body:not(.is-mobile) .ytfree-preview-modal .modal-content {
 }
 
 /*
+ * The picture takes a share of the sheet, not the whole of it — the same trade
+ * the phone makes two hundred lines down, and for a sharper reason here.
+ *
+ * The player's box is 16:9 of whatever it is given, and what it was being given
+ * was 80vw. On a 16:9 screen that is 45vh of *width*, so the picture alone came
+ * out taller than the 80vh window it was in: the title, the description, the
+ * transcript and the four buttons were all below the fold of a sheet that had
+ * just been made bigger to show them. Capping the width rather than the height
+ * keeps it a 16:9 picture instead of a pillarboxed one — the height follows from
+ * the ratio — and the leftover is what the open region grows into.
+ *
+ * 34, measured rather than guessed: `tools/preview-sheet-harness.mjs` reports a
+ * 722pt sheet on a 1512×945 laptop, and 34vh leaves the open region about 155 of
+ * them with nothing scrolling. Every point given to the picture comes off the
+ * reading, and Collapse gives all of it back at one button — the picture folds
+ * to 66pt and the player keeps playing.
+ */
+body:not(.is-mobile) .ytfree-preview-wrapper {
+  max-width: calc(34vh * 16 / 9);
+  margin-inline: auto;
+}
+
+/*
  * The sheet scrolls in one place, and the picture rides on top of it.
  *
  * Opening the transcript adds a box of text in the middle of the sheet, and a
@@ -3018,10 +3041,20 @@ body:not(.is-mobile) .ytfree-preview-modal .modal-content {
   visibility: hidden;
 }
 
-/* Both regions shut is a legal state — an empty description and a shut
-   transcript — and the buttons belong at the foot of the sheet rather than
-   halfway up it. */
-.ytfree-preview-actions {
+/*
+ * Both regions shut is a legal state — an empty description and a shut
+ * transcript — and the buttons belong at the foot of the sheet rather than
+ * halfway up it.
+ *
+ * Only then, though, and that is not a nicety. An auto margin on a flex item
+ * takes *all* the positive free space before `flex-grow` is resolved at all, so
+ * an unconditional `margin-top: auto` here leaves the open region with nothing
+ * to grow into: it comes out at its 7em floor, the sheet is over-constrained,
+ * and every fixed thing on it with a shrinkable height gets squeezed — which is
+ * what was clipping the two headers. `ytfree-sheet-shut` is set by `disclose`
+ * in `src/hub.ts` and is the one state where there is no region to feed.
+ */
+.ytfree-sheet-shut .ytfree-preview-actions {
   margin-top: auto;
 }
 
@@ -3056,9 +3089,14 @@ body:not(.is-mobile) .ytfree-preview-modal .modal-content {
   border-top: 1px solid var(--background-modifier-border);
 }
 
+/* `flex: none` on the height, and it is load-bearing: a header is a flex item
+   in its own section now, and a flex item with a definite height still shrinks
+   below it by default. In a sheet with no room to spare that is a 34px row
+   rendered at 20 with the words cut off. */
 .ytfree-preview-transcript-head,
 .ytfree-preview-disclose {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 0.4em;
   width: 100%;

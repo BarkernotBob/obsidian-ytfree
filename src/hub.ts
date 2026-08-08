@@ -2621,6 +2621,12 @@ class PreviewModal extends Modal {
 
     this.mountTranscript(contentEl);
 
+    // The starting state of the same flag `disclose` maintains. Exactly one
+    // region opens by default — the transcript on a phone, the description off
+    // one — so this is normally false, and true only for a video with no
+    // transcript to offer at all.
+    contentEl.toggleClass("ytfree-sheet-shut", !this.anyRegionOpen());
+
     const actions = contentEl.createDiv({ cls: "ytfree-card-actions ytfree-preview-actions" });
     const buttons = new Map<CardActionKey, HTMLButtonElement>();
     const repaint = (): void => {
@@ -2762,6 +2768,11 @@ class PreviewModal extends Modal {
       section.toggleClass("is-open", open);
       header.setAttribute("aria-expanded", String(open));
       setIcon(chevron, open ? "chevron-down" : "chevron-right");
+      // The sheet needs to know, not just the section: with nothing open the
+      // buttons are pushed to the foot by an auto margin, and an auto margin
+      // eats the free space the open region is asking for. See
+      // `.ytfree-sheet-shut` in styles.css.
+      this.contentEl.toggleClass("ytfree-sheet-shut", !this.anyRegionOpen());
       onChange?.(open);
     };
     this.regions.push(setOpen);
@@ -2776,6 +2787,15 @@ class PreviewModal extends Modal {
     });
 
     return setOpen;
+  }
+
+  /** Whether either disclosure is showing anything. */
+  private anyRegionOpen(): boolean {
+    return Boolean(
+      this.contentEl.querySelector(
+        ".ytfree-preview-describe.is-open, .ytfree-preview-transcript.is-open",
+      ),
+    );
   }
 
   /**

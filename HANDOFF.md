@@ -1,6 +1,40 @@
 # HANDOFF
 
-## Status — 2026-08-08: seven fixes off the device run
+## Status — 2026-08-08 (later): the Preview sheet, measured
+
+**The first pass at the two Preview items was wrong on both platforms, and the
+harness says so.** `tools/preview-sheet-harness.mjs` now renders the laptop sheet
+as well as the two phone ones, and does the region swap the way the plugin does
+rather than by adding a class.
+
+- **The open region was not taking the sheet, and the headers were clipping.**
+  One cause for both: `margin-top: auto` on the button row. An auto margin on a
+  flex item takes *all* the positive free space before `flex-grow` is resolved,
+  so the open region never had any to grow into — it came out at its 7em floor,
+  the sheet was over-constrained, and every fixed-height item on it that could
+  shrink did, which is what cut the two 34pt headers down. The margin now only
+  applies under `.ytfree-sheet-shut`, a flag `disclose` keeps on the sheet, which
+  is the one state with no region to feed; the headers say `flex: none`.
+- **The laptop sheet was all picture.** The player's box is 16:9 of what it is
+  given and it was being given 80vw — on a 16:9 screen that is 45vh of width, so
+  the picture alone was taller than the 80vh window. Capped by width, as the
+  phone already does: `max-width: calc(34vh * 16 / 9)`, centred. Measured on a
+  1512×945 laptop the sheet is 722pt, the player 387 and the open region about
+  155, and nothing scrolls that should not. Collapse still folds the picture to
+  66pt and hands the whole sheet to the reading.
+
+Numbers, from the harness: portrait 390×844 — transcript region 229pt,
+description 217 when swapped to, headers 34/34, sheet does not scroll. Landscape
+844×390 — unchanged, including its one honest shortage (opening the description
+makes the sheet scroll by 126pt; shutting it puts everything back).
+
+**Manual test (for BarkernotBob):** on the phone, open Preview and press Description,
+then Transcript. Each takes the whole area below the facts, the header rows read
+in full, and the buttons stay at the foot. On the laptop, open Preview: the
+window is 80% of Obsidian, the picture is about half the sheet's height, and the
+controls, the two headers and the four buttons are all on screen at once.
+
+## Previous — 2026-08-08: seven fixes off the device run
 
 **541 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
 `./install.sh` and a reload are the next thing. No issue files: these came
