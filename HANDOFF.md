@@ -1,6 +1,67 @@
 # HANDOFF
 
-## Status — 2026-08-06: 037–042 all built
+## Status — 2026-08-08: seven fixes off the device run
+
+**541 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
+`./install.sh` and a reload are the next thing. No issue files: these came
+straight from BarkernotBob as a list, and each is small enough that the change is its
+own explanation.
+
+- **Purple Play left the poster up (phone).** `withMedia` only calls
+  `ensureLoaded` when `readyState === 0`, and 038's warm-up (*Get the video
+  ready when a note opens*, default on) means the stream is already resolved at
+  mount. So `activate()` — the only thing that removed the poster — never ran,
+  and the audio played behind a still picture. `deferMobileLoad` now removes the
+  poster on the video's own `play` event instead, which is true whichever path
+  started it; `activate()` calls the same function.
+- **Notes button now collapses the video.** `jumpToSection` collapses on the way
+  to the notes section, in `"manual"` mode so dismissing the keyboard does not
+  bring the picture back. One-directional on purpose: pressing the header is
+  still the way to open it again.
+- **Controls stop hovering after a typing auto-resume.** `resumeAfterTyping`
+  adds `is-hushed` to the `<video>`, which sets `display: none` on
+  `::-webkit-media-controls` and its enclosure and panel; a pointerdown or a
+  pause takes it off, and a 6s timer is the backstop. Toggling `video.controls`
+  instead would replay the panel's entrance on the way back.
+- **Headings never take a timestamp; tags do.** `stampInsertOffset` defers on
+  any `#` — the character after it is what distinguishes `# heading` from
+  `#tag`. A space ends the line's chance at a stamp; anything else stamps
+  *before* the hash run, since `#[3:05](…)idea` is neither a tag nor a link.
+  Five new tests in `tests/capture.test.ts`; the old one that asserted `"## "`
+  gets stamped was the bug, and is gone.
+- **Preview's description and transcript are now mutually exclusive.** Both are
+  disclosures registered with a small `disclose()` helper on `PreviewModal`;
+  opening one shuts the others, and whichever is open takes the whole bottom
+  area (`flex: 1 1 0`, its body scrolls). The 22vh/30vh caps are gone. **Widened
+  deliberately:** the description was a disclosure only on a phone, and is one on
+  desktop too now — "when opened, that section should take up the whole bottom
+  area" is not expressible with a description that is permanently open.
+- **The desktop Preview window is 80% of the Obsidian window.** `80vw × 80vh` on
+  `body:not(.is-mobile)`, and `.modal-content` had to move from `max-height` to
+  a definite `height` — flex free space needs a definite container. Tablets keep
+  the 640px sheet.
+- **Card buttons keep their label when done.** The done layer is deleted
+  outright, DOM and CSS; `.is-done` was already colouring text and border
+  accent, so that is now the whole of it. A row of identical ticks could not say
+  which of four squares had been pressed. The cell is 96px whatever is in it, so
+  nothing reflows.
+
+**Manual test (for BarkernotBob), on the phone unless it says otherwise:**
+1. Open a video note, press the purple Play button. The picture starts with the
+   audio — no second tap on the video needed.
+2. In the same note press Notes. The video collapses and the caret is in the
+   notes section. Press the header to bring the video back.
+3. Start a video, type a line. It pauses; stop typing and it resumes — the
+   control bar does not sit over the picture.
+4. On a fresh line type `# Heading` — no timestamp. Type `#idea` — a timestamp,
+   in front of the `#`. Type `## ` — still no timestamp.
+5. Preview a video. Open Transcript: it fills the bottom and Description shuts.
+   Open Description: the reverse. Rotate to landscape and repeat.
+6. **Desktop:** Preview a video. The window is about 80% of Obsidian, both ways.
+7. On a hub card press Save (or Add note). The button keeps its text and turns
+   purple; nothing on the card or beside it moves.
+
+## Previous — 2026-08-06: 037–042 all built
 
 **537 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
 `./install.sh` and a reload are the next thing, then the six Manual test

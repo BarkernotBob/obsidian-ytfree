@@ -86,10 +86,44 @@ test("stampInsertOffset fires on the first line of a note", () => {
   assert.equal(stampInsertOffset("", 0, "T"), 0);
 });
 
-test("stampInsertOffset fires after indentation, quotes and headings", () => {
+test("stampInsertOffset fires after indentation and quotes", () => {
   assert.equal(stampInsertOffset("  ", 2, "a"), 2);
   assert.equal(stampInsertOffset("> ", 2, "a"), 2);
-  assert.equal(stampInsertOffset("## ", 3, "a"), 3);
+});
+
+test("stampInsertOffset holds its answer back on a bare hash", () => {
+  // `#` opens a heading and a tag alike, so nothing is known yet. It is typed
+  // clean and the character after it decides.
+  assert.equal(stampInsertOffset("", 0, "#"), null);
+  assert.equal(stampInsertOffset("#", 1, "#"), null);
+  assert.equal(stampInsertOffset("  ", 2, "#"), null);
+  assert.equal(stampInsertOffset("- ", 2, "#"), null);
+});
+
+test("stampInsertOffset never stamps a heading line", () => {
+  // The space after the hashes is what makes it a heading: a label for the
+  // paragraphs under it, not a thought of your own.
+  assert.equal(stampInsertOffset("#", 1, " "), null);
+  assert.equal(stampInsertOffset("# ", 2, "N"), null);
+  assert.equal(stampInsertOffset("## ", 3, "a"), null);
+  assert.equal(stampInsertOffset("###### ", 7, "a"), null);
+  assert.equal(stampInsertOffset("> ## ", 5, "a"), null);
+});
+
+test("stampInsertOffset stamps a tag line in front of the hash", () => {
+  // `#[3:05](…)idea` would be neither a tag nor a link, so the stamp goes
+  // before the run rather than at the cursor.
+  assert.equal(stampInsertOffset("#", 1, "i"), 0);
+  assert.equal(stampInsertOffset("#", 1, "1"), 0);
+  assert.equal(stampInsertOffset("  #", 3, "i"), 2);
+  assert.equal(stampInsertOffset("- #", 3, "i"), 2);
+  assert.equal(stampInsertOffset("> #", 3, "i"), 2);
+});
+
+test("stampInsertOffset leaves a tag line alone once it is under way", () => {
+  // One stamp per line, and the hash rule must not reopen the question.
+  assert.equal(stampInsertOffset("#idea", 5, "s"), null);
+  assert.equal(stampInsertOffset("[12:34](ytfree:abc:754)#idea", 28, "s"), null);
 });
 
 test("stampInsertOffset does not fire on the bullet character itself", () => {

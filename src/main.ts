@@ -2146,6 +2146,8 @@ export default class YtFreePlugin extends Plugin {
     if (this.inSection(file.path, view, content, section, line)) {
       this.lastJump.set(file.path, section);
       if (section === "notes") {
+        // Already here and pressed again: the video is the toggle. The first
+        // press folded it away (below), so this one is how it comes back.
         if (videoId) this.toggleHeaderFor(videoId);
       } else {
         // Folding the transcript away is the end of reading it, so it is also
@@ -2156,6 +2158,19 @@ export default class YtFreePlugin extends Plugin {
       return;
     }
     this.lastJump.set(file.path, section);
+
+    // Pressing Notes is asking for room to write in, so the picture goes now —
+    // on the *first* press, not the second. A 16:9 player above a note leaves
+    // about two lines of text visible, so a cursor placed correctly under
+    // `# Notes` was still a cursor you could not see. The phone had half of
+    // this already, off the keyboard, and the keyboard is not the trigger: a
+    // desktop has no keyboard event to hang it on, and on a phone the raise is
+    // the one thing iOS is entitled to decline.
+    //
+    // Deliberately "manual", the same mode the second press toggles: this is
+    // the reader's own decision about the picture, so it outlives the keyboard
+    // rather than springing back the moment they put it away.
+    if (section === "notes" && videoId) this.collapseHeaderFor(videoId);
 
     // Leaving the transcript for another section ends the follow; arriving at
     // the transcript starts it, once the unfold below has been laid out.
@@ -2336,6 +2351,20 @@ export default class YtFreePlugin extends Plugin {
     const entry = this.players.get(videoId);
     if (!entry) return;
     this.setCollapsed(entry, entry.collapsed ? null : "manual");
+  }
+
+  /**
+   * Fold the video away and leave it folded — the Notes button's first tap.
+   *
+   * One direction only, unlike `toggleHeaderFor`: pressing Notes twice from
+   * elsewhere in the note should not flicker the picture in and out. A collapse
+   * already in force is left exactly as it is, including a keyboard one, whose
+   * own release still governs it.
+   */
+  private collapseHeaderFor(videoId: string): void {
+    const entry = this.players.get(videoId);
+    if (!entry || entry.collapsed) return;
+    this.setCollapsed(entry, "manual");
   }
 
   // -------------------------------------------------------- transcript auto
@@ -4601,6 +4630,27 @@ export default class YtFreePlugin extends Plugin {
       });
     }
 
+    /**
+     * The picture is showing: the poster has nothing left to cover.
+     *
+     * Idempotent, because two different things reach it. `activate` is the
+     * poster's own path — tap the thumbnail, resolve, play — and the `play`
+     * event below is every *other* way playback starts, of which the purple
+     * Play button is the one that was broken: with the warm-up on (the default
+     * since 038) the media is already loaded by the time anyone presses it, so
+     * `withMedia` has nothing to ensure, `activate` never runs, and the video
+     * played its audio underneath a thumbnail that was still sitting on top of
+     * it. Tapping the poster afterwards was the only way to see the picture,
+     * which is exactly what it looked like: "I have to click the video to get
+     * it to start."
+     */
+    const uncover = (): void => {
+      poster.remove();
+      media.querySelector(".ytfree-fallback")?.remove();
+      setStatus(null);
+    };
+    player.video.addEventListener("play", uncover);
+
     let started: Promise<void> | null = null;
     /**
      * The resolve on its own, without the play (038).
@@ -4633,9 +4683,7 @@ export default class YtFreePlugin extends Plugin {
       setStatus("Resolving stream…");
       started = resolve()
         .then(() => {
-          poster.remove();
-          media.querySelector(".ytfree-fallback")?.remove();
-          setStatus(null);
+          uncover();
           player.play();
         })
         .catch((err: unknown) => {

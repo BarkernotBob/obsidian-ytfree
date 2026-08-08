@@ -17,9 +17,10 @@ export interface CardSlot {
   /** The idle label. Also the accessible name, in every state. */
   label: string;
   /**
-   * Already true of this video — drawn as a checkmark rather than as a second
-   * label. A done label wider than the idle one pushes the neighbours even
-   * inside a fixed cell, which the prototype found the hard way.
+   * Already true of this video. The label stays where it is and only takes the
+   * accent colour, so the button cannot change size on being pressed — a state
+   * that swaps the text for something wider pushes its neighbours even inside a
+   * fixed cell, which the prototype found the hard way.
    */
   done: boolean;
   /** Removing is the one action that reads red once it has happened. */

@@ -37,6 +37,33 @@
 }
 
 /*
+ * The native control panel, blacked out for a resume nobody pressed.
+ *
+ * Pause-while-typing starts the video again two seconds after the last
+ * keystroke, and both engines greet every `play` by putting the control bar
+ * across the picture for a few seconds — so a reader who is writing gets a bar
+ * over the video, repeatedly, having asked for nothing. See
+ * `hushNativeControls` in `src/player.ts` for why this is a class rather than
+ * `controls = false`, and for the two things that lift it early.
+ *
+ * Three selectors because the shadow parts are not the same on both engines and
+ * an unrecognised one invalidates only its own rule: `-panel` is the bar itself
+ * in both, `-enclosure` is Chromium's wrapper, and `-webkit-media-controls` is
+ * WebKit's root. `!important` because these are UA styles.
+ */
+.ytfree-video.is-hushed::-webkit-media-controls {
+  display: none !important;
+}
+
+.ytfree-video.is-hushed::-webkit-media-controls-enclosure {
+  display: none !important;
+}
+
+.ytfree-video.is-hushed::-webkit-media-controls-panel {
+  display: none !important;
+}
+
+/*
  * The box the picture and the progress line share.
  *
  * The desktop's only: mobile already docks the video inside `.ytfree-media`,
@@ -1697,12 +1724,18 @@ body.ytfree-immersive-open {
 /*
  * The four buttons.
  *
- * Every state of a button — idle, working, done — is a layer stacked in the
- * same single grid cell and swapped with `visibility`; the border is present in
- * all of them and the font never changes weight. That is what makes pressing
- * one incapable of resizing it, which is what stops the card and its
- * neighbours moving. The done state is a checkmark with no label, because a
- * done label wider than the idle one pushes anyway.
+ * Idle and working are two layers stacked in the same single grid cell and
+ * swapped with `visibility`; the border is present in both and the font never
+ * changes weight. That is what makes pressing one incapable of resizing it,
+ * which is what stops the card and its neighbours moving.
+ *
+ * Done used to be a checkmark on its own, on the theory that a done label wider
+ * than the idle one would push its neighbours. It cannot: the cell is 96px
+ * whatever is in it, and the label ellipsises inside it. What the tick did
+ * instead was take away the only thing saying which of four identical squares
+ * had just been pressed — a row of ticks is not a row you can read. So the
+ * label stays in every state and the colour is what changes: text and border go
+ * accent, which is the same signal without the amnesia.
  */
 .ytfree-card-actions {
   grid-area: actions;
@@ -1745,7 +1778,8 @@ body.ytfree-immersive-open {
   }
 }
 
-/* Colour only — a border that appeared with the state would move the label. */
+/* Colour only — a border that appeared with the state would move the label, so
+   it is present in every state and only its colour changes. */
 .ytfree-card-act.is-done {
   border-color: var(--text-accent);
   color: var(--text-accent);
@@ -1776,23 +1810,18 @@ body.ytfree-immersive-open {
   text-overflow: ellipsis;
 }
 
-/* Hidden, not absent: all three layers occupy the cell at all times. */
-.ytfree-card-busy,
-.ytfree-card-done {
+/* Hidden, not absent: both layers occupy the cell at all times. */
+.ytfree-card-busy {
   visibility: hidden;
 }
 
-.ytfree-card-act.is-busy .ytfree-card-idle,
-.ytfree-card-act.is-done .ytfree-card-idle {
+/* Working is the one state that replaces the label, and only for as long as the
+   work takes. Done does not: see the note above the block. */
+.ytfree-card-act.is-busy .ytfree-card-idle {
   visibility: hidden;
 }
 
 .ytfree-card-act.is-busy .ytfree-card-busy {
-  visibility: visible;
-}
-
-/* Busy outranks done: a second press on a done button still shows it working. */
-.ytfree-card-act.is-done:not(.is-busy) .ytfree-card-done {
   visibility: visible;
 }
 
@@ -2755,6 +2784,37 @@ body.ytfree-immersive-open {
 }
 
 /*
+ * The laptop sheet, at the size the thing in it is worth.
+ *
+ * 640px was a sheet for reading two paragraphs in. It now holds a player, a
+ * description and an hour of transcript, and at that width the picture is 360pt
+ * and the transcript is a column six words wide. Four fifths of the Obsidian
+ * window in both directions, which on any screen worth watching on is a picture
+ * you can see and a transcript you can read beside it.
+ *
+ * `body:not(.is-mobile)` rather than a width query: a tablet keeps the 640
+ * deliberately — see `panelAnchored` in `src/main.ts` for the same split — and a
+ * narrow desktop window is still a desktop window.
+ *
+ * The height is what the region below the picture is measured against, so it
+ * has to be a length and not a cap. See `.modal-content` under it.
+ */
+body:not(.is-mobile) .ytfree-preview-modal {
+  display: flex;
+  flex-direction: column;
+  width: 80vw;
+  height: 80vh;
+  max-width: none;
+}
+
+body:not(.is-mobile) .ytfree-preview-modal .modal-content {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+}
+
+/*
  * The sheet scrolls in one place, and the picture rides on top of it.
  *
  * Opening the transcript adds a box of text in the middle of the sheet, and a
@@ -2766,7 +2826,13 @@ body.ytfree-immersive-open {
 .ytfree-preview-modal .modal-content {
   display: flex;
   flex-direction: column;
-  max-height: min(82vh, calc(100vh - 8em));
+  /*
+   * A height, not a cap — this is what makes the foot of the sheet one region.
+   * A flex column only distributes *free* space, and a content-sized box has
+   * none to give: with `max-height` the open section would come out as tall as
+   * its own contents (or as its floor) and the sheet would scroll instead.
+   */
+  height: min(82vh, calc(100vh - 8em));
   overflow-y: auto;
   /*
    * Explicit, because it is not the default it looks like. A box with
@@ -2881,13 +2947,85 @@ body.ytfree-immersive-open {
   color: var(--text-muted);
 }
 
-/* Scrolls rather than grows: a 4,000-character description is a page of links,
-   and the four buttons underneath must stay reachable without scrolling to
-   them. Shorter since the player took the top of the sheet — the picture plus
-   40vh of text put the buttons off the bottom of a laptop screen. */
-.ytfree-preview-description {
-  max-height: 22vh;
+/*
+ * ------------------------------------------- the foot of the sheet is one ---
+ *
+ * The description and the transcript are two disclosures over a single region,
+ * not two boxes stacked in a scroller. Whichever is open takes everything below
+ * the facts and above the buttons, and opening one shuts the other — see
+ * `disclose` in `src/hub.ts`. Two half-height boxes was the alternative and it
+ * is worse at both jobs: a description is paragraphs and a transcript is an
+ * hour of speech, and neither is readable through a letterbox.
+ *
+ * Both headers stay put in both states. That is what makes the swap free of
+ * reflow under the pointer: pressing Description moves the transcript's header
+ * down the sheet, and nothing else on it changes size or place.
+ */
+.ytfree-preview-describe,
+.ytfree-preview-transcript {
+  display: flex;
+  flex-direction: column;
+  /* Shut, a region is its header and nothing more. */
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+/* The two headers read as one list of two, so they get the same rule above
+   them. The transcript's own comes with its section, further down. */
+.ytfree-preview-describe {
+  margin-top: 0.8em;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ytfree-preview-describe.is-open,
+.ytfree-preview-transcript.is-open {
+  /*
+   * `flex-basis: 0`, so the region asks for the leftover space rather than for
+   * the height of its own contents. With `auto` an hour of transcript would
+   * size the region, the sheet would grow past the screen, and we would be back
+   * to scrolling to find the words.
+   */
+  flex: 1 1 0;
+  /* A floor, so a two-line transcript is still a region and not a seam. */
+  min-height: 7em;
+}
+
+/* The body scrolls inside the region the region was given. `min-height: 0` is
+   what lets a flex item be shorter than its contents at all — without it the
+   box refuses to shrink and pushes the buttons off the bottom. */
+.ytfree-preview-describe.is-open .ytfree-preview-description,
+.ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
+  overflow-x: hidden;
+  /* A drag that runs out of text stops there rather than handing the rest of
+     the gesture to the sheet behind it — which would move the picture. */
+  overscroll-behavior: contain;
+}
+
+/*
+ * Shut is zero height and hidden, not `display: none`: a description is a page
+ * of unbreakable URLs and hashtag runs, and a box that has never been laid out
+ * has never wrapped them — opening it would then reflow the sheet under the
+ * finger that opened it, which is the one thing the sheet must never do.
+ */
+.ytfree-preview-describe:not(.is-open) .ytfree-preview-description {
+  max-height: 0;
+  margin-top: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+/* Both regions shut is a legal state — an empty description and a shut
+   transcript — and the buttons belong at the foot of the sheet rather than
+   halfway up it. */
+.ytfree-preview-actions {
+  margin-top: auto;
+}
+
+.ytfree-preview-description {
   /*
    * Never sideways. Two declarations because they answer two different
    * questions: `overflow-wrap` breaks the 90-character playlist URL that a
@@ -2969,10 +3107,10 @@ body.ytfree-immersive-open {
   overflow: hidden;
 }
 
+/* The 30vh cap that used to be here is gone: the region above decides the
+   height now, and a cap on top of it was the sheet keeping a box of blank
+   space under an open transcript. */
 .ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
-  max-height: 30vh;
-  overflow-y: auto;
-  overflow-x: hidden;
   padding-bottom: 0.4em;
 }
 
@@ -3089,29 +3227,12 @@ body.ytfree-immersive-open {
 
 /* ------------------------------------------------- preview, on a phone ---
  *
- * One scroller, not three.
- *
- * On a laptop the description is a 22vh box with its own scrollbar and the
- * sheet around it barely scrolls at all. On a phone that same box is about
- * 160pt in the middle of the screen: a finger that lands on the description
- * scrolls the *description*, so the title above it never moves and a 3,000
- * character description is read through a letterbox — which is exactly what
- * "the note header with the title doesn't scroll with the text" describes.
- *
- * So on a phone the description is not a scroller. The sheet is the scroller,
- * the title and the facts scroll away under the picture like the first
- * paragraph of anything else, and the description gets the whole height.
- *
- * The four buttons were what the 22vh cap was protecting — they must stay
- * reachable without scrolling a page of links first — so they stop being the
- * last thing in the flow and become the floor of the sheet instead. Sticky,
- * with a fixed height they already had, so nothing about them moves when the
- * text behind them does.
+ * The buttons are the floor of the sheet rather than the last thing in the
+ * flow: sticky, at a height they already had, so nothing about them moves when
+ * the text behind them does. Everything the description and the transcript used
+ * to say here is now said once, for every platform, in "the foot of the sheet
+ * is one" above — a phone was simply the first surface short enough to need it.
  */
-.is-phone .ytfree-preview-description {
-  max-height: none;
-  overflow: visible;
-}
 
 /* ------------------------------------ the transcript's own region — 039 ---
  *
@@ -3163,56 +3284,6 @@ body.ytfree-immersive-open {
 .is-phone .ytfree-preview-wrapper {
   max-width: calc(42vh * 16 / 9);
   margin-inline: auto;
-}
-
-.is-phone .ytfree-preview-describe {
-  flex: 0 0 auto;
-}
-
-/*
- * Shut is zero height and hidden, not `display: none`: the description is a
- * page of unbreakable URLs and hashtag runs, and a box that has never been laid
- * out has never wrapped them — opening it would then reflow the sheet under the
- * finger that opened it, which is the one thing the sheet must never do.
- */
-.is-phone .ytfree-preview-describe:not(.is-open) .ytfree-preview-description {
-  max-height: 0;
-  margin-top: 0;
-  overflow: hidden;
-  visibility: hidden;
-}
-
-.is-phone .ytfree-preview-transcript {
-  display: flex;
-  flex-direction: column;
-  /*
-   * `flex-basis: 0`, so the region asks for the leftover space rather than for
-   * the height of its own 63 paragraphs. With `auto` a long transcript would
-   * size the region, the sheet would grow past the screen, and we would be back
-   * to scrolling to find the words.
-   */
-  flex: 1 1 0;
-  /* A floor, so a two-line transcript is still a transcript and not a seam. */
-  min-height: 7em;
-}
-
-/* Shut, or empty, or unfetchable: it claims nothing and the description gets
-   the sheet back. `is-open` is the whole of "this region is in use". */
-.is-phone .ytfree-preview-transcript:not(.is-open) {
-  flex: 0 0 auto;
-  min-height: 0;
-}
-
-.is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
-  /* The region decides the height; `min-height: 0` is what lets a flex item be
-     shorter than its contents at all, and without it the box would refuse to
-     shrink and push the buttons off the bottom. */
-  flex: 1 1 auto;
-  min-height: 0;
-  max-height: none;
-  /* A drag that runs out of transcript stops there rather than handing the rest
-     of the gesture to the sheet behind it — which would move the picture. */
-  overscroll-behavior: contain;
 }
 
 .is-phone .ytfree-preview-actions {
@@ -3294,15 +3365,21 @@ body.ytfree-immersive-open {
     grid-area: 3 / 1;
   }
 
-  .is-phone .ytfree-preview-describe {
+  .is-phone .ytfree-preview-describe,
+  .is-phone .ytfree-preview-describe.is-open {
     grid-area: 4 / 1;
     display: flex;
     flex-direction: column;
-    /* Deliberately *not* `min-height: 0`. That is the usual incantation for a
-       flex item in a bounded box, and here it is the bug: it tells the grid the
-       section can be nothing tall, so the row stays the size it was and the
-       opened description spills over the buttons instead of pushing the sheet
-       into being scrollable. */
+    /*
+     * Deliberately *not* `min-height: 0` — nor the 7em floor the shared rules
+     * give an open region, which is why this says `auto` out loud rather than
+     * leaving the property alone. Zero tells the grid the section can be
+     * nothing tall, so the row stays the size it was and the opened description
+     * spills over the buttons instead of pushing the sheet into being
+     * scrollable; a floor does the mirror image, holding a shut header at seven
+     * lines and taking them off the picture beside it.
+     */
+    min-height: auto;
   }
 
   /*

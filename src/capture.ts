@@ -25,12 +25,26 @@ export interface StampGateInput {
 }
 
 /**
- * Whitespace, block quotes, list bullets, checkboxes and heading markers may sit
- * before the stamp — a line is still "new" when it is only a bullet so far.
- * Anything else means the line already has content.
+ * Whitespace, block quotes, list bullets and checkboxes may sit before the
+ * stamp — a line is still "new" when it is only a bullet so far. Anything else
+ * means the line already has content.
+ *
+ * Hashes are deliberately not in here. They used to be, as `(?:#{1,6}[ \t]+)?`,
+ * which stamped headings; they are now their own decision — see `HASH_RUN`.
  */
-const LINE_PREFIX =
-  /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?(?:#{1,6}[ \t]+)?$/;
+const LINE_PREFIX = /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?$/;
+
+/**
+ * A line that has got as far as its hashes and no further: the prefix above,
+ * then one to six `#`, and nothing else yet.
+ *
+ * This is the state where the answer is not knowable. `#` opens a heading and a
+ * tag alike, and the two want opposite things — a heading is a label for what
+ * follows and must never carry a stamp, a tag is the first word of a thought
+ * and should. The character after the hashes is what settles it, so the
+ * decision is deferred until it arrives.
+ */
+const HASH_RUN = /^([ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?)(#{1,6})$/;
 
 /**
  * Typing one of these as the first character of a line is starting a bullet,
@@ -66,6 +80,14 @@ export function lineHasTimestamp(lineText: string): boolean {
  * keystroke: `-` and the space after it are typed clean so Obsidian renders the
  * list, and the stamp lands with the text that follows.
  *
+ * A `#` is the same idea with one more state to it. Typed on its own it says
+ * nothing yet — `# ` is a heading and `#x` is a tag — so it takes no stamp and
+ * no decision. The character after it decides: a space makes the line a
+ * heading, which is a label for the paragraphs under it rather than a thought
+ * of your own, and is never stamped at all; anything else makes it a tag, so
+ * the line is stamped then, *before* the hash rather than at the cursor —
+ * `#[3:05](…)idea` would be neither a tag nor a link.
+ *
  * Null for the overwhelming majority of keystrokes — every character after the
  * first one on a line — so this is the cheap check that runs first.
  */
@@ -84,7 +106,20 @@ export function stampInsertOffset(
   // Typing into the middle of a line that already has content is editing, not
   // starting a thought.
   if (lineText.slice(cursorCh).trim() !== "") return null;
-  if (!LINE_PREFIX.test(lineText.slice(0, cursorCh))) return null;
+
+  // A hash — the first or the second — says nothing yet, so it is typed clean
+  // and the decision waits for whatever follows it.
+  if (typedText[0] === "#") return null;
+
+  const before = lineText.slice(0, cursorCh);
+
+  // The hashes are already down and this keystroke is the one that says what
+  // they were. Whitespace and a further hash have both been rejected above, so
+  // reaching here means a tag, and the stamp belongs in front of the run.
+  const hashes = HASH_RUN.exec(before);
+  if (hashes) return hashes[1].length;
+
+  if (!LINE_PREFIX.test(before)) return null;
   return cursorCh;
 }
 

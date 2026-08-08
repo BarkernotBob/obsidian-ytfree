@@ -210,6 +210,17 @@ const NATIVE_CONTROLS_BAND_PX = 56;
 const MAX_FRAME_SECONDS = 0.5;
 
 /**
+ * How long the native control panel stays blacked out after a resume nobody
+ * pressed — see `hushNativeControls`.
+ *
+ * Comfortably past both engines' own auto-hide (about three seconds in WebKit,
+ * three in Chromium), so the panel that was hidden has decided to go on its own
+ * before the blackout lifts. Lift it earlier and the controls would appear for
+ * the remainder of their timer, which is the whole thing being avoided.
+ */
+const CONTROLS_HUSH_MS = 6000;
+
+/**
  * Which player currently owns `navigator.mediaSession` — there is one of those
  * per document, and a vault can have several players open at once.
  */
@@ -272,6 +283,11 @@ export class YtFreePlayer {
    * about what the player is doing.
    */
   private pendingPlay = false;
+  /**
+   * The timer that lifts the native-controls blackout — see `hushNativeControls`.
+   * Non-null only while a blackout is in force.
+   */
+  private hushTimer: number | null = null;
   // --- Drag-to-seek. Null between gestures.
   private drag: { id: number; x: number; y: number; from: number; to: number; live: boolean } | null =
     null;
@@ -368,6 +384,13 @@ export class YtFreePlayer {
       this.pausedByTyping = false;
       this.started = true;
     });
+
+    // The two ways a blackout ends before its timer: a hand on the picture,
+    // which is a request for the controls, and a pause, which is a state the
+    // native bar is supposed to be visible in. See `hushNativeControls`.
+    for (const event of ["pointerdown", "pause"]) {
+      this.video.addEventListener(event, () => this.unhushNativeControls());
+    }
 
     this.trackBackgroundPause();
     this.trackProgress();
@@ -2295,7 +2318,44 @@ export class YtFreePlayer {
     if (!this.pausedByTyping) return;
     this.pausedByTyping = false;
     this.resumeGuardUntil = 0;
+    // Before the play, not after: both engines put the panel up on the `play`
+    // they are about to receive, and a class added a frame later is a class
+    // added after it is already on screen.
+    this.hushNativeControls();
     void this.video.play().catch(() => { /* user gesture may be required */ });
+  }
+
+  /**
+   * Black out the platform's control panel for this one resume.
+   *
+   * Every `play` puts the native controls up over the picture for a few seconds
+   * before they fade — which is right for a play someone pressed and wrong for
+   * this one. Pause-while-typing resumes on its own two seconds after the last
+   * keystroke, so a reader who is writing gets a bar across the video they were
+   * watching, over and over, having asked for nothing.
+   *
+   * Done in CSS rather than by clearing `controls`, and the difference matters:
+   * the engine's own show-and-hide timer keeps running behind the class, so the
+   * panel it is hiding has faded of its own accord long before the blackout
+   * lifts. Turning `controls` off and on again instead would replay the whole
+   * appearance at the moment it came back.
+   *
+   * It ends early on the first touch of the picture — that *is* someone asking
+   * for the controls, and the tap they used to ask must not be spent on
+   * cancelling a state they never knew about.
+   */
+  private hushNativeControls(): void {
+    this.video.addClass("is-hushed");
+    if (this.hushTimer !== null) window.clearTimeout(this.hushTimer);
+    this.hushTimer = window.setTimeout(() => this.unhushNativeControls(), CONTROLS_HUSH_MS);
+  }
+
+  private unhushNativeControls(): void {
+    if (this.hushTimer !== null) {
+      window.clearTimeout(this.hushTimer);
+      this.hushTimer = null;
+    }
+    this.video.removeClass("is-hushed");
   }
 
   get isPausedByTyping(): boolean {
@@ -2338,6 +2398,7 @@ export class YtFreePlayer {
     // this player — and every note in the vault keeps its scrolling locked.
     this.setImmersive(false);
     this.destroyed = true;
+    this.unhushNativeControls();
     this.stopSmartLoop();
     if (this.onVisibility) {
       document.removeEventListener("visibilitychange", this.onVisibility);

@@ -2347,11 +2347,11 @@ export class HubView extends ItemView {
   /**
    * One button, in the one shape every state of it shares.
    *
-   * Idle, working and done are three layers stacked in a single grid cell and
-   * swapped with `visibility`, the border is present in all of them, and the
-   * done state is a checkmark with no label. That is the whole no-reflow story:
-   * a button cannot change its own size, so pressing one cannot move the card
-   * it is on or any card beside it.
+   * Idle and working are two layers stacked in a single grid cell and swapped
+   * with `visibility`, and the border is present in both. Done is not a layer at
+   * all: the label stays put and only its colour changes. That is the whole
+   * no-reflow story — a button cannot change its own size, so pressing one
+   * cannot move the card it is on or any card beside it.
    */
   private buildAction(
     host: HTMLElement,
@@ -2370,9 +2370,6 @@ export class HubView extends ItemView {
 
     const busy = button.createSpan({ cls: "ytfree-card-state ytfree-card-busy" });
     busy.createDiv({ cls: "ytfree-card-spinner" });
-
-    const done = button.createSpan({ cls: "ytfree-card-state ytfree-card-done" });
-    setIcon(done, "check");
 
     let painted = "";
     const paint = (slot: CardSlot): void => {
@@ -2586,6 +2583,20 @@ class PreviewModal extends Modal {
    * if it is in Picture-in-Picture. See `previewCloseAction`.
    */
   private handingOver = false;
+  /**
+   * The setters for the sheet's disclosures, in the order they were built.
+   *
+   * The bottom of the sheet is one region, not two stacked ones: whichever of
+   * the description and the transcript is open gets all of it, and opening one
+   * shuts the other. Two half-height boxes was the alternative and it is worse
+   * at both jobs — a description is paragraphs and a transcript is an hour of
+   * speech, and neither is readable through a letterbox.
+   *
+   * A list rather than two fields so a third region costs nothing.
+   */
+  private regions: ((open: boolean) => void)[] = [];
+  /** The description's own setter — the region an empty transcript hands back to. */
+  private openDescription: ((open: boolean) => void) | null = null;
 
   constructor(
     app: App,
@@ -2642,7 +2653,6 @@ class PreviewModal extends Modal {
       idle.createSpan({ cls: "ytfree-card-label" });
       const busy = button.createSpan({ cls: "ytfree-card-state ytfree-card-busy" });
       busy.createDiv({ cls: "ytfree-card-spinner" });
-      setIcon(button.createSpan({ cls: "ytfree-card-state ytfree-card-done" }), "check");
       buttons.set(slot.key, button);
 
       button.addEventListener("click", () => {
@@ -2678,7 +2688,7 @@ class PreviewModal extends Modal {
     }
 
     // Last, and outside the slot loop: Share does nothing to the video, so it
-    // has no busy state, no done tick and nothing to repaint. It is drawn as
+    // has no busy state, no done state and nothing to repaint. It is drawn as
     // the same kind of button because it sits in the same row and a control
     // that looks different for no reason reads as a control that does
     // something different in kind.
@@ -2732,40 +2742,69 @@ class PreviewModal extends Modal {
   }
 
   /**
-   * The description — a paragraph on a laptop, a disclosure on a phone.
+   * Wire a header button to its section, one open at a time.
    *
-   * 039: the description is arbitrarily long, and on a phone it was the thing
-   * between the picture and the transcript. A sponsor block, a chapter list and
-   * a wall of hashtags is several screens, and every one of them is a screen
-   * between you and the words being spoken. So on a phone it starts shut and
-   * opens with one tap, which is the whole of "reachable but not in the way".
+   * Returns the setter as well as registering it, so a caller that has to shut
+   * its own region later — an empty transcript is the case — goes through the
+   * same path and cannot leave the chevron pointing at a body nobody can see.
    *
-   * On a laptop there is room for both and nothing to solve, so it stays what it
-   * was: a scrolling paragraph, always open, no header.
+   * `onChange` is for what the region does rather than for how it looks: the
+   * transcript's highlight ticks only while it is on screen.
+   */
+  private disclose(
+    section: HTMLElement,
+    header: HTMLElement,
+    chevron: HTMLElement,
+    onChange?: (open: boolean) => void,
+  ): (open: boolean) => void {
+    const setOpen = (open: boolean): void => {
+      if (section.hasClass("is-open") === open) return;
+      section.toggleClass("is-open", open);
+      header.setAttribute("aria-expanded", String(open));
+      setIcon(chevron, open ? "chevron-down" : "chevron-right");
+      onChange?.(open);
+    };
+    this.regions.push(setOpen);
+
+    header.addEventListener("click", () => {
+      const open = !section.hasClass("is-open");
+      // Shut the others first, so the sheet only ever has to lay one region out
+      // at its full height — opening before closing would give both of them the
+      // space for a frame, which on a phone is a visible jump.
+      if (open) for (const other of this.regions) if (other !== setOpen) other(false);
+      setOpen(open);
+    });
+
+    return setOpen;
+  }
+
+  /**
+   * The description, as a disclosure.
+   *
+   * 039 made it one on a phone: it is arbitrarily long — a sponsor block, a
+   * chapter list and a wall of hashtags is several screens — and every screen of
+   * it was a screen between the reader and the words being spoken. It is one
+   * everywhere now, because the sheet has a single region at its foot and a
+   * region that is always open is a region the transcript can never have.
+   *
+   * Open by default off a phone, which is what it was there before: a laptop
+   * sheet that opened straight into an hour of transcript would bury the two
+   * paragraphs saying what the video is.
    */
   private mountDescription(contentEl: HTMLElement): void {
     const section = contentEl.createDiv({ cls: "ytfree-preview-describe" });
-    let body: HTMLElement;
+    const start = !Platform.isPhone;
+    section.toggleClass("is-open", start);
 
-    if (Platform.isPhone) {
-      const header = section.createEl("button", {
-        cls: "ytfree-preview-disclose",
-        attr: { type: "button", "aria-expanded": "false" },
-      });
-      const chevron = header.createSpan({ cls: "ytfree-preview-disclose-chevron" });
-      setIcon(chevron, "chevron-right");
-      header.createSpan({ cls: "ytfree-preview-disclose-label", text: "Description" });
-      body = section.createDiv({ cls: "ytfree-preview-description" });
-      header.addEventListener("click", () => {
-        const open = section.hasClass("is-open");
-        section.toggleClass("is-open", !open);
-        header.setAttribute("aria-expanded", String(!open));
-        setIcon(chevron, open ? "chevron-right" : "chevron-down");
-      });
-    } else {
-      section.addClass("is-open");
-      body = section.createDiv({ cls: "ytfree-preview-description" });
-    }
+    const header = section.createEl("button", {
+      cls: "ytfree-preview-disclose",
+      attr: { type: "button", "aria-expanded": String(start) },
+    });
+    const chevron = header.createSpan({ cls: "ytfree-preview-disclose-chevron" });
+    setIcon(chevron, start ? "chevron-down" : "chevron-right");
+    header.createSpan({ cls: "ytfree-preview-disclose-label", text: "Description" });
+    const body = section.createDiv({ cls: "ytfree-preview-description" });
+    this.openDescription = this.disclose(section, header, chevron);
 
     body.setText(this.spec.description || (this.spec.fetchDescription ? "Loading…" : "No description."));
     if (this.spec.fetchDescription) {
@@ -2795,9 +2834,7 @@ class PreviewModal extends Modal {
     // Open from the start on a phone (039). The transcript is the reason the
     // sheet has a region for it at all, and a region you have to open before it
     // fills the screen is one that reflows the sheet the first time you use it.
-    // On a laptop the sheet is not short of room and shut is still the polite
-    // default — a transcript is a lot of text to put in front of someone who
-    // opened a preview to read the description.
+    // Off a phone the description has the region instead — see there.
     const start = Platform.isPhone;
     const section = contentEl.createDiv({ cls: "ytfree-preview-transcript" });
     section.toggleClass("is-open", start);
@@ -2813,14 +2850,12 @@ class PreviewModal extends Modal {
     });
     const body = section.createDiv({ cls: "ytfree-preview-transcript-body" });
 
-    header.addEventListener("click", () => {
-      const open = section.hasClass("is-open");
-      section.toggleClass("is-open", !open);
-      header.setAttribute("aria-expanded", String(!open));
-      setIcon(chevron, open ? "chevron-right" : "chevron-down");
-      // The tick only runs while anyone can see what it lights up.
-      if (open) this.stopTicking();
-      else this.startTicking();
+    // The tick only runs while anyone can see what it lights up — including
+    // when the *description* is what closed this, which is why it hangs off the
+    // shared setter rather than off the click.
+    const setOpen = this.disclose(section, header, chevron, (open) => {
+      if (open) this.startTicking();
+      else this.stopTicking();
     });
 
     // Nothing to show: shut the section rather than leaving a phone's filling
@@ -2829,9 +2864,10 @@ class PreviewModal extends Modal {
     const nothing = (why: string): void => {
       label.setText(why);
       header.setAttribute("disabled", "true");
-      header.setAttribute("aria-expanded", "false");
-      section.removeClass("is-open");
-      setIcon(chevron, "chevron-right");
+      setOpen(false);
+      // On a phone this is the region that was open, and leaving both shut
+      // would be a sheet with a hole in it. The description takes it instead.
+      this.openDescription?.(true);
     };
 
     void this.spec.fetchTranscript().then(
