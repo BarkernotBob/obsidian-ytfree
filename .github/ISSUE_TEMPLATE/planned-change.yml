@@ -1,0 +1,55 @@
+name: Planned change
+description: Something you want built, and you already know what "done" looks like.
+labels: ["planned", "nightly-ok"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill this in and forget about it. It shows up on your board as **Planned**,
+        and the nightly routine is allowed to build and merge it while you sleep.
+
+        Not sure what you want yet? Go back and pick **Rough idea** instead.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What do you want changed, and why?
+      description: Plain English is fine. One or two sentences is fine.
+      placeholder: The pool tool rounds chlorine to whole ounces, which is useless for small doses. Show one decimal place.
+    validations:
+      required: true
+
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when...
+      description: |
+        How you'll know it worked. Write it as things you could check yourself.
+        One per line.
+      placeholder: |
+        - Dose shows as 4.5 oz, not 5 oz
+        - Still works on my phone
+        - Nothing else on the page moved
+    validations:
+      required: true
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      description: Your gut feel. Nothing breaks if you guess wrong.
+      options:
+        - Quick - a small tweak
+        - Normal - an afternoon of work
+        - Big - this is really a project
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else?
+      description: Screenshots, links, the exact wording you want. Optional.
+    validations:
+      required: false
