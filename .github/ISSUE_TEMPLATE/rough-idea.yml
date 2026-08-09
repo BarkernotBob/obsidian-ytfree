@@ -1,0 +1,34 @@
+name: Rough idea
+description: Something you want, but you haven't thought it through yet.
+labels: ["planned", "needs-grilling"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Dump the idea here and move on. It shows up on your board as **Planned**,
+        flagged as needing a conversation.
+
+        The nightly routine will **not** build this. Instead it opens a chat that
+        asks you the hard questions, and waits for you in the Claude app. Once
+        that chat has pinned the idea down, the item becomes a normal planned
+        change and gets built the following night.
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What's the idea?
+      description: However half-baked. You're not committing to anything.
+      placeholder: Some way to see all my bank bonus deadlines without opening the app.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What's annoying you right now?
+      description: |
+        The problem behind the idea. This is usually the most useful box -
+        it's what stops the build going the wrong direction.
+      placeholder: I keep missing the direct-deposit deadline because I only check when I remember to.
+    validations:
+      required: false
