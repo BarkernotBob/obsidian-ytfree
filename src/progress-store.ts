@@ -10,6 +10,7 @@ import type { App } from "obsidian";
 import {
   emptyProgress,
   markWatched,
+  mergeProgress,
   normalizeProgress,
   pruneProgress,
   recordPosition,
@@ -33,6 +34,14 @@ export class ProgressStore {
   private saving: Promise<void> = Promise.resolve();
   private timer: number | null = null;
   private dirty = false;
+  /**
+   * mtime of the last copy of the file this device successfully read or wrote.
+   *
+   * The same watermark `SubscriptionsStore` keeps, for the same reason and with
+   * the same rule: only a read that answered may advance it, or one blip marks
+   * a version seen that never was and this device stays behind for good.
+   */
+  private diskTime = 0;
 
   constructor(
     private app: App,
@@ -40,17 +49,67 @@ export class ProgressStore {
   ) {}
 
   async load(): Promise<void> {
+    const read = await this.read();
+    if (read) this.state = read;
+    await this.noteDiskTime();
+    if (pruneProgress(this.state, new Date())) this.schedule();
+  }
+
+  /**
+   * What is in the file this instant, or null if it could not be read.
+   *
+   * Null covers both "no file yet" and "a file I could not parse", which is a
+   * distinction this store does not need: it never overwrites blind — every
+   * write merges into whatever it can read first — so the only decision left is
+   * whether there is anything to merge.
+   */
+  private async read(): Promise<ProgressState | null> {
     try {
-      if (await this.app.vault.adapter.exists(this.path)) {
-        this.state = normalizeProgress(JSON.parse(await this.app.vault.adapter.read(this.path)));
-      }
+      if (!(await this.app.vault.adapter.exists(this.path))) return null;
+      return normalizeProgress(JSON.parse(await this.app.vault.adapter.read(this.path)));
     } catch (err) {
       // A position is worth nothing next to the plugin loading, so an
-      // unreadable file starts empty rather than stopping anything.
-      console.error("YT Free: playback positions unreadable, starting empty.", err);
-      this.state = emptyProgress();
+      // unreadable file is survivable everywhere this is called from.
+      console.error("YT Free: playback positions unreadable.", err);
+      return null;
     }
-    if (pruneProgress(this.state, new Date())) this.schedule();
+  }
+
+  private async noteDiskTime(): Promise<void> {
+    try {
+      this.diskTime = (await this.app.vault.adapter.stat(this.path))?.mtime ?? 0;
+    } catch {
+      // A stat that failed is not evidence of anything. Leave the watermark.
+    }
+  }
+
+  /**
+   * Pick up what the other device has watched since we last looked.
+   *
+   * This is the whole of "progress crosses both ways". The file was read once
+   * at load and never again, so a desktop that had been open since morning was
+   * merging every save against its morning snapshot: a position written on the
+   * phone at lunch was invisible here, and the next save here wrote over it.
+   * The phone appeared to be the only device that synced because it is the one
+   * that gets killed and reloaded — every relaunch was a fresh `load`.
+   *
+   * A stat first, and a read only when the file has actually moved, so this is
+   * cheap enough to call whenever a note is opened or the window is focused.
+   */
+  async refreshFromDisk(): Promise<void> {
+    let mtime: number;
+    try {
+      mtime = (await this.app.vault.adapter.stat(this.path))?.mtime ?? 0;
+    } catch {
+      return;
+    }
+    if (mtime === this.diskTime) return;
+
+    const theirs = await this.read();
+    // Only a read that answered may say this version has been seen.
+    if (!theirs) return;
+    this.diskTime = mtime;
+    this.state = mergeProgress(this.state, theirs);
   }
 
   /** Where to pick this video up, or 0. */
@@ -105,8 +164,17 @@ export class ProgressStore {
     }
     if (!this.dirty) return this.saving;
     this.dirty = false;
+    // Read, merge, write — never a blind write of this device's snapshot. The
+    // file is synced and both devices hold it open, so a plain write means the
+    // last device to save wins every video in it, including the ones it has not
+    // played since yesterday.
     this.saving = this.saving
-      .then(() => this.app.vault.adapter.write(this.path, JSON.stringify(this.state)))
+      .then(async () => {
+        const theirs = await this.read();
+        if (theirs) this.state = mergeProgress(this.state, theirs);
+        await this.app.vault.adapter.write(this.path, JSON.stringify(this.state));
+        await this.noteDiskTime();
+      })
       .catch((err) => console.error("YT Free: could not write playback positions.", err));
     return this.saving;
   }

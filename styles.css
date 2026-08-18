@@ -2798,12 +2798,17 @@ body.ytfree-immersive-open {
  *
  * The height is what the region below the picture is measured against, so it
  * has to be a length and not a cap. See `.modal-content` under it.
+ *
+ * 88 rather than 80 since the sheet became two columns: everything on it is now
+ * either the picture or the reading, both of them want the room, and the
+ * backdrop showing round the edges is what says "modal" — a job 6% of the
+ * window does as well as 10%.
  */
 body:not(.is-mobile) .ytfree-preview-modal {
   display: flex;
   flex-direction: column;
-  width: 80vw;
-  height: 80vh;
+  width: 88vw;
+  height: 88vh;
   max-width: none;
 }
 
@@ -2815,25 +2820,17 @@ body:not(.is-mobile) .ytfree-preview-modal .modal-content {
 }
 
 /*
- * The picture takes a share of the sheet, not the whole of it — the same trade
- * the phone makes two hundred lines down, and for a sharper reason here.
+ * The picture, on a laptop, when the sheet is still one column.
  *
- * The player's box is 16:9 of whatever it is given, and what it was being given
- * was 80vw. On a 16:9 screen that is 45vh of *width*, so the picture alone came
- * out taller than the 80vh window it was in: the title, the description, the
- * transcript and the four buttons were all below the fold of a sheet that had
- * just been made bigger to show them. Capping the width rather than the height
- * keeps it a 16:9 picture instead of a pillarboxed one — the height follows from
- * the ratio — and the leftover is what the open region grows into.
- *
- * 34, measured rather than guessed: `tools/preview-sheet-harness.mjs` reports a
- * 722pt sheet on a 1512×945 laptop, and 34vh leaves the open region about 155 of
- * them with nothing scrolling. Every point given to the picture comes off the
- * reading, and Collapse gives all of it back at one button — the picture folds
- * to 66pt and the player keeps playing.
+ * Stacked, the picture and the reading are dividing one height between them,
+ * and 16:9 of the sheet's width is more than all of it — so the width is capped
+ * and the height follows from the ratio, which keeps it a 16:9 picture rather
+ * than a pillarboxed one. This is the narrow-window case only: above 1000px the
+ * sheet is two columns and the picture is not taking anything off the reading
+ * at all, which is where the rule below sends it.
  */
 body:not(.is-mobile) .ytfree-preview-wrapper {
-  max-width: calc(34vh * 16 / 9);
+  max-width: calc(38vh * 16 / 9);
   margin-inline: auto;
 }
 
@@ -2984,6 +2981,47 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
  * reflow under the pointer: pressing Description moves the transcript's header
  * down the sheet, and nothing else on it changes size or place.
  */
+/*
+ * The box both disclosures live in — one element, because they are one region.
+ *
+ * Shut it is two headers and asks for nothing; open it is the region, and it
+ * takes the space between the facts and the buttons. Off a phone it is also the
+ * right-hand column of the sheet, which is what lets the picture be a picture
+ * and the transcript be a full-height column at the same time.
+ */
+.ytfree-preview-read {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.ytfree-sheet-reading .ytfree-preview-read {
+  /* `flex-basis: 0`, so it asks for the leftover rather than for the height of
+     an hour of transcript. */
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/*
+ * While one region is open, the other one is not on the sheet at all.
+ *
+ * The header of a region you are not reading is a row of the screen spent
+ * saying so. On a phone that is 34 of about 400 points of transcript, and the
+ * cost is worse than the arithmetic: two headers and one body reads as two
+ * boxes sharing the space, which is exactly the letterboxed sheet the single
+ * region was built to avoid. Collapse what you are reading and both headers
+ * come back — that is the way to the other one, and the only one.
+ *
+ * `display: none` rather than a zero height, and only on the *shut* section:
+ * what it hides is a 34pt header with nothing in it to re-wrap, so bringing it
+ * back cannot reflow anything that was measured while it was gone.
+ */
+.ytfree-sheet-reading .ytfree-preview-describe:not(.is-open),
+.ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) {
+  display: none;
+}
+
 .ytfree-preview-describe,
 .ytfree-preview-transcript {
   display: flex;
@@ -2998,6 +3036,13 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
 .ytfree-preview-describe {
   margin-top: 0.8em;
   border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Except when it is the first thing in the column: a rule and a margin above
+   the top of the reading column is a seam against nothing. */
+.ytfree-sheet-reading .ytfree-preview-read > .is-open:first-child {
+  margin-top: 0;
+  border-top: none;
 }
 
 .ytfree-preview-describe.is-open,
@@ -3263,6 +3308,77 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
   z-index: -1;
 }
 
+/* ------------------------------------------- preview, on a wide window ---
+ *
+ * The sheet is two columns: the picture and what the video *is* on the left,
+ * the reading on the right, and the buttons along the foot of both.
+ *
+ * Stacked, the picture and the reading were dividing one height, and every
+ * point given to either was taken off the other — a picture worth watching left
+ * about 150 points of transcript, and a transcript worth reading left a
+ * thumbnail. On a 1512-point screen the sheet is 1330 wide and 60% of the
+ * height, so the two resources are not the same resource: width is what a
+ * laptop has spare. The picture gets a column and grows to fill it, and the
+ * open region gets the other column at the full height of the sheet.
+ *
+ * The same shape the phone uses held sideways, two hundred lines down, and for
+ * the same reason — 16:9 and a short window do not stack.
+ *
+ * 1000px, because below it the right-hand column stops being a column: the
+ * transcript's timestamp is 3.4em before a word of it is drawn, and at half of
+ * 900 points minus that, the text is four words to the line. Under the query
+ * the sheet is the stacked one above, which is what a narrow desktop window and
+ * a tablet both get.
+ */
+@media (min-width: 1000px) {
+  body:not(.is-mobile) .ytfree-preview-modal .modal-content {
+    display: grid;
+    /*
+     * The picture's column, and the reading's. 1.45 : 1 of 1330 points is a 760
+     * point picture — 428 tall, a third more than the whole sheet used to give
+     * it — against a 525 point column for the words, which is wider than this
+     * modal was in total until 2026-08-08.
+     */
+    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+    /* Picture, title, facts, the space left over, and the buttons under both. */
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    column-gap: 1.2em;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-modal .ytfree-preview-player {
+    grid-area: 1 / 1;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-title {
+    grid-area: 2 / 1;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-facts {
+    grid-area: 3 / 1;
+  }
+
+  /* Rows one to four of the second column: everything above the buttons. */
+  body:not(.is-mobile) .ytfree-preview-read {
+    grid-area: 1 / 2 / 5 / 3;
+    min-height: 0;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-actions {
+    grid-area: 5 / 1 / 6 / 3;
+  }
+
+  /*
+   * No width cap in here — the column *is* the cap, and that is the whole point
+   * of the two-column sheet. The height still has one: a very wide, very short
+   * window (a 21:9 monitor, a half-height Obsidian) would otherwise ask for a
+   * picture taller than the sheet and push the title and the facts off it.
+   */
+  body:not(.is-mobile) .ytfree-preview-wrapper {
+    max-width: calc(62vh * 16 / 9);
+    margin-inline: 0;
+  }
+}
+
 /* ------------------------------------------------- preview, on a phone ---
  *
  * The buttons are the floor of the sheet rather than the last thing in the
@@ -3364,15 +3480,12 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     /*
-     * Picture, title, facts, then the description, and the buttons under both
-     * columns. `minmax(auto, 1fr)` on the description's row rather than
-     * `minmax(0, 1fr)`: shut it is a 34pt header and the row takes the spare
-     * space, which is what gives the transcript beside it the full height;
-     * open, it is taller than the spare space and the row is allowed to say so
-     * rather than clipping the text. The sheet scrolls at that point — see the
-     * description's own cap below, which is where that trade is written down.
+     * Picture, title, facts, whatever is left, and the buttons under both
+     * columns. `minmax(0, 1fr)` on the fourth: nothing is placed in it in the
+     * left column any more — the reading is one box in the right-hand column
+     * now — so it is spare space and is allowed to be nothing at all.
      */
-    grid-template-rows: auto auto auto minmax(auto, 1fr) auto;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
     column-gap: 0.9em;
   }
 
@@ -3403,43 +3516,22 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
     grid-area: 3 / 1;
   }
 
-  .is-phone .ytfree-preview-describe,
-  .is-phone .ytfree-preview-describe.is-open {
-    grid-area: 4 / 1;
-    display: flex;
-    flex-direction: column;
-    /*
-     * Deliberately *not* `min-height: 0` — nor the 7em floor the shared rules
-     * give an open region, which is why this says `auto` out loud rather than
-     * leaving the property alone. Zero tells the grid the section can be
-     * nothing tall, so the row stays the size it was and the opened description
-     * spills over the buttons instead of pushing the sheet into being
-     * scrollable; a floor does the mirror image, holding a shut header at seven
-     * lines and taking them off the picture beside it.
-     */
-    min-height: auto;
-  }
-
   /*
-   * Bounded, unlike portrait — and this is where landscape's one honest
-   * shortage is written down. Picture, title, facts, a readable description and
-   * a full-height transcript do not all fit in 390 points: at rest the
-   * transcript wins and the description is a header, and opening it buys 30vh
-   * of text at the price of the sheet scrolling while it is open. Shutting it
-   * puts everything back.
+   * Both regions, in the right-hand column, at the full height of the sheet.
+   *
+   * This used to be the sheet's one honest shortage: the description was pinned
+   * under the facts in the *left* column and capped at 30vh, because a
+   * full-height transcript beside a readable description did not fit. It does
+   * now, because only one of them is ever drawn — the shut one is not on the
+   * sheet at all (see `.ytfree-sheet-reading`), so whichever you are reading
+   * gets the whole column and the cap has nothing left to protect.
    */
-  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-description {
-    /* A height rather than a cap, and no shrinking: the row it is in is allowed
-       to grow past the sheet, but only if the box in it insists on a size. Told
-       it may shrink, it shrinks to the 20 points the row had spare and the tap
-       appears to do nothing. */
-    flex: 0 0 30vh;
-    overflow-y: auto;
-    overscroll-behavior: contain;
+  .is-phone .ytfree-preview-read {
+    grid-area: 1 / 2 / 5 / 3;
+    min-height: 0;
   }
 
-  .is-phone .ytfree-preview-transcript {
-    grid-area: 1 / 2 / 5 / 3;
+  .is-phone .ytfree-preview-read > *:first-child {
     margin-top: 0;
     border-top: none;
   }

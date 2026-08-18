@@ -79,9 +79,12 @@ const cues = Array.from({ length: 63 }, (_, i) => {
 /*
  * The two regions are one region, so exactly one of them opens: the transcript
  * on a phone, the description on a laptop — see `mountDescription` and
- * `mountTranscript`. `ytfree-sheet-shut` is the sheet-level flag for "neither",
- * and it is what decides whether the buttons get their auto margin; the margin
- * would otherwise eat the free space the open region grows into.
+ * `mountTranscript`. They live together in `.ytfree-preview-read`, and the
+ * sheet carries one of two flags: `ytfree-sheet-shut` for "neither", which is
+ * what decides whether the buttons get their auto margin (the margin would
+ * otherwise eat the free space the open region grows into), and
+ * `ytfree-sheet-reading` for "one of them", which is what takes the shut one
+ * off the sheet entirely and hands the whole region to the open one.
  */
 const sheet = (transcript, phone = true) => {
   const describeOpen = !phone;
@@ -94,7 +97,7 @@ const sheet = (transcript, phone = true) => {
  <div class="modal-container mod-dim">
   <div class="modal-bg"></div>
   <div class="modal ytfree-preview-modal">
-   <div class="modal-content${describeOpen || transcriptOpen ? "" : " ytfree-sheet-shut"}">
+   <div class="modal-content${describeOpen || transcriptOpen ? " ytfree-sheet-reading" : " ytfree-sheet-shut"}">
     <div class="ytfree-preview-player">
      <div class="ytfree-wrapper ytfree-preview-wrapper">
       <div class="ytfree-media"><video class="ytfree-video"></video></div>
@@ -121,6 +124,7 @@ const sheet = (transcript, phone = true) => {
     </div>
     <div class="ytfree-preview-title">How Convection Currents Actually Work — and the supercalifragilisticexpialidocious case</div>
     <div class="ytfree-preview-facts">Veritasium · 21:04 · 1.2M views · 3 days ago</div>
+    <div class="ytfree-preview-read">
     <div class="ytfree-preview-describe${describeOpen ? " is-open" : ""}">
      <button class="ytfree-preview-disclose" aria-expanded="${describeOpen}">
       <span class="ytfree-preview-disclose-chevron"></span>
@@ -130,6 +134,7 @@ const sheet = (transcript, phone = true) => {
     <div class="ytfree-preview-transcript${transcriptOpen ? " is-open" : ""}">
      <button class="ytfree-preview-transcript-head"${transcript ? "" : " disabled"}><span class="ytfree-preview-transcript-chevron"></span><span class="ytfree-preview-transcript-label">${transcript ? "Transcript · 63 sections" : "Transcript — none for this video"}</span></button>
      <div class="ytfree-preview-transcript-body">${transcript ? cues : ""}</div>
+    </div>
     </div>
     <div class="ytfree-card-actions ytfree-preview-actions">
      ${["Watch", "Keep", "Remove", "Share"]
@@ -233,6 +238,10 @@ async function measure(viewport, transcript = true, phone = true) {
       transcriptRegionHeight: Math.round(body.getBoundingClientRect().height),
       transcriptScrollsItself: open ? scrolls(body) : 0,
       transcriptOverscroll: getComputedStyle(body).overscrollBehaviorY,
+      readRegionHeight: Math.round(box(".ytfree-preview-read").height),
+      // The ask in so many words: with the transcript open, "not even the
+      // description header is visible".
+      shutHeaderDrawn: getComputedStyle(q(".ytfree-preview-describe")).display !== "none",
       playerOnScreen: onScreen(box(".ytfree-preview-player")),
       actionsOnScreen: onScreen(box(".ytfree-preview-actions")),
       sheetScrolls: scrolls(content),
@@ -267,11 +276,15 @@ async function measure(viewport, transcript = true, phone = true) {
     q(".ytfree-preview-describe").classList.add("is-open");
     q(".ytfree-preview-disclose").setAttribute("aria-expanded", "true");
     content.classList.remove("ytfree-sheet-shut");
+    content.classList.add("ytfree-sheet-reading");
     const opened = {
       openingDescriptionMovesPlayer: Math.round(before.playerTop - box(".ytfree-preview-player").top),
       openingDescriptionSheetScrolls: scrolls(content),
       // Mutually exclusive now: the transcript is meant to be its header alone.
       transcriptWhenDescriptionOpen: Math.round(body.getBoundingClientRect().height),
+      transcriptHeaderDrawnWithDescriptionOpen:
+        getComputedStyle(q(".ytfree-preview-transcript")).display !== "none",
+      readRegionWithDescriptionOpen: Math.round(box(".ytfree-preview-read").height),
       descriptionHeight: Math.round(box(".ytfree-preview-description").height),
       descriptionScrollsItself: scrolls(q(".ytfree-preview-description")),
       // The headers are fixed-height flex items in a sheet with no room to
@@ -287,6 +300,8 @@ async function measure(viewport, transcript = true, phone = true) {
     };
     q(".ytfree-preview-describe").classList.remove("is-open");
     if (open) q(".ytfree-preview-transcript").classList.add("is-open");
+    content.classList.toggle("ytfree-sheet-reading", open);
+    content.classList.toggle("ytfree-sheet-shut", !open);
 
     const tall = box(".ytfree-preview-player").height;
     q(".ytfree-preview-wrapper").classList.add("is-collapsed");
@@ -320,10 +335,12 @@ async function measure(viewport, transcript = true, phone = true) {
 console.log("portrait, with a transcript:", await measure({ width: 390, height: 844 }));
 console.log("landscape, with a transcript:", await measure({ width: 844, height: 390 }));
 console.log("portrait, no transcript:", await measure({ width: 390, height: 844 }, false));
-// The laptop sheet is 80% of the window as of 2026-08-08, and the thing that
-// goes wrong at that size is the picture: 16:9 of 80vw is taller than 80vh, so
-// without a cap the player is the whole sheet and the buttons are off the
-// bottom. `playerHeight` against `sheetHeight` is that claim as a number.
+// The laptop sheet is 88% of the window and two columns as of 2026-08-17:
+// picture, title and facts on the left, whichever region is open on the right.
+// The thing that goes wrong at that size is the picture — 16:9 of a full column
+// is taller than the sheet, so uncapped the player is the whole of it and the
+// buttons are off the bottom. `playerHeight` against `sheetHeight` is that
+// claim as a number, and `readRegionHeight` is the other half of the trade.
 console.log("laptop, with a transcript:", await measure({ width: 1512, height: 945 }, true, false));
 
 await browser.close();

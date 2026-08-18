@@ -9,6 +9,7 @@ import {
   normalizeProgress,
   pruneProgress,
   markWatched,
+  mergeProgress,
   recordPosition,
   resumePoint,
   WATCH_STAMP_INTERVAL_MS,
@@ -203,4 +204,64 @@ test("a preview and a later watch are one session", () => {
   // Watching from there stamps it; previewing never did.
   assert.equal(markWatched(state, ID, NOW), true);
   assert.equal(watchedAt(state, ID), NOW.toISOString());
+});
+
+test("a merge keeps the newer position for each video, whichever side it is on", () => {
+  // 3: the phone writes at 12:05, the desktop's copy in memory is from 11:00.
+  // Blind-writing the desktop's copy is what lost the phone's afternoon.
+  const mine = emptyProgress();
+  mine.positions[ID] = { seconds: 30, updatedAt: "2026-07-29T11:00:00.000Z" };
+  mine.positions[OTHER] = { seconds: 900, updatedAt: "2026-07-29T12:30:00.000Z" };
+
+  const theirs = emptyProgress();
+  theirs.positions[ID] = { seconds: 600, updatedAt: "2026-07-29T12:05:00.000Z" };
+  theirs.positions[OTHER] = { seconds: 10, updatedAt: "2026-07-29T09:00:00.000Z" };
+
+  const merged = mergeProgress(mine, theirs);
+  assert.equal(merged.positions[ID].seconds, 600);
+  assert.equal(merged.positions[OTHER].seconds, 900);
+});
+
+test("a merge is the union, not an overwrite", () => {
+  const mine = emptyProgress();
+  mine.positions[ID] = { seconds: 30, updatedAt: "2026-07-29T11:00:00.000Z" };
+  const theirs = emptyProgress();
+  theirs.positions[OTHER] = { seconds: 40, updatedAt: "2026-07-29T11:00:00.000Z" };
+
+  const merged = mergeProgress(mine, theirs);
+  assert.deepEqual(Object.keys(merged.positions).sort(), [ID, OTHER].sort());
+});
+
+test("watch stamps merge on the same rule as positions", () => {
+  const mine = emptyProgress();
+  mine.watched[ID] = "2026-07-29T11:00:00.000Z";
+  const theirs = emptyProgress();
+  theirs.watched[ID] = "2026-07-29T12:00:00.000Z";
+  theirs.watched[OTHER] = "2026-07-20T12:00:00.000Z";
+
+  const merged = mergeProgress(mine, theirs);
+  assert.equal(merged.watched[ID], "2026-07-29T12:00:00.000Z");
+  assert.equal(merged.watched[OTHER], "2026-07-20T12:00:00.000Z");
+});
+
+test("an unreadable stamp loses to a readable one, from either side", () => {
+  // A half-written file from the other device must not be able to roll a real
+  // position back just by having a stamp that does not parse.
+  const mine = emptyProgress();
+  mine.positions[ID] = { seconds: 300, updatedAt: "2026-07-29T11:00:00.000Z" };
+  const theirs = emptyProgress();
+  theirs.positions[ID] = { seconds: 0, updatedAt: "not a date" };
+  assert.equal(mergeProgress(mine, theirs).positions[ID].seconds, 300);
+  assert.equal(mergeProgress(theirs, mine).positions[ID].seconds, 300);
+});
+
+test("neither side is mutated by a merge", () => {
+  const mine = emptyProgress();
+  mine.positions[ID] = { seconds: 30, updatedAt: "2026-07-29T11:00:00.000Z" };
+  const theirs = emptyProgress();
+  theirs.positions[OTHER] = { seconds: 40, updatedAt: "2026-07-29T11:00:00.000Z" };
+
+  mergeProgress(mine, theirs);
+  assert.deepEqual(Object.keys(mine.positions), [ID]);
+  assert.deepEqual(Object.keys(theirs.positions), [OTHER]);
 });

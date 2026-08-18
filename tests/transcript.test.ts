@@ -17,6 +17,9 @@ import {
   transcriptIndex,
   transcriptLineAt,
   transcriptLineFor,
+  followIndexAt,
+  followLineAt,
+  FOLLOW_LAG_SECONDS,
   isRenderedCueLine,
   TRANSCRIPT_ALIASES,
   TRANSCRIPT_HEADING,
@@ -556,6 +559,44 @@ test("transcriptLineAt gives the same answers as a fresh scan of the note", () =
     assert.equal(transcriptLineAt(index, at), transcriptLineFor(JUMP_NOTE, at));
   }
   assert.equal(transcriptLineAt(index, -1), null);
+});
+
+test("the follow waits three seconds past a paragraph before moving to it", () => {
+  // 4: a paragraph's timestamp is when its first caption *appears*, which is
+  // ahead of the words being said. Moving on the timestamp reads as jumping
+  // early; the lag makes it land late instead, which is the readable way round.
+  const index = transcriptIndex(JUMP_NOTE);
+  assert.equal(FOLLOW_LAG_SECONDS, 3);
+  assert.equal(followLineAt(index, 79), 6);
+  assert.equal(followLineAt(index, 80), 6);
+  assert.equal(followLineAt(index, 82), 6);
+  assert.equal(followLineAt(index, 83), 8);
+  assert.equal(followLineAt(index, 119), 8);
+  assert.equal(followLineAt(index, 123), 10);
+});
+
+test("the follow still shows the first paragraph inside its own lag", () => {
+  // The lag must not leave the first three seconds of the video pointing at
+  // nothing: there is no earlier paragraph to sit on while it elapses.
+  const index = transcriptIndex(JUMP_NOTE);
+  assert.equal(followLineAt(index, 0), 6);
+  assert.equal(followLineAt(index, 2), 6);
+});
+
+test("the follow answers null before the first paragraph, and for an empty note", () => {
+  assert.equal(followLineAt(transcriptIndex(JUMP_NOTE), -1), null);
+  assert.equal(followLineAt([], 100), null);
+});
+
+test("followIndexAt is the same rule on bare seconds, for the Preview list", () => {
+  const starts = [0, 80, 120];
+  assert.equal(followIndexAt(starts, 82), 0);
+  assert.equal(followIndexAt(starts, 83), 1);
+  assert.equal(followIndexAt(starts, 122), 1);
+  assert.equal(followIndexAt(starts, 123), 2);
+  assert.equal(followIndexAt(starts, 1), 0);
+  assert.equal(followIndexAt(starts, -1), -1);
+  assert.equal(followIndexAt([], 5), -1);
 });
 
 test("isRenderedCueLine tells a transcript paragraph from a timestamp you typed", () => {

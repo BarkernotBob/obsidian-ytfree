@@ -181,6 +181,55 @@ export function resumePoint(state: ProgressState, videoId: string): number {
 }
 
 /**
+ * Fold another device's copy of the file into this one.
+ *
+ * The reason this exists at all: the store used to read the file once, at load,
+ * and write its whole snapshot back from then on. A Mac left open all day
+ * therefore never saw a position the phone wrote at lunchtime — and worse, the
+ * next thing it wrote put its own morning snapshot back over it. Progress
+ * appeared to sync one way only, which is exactly what it was doing.
+ *
+ * Newest wins, per video, on the stamp each entry already carries. Both files
+ * are the same shape and neither is authoritative: whichever device last
+ * *watched* a video knows where it got to, and that is what `updatedAt`
+ * records.
+ *
+ * The one thing it cannot do is carry a deletion. A finished video has its
+ * position removed rather than zeroed, and an absence is indistinguishable from
+ * "this device has never seen it" — so a video finished here while the other
+ * device still holds an old position for it comes back with that position, and
+ * reopens near the end instead of at the start. That is a scrub back, once,
+ * against silently losing a position every time two devices disagree; the
+ * cheaper of the two mistakes wins.
+ */
+export function mergeProgress(mine: ProgressState, theirs: ProgressState): ProgressState {
+  const merged = emptyProgress();
+
+  for (const [videoId, point] of Object.entries(mine.positions)) merged.positions[videoId] = point;
+  for (const [videoId, point] of Object.entries(theirs.positions)) {
+    const ours = merged.positions[videoId];
+    if (!ours || newer(point.updatedAt, ours.updatedAt)) merged.positions[videoId] = point;
+  }
+
+  for (const [videoId, at] of Object.entries(mine.watched)) merged.watched[videoId] = at;
+  for (const [videoId, at] of Object.entries(theirs.watched)) {
+    const ours = merged.watched[videoId];
+    if (!ours || newer(at, ours)) merged.watched[videoId] = at;
+  }
+
+  return merged;
+}
+
+/** Strictly later, with an unparseable stamp losing to anything readable. */
+function newer(a: string, b: string): boolean {
+  const left = Date.parse(a);
+  const right = Date.parse(b);
+  if (!Number.isFinite(left)) return false;
+  if (!Number.isFinite(right)) return true;
+  return left > right;
+}
+
+/**
  * Drop what has gone stale and cap what is left, oldest first.
  *
  * Nothing here is precious — the worst case of pruning too hard is one video

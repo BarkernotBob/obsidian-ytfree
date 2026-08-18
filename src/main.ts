@@ -75,8 +75,8 @@ import {
   parseTranscriptCues,
   isRenderedCueLine,
   transcriptIndex,
-  transcriptLineAt,
   transcriptLineFor,
+  followLineAt,
   pickCaptionTrack,
   renderHeatmap,
   renderTranscript,
@@ -469,6 +469,40 @@ interface PinnedEntry {
 }
 
 /**
+ * What the reader set on one video, kept for as long as the vault is open.
+ *
+ * A player is not a durable thing: unpinning and pinning again destroys it and
+ * builds another, and so does reopening the note, switching a note from Preview
+ * to Watch, or Obsidian rebuilding a view's DOM. Everything the reader had
+ * changed on the bar and in the pop-out died with it and came back at the
+ * defaults — a 1.5× lecture dropping to 1× on a pin toggle was the report, and
+ * the volume, the mute and the two per-video overrides had the same bug behind
+ * them.
+ *
+ * The position is not in here: it lives in `progress.json`, because it is the
+ * one thing that has to survive the vault being closed and has to cross to the
+ * other device. None of these do — "half speed for this lecture" is a decision
+ * about this afternoon, and reviving it a week later would be a player that
+ * plays at the wrong speed for no reason anyone can see.
+ *
+ * Every field is optional and means "the reader has not said": the global
+ * setting answers until they do, which is what keeps a change to a setting
+ * from being shadowed by a video nobody has touched.
+ */
+interface VideoSession {
+  /** The speed picker on the control bar. */
+  rate?: number;
+  volume?: number;
+  muted?: boolean;
+  /** The Smart Speed switch in the pop-out — a per-video override, not a setting. */
+  smartSpeed?: boolean;
+  /** "Skip music too", same terms. */
+  skipNonSpeech?: boolean;
+  /** "Pause while typing", same terms. */
+  pauseWhileTyping?: boolean;
+}
+
+/**
  * Obsidian's per-file fold record, as it stores it and as both editing modes
  * apply it. None of this is in the public typings — `currentMode.applyFoldInfo`
  * and `app.foldManager` are internals — so every use of it is behind a `try`
@@ -564,6 +598,12 @@ export default class YtFreePlugin extends Plugin {
   private previewHost: HTMLElement | null = null;
   private pinned = new Map<MarkdownView, PinnedEntry>();
   /**
+   * Per video, what the reader set on the player — see `VideoSession`. Keyed by
+   * video rather than by note or by player, because the same video pinned in
+   * two notes is one video and both copies of it should play the same way.
+   */
+  private sessions = new Map<string, VideoSession>();
+  /**
    * The way back on. One per open video note whose pinned player is switched
    * off — see `syncPinRestore`.
    */
@@ -652,6 +692,7 @@ export default class YtFreePlugin extends Plugin {
     await this.loadSettings();
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
     await this.progress.load();
+    this.watchProgressFile();
     this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
     await this.silence.load();
     await this.setupSubscriptions();
@@ -3455,7 +3496,10 @@ export default class YtFreePlugin extends Plugin {
       follow.length = content.length;
     }
 
-    const line = transcriptLineAt(follow.index, follow.entry.player.currentTime);
+    // Deliberately lagged — see `FOLLOW_LAG_SECONDS`. A paragraph's timestamp
+    // is where its first caption *appears*, which is a beat before the words
+    // are said, so following it exactly put the reader ahead of the voice.
+    const line = followLineAt(follow.index, follow.entry.player.currentTime);
     if (line === null) return;
     // Re-marked every tick rather than only on a change: CodeMirror rebuilds
     // the lines it has scrolled past, and a class put on one of them does not
@@ -3805,6 +3849,19 @@ export default class YtFreePlugin extends Plugin {
   ): Promise<PlayerEntry | null> {
     const mobile = !Platform.isDesktopApp;
 
+    // Before the resume point is read, not after: the other device may have
+    // watched this very video since this window was opened, and a stat is the
+    // cheapest thing that happens in this function. Awaited, because the
+    // player asks `resumeAt` as part of the load below — a refresh that lands
+    // after it is a refresh that arrives one video too late.
+    await this.progress.refreshFromDisk();
+
+    // What this video was last set to in this session. Created on first sight
+    // and then held, so every later player for the same video — the pin turned
+    // off and on again, a note reopened, Preview handing over to Watch — starts
+    // where the last one was left rather than at the defaults.
+    const session = this.sessionFor(videoId);
+
     // Mobile keeps the media in its own fixed-aspect box, so the poster, the
     // video and the fallback all occupy exactly the same space and swapping
     // between them moves nothing.
@@ -3929,24 +3986,46 @@ export default class YtFreePlugin extends Plugin {
           // nothing. See `.ytfree-pinned` / `.ytfree-docked` in styles.css.
           heightVh: wrapper.hasClass("ytfree-pinned") ? this.settings.pinnedHeightVh : undefined,
           onHeight: (vh) => wrapper.style.setProperty("--ytfree-pinned-height", `${vh}vh`),
-          skipNonSpeech: this.settings.skipNonSpeech,
-          onSkipNonSpeech: (value) => this.setSkipNonSpeechFor(entry?.player ?? null, value),
+          skipNonSpeech: session.skipNonSpeech ?? this.settings.skipNonSpeech,
+          onSkipNonSpeech: (value) => {
+            session.skipNonSpeech = value;
+            this.setSkipNonSpeechFor(entry?.player ?? null, value);
+          },
           // Per video, like everything else in the pop-out: "let this lecture
           // run while I write" is a decision about this lecture. The setting
           // screen is still where "never do this" is said.
-          pauseWhileTyping: this.settings.pauseWhileTyping,
+          pauseWhileTyping: session.pauseWhileTyping ?? this.settings.pauseWhileTyping,
           onPauseWhileTyping: (value) => {
+            session.pauseWhileTyping = value;
             if (entry) entry.pauseWhileTyping = value;
           },
         },
+        // Everything the reader set on this video that a rebuilt player would
+        // otherwise throw away — see `VideoSession`.
+        session: {
+          rate: session.rate,
+          volume: session.volume,
+          muted: session.muted,
+          onRate: (rate) => {
+            session.rate = rate;
+          },
+          onVolume: (volume, muted) => {
+            session.volume = volume;
+            session.muted = muted;
+          },
+        },
         smartSpeed: {
-          enabled: this.settings.smartSpeed,
+          enabled: session.smartSpeed ?? this.settings.smartSpeed,
           silenceRate: this.settings.silenceSpeed,
           minGap: this.settings.silenceMinGap,
           // The player toggle is a per-session override, so it does not write
           // the setting back — flipping it off for one lecture should not turn
-          // the feature off for everything you open tomorrow.
-          onToggle: undefined,
+          // the feature off for everything you open tomorrow. It is remembered
+          // for the video, though: unpinning and pinning again rebuilds the
+          // player, and that is not a new decision about Smart Speed.
+          onToggle: (on) => {
+            session.smartSpeed = on;
+          },
         },
       },
     );
@@ -3957,6 +4036,8 @@ export default class YtFreePlugin extends Plugin {
       wrapper,
       collapsed: null,
       activate: null,
+      skipNonSpeech: session.skipNonSpeech,
+      pauseWhileTyping: session.pauseWhileTyping,
     };
     if (preview) this.preview = entry;
     else this.players.set(videoId, entry);
@@ -4214,6 +4295,49 @@ export default class YtFreePlugin extends Plugin {
    * is rebuilt from the stored maps. Nothing is refetched and nothing is
    * saved: the override lives as long as the note stays open.
    */
+  /**
+   * Catch up with the other device whenever this one comes back to the front.
+   *
+   * The mount path already refreshes before it reads a resume point, which
+   * covers opening a note. This is the rest of it: a hub left open on the Mac
+   * draws its progress lines from the same store, and a window that has been
+   * behind Safari for an hour is the exact case where the phone has been the
+   * one watching. Two events because the platforms disagree about which one
+   * they send — a Mac window regaining focus fires `focus`, and a phone coming
+   * back from the home screen fires `visibilitychange`.
+   *
+   * Both are a stat and nothing more when the file has not moved.
+   */
+  private watchProgressFile(): void {
+    this.registerDomEvent(window, "focus", () => void this.progress.refreshFromDisk());
+    this.registerDomEvent(document, "visibilitychange", () => {
+      if (!document.hidden) {
+        void this.progress.refreshFromDisk();
+        return;
+      }
+      // Going away is the other half, and on a phone it is the important one:
+      // a position is written on a four-second debounce, and an app swiped out
+      // of the switcher is never asked to unload. Whatever is pending goes to
+      // disk now, so picking the Mac up finds the minute just watched.
+      void this.progress.flush();
+    });
+  }
+
+  /**
+   * This video's session record, created empty the first time it is asked for.
+   *
+   * Never pruned. One record is six optional fields against a video ID, and a
+   * vault where you have played two thousand videos in one sitting has other
+   * problems; the map dies with the plugin either way.
+   */
+  private sessionFor(videoId: string): VideoSession {
+    const existing = this.sessions.get(videoId);
+    if (existing) return existing;
+    const fresh: VideoSession = {};
+    this.sessions.set(videoId, fresh);
+    return fresh;
+  }
+
   private setSkipNonSpeechFor(player: YtFreePlayer | null, value: boolean): void {
     const entry = player ? this.entryOf(player) : null;
     if (!entry) return;

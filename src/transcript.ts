@@ -514,6 +514,57 @@ export function transcriptLineAt(index: TranscriptEntry[], seconds: number): num
   return best;
 }
 
+/**
+ * How far past a paragraph's own start the video has to be before the follow
+ * moves on to it.
+ *
+ * The paragraph list is grouped caption timing, and a caption's start is the
+ * moment the *first* word of it is on screen — which YouTube places a beat
+ * ahead of the speech, and which grouping then inherits for the whole
+ * paragraph. Following that number exactly meant the highlight arrived at the
+ * next paragraph while the sentence before it was still being said: you read
+ * ahead of the voice, which is worse than reading behind it, because the
+ * highlighted words have not happened yet.
+ *
+ * So the follow lags. It moves to the next paragraph three seconds after that
+ * paragraph starts, by which point the words in it are demonstrably the words
+ * being spoken. Nothing else uses this: a click on a timestamp, "This moment",
+ * and a shared link are all *seeks*, and a seek that landed three seconds late
+ * every time would be a bug of its own.
+ */
+export const FOLLOW_LAG_SECONDS = 3;
+
+/**
+ * Which of `starts` the follow should be lighting up at `seconds`, or -1.
+ *
+ * The last one that started at least `FOLLOW_LAG_SECONDS` ago — with one floor:
+ * the very first paragraph counts as soon as it has started at all, because
+ * three seconds of nothing highlighted at the top of a video reads as a follow
+ * that is not working rather than as one being careful.
+ *
+ * Order is not assumed, for the same reason `transcriptLineAt` does not assume
+ * it: a note edited by hand can carry a stray timestamp, and a sorted-input
+ * assumption that is wrong once puts the highlight on the wrong paragraph with
+ * nothing on screen to explain it.
+ */
+export function followIndexAt(starts: number[], seconds: number): number {
+  let best = -1;
+  let first = -1;
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i];
+    if (!Number.isFinite(start)) continue;
+    if (start + FOLLOW_LAG_SECONDS <= seconds) best = i;
+    if (first === -1 && start <= seconds) first = i;
+  }
+  return best === -1 ? first : best;
+}
+
+/** The same rule against a note's paragraph index: the line, or null. */
+export function followLineAt(index: TranscriptEntry[], seconds: number): number | null {
+  const at = followIndexAt(index.map((entry) => entry.seconds), seconds);
+  return at === -1 ? null : index[at].line;
+}
+
 /** `**[12:34](ytfree:ID:754)** the words` — one line of a rendered transcript. */
 const RENDERED_CUE_RE = /^\*\*\[[^\]]*\]\(ytfree:[^:)]+:(\d+)\)\*\*\s*(.*)$/;
 

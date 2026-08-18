@@ -117,6 +117,31 @@ export interface PlayerOptions {
    * a horizontal swipe belongs to the host app, and over a video it should not.
    */
   dragSeek?: boolean;
+  /**
+   * How this video was left the last time a player was built for it, and where
+   * to report changes to. Absent, the player starts at 1× and the element's own
+   * volume, which is what a first sight of a video should do.
+   */
+  session?: SessionOptions;
+}
+
+/**
+ * The settings that belong to the video rather than to this instance of the
+ * player.
+ *
+ * A player is destroyed and rebuilt for reasons that have nothing to do with
+ * the video — the pin toggled, the note reopened, the view's DOM replaced — and
+ * every one of those used to put the speed back to 1× and the volume back to
+ * full. The host holds these across the rebuild; the player reads them once at
+ * construction and reports every change.
+ */
+export interface SessionOptions {
+  /** Playback speed, as the picker's own values: 0.5 to 2. */
+  rate?: number;
+  volume?: number;
+  muted?: boolean;
+  onRate?: (rate: number) => void;
+  onVolume?: (volume: number, muted: boolean) => void;
 }
 
 export interface PinOptions {
@@ -369,6 +394,22 @@ export class YtFreePlayer {
     // Before anything can set a rate above 1: without this a 3× pause is a
     // chipmunk, and Chromium and WebKit spell the property differently.
     this.preservePitch();
+
+    // How loud this video was left, before anything can be heard at the wrong
+    // volume. Both are read here rather than at `attach`, which already carries
+    // the element's own values across a source swap — this is the case where
+    // there is no element to carry them from, because the last one was
+    // destroyed with the player it belonged to.
+    const session = options.session;
+    if (session?.volume !== undefined && Number.isFinite(session.volume)) {
+      this.video.volume = Math.min(1, Math.max(0, session.volume));
+    }
+    if (session?.muted !== undefined) this.video.muted = session.muted;
+    if (session?.onVolume) {
+      this.video.addEventListener("volumechange", () =>
+        session.onVolume?.(this.video.volume, this.video.muted),
+      );
+    }
 
     this.buildControls();
     this.trackSmartSpeed();
@@ -809,10 +850,22 @@ export class YtFreePlayer {
     for (const rate of [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]) {
       speed.createEl("option", { text: `${rate}×`, value: String(rate) });
     }
-    speed.value = "1";
+    // Where this video was left, not 1× — see `SessionOptions`. The picker only
+    // offers these seven values, so a stored rate that is not one of them (an
+    // older record, a hand-edited file) would leave the `<select>` blank; it is
+    // taken only when it matches something on the list.
+    const stored = this.options.session?.rate;
+    if (stored !== undefined && speed.querySelector(`option[value="${stored}"]`)) {
+      this.playbackRate = stored;
+      this.video.playbackRate = stored;
+      speed.value = String(stored);
+    } else {
+      speed.value = "1";
+    }
     speed.addEventListener("change", () => {
       this.playbackRate = Number(speed.value);
       this.video.playbackRate = this.playbackRate;
+      this.options.session?.onRate?.(this.playbackRate);
     });
 
     // Smart Speed is no longer a button here. It was the ninth control on a

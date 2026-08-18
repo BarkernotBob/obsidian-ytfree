@@ -74,7 +74,7 @@ import { NOTES_HEADING } from "./sections";
 import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
 import { fetchTranscriptCues, fetchVideoDetails, searchYouTube } from "./innertube";
-import { groupCues, restingScrollTop } from "./transcript";
+import { followIndexAt, groupCues, restingScrollTop } from "./transcript";
 import type { Paragraph } from "./transcript";
 import type { SearchPage, SearchResult } from "./search";
 import {
@@ -2563,6 +2563,8 @@ class PreviewModal extends Modal {
   /** One row per paragraph, in order, so the highlight is an index and not a search. */
   private cueRows: HTMLElement[] = [];
   private cues: Paragraph[] = [];
+  /** The same paragraphs' start seconds, so the tick allocates nothing. */
+  private cueStarts: number[] = [];
   private litRow = -1;
   /** The scroller the rows live in — what autoscroll moves, and what a hand moves. */
   private cueScroller: HTMLElement | null = null;
@@ -2617,15 +2619,21 @@ class PreviewModal extends Modal {
       text: [this.spec.channel, ...this.spec.facts].filter(Boolean).join(" · "),
     });
 
-    this.mountDescription(contentEl);
+    // One box holding both disclosures, because they are one region — see
+    // "the foot of the sheet is one" in styles.css. It earns its place off a
+    // phone, where the sheet is two columns and this is the right-hand one: the
+    // picture and the facts do not have to be re-laid-out to give the reading
+    // its own full-height column.
+    const read = contentEl.createDiv({ cls: "ytfree-preview-read" });
+    this.mountDescription(read);
 
-    this.mountTranscript(contentEl);
+    this.mountTranscript(read);
 
     // The starting state of the same flag `disclose` maintains. Exactly one
     // region opens by default — the transcript on a phone, the description off
     // one — so this is normally false, and true only for a video with no
     // transcript to offer at all.
-    contentEl.toggleClass("ytfree-sheet-shut", !this.anyRegionOpen());
+    this.paintRegions();
 
     const actions = contentEl.createDiv({ cls: "ytfree-card-actions ytfree-preview-actions" });
     const buttons = new Map<CardActionKey, HTMLButtonElement>();
@@ -2768,11 +2776,8 @@ class PreviewModal extends Modal {
       section.toggleClass("is-open", open);
       header.setAttribute("aria-expanded", String(open));
       setIcon(chevron, open ? "chevron-down" : "chevron-right");
-      // The sheet needs to know, not just the section: with nothing open the
-      // buttons are pushed to the foot by an auto margin, and an auto margin
-      // eats the free space the open region is asking for. See
-      // `.ytfree-sheet-shut` in styles.css.
-      this.contentEl.toggleClass("ytfree-sheet-shut", !this.anyRegionOpen());
+      // The sheet needs to know, not just the section — see `paintRegions`.
+      this.paintRegions();
       onChange?.(open);
     };
     this.regions.push(setOpen);
@@ -2789,13 +2794,31 @@ class PreviewModal extends Modal {
     return setOpen;
   }
 
-  /** Whether either disclosure is showing anything. */
-  private anyRegionOpen(): boolean {
-    return Boolean(
+  /**
+   * Tell the sheet which of its two regions is open, if either.
+   *
+   * Two flags, and each pays for itself:
+   *
+   * `ytfree-sheet-shut` is the "neither" case. With nothing open the buttons
+   * are pushed to the foot of the sheet by an auto margin — and an auto margin
+   * takes all the positive free space before `flex-grow` is resolved, so it can
+   * only be applied when there is no open region waiting to grow into it.
+   *
+   * `ytfree-sheet-reading` is the other one: while a region is open, the *other*
+   * region's header is not drawn at all. On the sheet as it was, an open
+   * transcript still spent a row on a Description header nobody was reading,
+   * and the same in reverse — two headers, always, for one region. Collapsing
+   * what you are reading brings both headers back, which is also how you get to
+   * the other one. See `.ytfree-sheet-reading` in styles.css.
+   */
+  private paintRegions(): void {
+    const open = Boolean(
       this.contentEl.querySelector(
         ".ytfree-preview-describe.is-open, .ytfree-preview-transcript.is-open",
       ),
     );
+    this.contentEl.toggleClass("ytfree-sheet-shut", !open);
+    this.contentEl.toggleClass("ytfree-sheet-reading", open);
   }
 
   /**
@@ -2811,8 +2834,8 @@ class PreviewModal extends Modal {
    * sheet that opened straight into an hour of transcript would bury the two
    * paragraphs saying what the video is.
    */
-  private mountDescription(contentEl: HTMLElement): void {
-    const section = contentEl.createDiv({ cls: "ytfree-preview-describe" });
+  private mountDescription(host: HTMLElement): void {
+    const section = host.createDiv({ cls: "ytfree-preview-describe" });
     const start = !Platform.isPhone;
     section.toggleClass("is-open", start);
 
@@ -2848,7 +2871,7 @@ class PreviewModal extends Modal {
    * both states — only the chevron and the body's visibility change — so
    * opening the transcript never moves the buttons under the pointer.
    */
-  private mountTranscript(contentEl: HTMLElement): void {
+  private mountTranscript(host: HTMLElement): void {
     if (!this.spec.fetchTranscript) return;
 
     // Open from the start on a phone (039). The transcript is the reason the
@@ -2856,7 +2879,7 @@ class PreviewModal extends Modal {
     // fills the screen is one that reflows the sheet the first time you use it.
     // Off a phone the description has the region instead — see there.
     const start = Platform.isPhone;
-    const section = contentEl.createDiv({ cls: "ytfree-preview-transcript" });
+    const section = host.createDiv({ cls: "ytfree-preview-transcript" });
     section.toggleClass("is-open", start);
     const header = section.createEl("button", {
       cls: "ytfree-preview-transcript-head",
@@ -2914,6 +2937,7 @@ class PreviewModal extends Modal {
   private fillTranscript(body: HTMLElement, cues: Paragraph[]): void {
     body.empty();
     this.cueScroller = body;
+    this.cueStarts = cues.map((cue) => cue.seconds);
 
     // Hand-driven scrolling, caught at the *input* rather than at the `scroll`
     // event: our own autoscroll fires `scroll` too, and telling the two apart
@@ -2959,8 +2983,11 @@ class PreviewModal extends Modal {
     if (this.litRow >= 0) this.revealRow(this.cueRows[this.litRow]);
     const paint = (): void => {
       const at = this.player?.currentTime() ?? 0;
-      let index = -1;
-      for (let i = 0; i < this.cues.length && this.cues[i].seconds <= at; i++) index = i;
+      // Lagged by three seconds — see `FOLLOW_LAG_SECONDS`. The paragraph's own
+      // timestamp is when its first caption appears, which is ahead of the
+      // speech, so lighting it on that number lit the words before they were
+      // said. The same rule the note's follow uses, from the same function.
+      const index = followIndexAt(this.cueStarts, at);
       if (index === this.litRow) return;
       if (this.litRow >= 0) this.cueRows[this.litRow]?.removeClass("is-now");
       this.litRow = index;

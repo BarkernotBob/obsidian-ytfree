@@ -1,6 +1,70 @@
 # HANDOFF
 
-## Status — 2026-08-08 (later): the Preview sheet, measured
+## Status — 2026-08-17: five off BarkernotBob's list
+
+**550 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
+`./install.sh` and a reload are the next thing. No issue files: these came
+straight from BarkernotBob as a list of five.
+
+- **The picture back to its old size, and the reading with it (1, 2).** These
+  two pull against each other — a bigger picture and a taller reading region
+  cannot both come out of one stacked column — so on a laptop the sheet is two
+  columns now (`@media (min-width: 1000px)`): picture, title and facts down the
+  left, whatever is open down the right, buttons under both. The picture is
+  capped by the column rather than by `34vh`, which is what had shrunk it. On a
+  1512×945 laptop: sheet 769pt, player **492** (was 387 after the cap, ~321
+  before this pass), reading region **714**, nothing scrolls that should not.
+- **One region at a time, headers included (2).** Both disclosures live in a new
+  `.ytfree-preview-read` wrapper, and the sheet carries `ytfree-sheet-reading`
+  whenever one of them is open — under which the *shut* one is
+  `display: none`, not merely collapsed. So an open transcript really is the
+  whole area: the Description header is not on the sheet until you shut it, and
+  the mirror image for the description. This retired landscape's one honest
+  shortage as a side effect — the 30vh cap on the description existed only to
+  fit it beside a transcript that is no longer drawn.
+- **Progress syncs both ways (3).** `progress.json` was read once at load and
+  blind-written after, so a desktop left open all day never saw the phone's
+  writes and overwrote them; the phone only looked like it worked because
+  mobile Obsidian is relaunched and re-`load()`s. `ProgressStore` now mirrors
+  `SubscriptionsStore`: an mtime watermark, `refreshFromDisk()` on window focus
+  and on becoming visible, a flush on being backgrounded, a refresh before a
+  player is built, and a read-merge-write on every save. `mergeProgress` takes
+  the newer stamp per video, on positions and watch stamps alike.
+- **The follow lands late instead of early (4).** A paragraph's timestamp is
+  when its first caption *appears*, which is ahead of the words being said, so
+  moving on the timestamp read as jumping ~3s early. `followIndexAt` /
+  `followLineAt` wait `FOLLOW_LAG_SECONDS` past a paragraph before moving to
+  it, with the first paragraph exempt so the opening seconds point somewhere.
+  Seeks — timestamp clicks, "This moment", shared links — deliberately keep the
+  old exact rule.
+- **Unpin/repin keeps the video's settings (5).** Unpinning destroys the
+  `YtFreePlayer` and repinning builds a new one, which is why speed went back to
+  1×. `main.ts` keeps a per-video `VideoSession` (rate, volume, muted, Smart
+  Speed, skip non-speech, pause while typing) outside the player's lifetime and
+  seeds the new player from it.
+
+Numbers, from `tools/preview-sheet-harness.mjs` (which now renders the wrapper
+and both sheet flags): portrait 390×844 — reading region 325pt, transcript 277,
+the shut header not drawn, sheet does not scroll. Landscape 844×390 — reading
+region 264 of a 358pt sheet, and opening the description no longer scrolls the
+sheet at all.
+
+**Manual test (for BarkernotBob):**
+1. Laptop, open Preview on a video with a transcript. The picture should be
+   about two-thirds the height of the sheet and clearly bigger than last build,
+   with the description or transcript in a column beside it.
+2. Press Transcript. It should fill that whole column and the word
+   "Description" should disappear entirely. Press it again — Description comes
+   back. Repeat on the phone, portrait and landscape.
+3. Start a video on the phone, watch a minute, then switch to the Mac with
+   Obsidian already open and click the same video. It should resume where the
+   phone left off. Then do it the other way round.
+4. Play a video with the transcript following along. The highlight should now
+   move a beat *after* you hear the first words of a paragraph, never before.
+5. Play a video at 1.5×, unpin the player, repin it. Speed should still read
+   1.5×, and so should the volume and the per-video toggles.
+
+## Previous — 2026-08-08 (later): the Preview sheet, measured
 
 **The first pass at the two Preview items was wrong on both platforms, and the
 harness says so.** `tools/preview-sheet-harness.mjs` now renders the laptop sheet
