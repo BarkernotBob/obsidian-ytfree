@@ -1,6 +1,50 @@
 # HANDOFF
 
-## Status — 2026-08-17: five off BarkernotBob's list
+## Status — 2026-08-17 (later): nothing played, and why
+
+**`android_vr` is dead as a playback client.** BarkernotBob reported that no video
+played at all, with a message about yt-dlp. The resolve was fine — the *stream*
+was not: every URL the fast path handed to the `<video>` element answered **403
+to the first byte**, and yt-dlp's own downloader got the same 403 against the
+same URL, so it is not a header or User-Agent mismatch. YouTube has cut that
+client off. yt-dlp is current (2026.07.04, the latest brew has); upgrading it
+would not have helped.
+
+Measured on 2026-08-17, `-f 18/b -g` then a range request:
+
+| client | dQw4w9WgXcQ | jNQXAC9IVRw | 5MgBikgcWnY |
+| --- | --- | --- | --- |
+| `android_vr` (was) | 403 | 403 | 403 |
+| `web` / `mweb` | 403 | 403 | 403 |
+| `web_safari` | 206 | no formats | no formats |
+| `tv_simply` | **206** | **206** | **206** |
+
+- **The fast path now walks a list.** `FAST_CLIENTS = ["tv_simply",
+  "web_safari", ""]` — `""` being yt-dlp's own default set — and `resolveStream`
+  takes the first client whose URL **actually serves bytes**. That probe
+  (`servesBytes`, one two-byte range request) is the real lesson here: a `-g`
+  that succeeds proves nothing, which is why every smoke test but one passed
+  while nothing played. A network error during the probe counts as no opinion,
+  not as a failure.
+- **The quality path throws rather than downgrading.** HLS has mostly vanished
+  for signed-out clients (1 of 5 videos), and the selector's progressive
+  fallback was resolving a 403 URL. `QUALITY_CLIENTS` stays on the default set,
+  and if nothing serves it throws — `upgrade()` already catches that and keeps
+  the 360p stream that is playing.
+- **Mobile was never affected.** InnerTube's `android` client still serves itag
+  18 (206, checked directly). Downloads were not affected either — yt-dlp's
+  adaptive formats serve normally.
+
+**Known and unfixed: HD is mostly out of reach signed out.** With the account
+cookie file (`~/Library/Application Support/obsidian-ytfree/cookies.txt`, which
+this vault already has) HLS resolves and serves on every video tried, so passing
+`--cookies` on the *quality* resolve would restore the upgrade. Not done: it
+puts the signed-in account on every playback request, which is BarkernotBob's call.
+
+**Manual test (for BarkernotBob):** open any video note and press Play. First frame
+within a few seconds, no red error. Try one recent upload and one old one.
+
+## Previous — 2026-08-17: five off BarkernotBob's list
 
 **550 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
 `./install.sh` and a reload are the next thing. No issue files: these came

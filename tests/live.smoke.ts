@@ -14,6 +14,8 @@ import { parseExpiry } from "../src/stream.ts";
 
 // Stable, long-lived, non-age-restricted video.
 const VIDEO_ID = "dQw4w9WgXcQ";
+/** A second one, deliberately not from the same decade or the same uploader. */
+const OTHER_VIDEO_ID = "jNQXAC9IVRw";
 
 test("yt-dlp is installed and findable without a shell PATH", async () => {
   const path = await findYtDlp("");
@@ -40,7 +42,9 @@ test("progressive MP4 resolution works as the fallback path", async () => {
 });
 
 test("the resolved stream actually serves video bytes", async () => {
-  // The end-to-end proof: no YouTube player involved, real media on the wire.
+  // The end-to-end proof, and the one that earns the whole file: on 2026-08-17
+  // every other test here passed while nothing played, because `android_vr`
+  // resolved happily and then answered 403 to the first byte.
   const ytDlp = await findYtDlp("");
   const stream = await resolveStream(VIDEO_ID, ytDlp, "fast");
 
@@ -50,6 +54,16 @@ test("the resolved stream actually serves video bytes", async () => {
 
   const bytes = new Uint8Array(await res.arrayBuffer());
   assert.ok(bytes.length > 1000, `got only ${bytes.length} bytes`);
+});
+
+test("a second, older video serves bytes too", async () => {
+  // One video can be an exception — a client that has been cut off is not. This
+  // is also the case that exercises the fallback down `FAST_CLIENTS`: the
+  // client this one answers on is not the one the test above uses.
+  const ytDlp = await findYtDlp("");
+  const stream = await resolveStream(OTHER_VIDEO_ID, ytDlp, "fast");
+  const res = await fetch(stream.url, { headers: { Range: "bytes=0-4095" } });
+  assert.equal(res.status, 206, "expected HTTP 206 Partial Content");
 });
 
 test("an invalid video id fails loudly rather than silently", async () => {
