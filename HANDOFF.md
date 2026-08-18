@@ -1,6 +1,45 @@
 # HANDOFF
 
-## Status — 2026-08-17 (later): nothing played, and why
+## Status — 2026-08-17 (later still): the other half of the outage
+
+**The client swap was right and did nothing, because Obsidian's PATH has no
+`deno` on it.** BarkernotBob reported still no playback after the fix shipped. The
+cause is a second, quieter failure stacked on the first: yt-dlp now solves a
+JavaScript challenge to get playable formats out of `tv_simply`, and it solves
+it by shelling out to `deno`. Obsidian's Electron process does not inherit a
+login shell's PATH — the same fact `findYtDlp` already worked around by probing
+absolute paths — so inside Obsidian yt-dlp could not find one, dropped the
+client, and reported *"Requested format is not available"*, which reads as if
+the video were at fault. The chain then fell through to the clients that still
+answer with a URL nobody may fetch. Reproduced exactly:
+
+```
+env -i PATH=/usr/bin:/bin yt-dlp --extractor-args youtube:player_client=tv_simply -f 18/b -g <id>
+  → ERROR: Requested format is not available
+env -i PATH=/opt/homebrew/bin:/usr/bin:/bin  (same command)
+  → https://rr1---sn-...googlevideo.com/videoplayback?...
+```
+
+- **`src/desktop/env.ts` is new**: `ytDlpEnv(ytDlpPath)` is `process.env` with
+  yt-dlp's own directory and the Homebrew prefixes appended to PATH. Appended,
+  not prepended — a PATH the user arranged deliberately keeps winning. Every
+  yt-dlp spawn now passes it: resolve, download, account listings, transcript
+  info.
+- **The serve probe moved off `fetch`.** From Obsidian's renderer a `fetch` at
+  googlevideo is cross-origin, and a CORS refusal is indistinguishable from the
+  403 it is looking for — the probe would have had no opinion about any URL and
+  would never have rejected anything. It uses Node's `https` client now, which
+  no origin policy applies to. A 30x counts as willing.
+- **Two new regression tests.** `ytDlpEnv` in the unit suite; in the live smoke
+  suite, a resolve run with `process.env.PATH` cut down to `/usr/bin:/bin`,
+  which fails against the previous build and passes against this one.
+
+**Also filed: [043](issues/043-desktop-full-quality.md)** — HD on the desktop by
+playing the separate picture and sound files through MSE, signed out. Measured
+the same day: both adaptive URLs serve anonymously, the HLS ladder is gone for 4
+videos in 5, and cookies are off the table by BarkernotBob's decision.
+
+## Previous — 2026-08-17 (later): nothing played, and why
 
 **`android_vr` is dead as a playback client.** BarkernotBob reported that no video
 played at all, with a message about yt-dlp. The resolve was fine — the *stream*

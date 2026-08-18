@@ -66,6 +66,23 @@ test("a second, older video serves bytes too", async () => {
   assert.equal(res.status, 206, "expected HTTP 206 Partial Content");
 });
 
+test("it still resolves with the bare PATH Obsidian gives it", async () => {
+  // The second half of the 2026-08-17 outage: the client that serves needs
+  // yt-dlp to solve a JS challenge, which it does by shelling out to `deno`,
+  // which is not on the PATH an Electron app inherits. Resolving worked in a
+  // terminal and returned an unplayable URL inside Obsidian.
+  const ytDlp = await findYtDlp("");
+  const before = process.env.PATH;
+  process.env.PATH = "/usr/bin:/bin";
+  try {
+    const stream = await resolveStream(VIDEO_ID, ytDlp, "fast");
+    const res = await fetch(stream.url, { headers: { Range: "bytes=0-4095" } });
+    assert.equal(res.status, 206, "a bare PATH must still yield a stream that plays");
+  } finally {
+    process.env.PATH = before;
+  }
+});
+
 test("an invalid video id fails loudly rather than silently", async () => {
   const ytDlp = await findYtDlp("");
   await assert.rejects(

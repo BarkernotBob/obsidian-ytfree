@@ -7,6 +7,8 @@ import { promisify } from "util";
 
 const pExecFile = promisify(execFile);
 
+import { ytDlpEnv } from "./env.ts";
+
 /**
  * Where downloads go when the setting is blank.
  *
@@ -185,7 +187,7 @@ export function buildArgs(opts: DownloadOptions): string[] {
  * otherwise be silently resumed into much later.
  */
 export function downloadVideo(opts: DownloadOptions): DownloadHandle {
-  const child = spawn(opts.ytDlpPath, buildArgs(opts));
+  const child = spawn(opts.ytDlpPath, buildArgs(opts), { env: ytDlpEnv(opts.ytDlpPath) });
   let cancelled = false;
   let finalPath = "";
   let stderr = "";

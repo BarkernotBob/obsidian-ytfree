@@ -7,8 +7,10 @@
  */
 
 import { execFile } from "child_process";
+import https from "https";
 import { promisify } from "util";
 import { EXPIRY_SAFETY_MARGIN_MS, parseExpiry, ResolveError, YtDlpMissingError } from "../stream.ts";
+import { ytDlpEnv } from "./env.ts";
 // `import type` and not a plain import: `node --test` strips types rather than
 // compiling them, so a type imported as a value makes the whole module fail to
 // load — which is what stopped `npm run smoke` running at all.
@@ -53,21 +55,41 @@ const QUALITY_CLIENTS = [""];
  * here — where there is another client to try — and finding out in the
  * `<video>` element, where the only thing left to do is show an error.
  */
-export async function servesBytes(url: string): Promise<boolean> {
-  const control = new AbortController();
-  try {
-    const res = await fetch(url, { headers: { Range: "bytes=0-1" }, signal: control.signal });
-    // 206 for a byte range, 200 for an HLS manifest, which ignores the header.
-    const ok = res.status === 200 || res.status === 206;
-    control.abort();
-    return ok;
-  } catch {
+export function servesBytes(url: string): Promise<boolean> {
+  // Node's own client and not `fetch`: from Obsidian's renderer a `fetch` at
+  // googlevideo is a cross-origin request, and a CORS refusal is
+  // indistinguishable here from the 403 this is looking for — the probe would
+  // have no opinion about any URL and would never reject anything. This module
+  // is desktop-only and already spawns processes, so there is a client to hand
+  // that no origin policy applies to.
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (answer: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(answer);
+    };
+
+    const request = https.request(url, { method: "GET", headers: { Range: "bytes=0-1" } }, (res) => {
+      // 206 for a byte range, 200 for an HLS manifest, which ignores the
+      // header, and 30x for a redirector — all three mean YouTube is willing.
+      const status = res.statusCode ?? 0;
+      done(status === 200 || status === 206 || (status >= 300 && status < 400));
+      res.destroy(); // the two bytes are not wanted, only the answer
+      request.destroy();
+    });
+
     // A network error is not evidence against the URL — the probe is meant to
     // catch a stream YouTube is refusing, not to fail the resolve when the wifi
     // drops. Treated as "no opinion", which is `true` here: the caller has a
     // playable-looking URL and the player has its own recovery for the rest.
-    return true;
-  }
+    request.on("error", () => done(true));
+    request.setTimeout(8000, () => {
+      done(true);
+      request.destroy();
+    });
+    request.end();
+  });
 }
 
 export async function findYtDlp(configuredPath: string): Promise<string> {
@@ -111,7 +133,7 @@ export async function resolveAudioUrl(videoId: string, ytDlpPath: string): Promi
         "-g",
         `https://www.youtube.com/watch?v=${videoId}`,
       ],
-      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
+      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024, env: ytDlpEnv(ytDlpPath) },
     );
     stdout = result.stdout;
   } catch (err: unknown) {
@@ -125,7 +147,10 @@ export async function resolveAudioUrl(videoId: string, ytDlpPath: string): Promi
 }
 
 export async function getVersion(ytDlpPath: string): Promise<string> {
-  const { stdout } = await pExecFile(ytDlpPath, ["--version"], { timeout: 10_000 });
+  const { stdout } = await pExecFile(ytDlpPath, ["--version"], {
+    timeout: 10_000,
+    env: ytDlpEnv(ytDlpPath),
+  });
   return stdout.trim();
 }
 
@@ -192,7 +217,7 @@ async function resolveWith(
         "-g",
         `https://www.youtube.com/watch?v=${videoId}`,
       ],
-      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
+      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024, env: ytDlpEnv(ytDlpPath) },
     );
     stdout = result.stdout;
   } catch (err: unknown) {

@@ -45,3 +45,4 @@ Backlog index. One file per issue. Numbered in creation order, not priority orde
 | [040](040-this-moment-lands-at-the-top.md) | "This moment" lands the current line at the top, not the middle | Scoped 2026-08-06 — not built. From the 035 manual test |
 | [041](041-notes-button-cursor-and-keyboard.md) | The Notes button gives you a cursor and a keyboard on the phone | Scoped 2026-08-06 — not built. Mobile only; 035 works on desktop |
 | [042](042-tidy-clears-kept.md) | A tidied note takes its hub item with it | Scoped 2026-08-06 — not built |
+| [043](043-desktop-full-quality.md) | Full quality on the desktop (above 360p), signed out — play the separate picture and sound files via MSE | Backlog, scoped 2026-08-17 — not built |

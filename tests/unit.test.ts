@@ -11,6 +11,7 @@ import {
   parseProgress,
   sanitizeFilename,
 } from "../src/desktop/download.ts";
+import { ytDlpEnv } from "../src/desktop/env.ts";
 
 test("extractVideoId handles every URL shape we accept", () => {
   const id = "dQw4w9WgXcQ";
@@ -212,4 +213,37 @@ test("localFileUrl uses Obsidian's local scheme and escapes spaces", () => {
   const url = localFileUrl("/Users/me/Movies/YT Free/Some Title [abc].mp4");
   assert.ok(url.startsWith("app://local/"));
   assert.ok(!url.includes(" "), "a raw space would break the resource URL");
+});
+
+// --------------------------------------------- the environment yt-dlp is given
+
+test("ytDlpEnv puts the helper directories on PATH without dropping the real one", () => {
+  // yt-dlp shells out to `deno` to solve YouTube's JS challenge, and Obsidian's
+  // Electron process has a PATH that does not contain it. Without this, the
+  // clients that need the challenge solved silently offer no formats and the
+  // error reads as if the video were the problem.
+  const before = process.env.PATH;
+  process.env.PATH = "/somewhere/of/mine";
+  try {
+    const dirs = (ytDlpEnv("/opt/homebrew/bin/yt-dlp").PATH ?? "").split(":");
+    assert.ok(dirs.includes("/opt/homebrew/bin"), "homebrew bin must be searchable");
+    assert.ok(dirs.includes("/usr/local/bin"));
+    // The user's own PATH keeps winning: appended, not prepended, not replaced.
+    assert.equal(dirs[0], "/somewhere/of/mine");
+  } finally {
+    process.env.PATH = before;
+  }
+});
+
+test("ytDlpEnv lists no directory twice and survives an empty PATH", () => {
+  const before = process.env.PATH;
+  process.env.PATH = "/opt/homebrew/bin";
+  try {
+    const dirs = (ytDlpEnv("/opt/homebrew/bin/yt-dlp").PATH ?? "").split(":");
+    assert.equal(dirs.filter((d) => d === "/opt/homebrew/bin").length, 1);
+    delete process.env.PATH;
+    assert.ok((ytDlpEnv("").PATH ?? "").includes("/opt/homebrew/bin"));
+  } finally {
+    process.env.PATH = before;
+  }
 });
