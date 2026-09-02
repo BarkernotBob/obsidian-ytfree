@@ -1018,7 +1018,17 @@ export class HubView extends ItemView {
    */
   private mode: "hub" | "browse" = "hub";
 
-  private filter: HubFilter = "new";
+  /**
+   * Everything, not the Inbox.
+   *
+   * Opening on the Inbox opens on a list defined by what you have *not* done —
+   * it is empty on a good day and full on a bad one, and either way it is a
+   * chore list rather than a library. BarkernotBob asked for Everything as the
+   * landing list on 2026-09-01: the hub's normal use is "find that video",
+   * which the Inbox cannot answer because a video you have already opened has
+   * left it.
+   */
+  private filter: HubFilter = "all";
   private channelFilter: string | null = null;
   /** The hub's own box: free text over the list you are looking at. */
   private itemQuery = "";
@@ -1556,7 +1566,7 @@ export class HubView extends ItemView {
   /** What the collapsed menu says: the filter, then the channel. */
   private renderMenuLabel(): void {
     if (!this.menuLabelEl) return;
-    const filterLabel = FILTER_LABELS.find(([value]) => value === this.filter)?.[1] ?? "Inbox";
+    const filterLabel = FILTER_LABELS.find(([value]) => value === this.filter)?.[1] ?? "Everything";
     const channel = this.channelFilter
       ? (this.store.state.channels.find((c) => c.id === this.channelFilter)?.title ?? "Channel")
       : "All channels";

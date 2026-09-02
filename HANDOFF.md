@@ -1,6 +1,75 @@
 # HANDOFF
 
-## Status — 2026-08-17 (later still): the other half of the outage
+## Status — 2026-09-01: six issues filed, and why they did not exist
+
+**552 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
+`./install.sh` and a reload are the next thing. Nothing was built this session
+except a one-line default; the work was an audit.
+
+**Start here: [044](issues/044-subscription-sync-recovery-and-removals.md).**
+BarkernotBob reported that adding or removing subscriptions on YouTube was not
+reaching the app. It is three faults, and the first one is why the other two
+went unnoticed:
+
+- **The account sync has been dead since 2026-08-07.** `data.json` holds
+  `status: "expired"`, `lastError: "cookies are no longer valid: the cookie file
+  is gone"`. The cookie file is **not** gone — it was rewritten 2026-08-17
+  during the streaming work. `syncAccount` returns early on any status but
+  `signed-in` and `syncIsDue` answers `false` for the same reason, so nothing
+  has re-tried in five weeks. The precondition healed itself and no code path
+  looks. Every channel in `subscriptions.json` still reads
+  `addedAt: 2026-07-28` — the original Takeout import.
+- **It failed silently.** The Notice fires once, at expiry. After that the only
+  trace is a line in Settings. The hub, which prints a "last polled" line for
+  the RSS feed, says nothing about the account.
+- **Unsubscribes were deliberately ignored,** and BarkernotBob has overturned it. The
+  additive-only rule in `mergeChannels` was written for a hand-imported Takeout
+  CSV, where an absence proves nothing, and got inherited by the live account
+  sync, where it proves quite a lot. **His decision: the channel leaves so no
+  new videos arrive, and nothing already in the hub is purged.** That is *not*
+  what `removedChannels` does — it purges undecided items — so it needs its own
+  list. 044 spells out the trap.
+
+**The other five issues all came out of this file.** They were decisions taken,
+limitations documented, or "stage two is next" notes that were written into
+HANDOFF prose and never became rows in `issues/README.md`:
+
+- **[045](issues/045-channel-screen-and-subscribe.md)** — the channel screen and
+  Subscribe. Fully specified on **2026-08-06** under *"Decisions taken this
+  session, not yet issues"*, and untouched for four weeks. BarkernotBob noticed it was
+  missing, not the backlog. Has a v1 scope at
+  [docs/V1-SCOPE-CHANNEL-SCREEN.md](docs/V1-SCOPE-CHANNEL-SCREEN.md).
+- **[046](issues/046-in-progress-chip.md)** — the In progress chip, decided the
+  same day, same paragraph.
+- **[047](issues/047-search-blocklist-and-hide-channel.md)** — stage two of the
+  card-controls scope. Called "next" in the write-ups for both 023 and 024;
+  `removedResults` in `hub.ts` still carries two comments saying it is
+  session-only "at this stage". Stages one and three shipped.
+- **[048](issues/048-rss-backfill.md)** — the 15-entry window with no backfill,
+  documented as a known limitation on 2026-07-28. The only place this plugin
+  loses data silently and irreversibly. Depends on 045.
+- **[049](issues/049-webclipper-template-escapes-the-description.md)** — the Web
+  Clipper template still inserts a raw description while the plugin's own writer
+  escapes one.
+
+**The index was lying, and is fixed.** 006 (sign in to YouTube) was listed as
+"approved… not built" — it shipped, and it is the thing that just broke.
+037–042 were listed as "not built" and were built on 2026-08-06. 003 and 027
+have rows and no files; the rows now say where the record actually is.
+
+**One change to code:** the hub opens on **Everything**, not the Inbox
+(`hub.ts`, plus the menu label's fallback). BarkernotBob's call — the Inbox is defined
+by what you have not done, so it cannot answer "find that video", which is what
+the hub is for.
+
+**The rule that would have prevented all six:** a decision that is not a row in
+`issues/README.md` is not a decision, it is a paragraph. It is written at the
+foot of that index now.
+
+**Next:** 044, then install and reload. 045 needs BarkernotBob's reaction to the scope
+doc before it is built.
+
+## Previous — 2026-08-17 (later still): the other half of the outage
 
 **The client swap was right and did nothing, because Obsidian's PATH has no
 `deno` on it.** BarkernotBob reported still no playback after the fix shipped. The
