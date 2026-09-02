@@ -1020,16 +1020,24 @@ interface CardButton {
 }
 
 /**
- * The four lists, in the order they are offered.
+ * The five lists, in the order they are offered.
  *
  * A video is in exactly one of three states — undecided, kept (you opened it),
- * hidden (you turned it down) — and the first three chips are those states.
+ * hidden (you turned it down) — and three of the chips are those states.
  * Everything is the union of the first two, and exists for one reason: it is
  * the only list where a video you already watched on YouTube still appears, and
  * the only place a search across both kept and undecided is one search.
+ *
+ * **In progress is the odd one and sits second on purpose.** Every other chip
+ * asks about a *decision*; this one asks about *progress*, and it is the only
+ * list of the five with a daily use — a 40-minute video you are twelve minutes
+ * into is otherwise Kept, indistinguishable from a hundred other Kept videos,
+ * and the way back to it is remembering its title. Second rather than last
+ * because that is how often it is the answer. See issue 046.
  */
 const FILTER_LABELS: ReadonlyArray<readonly [HubFilter, string]> = [
   ["new", "Inbox"],
+  ["progress", "In progress"],
   ["kept", "Kept"],
   ["hidden", "Hidden"],
   ["all", "Everything"],
@@ -1044,6 +1052,7 @@ const FILTER_LABELS: ReadonlyArray<readonly [HubFilter, string]> = [
  */
 const FILTER_RULES: Record<HubFilter, string> = {
   new: "not opened, not hidden",
+  progress: "started and not finished — most recently watched first",
   kept: "opened — a note exists",
   hidden: "you removed these",
   all: "inbox + kept, including already-watched",
@@ -1174,6 +1183,11 @@ export class HubView extends ItemView {
      * tests, where the banner simply has no action to offer.
      */
     private signIn: (() => Promise<void>) | null = null,
+    /**
+     * Which videos you are part-way through, and when you last watched each.
+     * Null — no plugin behind this view — and the In progress list is empty.
+     */
+    private inProgress: (() => ReadonlyMap<string, string>) | null = null,
   ) {
     super(leaf);
   }
@@ -1786,6 +1800,10 @@ export class HubView extends ItemView {
       includeShorts: this.settings().includeShorts,
       showWatched: this.settings().showWatched,
       query: this.itemQuery,
+      // Read on every call rather than cached: a position written by the player
+      // a second ago, or merged in from the phone, has to be in this list the
+      // next time it is drawn. Only computed for the list that uses it.
+      inProgress: this.filter === "progress" ? this.inProgress?.() : undefined,
     });
   }
 

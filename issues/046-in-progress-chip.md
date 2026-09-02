@@ -1,7 +1,7 @@
 # 046 — An "In progress" list: what you started and did not finish
 
-**Status:** Scoped 2026-09-01. **Not built.** Decided by BarkernotBob on 2026-08-06
-and left in HANDOFF prose until now.
+**Status:** **Built 2026-09-02.** Scoped 2026-09-01, decided by BarkernotBob on
+2026-08-06 and left in HANDOFF prose until then.
 
 **Created:** 2026-09-01
 
@@ -89,3 +89,85 @@ criterion 4, and a video watched past two minutes and abandoned for the rest.
   ([subscriptions.ts:60](../src/subscriptions.ts)), which is what criterion 7 is
   about. `progress.json` records duration alongside the position, so prefer that
   source — it is the number the player actually saw.
+
+## Built — 2026-09-02
+
+All eight criteria. `progress.ts` grew the rules, `visibleItems` grew the list,
+and the chip row grew a fifth chip.
+
+- **`inProgressFloor(duration)`** is `min(0.1 × duration, 120s)` and **null when
+  the length is not known** — criterion 7 falls out of the return type rather
+  than out of a check somewhere.
+- **`inProgressVideos(state, durationFor)`** returns id → when you last watched
+  it. Finishing is not re-defined here: `recordPosition` deletes the entry at
+  the credits and has since 012, so a finished video simply cannot be in the map
+  (criterion 3).
+- **`WatchPoint` gained an optional `duration`.** The issue's note said
+  `progress.json` "records duration alongside the position, so prefer that
+  source" — it did not, so now it does. It is what the player measured, and it
+  is the right source precisely because a hub item's `durationSeconds` is
+  `undefined` until a poll backfills it and a Watch Later item may never get one
+  at all. The hub item stays as the fallback, for entries written before today.
+  `recordPosition` writes a late-arriving duration even when the second has not
+  moved, which turns an entry the list had to skip into one it can judge.
+- **`visibleItems` takes `inProgress`** and sorts by it — most recently watched
+  first, which is the only order this list can sensibly have. A **dismissed**
+  video never appears even with a position: you watched five minutes and then
+  turned it down, and that is a decision rather than a video you are in the
+  middle of.
+- **The chip sits second**, after Inbox. The issue left the position open; the
+  reason for second is that this is the only one of the five with a daily use,
+  and the four others are all questions about a decision. `FILTER_RULES` says
+  *started and not finished — most recently watched first*.
+- **Nothing reads frontmatter** (criterion 8), and the reason is written at
+  `inProgressVideos` and again at `Plugin.inProgressVideos`: the player writes a
+  position many times a session and frontmatter never, so a list built from
+  notes would disagree with the player about where you are.
+- **Two devices** (criterion 4) come free from `ProgressStore`'s two-way sync of
+  2026-08-17. The map is rebuilt on every draw rather than cached, so a merged
+  position is in the list the next time it is rendered.
+- **No reflow** (criterion 6): the chip row now wraps, and each chip is
+  `white-space: nowrap` so none can change height when the row gets tight. The
+  active state is still a background change only. On the phone the chips are
+  `flex: 1 1 30%` — three across, then two — because five 40pt targets do not
+  fit across a phone and a 60pt target is worse than a second row in a sheet
+  that is already a disclosure.
+
+### The TTL, checked as the issue asked
+
+`PROGRESS_TTL_DAYS` is **365**, and it stands. A video you started and have not
+touched in a year is not "in progress", it is abandoned, and the list quietly
+forgetting it is the behaviour you want rather than a wart. The number was
+chosen for the file's size and happens to be defensible for this too; nothing
+changed.
+
+### Tests
+
+573 unit tests, eleven new, `tsc` clean, build clean. One existing assertion
+changed: `recordPosition` now writes a `duration` alongside the position.
+
+## Manual test
+
+**One device (five minutes).**
+
+1. Open the hub. There are five chips: Inbox, **In progress**, Kept, Hidden,
+   Everything. Click each in turn — nothing on the screen moves except the list.
+2. Click In progress on a fresh install. Empty, and the status line reads
+   *0 videos · started and not finished — most recently watched first*.
+3. Open a video over 20 minutes long and watch past 2:00. Close it. Click In
+   progress: it is there, first.
+4. Open a video **under** 20 minutes and watch 30 seconds. It appears only if 30
+   seconds is a tenth of it or more — so a 5-minute video qualifies, a 20-minute
+   one does not. Check one of each.
+5. Scrub the first video to its last minute and let it play out. Click In
+   progress: it is gone, and you did nothing but finish it.
+6. Hide a video you are part-way through. It leaves In progress and appears in
+   Hidden.
+
+**Two devices (criterion 4).**
+
+7. On the iPhone, watch three minutes of a long video you have not started. Let
+   the player close properly.
+8. On the Mac, wait for the progress file to sync, then open the hub and click
+   In progress. The video is there, at the top — it is the most recently
+   watched. Reverse the devices and repeat.

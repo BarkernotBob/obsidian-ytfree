@@ -1006,7 +1006,7 @@ export function expireItems(
   return { items: survivors, removed: items.length - survivors.length };
 }
 
-export type HubFilter = "new" | "all" | "kept" | "hidden";
+export type HubFilter = "new" | "all" | "kept" | "hidden" | "progress";
 
 /**
  * What the hub shows, newest first, after the filters have had their say.
@@ -1026,6 +1026,14 @@ export function visibleItems(
     showWatched?: boolean;
     /** The hub's own search box: free text over title and channel. */
     query?: string;
+    /**
+     * Videos you are part-way through: id → when you last watched it. Built by
+     * `inProgressVideos` from `progress.json`, which is the only thing that
+     * knows — deliberately not note frontmatter, which the player does not
+     * write and which would therefore disagree with the player about where you
+     * are. Absent means the In progress list is empty, not that it is unfiltered.
+     */
+    inProgress?: ReadonlyMap<string, string>;
   },
 ): HubItem[] {
   const matching = items.filter((item) => {
@@ -1033,6 +1041,12 @@ export function visibleItems(
     if (!options.includeShorts && item.isShort === true) return false;
     if (!hubItemMatches(item, options.query ?? "")) return false;
     if (options.filter === "hidden") return item.state === "dismissed";
+    if (options.filter === "progress") {
+      // A video you turned down is not a video you are part-way through, even
+      // if you watched five minutes of it before deciding that.
+      if (item.state === "dismissed") return false;
+      return options.inProgress?.has(item.videoId) ?? false;
+    }
     if (options.filter === "new") {
       if (item.watched && !options.showWatched) return false;
       return item.state === "new";
@@ -1045,6 +1059,18 @@ export function visibleItems(
   // question you bring to that list is "what did I just remove", and half of
   // them have no publish date to sort by anyway.
   if (options.filter === "hidden") return hiddenItems(matching);
+
+  // In progress is ordered by when you last watched it, for the same reason and
+  // more strongly: "the one I was in the middle of" is the entire question, and
+  // when the video was published has nothing to do with the answer.
+  if (options.filter === "progress") {
+    const watchedAt = options.inProgress ?? new Map<string, string>();
+    return matching.sort(
+      (a, b) =>
+        (Date.parse(watchedAt.get(b.videoId) ?? "") || 0) -
+        (Date.parse(watchedAt.get(a.videoId) ?? "") || 0),
+    );
+  }
 
   return matching.sort(
     (a, b) => (Date.parse(b.published) || 0) - (Date.parse(a.published) || 0),

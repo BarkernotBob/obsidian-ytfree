@@ -686,3 +686,77 @@ test("swept items age out of the tombstone cap like any other", () => {
     false,
   );
 });
+
+// ------------------------------------------------- the In progress list (046)
+
+test("In progress lists what a stored position says you started", () => {
+  const started = item({ videoId: "aaaaaaaaaaa", state: "kept" });
+  const untouched = item({ videoId: "bbbbbbbbbbb" });
+  const turnedDown = item({ videoId: "ccccccccccc", state: "dismissed" });
+
+  const inProgress = new Map([
+    ["aaaaaaaaaaa", "2026-07-27T10:00:00.000Z"],
+    // You watched five minutes and then turned it down. That is a decision,
+    // not a video you are in the middle of.
+    ["ccccccccccc", "2026-07-27T11:00:00.000Z"],
+  ]);
+
+  const visible = visibleItems([started, untouched, turnedDown], {
+    filter: "progress",
+    channelId: null,
+    includeShorts: true,
+    inProgress,
+  });
+  assert.deepEqual(visible.map((i) => i.videoId), ["aaaaaaaaaaa"]);
+});
+
+test("In progress sorts by when you last watched, not when it was published", () => {
+  const old = item({ videoId: "aaaaaaaaaaa", published: "2026-01-01T00:00:00Z" });
+  const recent = item({ videoId: "bbbbbbbbbbb", published: "2026-07-26T00:00:00Z" });
+
+  const visible = visibleItems([old, recent], {
+    filter: "progress",
+    channelId: null,
+    includeShorts: true,
+    inProgress: new Map([
+      ["aaaaaaaaaaa", "2026-07-27T11:00:00.000Z"],
+      ["bbbbbbbbbbb", "2026-07-20T09:00:00.000Z"],
+    ]),
+  });
+  // The old video was the one you were in the middle of, so it goes first.
+  assert.deepEqual(visible.map((i) => i.videoId), ["aaaaaaaaaaa", "bbbbbbbbbbb"]);
+});
+
+test("In progress with nothing in progress is empty, not unfiltered", () => {
+  const visible = visibleItems([item(), item({ videoId: "bbbbbbbbbbb" })], {
+    filter: "progress",
+    channelId: null,
+    includeShorts: true,
+  });
+  assert.deepEqual(visible, []);
+});
+
+test("In progress still honours the channel filter and the search box", () => {
+  const mine = item({ videoId: "aaaaaaaaaaa", title: "Black holes" });
+  const other = item({
+    videoId: "bbbbbbbbbbb",
+    channelId: "UCsXVk37bltHxD1rDPwtNM8Q",
+    title: "Black holes",
+  });
+  const options = {
+    filter: "progress" as const,
+    includeShorts: true,
+    inProgress: new Map([
+      ["aaaaaaaaaaa", "2026-07-27T11:00:00.000Z"],
+      ["bbbbbbbbbbb", "2026-07-27T11:00:00.000Z"],
+    ]),
+  };
+  assert.deepEqual(
+    visibleItems([mine, other], { ...options, channelId: CHANNEL }).map((i) => i.videoId),
+    ["aaaaaaaaaaa"],
+  );
+  assert.deepEqual(
+    visibleItems([mine, other], { ...options, channelId: null, query: "nothing" }),
+    [],
+  );
+});

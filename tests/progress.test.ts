@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   clearPosition,
   emptyProgress,
+  inProgressFloor,
+  inProgressVideos,
   isFinished,
   MAX_PROGRESS_ENTRIES,
   MIN_REMEMBER_SECONDS,
@@ -31,7 +33,13 @@ function hoursAgo(hours: number): string {
 test("records a position past the floor", () => {
   const state = emptyProgress();
   assert.equal(recordPosition(state, ID, 120.7, 600, NOW), true);
-  assert.deepEqual(state.positions[ID], { seconds: 120, updatedAt: NOW.toISOString() });
+  // The duration rides along since 046 — it is what the In progress floor is
+  // measured against, and the player is the only thing that reliably knows it.
+  assert.deepEqual(state.positions[ID], {
+    seconds: 120,
+    updatedAt: NOW.toISOString(),
+    duration: 600,
+  });
   assert.equal(resumePoint(state, ID), 120);
 });
 
@@ -264,4 +272,94 @@ test("neither side is mutated by a merge", () => {
   mergeProgress(mine, theirs);
   assert.deepEqual(Object.keys(mine.positions), [ID]);
   assert.deepEqual(Object.keys(theirs.positions), [OTHER]);
+});
+
+// ------------------------------------------------------- in progress (046)
+
+test("the floor is a tenth of the video or two minutes, whichever is smaller", () => {
+  // A 40-minute lecture qualifies two minutes in; a five-minute clip at thirty
+  // seconds. One flat number cannot do both.
+  assert.equal(inProgressFloor(2400), 120);
+  assert.equal(inProgressFloor(300), 30);
+  assert.equal(inProgressFloor(1200), 120);
+  // No length, no opinion — criterion 7. Never a guessed floor.
+  assert.equal(inProgressFloor(0), null);
+  assert.equal(inProgressFloor(null), null);
+  assert.equal(inProgressFloor(undefined), null);
+  assert.equal(inProgressFloor(Number.NaN), null);
+});
+
+test("in progress is a stored position past the floor, most recent first", () => {
+  const state = emptyProgress();
+  const now = new Date("2026-07-27T12:00:00Z");
+
+  // 12 minutes into a 40-minute video: started.
+  recordPosition(state, "aaaaaaaaaaa", 720, 2400, now);
+  // 40 seconds into the same 40-minute video: glanced at.
+  recordPosition(state, "bbbbbbbbbbb", 40, 2400, now);
+  // 40 seconds into a five-minute video: started, because the floor is 30.
+  recordPosition(state, "ccccccccccc", 40, 300, now);
+
+  const found = inProgressVideos(state, () => null);
+  assert.deepEqual([...found.keys()].sort(), ["aaaaaaaaaaa", "ccccccccccc"]);
+});
+
+test("finishing a video takes it off the list with no extra bookkeeping", () => {
+  // Criterion 3: `recordPosition` already deletes the entry at the credits, and
+  // there is deliberately no second definition of "done".
+  const state = emptyProgress();
+  const now = new Date("2026-07-27T12:00:00Z");
+  recordPosition(state, "aaaaaaaaaaa", 720, 2400, now);
+  assert.equal(inProgressVideos(state, () => null).size, 1);
+  recordPosition(state, "aaaaaaaaaaa", 2395, 2400, now);
+  assert.equal(inProgressVideos(state, () => null).size, 0);
+});
+
+test("a video whose length nobody knows is left out, not guessed at", () => {
+  const state = emptyProgress();
+  const now = new Date("2026-07-27T12:00:00Z");
+  // A stream that never announced a duration: the position is remembered, but
+  // there is no floor to measure it against.
+  recordPosition(state, "aaaaaaaaaaa", 900, 0, now);
+  assert.equal(inProgressVideos(state, () => null).size, 0);
+  // …until the hub item supplies one.
+  assert.equal(inProgressVideos(state, () => 2400).size, 1);
+});
+
+test("the entry's own duration wins over the hub item's", () => {
+  // The entry records what the player measured. A hub item's duration is
+  // backfilled by a poll and may be absent or, for a Watch Later item, never
+  // arrive at all — so it is the fallback, not the source.
+  const state = emptyProgress();
+  recordPosition(state, "aaaaaaaaaaa", 200, 2400, new Date("2026-07-27T12:00:00Z"));
+  assert.equal(state.positions["aaaaaaaaaaa"].duration, 2400);
+  // 200s clears a floor of 120 (from 2400) and not one of 300 (from a wrong
+  // 3000... but the wrong number is never consulted).
+  assert.equal(inProgressVideos(state, () => 60).size, 1);
+});
+
+test("a duration arriving late is written even when the second has not moved", () => {
+  const state = emptyProgress();
+  const now = new Date("2026-07-27T12:00:00Z");
+  recordPosition(state, "aaaaaaaaaaa", 900, 0, now);
+  assert.equal(state.positions["aaaaaaaaaaa"].duration, undefined);
+  assert.equal(recordPosition(state, "aaaaaaaaaaa", 900, 2400, now), true);
+  assert.equal(state.positions["aaaaaaaaaaa"].duration, 2400);
+  // And once it is known, an identical report changes nothing and writes nothing.
+  assert.equal(recordPosition(state, "aaaaaaaaaaa", 900, 2400, now), false);
+});
+
+test("a duration survives the file, and a nonsense one does not", () => {
+  const raw = {
+    positions: {
+      aaaaaaaaaaa: { seconds: 900, updatedAt: "2026-07-27T12:00:00.000Z", duration: 2400 },
+      bbbbbbbbbbb: { seconds: 900, updatedAt: "2026-07-27T12:00:00.000Z", duration: -1 },
+      ccccccccccc: { seconds: 900, updatedAt: "2026-07-27T12:00:00.000Z", duration: "long" },
+    },
+    watched: {},
+  };
+  const state = normalizeProgress(raw);
+  assert.equal(state.positions["aaaaaaaaaaa"].duration, 2400);
+  assert.equal(state.positions["bbbbbbbbbbb"].duration, undefined);
+  assert.equal(state.positions["ccccccccccc"].duration, undefined);
 });

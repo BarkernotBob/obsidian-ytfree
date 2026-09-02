@@ -1,6 +1,54 @@
 # HANDOFF
 
-## Status — 2026-09-02: 044 is built, and installed
+## Status — 2026-09-02 (later): 046 as well
+
+**573 unit tests pass, `tsc` clean, build clean, `./install.sh` run.** Obsidian
+still needs one reload to pick up both. Two issues built today, both with their
+manual tests written into the issue file:
+[044](issues/044-subscription-sync-recovery-and-removals.md) and
+[046](issues/046-in-progress-chip.md).
+
+**[046](issues/046-in-progress-chip.md) — the In progress chip.** Fifth chip,
+and it sits **second**, after Inbox: the issue left the position open, and the
+reason for second is that it is the only one of the five with a daily use while
+the other four are all questions about a decision. A video is in progress when
+`progress.json` holds a position past `min(0.1 × duration, 120s)`; finishing
+takes it off the list for free, because `recordPosition` has deleted the entry
+at the credits since 012 and there is deliberately no second definition of
+"done". Sorted by when you last watched it — the only order the list can have.
+
+**`WatchPoint` gained a `duration`.** The issue assumed `progress.json` already
+recorded one "so prefer that source"; it did not. It does now, written by
+`recordPosition` from what the player measured, with the hub item's
+`durationSeconds` as the fallback for entries written before today. That matters
+because a hub item has no duration until a poll backfills one and a Watch Later
+item may never get one — and a video whose length nobody knows is left **out** of
+the list rather than given a guessed floor.
+
+**The chip row wraps now**, and every chip is `white-space: nowrap`; on the phone
+they are `flex: 1 1 30%`, three across then two, because five 40pt targets do
+not fit across a phone.
+
+**The TTL question 046 raised, answered:** `PROGRESS_TTL_DAYS` stays 365. A video
+untouched for a year is abandoned, not in progress, and the list forgetting it is
+right.
+
+**[049](issues/049-webclipper-template-escapes-the-description.md) is the one
+thing waiting on BarkernotBob, and it is a one-word answer:** is the Obsidian Web
+Clipper still part of the workflow? If not, deleting `templates/` is the whole
+fix. If it is, the issue recommends dropping the description from the template
+and letting the plugin's own escaping writer be the only thing that writes one.
+Nothing was built for it, because both branches are cheap and the wrong one is
+wasted.
+
+**Next:** reload Obsidian, run both manual tests (044's second half and 046's
+second half both need the iPhone). Then
+[047](issues/047-search-blocklist-and-hide-channel.md) or
+[048](issues/048-rss-backfill.md) — 048 depends on
+[045](issues/045-channel-screen-and-subscribe.md), which still needs BarkernotBob's
+reaction to [docs/V1-SCOPE-CHANNEL-SCREEN.md](docs/V1-SCOPE-CHANNEL-SCREEN.md).
+
+## Previous — 2026-09-02: 044 is built, and installed
 
 **562 unit tests pass, `tsc` clean, build clean, `./install.sh` run.** Obsidian
 needs a reload to pick it up. **[044](issues/044-subscription-sync-recovery-and-removals.md)

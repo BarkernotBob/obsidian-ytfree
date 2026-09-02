@@ -1149,6 +1149,10 @@ export default class YtFreePlugin extends Plugin {
           // The account banner's "Sign in again". The same window Settings
           // opens, so there is one way to sign in and not two.
           Platform.isDesktopApp ? () => this.signIn() : null,
+          // The In progress list. Built here because the floor needs a duration
+          // and the hub items are the fallback source for one — see
+          // `inProgressVideos`.
+          () => this.inProgressVideos(),
         ),
     );
 
@@ -1298,6 +1302,21 @@ export default class YtFreePlugin extends Plugin {
     if (Number.isFinite(last) && Date.now() - last < minutes * 60_000) return;
     await this.subscriptions.poll();
     this.refreshHub();
+  }
+
+  /**
+   * Which videos you are part-way through, for the hub's In progress list.
+   *
+   * `progress.json` is the only source, and that is a decision rather than a
+   * convenience: the player writes a position many times a session and writes
+   * frontmatter never, so a list built from notes would disagree with the
+   * player about where you are — which is worse than having no list.
+   */
+  inProgressVideos(): ReadonlyMap<string, string> {
+    const durations = new Map(
+      this.subscriptions.state.items.map((item) => [item.videoId, item.durationSeconds ?? null]),
+    );
+    return this.progress.inProgress((videoId) => durations.get(videoId) ?? null);
   }
 
   hubSettings(): HubSettings {

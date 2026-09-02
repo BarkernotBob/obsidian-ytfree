@@ -1487,6 +1487,10 @@ body.ytfree-immersive-open {
 
 .ytfree-hub-filters {
   display: flex;
+  /* Wraps since the fifth chip — "In progress" is two words and a narrow
+     sidebar has no room for five on one line. Wrapping happens on a resize,
+     never on a click: the chips keep their width whatever is selected. */
+  flex-wrap: wrap;
   gap: 0.3em;
 }
 
@@ -1501,6 +1505,9 @@ body.ytfree-immersive-open {
   padding: 0.3em 0.8em;
   border-radius: var(--radius-s);
   font-size: var(--font-ui-small);
+  /* One line each, or a chip would change height when the row got tight and
+     take its neighbours with it. */
+  white-space: nowrap;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -2551,7 +2558,10 @@ body.ytfree-immersive-open {
 }
 
 .ytfree-hub.ytfree-phone .ytfree-hub-filter {
-  flex: 1 1 0;
+  /* Three across, then two: five 40pt targets do not fit across a phone, and a
+     tap target squeezed to 60pt is worse than a second row in a menu that is
+     already a sheet. */
+  flex: 1 1 30%;
   min-width: 0;
   height: 40px;
   padding: 0;

@@ -9,6 +9,7 @@
 import type { App } from "obsidian";
 import {
   emptyProgress,
+  inProgressVideos,
   markWatched,
   mergeProgress,
   normalizeProgress,
@@ -113,6 +114,15 @@ export class ProgressStore {
   }
 
   /** Where to pick this video up, or 0. */
+  /**
+   * Which videos are part-way through. The rules are `inProgressVideos`; this
+   * is only the handle on the state, which stays private so nothing outside can
+   * write a position without going through `recordPosition`.
+   */
+  inProgress(durationFor: (videoId: string) => number | null | undefined): ReadonlyMap<string, string> {
+    return inProgressVideos(this.state, durationFor);
+  }
+
   resumeFor(videoId: string): number {
     return resumePoint(this.state, videoId);
   }

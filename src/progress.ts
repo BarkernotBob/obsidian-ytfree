@@ -43,6 +43,17 @@ export interface WatchPoint {
   seconds: number;
   /** ISO 8601, so the file is readable and the prune has something to sort on. */
   updatedAt: string;
+  /**
+   * How long the video runs, as the player measured it. Absent on every entry
+   * written before the In progress list existed, and on any report that arrived
+   * before the stream announced a duration.
+   *
+   * Recorded here rather than read back off the hub item because this is the
+   * number the player actually saw: a hub item's `durationSeconds` is
+   * `undefined` until a poll backfills it, and a Watch Later item may never get
+   * one at all. See `inProgressVideos`.
+   */
+  duration?: number;
 }
 
 /**
@@ -89,7 +100,11 @@ export function normalizeProgress(raw: unknown): ProgressState {
       if (!Number.isFinite(seconds) || seconds < MIN_REMEMBER_SECONDS) continue;
       const updatedAt = String((value as WatchPoint)?.updatedAt ?? "");
       if (!Number.isFinite(Date.parse(updatedAt))) continue;
-      state.positions[videoId] = { seconds, updatedAt };
+      const duration = Number((value as WatchPoint)?.duration);
+      state.positions[videoId] =
+        Number.isFinite(duration) && duration > 0
+          ? { seconds, updatedAt, duration }
+          : { seconds, updatedAt };
     }
   }
 
@@ -135,9 +150,67 @@ export function recordPosition(
   }
 
   const existing = state.positions[videoId];
-  if (existing && existing.seconds === at) return false;
-  state.positions[videoId] = { seconds: at, updatedAt: now.toISOString() };
+  // The duration is worth writing even when the second has not moved: a report
+  // that finally knows how long the video is turns an entry the In progress
+  // list had to skip into one it can judge.
+  const known = Number.isFinite(duration) && duration > 0 ? Math.round(duration) : undefined;
+  if (existing && existing.seconds === at && (known === undefined || existing.duration === known)) {
+    return false;
+  }
+  state.positions[videoId] = {
+    seconds: at,
+    updatedAt: now.toISOString(),
+    ...(known !== undefined ? { duration: known } : existing?.duration !== undefined
+      ? { duration: existing.duration }
+      : {}),
+  };
   return true;
+}
+
+// ------------------------------------------------------------- in progress
+
+/**
+ * How far in you have to be before a video counts as *started* rather than
+ * *glanced at*.
+ *
+ * Two minutes, or a tenth of the video, whichever is **smaller** — so a
+ * 40-minute lecture qualifies two minutes in, and a five-minute clip at thirty
+ * seconds. A single flat number cannot do both: 2 minutes of a 3-minute video
+ * is most of it, and 10% of a 3-hour talk is eighteen minutes.
+ */
+export const IN_PROGRESS_FLOOR_SECONDS = 120;
+export const IN_PROGRESS_FLOOR_FRACTION = 0.1;
+
+/** The floor for one video, or null when its length is not known. */
+export function inProgressFloor(duration: number | null | undefined): number | null {
+  if (duration == null || !Number.isFinite(duration) || duration <= 0) return null;
+  return Math.min(duration * IN_PROGRESS_FLOOR_FRACTION, IN_PROGRESS_FLOOR_SECONDS);
+}
+
+/**
+ * Which videos you are part-way through, and when you last watched each.
+ *
+ * A stored position *is* the whole definition: `recordPosition` deletes the
+ * entry the moment `isFinished` says so, and has since 012, so a finished video
+ * cannot appear here and there is no second opinion about what "done" means.
+ * This only adds the floor.
+ *
+ * A video whose length nobody knows is **left out** rather than guessed at. The
+ * length is taken from the entry itself first — that is what the player
+ * measured — and from `durationFor` only as a fallback, for entries written
+ * before the field existed.
+ */
+export function inProgressVideos(
+  state: ProgressState,
+  durationFor: (videoId: string) => number | null | undefined,
+): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const [videoId, point] of Object.entries(state.positions)) {
+    const floor = inProgressFloor(point.duration ?? durationFor(videoId));
+    if (floor === null || point.seconds < floor) continue;
+    found.set(videoId, point.updatedAt);
+  }
+  return found;
 }
 
 /**
