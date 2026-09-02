@@ -1,6 +1,54 @@
 # HANDOFF
 
-## Status — 2026-09-01: six issues filed, and why they did not exist
+## Status — 2026-09-02: 044 is built, and installed
+
+**562 unit tests pass, `tsc` clean, build clean, `./install.sh` run.** Obsidian
+needs a reload to pick it up. **[044](issues/044-subscription-sync-recovery-and-removals.md)
+carries the full write-up and the manual test** — the second half of it needs
+the iPhone, and it is the only thing standing between this and "verified".
+
+Three faults, all three fixed:
+
+- **The wedged session.** A missing cookie file no longer reads as an expiry —
+  new `COOKIE_FILE_MISSING` and `looksLikeMissingCookieFile`, and
+  `looksLikeExpiry` refuses both the new wording and the legacy one that latched
+  the live session. `AccountSession` gains **`lastAttemptAt`**, which is what
+  unblocked everything else: `lastSyncAt` was being advanced on failures to pace
+  the schedule, so it could not also be the record of what succeeded, and an
+  expired session had no stamp to retry from at all. `syncIsDue` now says yes to
+  an expired session — one probe a period, never faster — and `unwedgeSession`
+  runs once at load so a wedge already on disk heals itself.
+- **The silence.** `accountStatusLine` gives the hub a phrase beside its
+  "checked N minutes ago", and a banner with the action attached when the sync
+  is expired or two periods stale. The banner is always in the DOM and collapses
+  by height, so nothing on screen moves when it comes or goes.
+- **The unsubscribes.** A new `unsubscribedChannels` tombstone list beside
+  `removedChannels`, unioned by `mergeStates` the same way and applied **only to
+  the channel list**. The channel stops being polled; not one item is touched,
+  kept or hidden or undecided. Only a successful read of `/feed/channels` may
+  drive a removal — `:ytsubs` and a caught failure can add and nothing else.
+
+**One thing fixed that nobody asked for, because 044 could not work without it.**
+`mergeStates` keeps the *earliest* `addedAt` when both devices know a channel,
+which is right for sorting an import and wrong for arbitrating a tombstone: the
+device that has not synced yet still holds the original stamp and drags the
+merged value back under the tombstone's, so the channel is deleted again on
+every merge. It now answers tombstones with the newest stamp either device
+holds. **This was a live bug for `removedChannels`** — remove a channel on the
+Mac, add it back, and the phone's stale copy would take it away again.
+
+**The vault's session had already been fixed by hand.** `data.json` reads
+`signed-in`, last synced 2026-09-02T01:23, and two channels carry
+`addedAt: 2026-09-02` — BarkernotBob signed in again on the 1st, which is the unblock
+044's notes suggested. So adds already work; the removals and the visibility are
+what this build adds, and the un-wedge path is tested rather than observed.
+
+**Next:** reload Obsidian and run 044's manual test, phone half included. Then
+[045](issues/045-channel-screen-and-subscribe.md), which still needs BarkernotBob's
+reaction to [docs/V1-SCOPE-CHANNEL-SCREEN.md](docs/V1-SCOPE-CHANNEL-SCREEN.md)
+before it is built, or [046](issues/046-in-progress-chip.md), which does not.
+
+## Previous — 2026-09-01: six issues filed, and why they did not exist
 
 **552 unit tests pass, `tsc` clean, build clean. Not installed to the vault** —
 `./install.sh` and a reload are the next thing. Nothing was built this session

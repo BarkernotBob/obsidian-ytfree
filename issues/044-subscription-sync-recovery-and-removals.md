@@ -1,6 +1,6 @@
 # 044 — Subscriptions that never came back: a wedged session, a silent one, and unsubscribes that do nothing
 
-**Status:** Scoped 2026-09-01. **Not built.** Raised by BarkernotBob:
+**Status:** **Built 2026-09-02.** Scoped 2026-09-01. Raised by BarkernotBob:
 
 > "adding or removing subs on youtube isn't publishing back to the app"
 
@@ -176,3 +176,118 @@ prove the state crossed.
   Settings. That alone restores adds. Removals need the code.
 - The `data.json` read that found this is worth keeping as a habit — the plugin's
   live state answered in one command what the code could not.
+
+## Built — 2026-09-02
+
+All eleven criteria. The manual test is below; the second half needs the phone.
+
+### The session
+
+- **`COOKIE_FILE_MISSING`** replaces the old thrown string, and
+  `looksLikeMissingCookieFile` is what tells the two kinds of failure apart.
+  `looksLikeExpiry` consults it first and answers `false` — including for the
+  legacy wording, which said "cookies are no longer valid" and is exactly what
+  latched the live session. A missing file now records an error, leaves the
+  status `signed-in`, and the next period looks again.
+- **`lastAttemptAt` is a new field on `AccountSession`**, and it is what made
+  the rest possible. `lastSyncAt` was doing two jobs: it was advanced on a
+  failure so the schedule would wait a period, which meant settings reported a
+  sync that never happened *and* an expired session — whose `lastSyncAt` was
+  deliberately not advanced — had no stamp at all to pace a retry from. One
+  field for what succeeded, one for what the schedule measures. Optional, so a
+  session written before today still loads.
+- **`syncIsDue` is true for an expired session**, at the same one-a-period rate
+  and no faster. Only `signed-out` is never due. `syncAccount` no longer returns
+  early on the status, and "Sync now" spends the probe if one is due.
+- **`unwedgeSession`, run once at load** (`healAccountSession` in `main.ts`).
+  Fixing the code that wrote the state does not fix the state, so this re-reads
+  the disk and decides again. Moot for this vault as it turned out — BarkernotBob
+  signed in again on the 1st, which is the unblock this issue's notes suggested
+  — but the path is tested and it is what a future wedge heals through.
+- **The expiry Notice fires on the transition only.** With re-probing, an
+  outage would otherwise interrupt once every twelve hours forever.
+
+### The visibility
+
+- **`accountStatusLine`** — one pure function, three answers: nothing (signed
+  out), a phrase for the status strip, or a phrase plus an alert. Stale is two
+  periods, not one: a laptop that was shut when a period fell due is not a
+  fault.
+- The hub's status strip now carries `account synced 3 hours ago` beside
+  `checked 20 minutes ago`, in the same voice.
+- **A banner above the list** for the two states worth interrupting over, with
+  its action attached — *Sign in again* for an expiry, *Sync now* for stale. It
+  is always in the DOM and collapses by height and visibility, so a state change
+  behind it cannot shove the list under a finger already on a card.
+- `describeSession` says when a signed-in session's last sync failed. It looked
+  identical to a healthy one, which is half of why a month went unnoticed.
+
+### The removals
+
+- **`unsubscribedChannels`**, a second tombstone list beside `removedChannels`,
+  unioned by `mergeStates` the same way and **applied to the channel list
+  only**. The item filter still reads `removedChannels` alone, so the hub's own
+  Remove button purges undecided videos exactly as it did.
+- **`applyUnsubscribes`** in `subscriptions.ts` does the reconciliation and
+  touches no item. `SubscriptionsStore.applyAccountChannels` is the one call
+  that adds and removes in a single save.
+- **`complete` is a separate variable from "the list has channels in it"**, and
+  that is the guard the issue asked for. Only a `/feed/channels` read that
+  actually returned drives removals: the `.catch(() => [])` is now a `try` that
+  logs and falls through, and a run that fell back to `:ytsubs` sets `complete`
+  false and can only add. `applyUnsubscribes` refuses an empty list as a last
+  line, but the real decision is at the call site where the failure is visible.
+- **Re-subscribing needed a fix one level up.** `mergeStates` keeps the
+  *earliest* `addedAt` when both devices know a channel — right for sorting a
+  fresh import, wrong for arbitrating a tombstone, because the device that has
+  not synced yet still holds the original stamp and would drag the merged value
+  back under the tombstone's. It now tracks the newest stamp either device holds
+  and answers tombstones with that. This was a live bug for `removedChannels`
+  too: remove a channel on the Mac, add it back, and the phone's stale copy
+  would delete it again on the next merge.
+
+### Tests
+
+`npm run check` clean: 562 unit tests, `tsc` clean, build clean — ten new, six
+of them in `tests/merge.test.ts` as scenarios. The one changed assertion is the
+old `syncIsDue({ status: "expired" }) === false`, which was the bug.
+
+## Manual test
+
+**The adds and the visibility (Mac, ten minutes).**
+
+1. Settings → YT Free. The account line should read *Signed in… Synced N
+   minutes ago* with no trailing failure.
+2. Open the hub. The status strip under the search box ends with
+   `account synced N minutes ago`. No banner.
+3. Subscribe to a channel on youtube.com you do not already have.
+4. Hub toolbar → the refresh button. The Notice counts the channels and says
+   `(1 new)`. The channel appears in the channel list down the left.
+5. Set **Sync every** to 1 hour in settings and edit `lastSyncAt` in
+   `.obsidian/plugins/ytfree/data.json` to three hours ago, then reload
+   Obsidian. The banner should appear above the list, red, reading
+   *account last synced 3 hours ago* with a **Sync now** button. Press it: the
+   banner goes, and nothing else on the screen moves. Put **Sync every** back.
+
+**The removals (Mac, then the iPhone).**
+
+6. Note a channel you are subscribed to that has videos in the hub. Keep one of
+   them, hide another, and leave a third undecided. Open the kept one's note and
+   type a word in it.
+7. Unsubscribe from that channel on youtube.com.
+8. Hub → refresh. The Notice should say `(0 new, 1 unsubscribed)`. The channel
+   is gone from the channel list.
+9. **The point of the whole issue:** all three videos are still in the hub —
+   Everything shows the kept one and the undecided one, Hidden shows the third.
+   The note still has your word in it. Nothing was purged.
+10. Re-subscribe on youtube.com, refresh again. The channel is back in the list
+    and its new videos arrive on the next poll.
+11. On the iPhone, open the hub and wait twenty seconds for the refresh. The
+    unsubscribed channel must not come back — and if you did step 10, it must
+    be there rather than vanishing again a minute later.
+
+**The wedge (only if you want to see it heal).** Stop Obsidian, set
+`accountSession.status` to `"expired"` and `lastError` to
+`"cookies are no longer valid: the cookie file is gone"` in `data.json`, and
+start Obsidian. The console logs *account session un-wedged*, settings says
+signed in, and no sign-in window was needed.

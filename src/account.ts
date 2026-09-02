@@ -13,6 +13,7 @@
  */
 
 import type { HubItem } from "./subscriptions.ts";
+import { relativeAge } from "./subscriptions.ts";
 
 /**
  * What yt-dlp needs to see to consider the session usable. `LOGIN_INFO` is the
@@ -253,12 +254,66 @@ export interface AccountSession {
   name: string | null;
   /** ISO time of the last successful authenticated sync. */
   lastSyncAt: string | null;
+  /**
+   * ISO time of the last sync *attempt*, successful or not.
+   *
+   * `lastSyncAt` used to do both jobs by being advanced on a failure, which
+   * made settings claim a sync that never happened and left an expired session
+   * with no stamp at all to pace a retry from — so nothing ever retried. Two
+   * fields: one for what succeeded, one for what the schedule measures.
+   * Optional, so a session written before this field existed still loads.
+   */
+  lastAttemptAt?: string | null;
   /** Why the last sync failed, shown in settings. */
   lastError: string | null;
 }
 
 export function emptySession(): AccountSession {
-  return { status: "signed-out", name: null, lastSyncAt: null, lastError: null };
+  return {
+    status: "signed-out",
+    name: null,
+    lastSyncAt: null,
+    lastAttemptAt: null,
+    lastError: null,
+  };
+}
+
+/**
+ * The error a sync raises when the cookie file is not on disk.
+ *
+ * Worded so it does *not* read as an expiry, which is the whole point: the
+ * previous wording ("cookies are no longer valid…") matched `looksLikeExpiry`,
+ * latched the session, and stopped the schedule over a file that could simply
+ * be re-read the next period. See `looksLikeMissingCookieFile`.
+ */
+export const COOKIE_FILE_MISSING = "the cookie file is missing";
+
+/**
+ * A failure that is about the file rather than about Google.
+ *
+ * The old message is matched too, because there is a session sitting in a
+ * vault right now that was latched by it and has to heal itself on load — see
+ * `unwedgeSession`.
+ */
+export function looksLikeMissingCookieFile(message: string): boolean {
+  return /the cookie file is (gone|missing)|no cookie file/i.test(message);
+}
+
+/**
+ * Un-latch a session that was expired over a file that is now there.
+ *
+ * `expired` means *a human has to sign in again*, and it stops the schedule
+ * dead. A missing cookie file never deserved that verdict, but it got it, and
+ * the state it wrote outlives the code that wrote it: the file came back ten
+ * days later and nothing looked. Run at load, against the file as it is now.
+ */
+export function unwedgeSession(
+  session: AccountSession,
+  cookieFilePresent: boolean,
+): AccountSession {
+  if (session.status !== "expired" || !cookieFilePresent) return session;
+  if (!session.lastError || !looksLikeMissingCookieFile(session.lastError)) return session;
+  return { ...session, status: "signed-in", lastError: null };
 }
 
 /** The one line settings shows. Kept here so the wording is testable. */
@@ -268,12 +323,25 @@ export function describeSession(session: AccountSession, now: Date): string {
     return "Session expired — sign in again." + (session.lastError ? ` (${session.lastError})` : "");
   }
   const who = session.name ? `Signed in as ${session.name}` : "Signed in";
-  if (!session.lastSyncAt) return `${who}. Not synced yet.`;
+  // A signed-in session that is failing says so. It used to look identical to a
+  // healthy one here, which is half of why a month of failures went unnoticed.
+  const trouble = session.lastError ? ` Last sync failed — ${session.lastError}` : "";
+  if (!session.lastSyncAt) return `${who}. Not synced yet.${trouble}`;
   const minutes = Math.max(0, Math.round((now.getTime() - Date.parse(session.lastSyncAt)) / 60_000));
-  if (minutes < 1) return `${who}. Synced just now.`;
-  if (minutes < 60) return `${who}. Synced ${minutes} minute${minutes === 1 ? "" : "s"} ago.`;
+  if (minutes < 1) return `${who}. Synced just now.${trouble}`;
+  if (minutes < 60) {
+    return `${who}. Synced ${minutes} minute${minutes === 1 ? "" : "s"} ago.${trouble}`;
+  }
   const hours = Math.round(minutes / 60);
-  return `${who}. Synced ${hours} hour${hours === 1 ? "" : "s"} ago.`;
+  return `${who}. Synced ${hours} hour${hours === 1 ? "" : "s"} ago.${trouble}`;
+}
+
+/** The newest stamp the schedule may measure from, or null if there is none. */
+function lastAttemptTime(session: AccountSession): number | null {
+  const times = [session.lastAttemptAt, session.lastSyncAt]
+    .map((stamp) => (stamp ? Date.parse(stamp) : Number.NaN))
+    .filter((time) => Number.isFinite(time));
+  return times.length > 0 ? Math.max(...times) : null;
 }
 
 /**
@@ -282,13 +350,64 @@ export function describeSession(session: AccountSession, now: Date): string {
  * yt-dlp's own documentation warns that recurring authenticated requests can
  * get an account flagged, so the gap is a floor and never an approximation:
  * "not yet" is always the safe answer.
+ *
+ * An **expired** session falls due too, at exactly the same rate — one probe a
+ * period, no faster. Never re-probing is what turned a five-week outage into a
+ * silent one: the thing that expired the session was a missing file, the file
+ * came back, and no code path was ever going to look again. One wasted yt-dlp
+ * call every twelve hours is the price of noticing. Only `signed-out` — nobody
+ * has ever signed in, or they signed out on purpose — is never due.
  */
 export function syncIsDue(session: AccountSession, everyHours: number, now: Date): boolean {
-  if (session.status !== "signed-in") return false;
-  if (!session.lastSyncAt) return true;
-  const last = Date.parse(session.lastSyncAt);
-  if (!Number.isFinite(last)) return true;
+  if (session.status === "signed-out") return false;
+  const last = lastAttemptTime(session);
+  if (last === null) return true;
   return now.getTime() - last >= Math.max(1, everyHours) * 3_600_000;
+}
+
+/**
+ * What the hub says about the account, beside what it says about the feeds.
+ *
+ * Null means there is nothing to say — nobody has signed in, so there is no
+ * sync to be silent about. Everything else gets a phrase, and the two states
+ * worth interrupting for get `alert`.
+ *
+ * "Stale" is two sync periods, not one: a period is a floor and a laptop that
+ * was shut when one fell due is not a fault.
+ */
+export interface AccountLine {
+  /** The phrase for the hub's status strip. */
+  text: string;
+  /** Worth its own banner: expired, or nothing has succeeded in two periods. */
+  alert: boolean;
+  /** What the banner's button does. Null when the line is not an alert. */
+  action: "sign-in" | "sync" | null;
+}
+
+export function accountStatusLine(
+  session: AccountSession,
+  everyHours: number,
+  now: Date,
+): AccountLine | null {
+  if (session.status === "signed-out") return null;
+  if (session.status === "expired") {
+    return {
+      text: "YouTube session expired — account sync has stopped",
+      alert: true,
+      action: "sign-in",
+    };
+  }
+  const period = Math.max(1, everyHours) * 3_600_000;
+  const last = session.lastSyncAt ? Date.parse(session.lastSyncAt) : Number.NaN;
+  if (!Number.isFinite(last)) {
+    return { text: "account not synced yet", alert: false, action: null };
+  }
+  const stale = now.getTime() - last >= 2 * period;
+  const age = relativeAge(session.lastSyncAt ?? "", now);
+  if (stale) {
+    return { text: `account last synced ${age}`, alert: true, action: "sync" };
+  }
+  return { text: `account synced ${age}`, alert: false, action: null };
 }
 
 /**
@@ -300,6 +419,10 @@ export function syncIsDue(session: AccountSession, everyHours: number, now: Date
  * mistaken for it, and neither must a signed-out response be tolerated.
  */
 export function looksLikeExpiry(message: string): boolean {
+  // The file being absent is not a verdict about the session. It was, for five
+  // weeks, and this line is why it will not be again — the legacy wording said
+  // "cookies are no longer valid" and matched below.
+  if (looksLikeMissingCookieFile(message)) return false;
   return /login details are needed|sign in to confirm|cookies are no longer valid|not a bot|account cookies|http error 401|http error 403/i.test(
     message,
   );

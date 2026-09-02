@@ -16,6 +16,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { HubItem, SubscriptionsState } from "../src/subscriptions.ts";
 import {
+  applyUnsubscribes,
   emptyState,
   forgetVideo,
   hideItem,
@@ -360,4 +361,124 @@ test("deletions survive the trip through JSON", () => {
   forgetVideo(mac, "aaaaaaaaaaa", new Date("2026-07-31T12:00:00Z"));
   const reread = normalizeState(JSON.parse(JSON.stringify(mac)));
   assert.deepEqual(reread.deletedVideos, [{ id: "aaaaaaaaaaa", at: "2026-07-31T12:00:00.000Z" }]);
+});
+
+// ------------------------------------------------ unsubscribed on YouTube (044)
+
+const OTHER = "UCsXVk37bltHxD1rDPwtNM8Q";
+
+test("an unsubscribe drops the channel and touches not one video", () => {
+  // BarkernotBob's decision, in his words: "Channel leaves so no new videos come, but
+  // nothing gets purged from what's already in the hub."
+  const before = state([
+    item("aaaaaaaaaaa"),
+    item("bbbbbbbbbbb", { state: "kept", notePath: "Videos/b.md" }),
+    item("ccccccccccc", { state: "dismissed", dismissedAt: "2026-07-02T00:00:00.000Z" }),
+  ]);
+
+  const result = applyUnsubscribes(
+    before.channels,
+    before.unsubscribedChannels,
+    [OTHER],
+    new Date("2026-07-28T12:00:00Z"),
+  );
+
+  assert.deepEqual(result.channels, []);
+  assert.deepEqual(result.removed.map((c) => c.id), [CHANNEL]);
+  assert.deepEqual(result.unsubscribedChannels, [
+    { id: CHANNEL, at: "2026-07-28T12:00:00.000Z" },
+  ]);
+
+  // The items are the caller's, and `applyUnsubscribes` never sees them. The
+  // merge is where the difference from `removedChannels` has to hold.
+  const after = mergeStates(
+    { ...before, channels: result.channels, unsubscribedChannels: result.unsubscribedChannels },
+    { ...before, channels: result.channels, unsubscribedChannels: result.unsubscribedChannels },
+  );
+  assert.deepEqual(after.items.map((i) => i.videoId).sort(), [
+    "aaaaaaaaaaa",
+    "bbbbbbbbbbb",
+    "ccccccccccc",
+  ]);
+  assert.equal(after.items.find((i) => i.videoId === "bbbbbbbbbbb")?.notePath, "Videos/b.md");
+  assert.deepEqual(after.channels, []);
+});
+
+test("removing a channel in the hub still purges what you had not kept", () => {
+  // The other half of the same guarantee: the two lists mean different things,
+  // and adding one must not have quietly changed the other.
+  const before = state([item("aaaaaaaaaaa"), item("bbbbbbbbbbb", { state: "kept" })], {
+    channels: [],
+    removedChannels: [{ id: CHANNEL, at: "2026-07-28T12:00:00.000Z" }],
+  });
+  const after = mergeStates(before, copy(before));
+  assert.deepEqual(after.items.map((i) => i.videoId), ["bbbbbbbbbbb"]);
+});
+
+test("a failed or partial channel fetch removes nothing", () => {
+  // The `.catch(() => [])` in the sync used to be harmless because nothing
+  // acted on absence. An empty live list must never read as "you unsubscribed
+  // from everything" — and neither must the `:ytsubs` fallback, which the call
+  // site refuses on its own because this function cannot tell them apart.
+  const before = state([]);
+  const result = applyUnsubscribes(before.channels, before.unsubscribedChannels, [], new Date());
+  assert.deepEqual(result.channels, before.channels);
+  assert.deepEqual(result.removed, []);
+});
+
+test("an unsubscribe crosses to a device that has not synced yet", () => {
+  const mac = state([item("aaaaaaaaaaa")], {
+    channels: [],
+    unsubscribedChannels: [{ id: CHANNEL, at: "2026-07-28T12:00:00.000Z" }],
+  });
+  // The phone still lists the channel — it has not run an account sync.
+  const phone = state([item("aaaaaaaaaaa")]);
+
+  const merged = mergeStates(copy(phone), copy(mac));
+  assert.deepEqual(merged.channels, []);
+  assert.deepEqual(merged.items.map((i) => i.videoId), ["aaaaaaaaaaa"]);
+  // And the tombstone survives, or the next merge hands the channel back.
+  assert.deepEqual(merged.unsubscribedChannels, [
+    { id: CHANNEL, at: "2026-07-28T12:00:00.000Z" },
+  ]);
+});
+
+test("re-subscribing brings the channel back and it stays back", () => {
+  const mac = state([], {
+    channels: [],
+    unsubscribedChannels: [{ id: CHANNEL, at: "2026-07-28T12:00:00.000Z" }],
+  });
+  // The next sync sees it again: `applyAccountChannels` adds it with a fresh
+  // stamp and drops the tombstone it has outlived.
+  const back = applyUnsubscribes(
+    [{ id: CHANNEL, title: "A channel", addedAt: "2026-07-29T09:00:00.000Z", error: null }],
+    mac.unsubscribedChannels,
+    [CHANNEL],
+    new Date("2026-07-29T09:00:00Z"),
+  );
+  assert.deepEqual(back.channels.map((c) => c.id), [CHANNEL]);
+  assert.deepEqual(back.unsubscribedChannels, []);
+
+  // The phone has not merged yet, so it still holds the tombstone *and* the
+  // channel at its original `addedAt`. The merge must not delete it again —
+  // the newest stamp either device holds is what the tombstone answers to.
+  const phone = state([], { unsubscribedChannels: mac.unsubscribedChannels });
+  const merged = mergeStates(
+    { ...mac, channels: back.channels, unsubscribedChannels: back.unsubscribedChannels },
+    copy(phone),
+  );
+  assert.deepEqual(merged.channels.map((c) => c.id), [CHANNEL]);
+});
+
+test("unsubscribes survive the trip through JSON", () => {
+  const raw = JSON.parse(
+    JSON.stringify(
+      state([], { unsubscribedChannels: [{ id: CHANNEL, at: "2026-07-28T12:00:00.000Z" }] }),
+    ),
+  ) as unknown;
+  assert.deepEqual(normalizeState(raw).unsubscribedChannels, [
+    { id: CHANNEL, at: "2026-07-28T12:00:00.000Z" },
+  ]);
+  // And a file written before this list existed still loads.
+  assert.deepEqual(normalizeState({ version: 1, channels: [], items: [] }).unsubscribedChannels, []);
 });

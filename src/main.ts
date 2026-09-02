@@ -22,11 +22,14 @@ import {
   applyWatched,
   channelsFromChannelsPage,
   channelsFromSubsFeed,
+  COOKIE_FILE_MISSING,
   describeSession,
   emptySession,
+  ImportedChannel,
   looksLikeExpiry,
   mergeWatchLater,
   syncIsDue,
+  unwedgeSession,
   videoIdsFrom,
 } from "./account";
 import {
@@ -1124,6 +1127,7 @@ export default class YtFreePlugin extends Plugin {
       () => this.hubSettings(),
     );
     await this.subscriptions.load();
+    await this.healAccountSession();
 
     this.registerView(
       HUB_VIEW_TYPE,
@@ -1142,6 +1146,9 @@ export default class YtFreePlugin extends Plugin {
           // Share, from the Preview sheet. The same menu the player's own
           // Share button opens.
           (anchor, videoId, seconds) => this.shareMenuFor(anchor, videoId, seconds),
+          // The account banner's "Sign in again". The same window Settings
+          // opens, so there is one way to sign in and not two.
+          Platform.isDesktopApp ? () => this.signIn() : null,
         ),
     );
 
@@ -1264,8 +1271,11 @@ export default class YtFreePlugin extends Plugin {
    * nagging someone who deliberately never signed in.
    */
   async syncNow(): Promise<void> {
+    // An expired session counts: `syncAccount` re-probes it once a period, and
+    // "sync now" is exactly when you would want that probe spent. It declines
+    // politely if one is not due yet.
     const signedIn =
-      Platform.isDesktopApp && this.settings.accountSession.status === "signed-in";
+      Platform.isDesktopApp && this.settings.accountSession.status !== "signed-out";
     // First, before anything goes out to YouTube: the button's job as anyone
     // pressing it understands it is "agree with my other device", and the
     // answer to that is already in the vault. It also means the account sync
@@ -1304,6 +1314,11 @@ export default class YtFreePlugin extends Plugin {
         enabled: this.settings.notificationsEnabled,
         format: this.settings.notificationFormat,
       },
+      // Desktop only: the account sync runs yt-dlp, so on the phone there is no
+      // sync to report the age of and the hub says nothing about one.
+      account: Platform.isDesktopApp
+        ? { session: this.settings.accountSession, syncHours: this.settings.accountSyncHours }
+        : null,
     };
   }
 
@@ -1578,6 +1593,7 @@ export default class YtFreePlugin extends Plugin {
         status: "signed-in",
         name,
         lastSyncAt: null,
+        lastAttemptAt: null,
         lastError: null,
       };
       await this.saveSettings();
@@ -1614,11 +1630,55 @@ export default class YtFreePlugin extends Plugin {
    * retrying every minute. Hammering is the thing that gets an account flagged;
    * failing quietly for twelve hours is not.
    */
+  /**
+   * Un-wedge a session that was expired over a cookie file that is back.
+   *
+   * At load, once, against the file as it is now. There is a session in a vault
+   * right now that has been `expired` since 00:01 on 2026-08-07 because the
+   * file was missing at that moment; it was rewritten ten days later and
+   * nothing looked, because `syncAccount` and `syncIsDue` both returned early
+   * on the status and the status was the only record of a condition that had
+   * healed. Fixing the code that wrote it does not fix the state it wrote, so
+   * this reads the disk and decides again. See `unwedgeSession`.
+   */
+  private async healAccountSession(): Promise<void> {
+    if (!Platform.isDesktopApp) return;
+    if (this.settings.accountSession.status !== "expired") return;
+    try {
+      const api = await desktop();
+      const file = api.resolveCookieFile(this.settings.accountCookieFile);
+      const healed = unwedgeSession(this.settings.accountSession, api.cookieFileExists(file));
+      if (healed === this.settings.accountSession) return;
+      this.settings.accountSession = healed;
+      await this.saveSettings();
+      this.refreshSettingsTab();
+      console.log("YT Free: account session un-wedged — the cookie file is back.");
+    } catch (err) {
+      console.error("YT Free: could not check the cookie file at load.", err);
+    }
+  }
+
   async syncAccount(manual: boolean): Promise<void> {
     if (!Platform.isDesktopApp) return;
     const session = this.settings.accountSession;
-    if (session.status !== "signed-in") {
+    if (session.status === "signed-out") {
       if (manual) new Notice("YT Free: not signed in. Run “Sign in to YouTube” first.");
+      return;
+    }
+    // An expired session is allowed exactly one probe a period — `syncIsDue`
+    // says when — because the thing that expired it may have healed. The
+    // scheduler asks the same question before calling; this is the floor a
+    // manual click cannot get under either, and the reason is unchanged: it is
+    // recurring authenticated requests that get an account flagged.
+    if (
+      session.status === "expired" &&
+      !syncIsDue(session, this.settings.accountSyncHours, new Date())
+    ) {
+      if (manual) {
+        new Notice(
+          "YT Free: your YouTube session expired. Sign in again — a retry is not due yet.",
+        );
+      }
       return;
     }
     if (this.accountSyncing) {
@@ -1632,7 +1692,11 @@ export default class YtFreePlugin extends Plugin {
     try {
       const cookieFile = api.resolveCookieFile(this.settings.accountCookieFile);
       if (!api.cookieFileExists(cookieFile)) {
-        throw new Error("cookies are no longer valid: the cookie file is gone");
+        // Not an expiry. The file can go missing for reasons that have nothing
+        // to do with your Google session and everything to do with a disk, and
+        // the next period can simply look again — which is exactly what the old
+        // wording, latching the session, made impossible. See issue 044.
+        throw new Error(COOKIE_FILE_MISSING);
       }
       const ytDlpPath = await this.resolveYtDlp();
 
@@ -1641,12 +1705,27 @@ export default class YtFreePlugin extends Plugin {
       // videos, so it only names channels that have posted recently. The first
       // is what a Takeout export matches, so it goes first and the second is a
       // fallback rather than an equivalent.
-      let channels = channelsFromChannelsPage(
-        await api
-          .listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.channelsPage)
-          .catch(() => []),
-      );
+      //
+      // Whether the list may drive *removals* is a separate question from
+      // whether it has channels in it, and the two used to be the same
+      // variable. Only a `/feed/channels` read that actually succeeded is
+      // evidence about what you are no longer subscribed to: a failed fetch
+      // caught into `[]` is not, and `:ytsubs` — which names only channels that
+      // have posted recently — is not either, at any length. Getting this wrong
+      // would not lose a channel, it would lose all of them.
+      let channels: ImportedChannel[] = [];
       let source = "subscription manager";
+      let complete = false;
+      try {
+        channels = channelsFromChannelsPage(
+          await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.channelsPage),
+        );
+        complete = channels.length > 0;
+      } catch (err) {
+        // Swallowed so the fallback still runs. If this was an expiry, the
+        // fallback below raises it too and the catch at the foot latches.
+        console.error("YT Free: the subscription manager would not load.", err);
+      }
       if (channels.length === 0) {
         channels = channelsFromSubsFeed(
           await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.subsFeed, {
@@ -1655,7 +1734,10 @@ export default class YtFreePlugin extends Plugin {
         );
         source = "subscription feed";
       }
-      const addedChannels = channels.length > 0 ? this.subscriptions.addChannels(channels) : 0;
+      const applied = complete
+        ? this.subscriptions.applyAccountChannels(channels)
+        : { added: channels.length > 0 ? this.subscriptions.addChannels(channels) : 0, removed: 0 };
+      const addedChannels = applied.added;
 
       // Watch Later.
       const wlRows = await api.listWithCookies(
@@ -1679,18 +1761,21 @@ export default class YtFreePlugin extends Plugin {
       await this.subscriptions.save();
       this.refreshHub();
 
+      const finishedAt = new Date().toISOString();
       this.settings.accountSession = {
         ...session,
         status: "signed-in",
-        lastSyncAt: new Date().toISOString(),
+        lastSyncAt: finishedAt,
+        lastAttemptAt: finishedAt,
         lastError: null,
       };
       await this.saveSettings();
       this.refreshSettingsTab();
 
       if (manual) {
+        const gone = applied.removed > 0 ? `, ${applied.removed} unsubscribed` : "";
         new Notice(
-          `YT Free: ${channels.length} channels from the ${source} (${addedChannels} new), ` +
+          `YT Free: ${channels.length} channels from the ${source} (${addedChannels} new${gone}), ` +
             `${merged.added} new from Watch Later, ${marked} marked watched.`,
           8000,
         );
@@ -1701,13 +1786,22 @@ export default class YtFreePlugin extends Plugin {
       this.settings.accountSession = {
         ...session,
         status: expired ? "expired" : "signed-in",
-        // Advancing the clock on a failure is deliberate: see the note above.
-        lastSyncAt: expired ? session.lastSyncAt : new Date().toISOString(),
+        // `lastSyncAt` is what *succeeded* and a failure never touches it — it
+        // used to be advanced here so the schedule would wait a full period,
+        // which made settings report a sync that did not happen and left an
+        // expired session with nothing to pace a retry from. The waiting is
+        // `lastAttemptAt`'s job now, and it is set on every outcome including
+        // this one, so a broken sync still waits a period rather than hammering.
+        lastAttemptAt: new Date().toISOString(),
         lastError: message.slice(0, 300),
       };
       await this.saveSettings();
       this.refreshSettingsTab();
-      if (manual || expired) {
+      // The expiry Notice fires when the session *becomes* expired, not every
+      // time a re-probe confirms it: one interruption per outage. The hub's own
+      // banner is what keeps saying it after that.
+      const justExpired = expired && session.status !== "expired";
+      if (manual || justExpired) {
         new Notice(
           expired
             ? "YT Free: your YouTube session expired. Sign in again — syncing has stopped until you do."

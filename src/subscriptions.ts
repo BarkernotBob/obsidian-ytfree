@@ -113,6 +113,20 @@ export interface SubscriptionsState {
    */
   removedChannels?: Array<{ id: string; at: string }>;
   /**
+   * Channels you unsubscribed from **on YouTube**, and when the sync noticed.
+   *
+   * Deliberately not `removedChannels`, and the difference is the whole point.
+   * Removing a channel in the hub is a statement about the hub — it takes the
+   * channel *and* everything of its you had not kept. Unsubscribing on YouTube
+   * is a statement about YouTube: stop bringing me new videos from these. What
+   * is already here stays exactly where it is, kept, undecided and hidden
+   * alike, with its notes and positions.
+   *
+   * So this list is applied to the channel list and to nothing else. Collapsing
+   * the two would quietly change what the hub's own Remove button does.
+   */
+  unsubscribedChannels?: Array<{ id: string; at: string }>;
+  /**
    * Videos whose note you deleted, and when.
    *
    * A deletion takes the video out of every list at once, which a channel feed
@@ -143,6 +157,7 @@ export function emptyState(): SubscriptionsState {
     items: [],
     lastPolledAt: null,
     removedChannels: [],
+    unsubscribedChannels: [],
     deletedVideos: [],
     notifiedVideos: [],
   };
@@ -169,6 +184,12 @@ export function normalizeState(raw: unknown): SubscriptionsState {
   state.lastPolledAt = typeof data.lastPolledAt === "string" ? data.lastPolledAt : null;
   if (Array.isArray(data.removedChannels)) {
     state.removedChannels = data.removedChannels.filter(
+      (r): r is { id: string; at: string } =>
+        Boolean(r) && typeof r.id === "string" && typeof r.at === "string",
+    );
+  }
+  if (Array.isArray(data.unsubscribedChannels)) {
+    state.unsubscribedChannels = data.unsubscribedChannels.filter(
       (r): r is { id: string; at: string } =>
         Boolean(r) && typeof r.id === "string" && typeof r.at === "string",
     );
@@ -312,20 +333,94 @@ function mergeItem(mine: HubItem, theirs: HubItem): HubItem {
  * Pure, and the thing the regression tests point at. If a future change breaks
  * hidden videos again, it breaks a test here first.
  */
+function newestByChannel(
+  lists: Array<Array<{ id: string; at: string }> | undefined>,
+): Map<string, string> {
+  const newest = new Map<string, string>();
+  for (const list of lists) {
+    for (const entry of list ?? []) {
+      const seen = newest.get(entry.id);
+      if (!seen || entry.at > seen) newest.set(entry.id, entry.at);
+    }
+  }
+  return newest;
+}
+
+/**
+ * Fold a live subscription list into the channels we poll.
+ *
+ * The caller must have a list it *trusts*: a successful read of the
+ * subscription manager, and nothing else. An empty list from a failed fetch, or
+ * the `:ytsubs` fallback — which only names channels that have posted recently
+ * — would read as "you unsubscribed from everything", and this function has no
+ * way to tell the difference. That check belongs at the call site, where the
+ * failure is visible; the guard here is only the last one: `live` being empty
+ * removes nothing, ever.
+ *
+ * What it does, and deliberately all it does: a channel absent from the live
+ * list stops being polled and gets a tombstone so the other device does not
+ * hand it back. **No item is touched.** Everything already in the hub from that
+ * channel stays — kept, undecided and hidden — with its notes, its positions
+ * and its decisions. That is the difference from `removeChannel`, which is a
+ * decision about the hub rather than about YouTube.
+ */
+export function applyUnsubscribes(
+  channels: Channel[],
+  tombstones: Array<{ id: string; at: string }> | undefined,
+  live: string[],
+  now: Date,
+): { channels: Channel[]; unsubscribedChannels: Array<{ id: string; at: string }>; removed: Channel[] } {
+  const subscribed = new Set(live);
+  const existing = newestByChannel([tombstones]);
+
+  if (subscribed.size === 0) {
+    return {
+      channels,
+      unsubscribedChannels: [...existing].map(([id, at]) => ({ id, at })),
+      removed: [],
+    };
+  }
+
+  const at = now.toISOString();
+  const removed = channels.filter((channel) => !subscribed.has(channel.id));
+  for (const channel of removed) existing.set(channel.id, at);
+  // A channel you are subscribed to again has settled its tombstone's argument.
+  // Dropped rather than kept-and-outvoted so the list cannot grow forever, and
+  // safe because `addChannels` gave it an `addedAt` newer than any stamp the
+  // other device could still be holding.
+  for (const channel of channels) {
+    if (subscribed.has(channel.id)) existing.delete(channel.id);
+  }
+
+  return {
+    channels: channels.filter((channel) => subscribed.has(channel.id)),
+    unsubscribedChannels: [...existing].map(([id, at]) => ({ id, at })),
+    removed,
+  };
+}
+
 export function mergeStates(
   mine: SubscriptionsState,
   theirs: SubscriptionsState,
 ): SubscriptionsState {
   // Channel removals first: they decide which items are still wanted.
-  const removals = new Map<string, string>();
-  for (const list of [theirs.removedChannels ?? [], mine.removedChannels ?? []]) {
-    for (const entry of list) {
-      const seen = removals.get(entry.id);
-      if (!seen || entry.at > seen) removals.set(entry.id, entry.at);
-    }
-  }
+  const removals = newestByChannel([theirs.removedChannels, mine.removedChannels]);
+  // Unsubscribes are unioned the same way and used differently: they reach the
+  // channel list below and never the items. See `unsubscribedChannels`.
+  const unsubscribes = newestByChannel([theirs.unsubscribedChannels, mine.unsubscribedChannels]);
 
   const channels = new Map<string, Channel>();
+  /**
+   * The *newest* `addedAt` either device holds, which is a different question
+   * from the one the stored value answers and the only one a tombstone cares
+   * about. A channel added back after being removed has a fresh stamp on the
+   * device that added it and its original stamp on the device that has not
+   * merged yet; taking the earlier of the two — which the stored value does, so
+   * that a fresh import still sorts by when you first had the channel — would
+   * hand the tombstone an argument it has already lost, and the channel would
+   * be deleted again on every merge.
+   */
+  const latestAdded = new Map<string, string>();
   for (const channel of [...theirs.channels, ...mine.channels]) {
     const existing = channels.get(channel.id);
     // Mine second, so a fresher title and a fresher error win; the earlier
@@ -335,11 +430,15 @@ export function mergeStates(
       addedAt:
         existing?.addedAt && existing.addedAt < channel.addedAt ? existing.addedAt : channel.addedAt,
     });
+    const newest = latestAdded.get(channel.id);
+    if (!newest || channel.addedAt > newest) latestAdded.set(channel.id, channel.addedAt);
   }
   // A removal only counts against a channel that was not added back afterwards.
-  for (const [id, at] of removals) {
-    const channel = channels.get(id);
-    if (channel && !(channel.addedAt > at)) channels.delete(id);
+  // The same rule serves both lists: re-subscribing on YouTube arrives as an
+  // `addChannels` with a fresh `addedAt`, which is how a channel comes back.
+  for (const [id, at] of [...removals, ...unsubscribes]) {
+    if (!channels.has(id)) continue;
+    if (!((latestAdded.get(id) ?? "") > at)) channels.delete(id);
   }
 
   const theirsById = new Map(theirs.items.map((item) => [item.videoId, item]));
@@ -389,6 +488,10 @@ export function mergeStates(
     items: kept,
     lastPolledAt: polled.length ? polled[polled.length - 1] : null,
     removedChannels: [...removals].map(([id, at]) => ({ id, at })),
+    // Never pruned against the surviving channels: a device that has not synced
+    // yet still lists the channel, and dropping the tombstone here would let it
+    // hand it back on the next merge — the bug this whole function exists for.
+    unsubscribedChannels: [...unsubscribes].map(([id, at]) => ({ id, at })),
     // Unioned and never pruned against the live list, unlike the deletions
     // above: a tombstone whose video is back has lost its argument, but a video
     // you have already been told about is still a video you have already been
@@ -574,10 +677,13 @@ export function parseSubscriptionsCsv(text: string): ImportedChannel[] {
 
 /**
  * Additive and idempotent. Re-importing a newer Takeout export adds what is new
- * and changes nothing else — in particular it never removes a channel that has
- * since been unsubscribed on YouTube. Unsubscribing there is not a statement
- * about what you want to keep seeing here; removing a channel is a deliberate
- * act in the hub.
+ * and changes nothing else — in particular it never removes a channel absent
+ * from the file. A Takeout export is a download you did by hand and may be
+ * months stale, so an absence in it proves nothing.
+ *
+ * That is a fact about *this file*, not a rule about unsubscribing. A live read
+ * of the subscription manager is a different kind of evidence and gets a
+ * different function: `applyUnsubscribes`.
  */
 export function mergeChannels(
   existing: Channel[],

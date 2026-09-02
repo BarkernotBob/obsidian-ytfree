@@ -22,8 +22,11 @@ import {
   setIcon,
 } from "obsidian";
 import { SEARCH_YT_ICON, SHARE_ICON, YT_ICON } from "./icon";
+import type { AccountLine, AccountSession } from "./account";
+import { accountStatusLine } from "./account";
 import type { HubFilter, HubItem, SubscriptionsState } from "./subscriptions";
 import {
+  applyUnsubscribes,
   buildWatchLaterNote,
   deskSub,
   emptyState,
@@ -153,6 +156,15 @@ export interface HubSettings {
   transcriptIntervalSeconds: number;
   /** Where a poll announces new Inbox videos, and whether it does at all. */
   notifications: NotificationSettings;
+  /**
+   * The account sync, as far as the hub needs to know it. Null on mobile, where
+   * there is no account sync to have an opinion about.
+   *
+   * The hub says when the feeds were last polled and said nothing at all about
+   * the account, so an account sync that had been dead for five weeks was
+   * invisible on the one screen anybody looks at. See issue 044.
+   */
+  account: { session: AccountSession; syncHours: number } | null;
 }
 
 /**
@@ -447,6 +459,50 @@ export class SubscriptionsStore {
     this.emit();
     void this.save();
     return this.state.channels.length - before;
+  }
+
+  /**
+   * Reconcile the polled channels against a **trusted** live subscription list.
+   *
+   * "Trusted" is load-bearing and checked by the caller, not here: only a
+   * successful read of the subscription manager may drive removals. See
+   * `applyUnsubscribes` for what a fallback list or a failed fetch would do.
+   *
+   * Adds are the same adds `addChannels` makes. Removals take the channel out
+   * of the polled list and leave every item alone — that is the whole point,
+   * and it is why this cannot be `removeChannel` in a loop.
+   */
+  applyAccountChannels(live: Array<{ id: string; title: string }>): {
+    added: number;
+    removed: number;
+  } {
+    const known = new Set(this.state.channels.map((c) => c.id));
+    const now = new Date();
+    let added = 0;
+    for (const channel of live) {
+      if (known.has(channel.id)) continue;
+      known.add(channel.id);
+      added++;
+      this.state.channels.push({
+        id: channel.id,
+        title: channel.title,
+        addedAt: now.toISOString(),
+        error: null,
+      });
+    }
+
+    const result = applyUnsubscribes(
+      this.state.channels,
+      this.state.unsubscribedChannels,
+      live.map((c) => c.id),
+      now,
+    );
+    this.state.channels = result.channels;
+    this.state.unsubscribedChannels = result.unsubscribedChannels;
+
+    this.emit();
+    void this.save();
+    return { added, removed: result.removed.length };
   }
 
   /**
@@ -1040,6 +1096,8 @@ export class HubView extends ItemView {
   private listEl: HTMLElement | null = null;
   private channelsEl: HTMLElement | null = null;
   private statusEl: HTMLElement | null = null;
+  /** The account-sync banner. Always in the DOM; empty when there is no alert. */
+  private accountAlertEl: HTMLElement | null = null;
   /** Cards on screen right now, so a click can update one in place. */
   private cards = new Map<string, HTMLElement>();
   /** The columns the cards go in. Not the list: the sentinel sits outside it. */
@@ -1111,6 +1169,11 @@ export class HubView extends ItemView {
      * platform — a clipboard, or the phone's own sheet.
      */
     private shareMenu: ShareMenu | null = null,
+    /**
+     * Opens the sign-in window, for the banner's button. Null on mobile and in
+     * tests, where the banner simply has no action to offer.
+     */
+    private signIn: (() => Promise<void>) | null = null,
   ) {
     super(leaf);
   }
@@ -1179,6 +1242,7 @@ export class HubView extends ItemView {
     this.listEl = null;
     this.channelsEl = null;
     this.statusEl = null;
+    this.accountAlertEl = null;
     this.primaryEl = null;
     this.relatedEl = null;
     this.searchInputEl = null;
@@ -1239,6 +1303,10 @@ export class HubView extends ItemView {
 
     this.buildItemFilter(root);
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status" });
+    // Created empty and always present, so the row it sits in does not appear
+    // and disappear under a click. `renderAccountAlert` fills it or blanks it.
+    this.accountAlertEl = root.createDiv({ cls: "ytfree-hub-account-alert" });
+    this.renderAccountAlert();
 
     const body = root.createDiv({ cls: "ytfree-hub-body" });
     if (this.phone) this.buildPhoneBody(body);
@@ -1575,6 +1643,7 @@ export class HubView extends ItemView {
 
   renderAll(): void {
     this.renderStatus();
+    this.renderAccountAlert();
     this.renderChannels();
     this.renderMenuLabel();
     this.renderList();
@@ -1606,7 +1675,49 @@ export class HubView extends ItemView {
     if (lastPolledAt && !this.store.polling && this.filter !== "hidden") {
       parts.push(`checked ${relativeAge(lastPolledAt, new Date())}`);
     }
+    // The account, in the same voice and on the same line as the feeds. A sync
+    // you cannot see the age of is a sync nobody notices has stopped.
+    const account = this.accountLine();
+    if (account && this.filter !== "hidden") parts.push(account.text);
     this.statusEl.setText(parts.join(" · "));
+  }
+
+  /** What the account sync is worth saying right now, or null. */
+  private accountLine(): AccountLine | null {
+    const account = this.settings().account;
+    if (!account) return null;
+    return accountStatusLine(account.session, account.syncHours, new Date());
+  }
+
+  /**
+   * The banner, for the two states worth interrupting over: the session has
+   * expired, or nothing has succeeded in two sync periods. Anything less says
+   * its piece on the status line and stays out of the way.
+   *
+   * The element is never added or removed — only emptied — so nothing on the
+   * screen moves when the state behind it changes.
+   */
+  private renderAccountAlert(): void {
+    const host = this.accountAlertEl;
+    if (!host) return;
+    host.empty();
+    const line = this.accountLine();
+    host.toggleClass("is-visible", Boolean(line?.alert));
+    if (!line?.alert) return;
+
+    host.createSpan({ cls: "ytfree-hub-account-alert-text", text: line.text });
+    if (!line.action) return;
+    const button = host.createEl("button", {
+      cls: "ytfree-hub-account-alert-button",
+      text: line.action === "sign-in" ? "Sign in again" : "Sync now",
+    });
+    button.addEventListener("click", () => {
+      const run =
+        line.action === "sign-in"
+          ? (this.signIn?.() ?? Promise.resolve())
+          : (this.sync?.() ?? this.store.poll());
+      void run.then(() => this.renderAll());
+    });
   }
 
   /**

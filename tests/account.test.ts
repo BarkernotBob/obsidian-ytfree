@@ -1,18 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  accountStatusLine,
   applyWatched,
   channelsFromChannelsPage,
   channelsFromSubsFeed,
+  COOKIE_FILE_MISSING,
   describeSession,
   emptySession,
   hasCompleteSession,
   looksLikeExpiry,
+  looksLikeMissingCookieFile,
   mergeWatchLater,
   missingAuthCookies,
   parsePrintRows,
   syncIsDue,
   toNetscape,
+  unwedgeSession,
   videoIdsFrom,
 } from "../src/account.ts";
 import { resolveCookieFile } from "../src/desktop/account.ts";
@@ -217,7 +221,7 @@ test("the status line says what state the session is in", () => {
   assert.match(describeSession({ ...signedIn, status: "expired" }, NOW), /^Session expired/);
 });
 
-test("a sync is due only when signed in and the gap has passed", () => {
+test("a sync is due once the gap has passed, and never when signed out", () => {
   const session: AccountSession = {
     status: "signed-in",
     name: null,
@@ -227,8 +231,80 @@ test("a sync is due only when signed in and the gap has passed", () => {
   assert.equal(syncIsDue(session, 12, NOW), true);
   assert.equal(syncIsDue(session, 24, NOW), false);
   assert.equal(syncIsDue({ ...session, lastSyncAt: null }, 12, NOW), true);
-  assert.equal(syncIsDue({ ...session, status: "expired" }, 1, NOW), false);
   assert.equal(syncIsDue({ ...session, status: "signed-out" }, 1, NOW), false);
+});
+
+test("an expired session re-probes — at most once a period, and no faster", () => {
+  // 044: the session that has been expired since 2026-08-07 over a cookie file
+  // that came back on the 17th. Never re-probing is what made that silent.
+  const expired: AccountSession = {
+    status: "expired",
+    name: null,
+    lastSyncAt: "2026-07-28T00:00:00Z",
+    lastError: "cookies are no longer valid: the cookie file is gone",
+  };
+  assert.equal(syncIsDue(expired, 12, NOW), true);
+  assert.equal(syncIsDue(expired, 24, NOW), false);
+
+  // A probe that failed leaves an attempt stamp, and that is what paces the
+  // next one. Without it the answer stays `true` forever and this becomes the
+  // retry loop that gets an account flagged.
+  const probed = { ...expired, lastAttemptAt: "2026-07-28T11:00:00Z" };
+  assert.equal(syncIsDue(probed, 12, NOW), false);
+  assert.equal(syncIsDue({ ...probed, lastAttemptAt: "2026-07-27T20:00:00Z" }, 12, NOW), true);
+});
+
+test("a missing cookie file is not an expiry", () => {
+  assert.equal(looksLikeMissingCookieFile(COOKIE_FILE_MISSING), true);
+  assert.equal(looksLikeExpiry(COOKIE_FILE_MISSING), false);
+  // The legacy wording, which is what latched the live session: it says
+  // "cookies are no longer valid" and must still not count.
+  assert.equal(looksLikeExpiry("cookies are no longer valid: the cookie file is gone"), false);
+  assert.equal(looksLikeMissingCookieFile("Sign in to confirm you're not a bot"), false);
+});
+
+test("a session wedged by a missing file un-wedges once the file is back", () => {
+  const wedged: AccountSession = {
+    status: "expired",
+    name: "BarkernotBob",
+    lastSyncAt: "2026-08-07T00:01:15.950Z",
+    lastError: "cookies are no longer valid: the cookie file is gone",
+  };
+  assert.equal(unwedgeSession(wedged, true).status, "signed-in");
+  assert.equal(unwedgeSession(wedged, true).lastError, null);
+  // Still no file: still expired. And a genuine sign-out never heals itself,
+  // whatever is on disk — only a human at a sign-in window fixes that.
+  assert.equal(unwedgeSession(wedged, false).status, "expired");
+  assert.equal(
+    unwedgeSession({ ...wedged, lastError: "Sign in to confirm you're not a bot" }, true).status,
+    "expired",
+  );
+});
+
+test("the hub's account line says nothing until there is something to say", () => {
+  assert.equal(accountStatusLine(emptySession(), 12, NOW), null);
+
+  const fresh: AccountSession = {
+    status: "signed-in",
+    name: null,
+    lastSyncAt: "2026-07-28T09:00:00Z",
+    lastError: null,
+  };
+  assert.deepEqual(accountStatusLine(fresh, 12, NOW), {
+    text: "account synced 3 hours ago",
+    alert: false,
+    action: null,
+  });
+
+  // Two periods, not one: a laptop that was shut when one fell due is not a
+  // fault. At 12 hours, 25 hours ago is.
+  const stale = accountStatusLine({ ...fresh, lastSyncAt: "2026-07-27T11:00:00Z" }, 12, NOW);
+  assert.equal(stale?.alert, true);
+  assert.equal(stale?.action, "sync");
+
+  const expired = accountStatusLine({ ...fresh, status: "expired" }, 12, NOW);
+  assert.equal(expired?.alert, true);
+  assert.equal(expired?.action, "sign-in");
 });
 
 test("only an auth failure counts as expiry — a timeout is not a sign-out", () => {
