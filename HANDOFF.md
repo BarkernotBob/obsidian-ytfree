@@ -1,6 +1,34 @@
 # HANDOFF
 
-## Status — 2026-09-02 (later): 046 as well
+## Status — 2026-09-10: repo is public, one-line installer
+
+**The repo went public today.** History was rewritten with `git filter-repo`
+first: Obsidian's `app.css` is gone from every commit (the harnesses read it
+from `/tmp/ytfree-harness/app.css`, as they always did — extract it there with
+the `asar` command in `tools/phone-hub-harness.mjs`), the owner's first name and
+vault name are replaced throughout, and the author field is the GitHub handle.
+The `prototype/signin-spike` remote branch carried the old history and was
+deleted. `/app.css` is gitignored so it cannot come back.
+
+**Installing:**
+- `./install.sh` now reads the vault path from a gitignored `.vault` file at
+  the repo root (or `YTFREE_VAULT`). Create it once per machine.
+- `setup.sh` is the one-liner for someone else, in the README. It installs
+  Homebrew + yt-dlp if missing, reads the vault list from
+  `~/Library/Application Support/obsidian/obsidian.json` (asks if there is more
+  than one), downloads `main.js`/`manifest.json`/`styles.css` from the
+  **latest GitHub release**, and appends `ytfree` to `community-plugins.json`
+  when Obsidian is closed (Obsidian overwrites that file from memory, so it
+  prints the manual toggle instead when Obsidian is running).
+- **Releases are now how the plugin ships.** `v0.1.0` exists with the three
+  assets. After a change worth sending out: bump `manifest.json`'s version,
+  `npm run check`, then
+  `gh release create vX.Y.Z main.js manifest.json styles.css --title vX.Y.Z --notes "…"`.
+  Re-running `setup.sh` (or BRAT) picks it up.
+
+**Next:** nothing pending from this; the 045 question below still stands.
+
+## Previous — 2026-09-02 (later): 046 as well
 
 **573 unit tests pass, `tsc` clean, build clean, `./install.sh` run.** Obsidian
 still needs one reload to pick up both. Two issues built today, both with their

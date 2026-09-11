@@ -7,16 +7,25 @@ stitches ads into the same stream as the content. Instead it skips the player en
 `yt-dlp` resolves the video to its underlying stream URL, which plays in a plain HTML5
 `<video>` element. There is no ad in the bytes to begin with.
 
-## Requirements
+## Install (Mac)
+
+Paste this into Terminal. It installs Homebrew and `yt-dlp` if you don't have
+them, downloads the latest release into your vault, and enables the plugin:
 
 ```bash
-brew install yt-dlp
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/BarkernotBob/obsidian-ytfree/main/setup.sh)"
 ```
 
-## Install
+Run it again any time to update. If Obsidian was open while it ran, finish with
+Settings → Community plugins → reload → enable **YT Free**.
+
+Optional: `brew install ffmpeg` for downloads above 360p and better Smart Speed.
+
+## Install (from source)
 
 ```bash
-YTFREE_VAULT="/path/to/your/vault" ./install.sh
+echo "/path/to/your/vault" > .vault   # once
+./install.sh
 ```
 
 Then: Obsidian → Settings → Community plugins → reload → enable **YT Free**.
