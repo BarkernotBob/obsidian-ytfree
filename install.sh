@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Build and copy the plugin into the MyVault vault.
+# Check and copy the plugin into your vault. Set YTFREE_VAULT to the vault path.
 # Source of truth stays in ~/Projects; the vault only ever holds build output.
 set -euo pipefail
 
-VAULT="${YTFREE_VAULT:-$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVault}"
+if [[ -z "${YTFREE_VAULT:-}" ]]; then
+  echo "Set YTFREE_VAULT to your vault path, e.g.:" >&2
+  echo '  YTFREE_VAULT="$HOME/Documents/My Vault" ./install.sh' >&2
+  exit 1
+fi
+VAULT="$YTFREE_VAULT"
 DEST="$VAULT/.obsidian/plugins/ytfree"
 
 cd "$(dirname "$0")"

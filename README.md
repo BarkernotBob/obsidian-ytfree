@@ -7,9 +7,6 @@ stitches ads into the same stream as the content. Instead it skips the player en
 `yt-dlp` resolves the video to its underlying stream URL, which plays in a plain HTML5
 `<video>` element. There is no ad in the bytes to begin with.
 
-**Desktop only. Personal use only** — this is against YouTube's ToS and will never be
-submitted to the community plugin store.
-
 ## Requirements
 
 ```bash
@@ -19,7 +16,7 @@ brew install yt-dlp
 ## Install
 
 ```bash
-./install.sh
+YTFREE_VAULT="/path/to/your/vault" ./install.sh
 ```
 
 Then: Obsidian → Settings → Community plugins → reload → enable **YT Free**.

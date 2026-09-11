@@ -4,7 +4,7 @@ Everything so far was verified from the command line. This confirms it actually 
 inside Obsidian. Takes about 10 minutes.
 
 ## Setup
-1. Open Obsidian (the MyVault vault).
+1. Open Obsidian.
 2. Go to Settings → Community plugins.
 3. Click the reload icon next to "Installed plugins".
 4. Find **YT Free** in the list and turn it on.
