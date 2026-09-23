@@ -1,12 +1,11 @@
 name: Planned change
 description: Something you want built, and you already know what "done" looks like.
-labels: ["planned", "nightly-ok"]
 body:
   - type: markdown
     attributes:
       value: |
-        Fill this in and forget about it. It shows up on your board as **Planned**,
-        and the nightly routine is allowed to build and merge it while you sleep.
+        Fill this in and forget about it. It lands on your board straight away,
+        and the nightly routine builds and merges it while you sleep.
 
         Not sure what you want yet? Go back and pick **Rough idea** instead.
 
