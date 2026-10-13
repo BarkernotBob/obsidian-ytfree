@@ -90,7 +90,7 @@ import {
   TRANSCRIPT_REST_MARGIN_PX,
   upsertSection,
 } from "./transcript";
-import { fetchCaptionTrack, fetchHeatmap } from "./innertube";
+import { fetchCaptionTrack, fetchHeatmap, fetchVideoDetails } from "./innertube";
 import type { NotePosition, SectionName } from "./sections";
 import {
   SECTION_HEADINGS,
@@ -1056,6 +1056,22 @@ export default class YtFreePlugin extends Plugin {
       },
     });
 
+    // The channel screen (045), from a note. The hub item knows the channel
+    // when there is one; a note made some other way costs one player call to
+    // ask YouTube who uploaded it.
+    this.addCommand({
+      id: "open-video-channel",
+      name: "Open this video's channel",
+      callback: () => {
+        const videoId = this.shareTargetVideoId();
+        if (!videoId) {
+          new Notice("YT Free: no video in this note.");
+          return;
+        }
+        void this.openVideoChannel(videoId);
+      },
+    });
+
     this.addCommand({
       id: "share-video-at-time",
       name: "Share this video at the current time",
@@ -1844,6 +1860,25 @@ export default class YtFreePlugin extends Plugin {
     for (const leaf of this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)) {
       if (leaf.view instanceof HubView) leaf.view.renderAll();
     }
+  }
+
+  /** The channel screen for whoever uploaded `videoId`. */
+  private async openVideoChannel(videoId: string): Promise<void> {
+    const item = this.subscriptions.itemFor(videoId);
+    let channelId = item?.channelId ?? "";
+    let channelTitle = item?.channelTitle ?? "";
+    if (!channelId) {
+      const details = await fetchVideoDetails(videoId);
+      channelId = details.channelId;
+      channelTitle = details.channelTitle;
+    }
+    if (!channelId) {
+      new Notice("YT Free: YouTube would not say whose video this is.");
+      return;
+    }
+    await this.openHub();
+    const leaf = this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)[0];
+    if (leaf?.view instanceof HubView) leaf.view.showChannel(channelId, channelTitle);
   }
 
   private async openHub(screen: "hub" | "search" = "hub"): Promise<void> {

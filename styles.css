@@ -3699,3 +3699,60 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
   padding-left: 1em;
   border-left: 2px solid var(--background-modifier-border);
 }
+
+/*
+ * ------------------------------------------------- the channel screen (045) ---
+ *
+ * The search screen's frame with a channel's face on it: avatar and name where
+ * "Search YouTube" sits, Subscribe at the far end of the header, and one line
+ * of facts under it. The facts line is always one line tall, so the header
+ * arriving after the first paint never moves the search box.
+ */
+.ytfree-channel-avatar {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--background-modifier-border);
+}
+
+.ytfree-channel-avatar.is-empty {
+  visibility: hidden;
+}
+
+.ytfree-channel-subscribe {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.ytfree-channel-facts {
+  height: 1.6em;
+  line-height: 1.6em;
+  padding: 0 0.75em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+/* The channel name in Preview's facts line: a way to that channel's screen. */
+.ytfree-preview-channel {
+  display: inline;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  color: var(--text-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+}
+
+.ytfree-preview-channel:hover {
+  text-decoration-color: currentColor;
+}

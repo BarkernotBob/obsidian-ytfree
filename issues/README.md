@@ -50,7 +50,7 @@ as the detailed record for the tickets they already cover; decisions go in [GLOS
 | [042](042-tidy-clears-kept.md) | A tidied note takes its hub item with it | Done — manual test passed (Isaiah, 2026-10-13) |
 | [043](043-desktop-full-quality.md) | Full quality on the desktop (above 360p), signed out — play the separate picture and sound files via MSE | Backlog, scoped 2026-08-17 — not built |
 | [044](044-subscription-sync-recovery-and-removals.md) | Subscriptions that never came back: a wedged session, a silent one, and unsubscribes that do nothing | Done — manual test passed (Isaiah, 2026-10-13) |
-| [045](045-channel-screen-and-subscribe.md) | A channel screen: the back catalogue, a search inside it, and Subscribe | Scope approved by Isaiah 2026-10-13 — **building** |
+| [045](045-channel-screen-and-subscribe.md) | A channel screen: the back catalogue, a search inside it, and Subscribe | **Built 2026-10-13** — awaiting manual test |
 | [046](046-in-progress-chip.md) | An "In progress" list: what you started and did not finish | Done — manual test passed (Isaiah, 2026-10-13) |
 | [047](047-search-blocklist-and-hide-channel.md) | A search Remove that lasts, and a way to mute a channel in search | Scoped 2026-09-01 — not built, next after 045 |
 | [048](048-rss-backfill.md) | The 15-entry window loses videos permanently | Scoped 2026-09-01 — not built, builds on 045's channel browse |

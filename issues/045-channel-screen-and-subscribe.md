@@ -1,8 +1,8 @@
 # 045 — A channel screen: the back catalogue, a search inside it, and Subscribe
 
-**Status:** Scoped 2026-09-01, with a v1 scope at
-[docs/V1-SCOPE-CHANNEL-SCREEN.md](../docs/V1-SCOPE-CHANNEL-SCREEN.md).
-**Not built.** Raised by BarkernotBob:
+**Status:** **Built 2026-10-13** — awaiting manual test. Scope approved by Isaiah the same day
+([docs/V1-SCOPE-CHANNEL-SCREEN.md](../docs/V1-SCOPE-CHANNEL-SCREEN.md)). Parser in `src/channel.ts`,
+screen in `HubView` (`showChannel`), live check in `tests/channel.smoke.ts`. Raised by BarkernotBob:
 
 > "I want a way to navigate to yt to subscribe to a channel, view other videos
 > from that channel, etc. Was that not something you already worked on, because
@@ -96,10 +96,28 @@ The full boundary is in the scope doc. In short:
 
 ## Manual test (for BarkernotBob)
 
-To be written when this is built, per the repo rule. It should include the
-collab-video case end to end: find a guest-channel collaboration from
-the Ward on Words video, reach RBN's channel screen, subscribe, sync, and see
-RBN's videos arrive.
+Install (`./install.sh`), reload Obsidian, then:
+
+1. **From a preview.** Open the hub, tap any card. In the Preview sheet the channel name under
+   the title is now a link. Tap it: the sheet closes and the hub shows that channel, with its
+   avatar, name, handle, subscriber count and video count at the top.
+2. **More than 15.** The channel lists about 28–30 videos, newest first. Scroll to the bottom
+   and press **More videos**: another page appends below, and nothing above it moves.
+3. **Search inside it.** Type a word in "Search <channel>" and press Enter. Only that channel's
+   videos come back. Clear the box: the full list returns.
+4. **Cards.** Save, Preview, Remove and Watch on a channel card behave exactly as on a search
+   result. A video already in your hub shows its ticked state instead of disappearing.
+5. **From a note.** Open any video note, run **YT Free: Open this video's channel** from the
+   command palette. The hub opens on that channel. Works for a note the hub didn't make too
+   (one extra lookup).
+6. **Back.** The arrow returns to the screen you came from (the hub, or Search YouTube).
+7. **Subscribe (desktop).** Press Subscribe: youtube.com opens on that channel in your browser.
+   Subscribe there, then run **Sync account now**. The channel appears in the hub's channel
+   list. On the phone there is no Subscribe button.
+8. **Offline.** Turn Wi-Fi off and open a channel: it says it could not load and offers Try again.
+
+Run `npm run smoke` on the Mac once: `tests/channel.smoke.ts` checks page two and the
+in-channel search against live YouTube, which the cloud build machine cannot reach.
 
 ## Notes
 
@@ -107,9 +125,16 @@ RBN's videos arrive.
   call this issue builds — a channel's uploads beyond the RSS window. Building
   048 first would mean building this badly and twice.
 - The 2026-08-06 note that "per-channel RSS lists only that channel's own
-  uploads and never a guest's collaborations" is still true and this does not
-  change it. Catching collaborations means subscribing to the other channel,
-  which is what this makes possible.
+  uploads and never a guest's collaborations" is still true, and measured on
+  2026-10-13 the same holds for a channel's Videos tab: Ward on Words' tab does
+  not list the RBN collab. Collabs are caught from the signed-in subscription
+  feed instead (GitHub #2).
+- **The hub card reaches the channel through Preview** (card → Preview → channel
+  name). The card body is already Preview, and a fifth button would break the
+  four-button layout; the extra tap is the price of not doing that.
+- Not run under `tools/search-screen-harness.mjs` yet: it needs Obsidian's
+  `app.css` on the build machine. The screen reuses the search screen's
+  classes and `renderResult`, so the no-reflow contract is the same code.
 - `tools/search-screen-harness.mjs` renders the search screen under Obsidian's
   own `app.css` and reports any box that moved on a click. Point it at this
   screen too rather than arguing criterion 5 on paper.

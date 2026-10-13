@@ -76,7 +76,9 @@ import type { NotificationSettings, Post, SendOutcome } from "./notify";
 import { NOTES_HEADING } from "./sections";
 import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
-import { fetchTranscriptCues, fetchVideoDetails, searchYouTube } from "./innertube";
+import { browseChannel, fetchTranscriptCues, fetchVideoDetails, searchYouTube } from "./innertube";
+import { channelUrl } from "./channel";
+import type { ChannelHeader } from "./channel";
 import { followIndexAt, groupCues, restingScrollTop } from "./transcript";
 import type { Paragraph } from "./transcript";
 import type { SearchPage, SearchResult } from "./search";
@@ -90,7 +92,7 @@ import {
   nonDefaultFilters,
 } from "./search-params";
 import type { SearchFilters } from "./search-params";
-import { searchScreen } from "./search-screen";
+import { channelScreen, searchScreen } from "./search-screen";
 import type { SearchScreenCopy, SearchScreenKind } from "./search-screen";
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
@@ -1067,6 +1069,25 @@ const FILTER_RULES: Record<HubFilter, string> = {
  * where it is and only its marker changes. The list re-filters on the next
  * refresh, poll, or filter change.
  */
+/** Which screen the hub view is drawing. */
+type HubMode = "hub" | "browse" | "channel";
+
+/** Everything the channel screen needs, held so a trip away and back restores it. */
+interface ChannelState {
+  channelId: string;
+  /** What we knew the channel as before its header arrived — a card's byline. */
+  channelTitle: string;
+  header: ChannelHeader | null;
+  /** A search inside the channel, or null for its plain catalogue. */
+  query: string | null;
+  results: SearchResult[];
+  continuation: string | null;
+  state: "idle" | "loading" | "error";
+  error: string;
+  /** The screen Back returns to. */
+  returnTo: "hub" | "browse";
+}
+
 export class HubView extends ItemView {
   /**
    * Which screen you are on.
@@ -1081,7 +1102,7 @@ export class HubView extends ItemView {
    * clicks never moving their neighbours is not in play — and everything either
    * screen needs is held in fields, so coming back restores what you left.
    */
-  private mode: "hub" | "browse" = "hub";
+  private mode: HubMode = "hub";
 
   /**
    * Everything, not the Inbox.
@@ -1144,6 +1165,17 @@ export class HubView extends ItemView {
   private removedResults = new Set<string>();
   /** Bumped per search, so a slow first page cannot land over a newer one. */
   private searchToken = 0;
+
+  /**
+   * The channel screen (issue 045): one channel's whole catalogue, or a search
+   * inside it. Null until a channel has been opened. Kept after leaving, like
+   * the search state, so Back and forward again shows what you left.
+   */
+  private channel: ChannelState | null = null;
+  /** Same job as `searchToken`, for channel pages. */
+  private channelToken = 0;
+  private channelInputEl: HTMLInputElement | null = null;
+  private channelFactsEl: HTMLElement | null = null;
 
   /**
    * A phone gets a different menu, not a narrower one. See docs/MOBILE-UX.md:
@@ -1260,6 +1292,8 @@ export class HubView extends ItemView {
     this.primaryEl = null;
     this.relatedEl = null;
     this.searchInputEl = null;
+    this.channelInputEl = null;
+    this.channelFactsEl = null;
     this.menuEl = null;
     this.scrimEl = null;
     this.menuButtonEl = null;
@@ -1268,6 +1302,7 @@ export class HubView extends ItemView {
     this.cards.clear();
 
     if (this.mode === "browse") this.buildBrowse(root);
+    else if (this.mode === "channel") this.buildChannel(root);
     else this.buildHub(root);
   }
 
@@ -1584,8 +1619,284 @@ export class HubView extends ItemView {
     if (!this.phone) this.searchInputEl?.focus();
   }
 
+  // -------------------------------------------------------- the channel screen
+
+  /**
+   * Open one channel's catalogue (issue 045), from Preview or from a note.
+   *
+   * Opening the channel already on screen is a no-op rather than a reload: the
+   * list you were scrolling should not jump back to the top because a link to
+   * the same place was pressed.
+   */
+  showChannel(channelId: string, channelTitle: string): void {
+    const same = this.channel?.channelId === channelId;
+    const returnTo = this.mode === "channel" ? (this.channel?.returnTo ?? "hub") : this.mode;
+    if (!same) {
+      this.channel = {
+        channelId,
+        channelTitle,
+        header: null,
+        query: null,
+        results: [],
+        continuation: null,
+        state: "loading",
+        error: "",
+        returnTo,
+      };
+    } else if (this.channel) {
+      this.channel.returnTo = returnTo;
+    }
+    this.mode = "channel";
+    this.build();
+    this.renderAll();
+    if (!same) this.loadChannel();
+  }
+
+  private channelName(): string {
+    return this.channel?.header?.title || this.channel?.channelTitle || "";
+  }
+
+  private channelCopy(): SearchScreenCopy {
+    const channel = this.channel;
+    return channelScreen({
+      title: this.channelName(),
+      query: channel?.query ?? null,
+      state: channel?.state ?? "loading",
+      error: channel?.error ?? "",
+      results: channel?.results.length ?? 0,
+      videosText: channel?.header?.videos ?? "",
+    });
+  }
+
+  /**
+   * The channel's header and its search box.
+   *
+   * Subscribe opens youtube.com in the browser, and that is all it does: the
+   * subscription itself is an authenticated write this plugin never makes, and
+   * the next account sync picks the channel up from your real subscriptions.
+   * Desktop only — the sync that would notice it is desktop only too.
+   */
+  private buildChannel(root: HTMLElement): void {
+    const channel = this.channel;
+    const header = root.createDiv({ cls: "ytfree-hub-header ytfree-hub-header-browse" });
+
+    const back = header.createEl("button", {
+      cls: "ytfree-hub-icon-button ytfree-hub-back",
+      attr: { type: "button", "aria-label": "Back", title: "Back" },
+    });
+    setIcon(back, "arrow-left");
+    back.addEventListener("click", () => this.setMode(this.channel?.returnTo ?? "hub"));
+
+    const title = header.createDiv({ cls: "ytfree-hub-screen-title ytfree-channel-title" });
+    const avatar = title.createEl("img", { cls: "ytfree-channel-avatar", attr: { alt: "" } });
+    if (channel?.header?.avatar) avatar.src = channel.header.avatar;
+    else avatar.addClass("is-empty");
+    title.createSpan({ cls: "ytfree-hub-screen-name", text: this.channelName() || "Channel" });
+
+    if (Platform.isDesktopApp && channel) {
+      const subscribe = header.createEl("button", {
+        cls: "ytfree-channel-subscribe",
+        text: "Subscribe",
+        attr: {
+          type: "button",
+          title: "Opens this channel on youtube.com. The next account sync picks the subscription up.",
+        },
+      });
+      subscribe.addEventListener("click", () => {
+        window.open(channelUrl(channel.channelId), "_blank");
+      });
+    }
+
+    this.channelFactsEl = root.createDiv({ cls: "ytfree-channel-facts" });
+    this.renderChannelFacts();
+
+    const row = root.createDiv({ cls: "ytfree-hub-searchbar" });
+    const field = row.createDiv({ cls: "ytfree-search-field" });
+    setIcon(field.createSpan({ cls: "ytfree-search-field-icon" }), "search");
+    const label = `Search ${this.channelName() || "this channel"}`;
+    const input = field.createEl("input", {
+      cls: "ytfree-search-field-input",
+      type: "search",
+      attr: {
+        placeholder: label,
+        enterkeyhint: "search",
+        autocapitalize: "off",
+        autocorrect: "off",
+        spellcheck: "false",
+        "aria-label": label,
+      },
+    });
+    this.channelInputEl = input;
+    input.value = channel?.query ?? "";
+    input.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter") {
+        evt.preventDefault();
+        this.runChannelSearch(input.value);
+      } else if (evt.key === "Escape") {
+        evt.preventDefault();
+        input.value = "";
+        this.runChannelSearch("");
+      }
+    });
+    // Emptying the box goes back to the whole catalogue, however it was emptied.
+    input.addEventListener("input", () => {
+      if (input.value.trim() === "" && this.channel?.query) this.runChannelSearch("");
+    });
+    const go = field.createEl("button", {
+      cls: "ytfree-search-field-go",
+      attr: { type: "button", "aria-label": "Search this channel", title: "Search this channel" },
+    });
+    setIcon(go, "arrow-right");
+    go.addEventListener("click", () => this.runChannelSearch(input.value));
+
+    this.statusEl = root.createDiv({ cls: "ytfree-hub-status ytfree-hub-status-browse" });
+    const body = root.createDiv({ cls: "ytfree-hub-body" });
+    this.listEl = body.createDiv({ cls: "ytfree-hub-list" });
+  }
+
+  /** Handle, subscribers, video count — whichever the header has said so far. */
+  private renderChannelFacts(): void {
+    const el = this.channelFactsEl;
+    if (!el) return;
+    const header = this.channel?.header;
+    // Always present and always one line, so the header arriving never moves
+    // the search box below it.
+    el.setText(
+      [header?.handle, header?.subscribers, header?.videos].filter(Boolean).join(" · ") || "\u00a0",
+    );
+  }
+
+  /** A search inside the channel, or "" for its plain catalogue. */
+  private runChannelSearch(query: string): void {
+    const channel = this.channel;
+    if (!channel) return;
+    const text = query.trim() || null;
+    if (text === channel.query && channel.state !== "error") return;
+    channel.query = text;
+    this.loadChannel();
+  }
+
+  /**
+   * The first page of whatever the channel screen is showing — the catalogue,
+   * or a search inside it. Replaces what is on screen; `loadMoreChannel`
+   * appends.
+   */
+  private loadChannel(): void {
+    const channel = this.channel;
+    if (!channel) return;
+    const token = ++this.channelToken;
+    channel.results = [];
+    channel.continuation = null;
+    channel.state = "loading";
+    channel.error = "";
+    this.renderList();
+    this.renderStatus();
+
+    let headerArrived = false;
+    void browseChannel(channel, channel.query)
+      .then(
+        (page) => {
+          if (token !== this.channelToken || this.channel !== channel) return;
+          channel.results = page.results;
+          channel.continuation = page.continuation;
+          if (page.header && !channel.header) {
+            channel.header = page.header;
+            headerArrived = true;
+          }
+          channel.state = "idle";
+        },
+        (err: unknown) => {
+          if (token !== this.channelToken || this.channel !== channel) return;
+          channel.state = "error";
+          channel.error = err instanceof Error ? err.message : String(err);
+        },
+      )
+      .then(() => {
+        if (token !== this.channelToken || this.channel !== channel) return;
+        if (this.mode !== "channel") return;
+        // The header arrives with the first page, and the name in the title and
+        // the box's placeholder were drawn before it did — so the first load
+        // rebuilds the screen once. A search inside the channel does not, or it
+        // would take the cursor out of the box you are typing in.
+        if (headerArrived) {
+          this.build();
+          this.renderAll();
+        } else {
+          this.renderList();
+          this.renderStatus();
+        }
+      });
+  }
+
+  /** One more page of the channel, appended — same rule as `loadMore`. */
+  private loadMoreChannel(button: HTMLElement): void {
+    const channel = this.channel;
+    if (!channel?.continuation || channel.state === "loading") return;
+    const token = this.channelToken;
+    channel.state = "loading";
+    button.setText("Loading…");
+
+    void browseChannel(channel, channel.query, channel.continuation).then(
+      (page) => {
+        if (token !== this.channelToken || this.channel !== channel) return;
+        const shown = new Set(channel.results.map((result) => result.videoId));
+        const fresh = page.results.filter((result) => !shown.has(result.videoId));
+        channel.results = [...channel.results, ...fresh];
+        channel.continuation = page.continuation;
+        channel.state = "idle";
+        const now = new Date();
+        for (const result of fresh) this.renderResult(result, now);
+        button.setText("More videos");
+        if (!page.continuation || fresh.length === 0) button.remove();
+        this.renderStatus();
+      },
+      (err: unknown) => {
+        if (token !== this.channelToken || this.channel !== channel) return;
+        channel.state = "idle";
+        button.setText("More videos");
+        new Notice(`YT Free: could not load more videos — ${String(err)}`);
+      },
+    );
+  }
+
+  /**
+   * The catalogue as cards — the same cards and the same four buttons as
+   * search, through the same `renderResult`. Nothing is hidden for already
+   * being in the hub: a catalogue answers "what has this channel made", and
+   * the cards say which of those you have.
+   */
+  private renderChannelList(): void {
+    const list = this.listEl;
+    if (!list) return;
+    list.empty();
+    this.cards.clear();
+    this.results.clear();
+    this.primaryEl = null;
+    this.relatedEl = null;
+    const channel = this.channel;
+
+    const copy = this.channelCopy();
+    if (copy.kind !== "results" || !channel) {
+      this.renderSearchState(list, copy);
+      return;
+    }
+
+    this.primaryEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
+    const now = new Date();
+    for (const result of channel.results) this.renderResult(result, now);
+
+    if (channel.continuation) {
+      const more = list.createEl("button", {
+        cls: "ytfree-hub-more",
+        text: "More videos",
+        attr: { type: "button" },
+      });
+      more.addEventListener("click", () => this.loadMoreChannel(more));
+    }
+  }
+
   /** Swap screens. Everything either one needs is in a field, so this is safe. */
-  private setMode(mode: "hub" | "browse"): void {
+  private setMode(mode: HubMode): void {
     if (this.mode === mode) return;
     this.mode = mode;
     this.build();
@@ -1667,6 +1978,10 @@ export class HubView extends ItemView {
     if (!this.statusEl) return;
     if (this.mode === "browse") {
       this.statusEl.setText(this.searchCopy().status);
+      return;
+    }
+    if (this.mode === "channel") {
+      this.statusEl.setText(this.channelCopy().status);
       return;
     }
 
@@ -2044,7 +2359,8 @@ export class HubView extends ItemView {
     });
     retry.toggleClass("is-hidden", !copy.retry);
     retry.addEventListener("click", () => {
-      if (this.searchQuery) this.runSearch(this.searchQuery);
+      if (this.mode === "channel") this.loadChannel();
+      else if (this.searchQuery) this.runSearch(this.searchQuery);
     });
   }
 
@@ -2059,6 +2375,9 @@ export class HubView extends ItemView {
    */
   private resultHost(result: SearchResult): HTMLElement | null {
     const host = result.secondary ? this.relatedEl : this.primaryEl;
+    // A channel's catalogue is one list with nothing related under it, so it
+    // needs no heading saying which half you are in.
+    if (this.mode === "channel") return host;
     if (host && host.childElementCount === 0) {
       host.createDiv({
         cls: "ytfree-hub-results-heading",
@@ -2211,6 +2530,10 @@ export class HubView extends ItemView {
     if (!list) return;
     if (this.mode === "browse") {
       this.renderSearch();
+      return;
+    }
+    if (this.mode === "channel") {
+      this.renderChannelList();
       return;
     }
     list.empty();
@@ -2617,8 +2940,13 @@ export class HubView extends ItemView {
    */
   private openPreview(videoId: string, repaintCard: () => void): void {
     const item = this.store.itemFor(videoId);
-    const result = this.searchResults.find((entry) => entry.videoId === videoId) ?? null;
+    const result =
+      this.searchResults.find((entry) => entry.videoId === videoId) ??
+      this.channel?.results.find((entry) => entry.videoId === videoId) ??
+      null;
     if (!item && !result) return;
+    const channelId = item?.channelId || result?.channelId || "";
+    const channelTitle = item?.channelTitle || result?.channelTitle || "";
 
     const facts = (): CardFacts => ({
       inHub: this.store.hasItem(videoId),
@@ -2650,6 +2978,13 @@ export class HubView extends ItemView {
           groupCues(cues, this.settings().transcriptIntervalSeconds),
         ),
       share: this.shareMenu,
+      // The way from a video to everything else its channel has made — the
+      // question that follows a good video (045). Not offered from inside the
+      // channel it would open: that is where you already are.
+      openChannel:
+        channelId && !(this.mode === "channel" && this.channel?.channelId === channelId)
+          ? () => this.showChannel(channelId, channelTitle)
+          : null,
       slots: () => (item ? hubSlots(facts()) : searchSlots(facts())),
       run: async (key, repaint) => {
         // Re-looked-up: the modal outlives the card that opened it, and a poll
@@ -2685,6 +3020,8 @@ interface PreviewSpec {
   fetchTranscript: (() => Promise<Paragraph[]>) | null;
   /** Opens the share menu. Null — no plugin behind the view — and no Share is drawn. */
   share: ShareMenu | null;
+  /** Opens the video's channel screen. Null and the channel name is plain text. */
+  openChannel: (() => void) | null;
   slots: () => CardSlot[];
   run: (key: CardActionKey, repaint: () => void) => Promise<void>;
 }
@@ -2753,10 +3090,26 @@ class PreviewModal extends Modal {
 
     this.mountPlayer(contentEl);
     contentEl.createDiv({ cls: "ytfree-preview-title", text: this.spec.title });
-    contentEl.createDiv({
-      cls: "ytfree-preview-facts",
-      text: [this.spec.channel, ...this.spec.facts].filter(Boolean).join(" · "),
-    });
+    const factsEl = contentEl.createDiv({ cls: "ytfree-preview-facts" });
+    const openChannel = this.spec.openChannel;
+    if (openChannel && this.spec.channel) {
+      // A link-styled button, not an anchor: there is no href to follow, and
+      // an anchor in Obsidian invites its external-link handling.
+      const link = factsEl.createEl("button", {
+        cls: "ytfree-preview-channel",
+        text: this.spec.channel,
+        attr: { type: "button", title: `See everything from ${this.spec.channel}` },
+      });
+      link.addEventListener("click", () => {
+        this.handingOver = true;
+        this.close();
+        openChannel();
+      });
+      const rest = this.spec.facts.filter(Boolean).join(" · ");
+      if (rest) factsEl.appendText(` · ${rest}`);
+    } else {
+      factsEl.setText([this.spec.channel, ...this.spec.facts].filter(Boolean).join(" · "));
+    }
 
     // One box holding both disclosures, because they are one region — see
     // "the foot of the sheet is one" in styles.css. It earns its place off a
