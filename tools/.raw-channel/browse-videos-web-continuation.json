@@ -1,0 +1,691 @@
+{
+ "responseContext": {
+  "visitorData": "CgtjbVZxZlBhMTBLOCij57rWBjIKCgJVUxIEGgAgWw%3D%3D",
+  "serviceTrackingParams": [
+   {
+    "service": "GFEEDBACK",
+    "params": [
+     {
+      "key": "browse_id",
+      "value": "UCKRmL7BMyCeLE4KUo73RDzw"
+     },
+     {
+      "key": "browse_id_prefix",
+      "value": ""
+     },
+     {
+      "key": "route",
+      "value": "channel.featured"
+     },
+     {
+      "key": "is_owner",
+      "value": "false"
+     },
+     {
+      "key": "is_alc_surface",
+      "value": "false"
+     },
+     {
+      "key": "logged_in",
+      "value": "0"
+     },
+     {
+      "key": "visitor_data",
+      "value": "CgtjbVZxZlBhMTBLOCij57rWBjIKCgJVUxIEGgAgWw%3D%3D"
+     }
+    ]
+   },
+   {
+    "service": "GOOGLE_HELP",
+    "params": [
+     {
+      "key": "browse_id",
+      "value": "UCKRmL7BMyCeLE4KUo73RDzw"
+     },
+     {
+      "key": "browse_id_prefix",
+      "value": ""
+     }
+    ]
+   },
+   {
+    "service": "CSI",
+    "params": [
+     {
+      "key": "c",
+      "value": "WEB"
+     },
+     {
+      "key": "cver",
+      "value": "2.20250101.00.00"
+     },
+     {
+      "key": "yt_li",
+      "value": "0"
+     },
+     {
+      "key": "GetChannelPage_rid",
+      "value": "0x28f2c2dac07ef3b3"
+     }
+    ]
+   },
+   {
+    "service": "GUIDED_HELP",
+    "params": [
+     {
+      "key": "logged_in",
+      "value": "0"
+     }
+    ]
+   },
+   {
+    "service": "ECATCHER",
+    "params": [
+     {
+      "key": "client.version",
+      "value": "2.20260918"
+     },
+     {
+      "key": "client.name",
+      "value": "WEB"
+     }
+    ]
+   }
+  ],
+  "maxAgeSeconds": 300,
+  "mainAppWebResponseContext": {
+   "loggedOut": true,
+   "trackingParam": "k5_fmPxhoXZROPFYaXHQkZvUKQ3kTEpklYgoRx7scs9QixooYiEgkD2Q-wRMkusEmIBwOcCw59TLtslLKPQGSS"
+  },
+  "responseId": "IhMIi6DJpIi4lwMVI4TlBx0yVxCe",
+  "webResponseContextExtensionData": {
+   "webResponseContextPreloadData": {
+    "preloadMessageNames": [
+     "aboutChannelRenderer",
+     "aboutChannelViewModel",
+     "channelExternalLinkViewModel",
+     "buttonRenderer",
+     "menuPopupRenderer",
+     "menuServiceItemRenderer",
+     "unifiedSharePanelRenderer",
+     "notificationActionRenderer"
+    ]
+   },
+   "hasDecorated": true
+  }
+ },
+ "trackingParams": "CAAQhGciEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+ "onResponseReceivedEndpoints": [
+  {
+   "clickTrackingParams": "CAAQhGciEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+   "appendContinuationItemsAction": {
+    "continuationItems": [
+     {
+      "aboutChannelRenderer": {
+       "metadata": {
+        "aboutChannelViewModel": {
+         "description": "“If with your tongue you utter speech that is not intelligible, how will anyone know what is said? For you will be speaking into the air.” (1 Corinthians 14:9 ESV)\n\nNew videos every Thursday if I can hack it. I talk about English Bible translations—and why it's a blessing to have so many! I explain why they exist and why they differ—when, sometime, they do.\n",
+         "descriptionLabel": {
+          "content": "Description",
+          "styleRuns": [
+           {
+            "startIndex": 0,
+            "length": 11
+           }
+          ]
+         },
+         "country": "United States",
+         "customLinksLabel": {
+          "content": "Links",
+          "styleRuns": [
+           {
+            "startIndex": 0,
+            "length": 5
+           }
+          ]
+         },
+         "subscriberCountText": "40.6K subscribers",
+         "viewCountText": "3,799,744 views",
+         "joinedDateText": {
+          "content": "Joined Nov 21, 2009",
+          "styleRuns": [
+           {
+            "startIndex": 0,
+            "length": 19
+           }
+          ]
+         },
+         "canonicalChannelUrl": "http://www.youtube.com/@wardonwords",
+         "channelId": "UCKRmL7BMyCeLE4KUo73RDzw",
+         "additionalInfoLabel": {
+          "content": "More info",
+          "styleRuns": [
+           {
+            "startIndex": 0,
+            "length": 9
+           }
+          ]
+         },
+         "customUrlOnTap": {
+          "innertubeCommand": {
+           "clickTrackingParams": "CAYQo4sSIhMIi6DJpIi4lwMVI4TlBx0yVxCeygEEMHlwUA==",
+           "commandMetadata": {
+            "webCommandMetadata": {
+             "ignoreNavigation": true
+            }
+           },
+           "shareEntityEndpoint": {
+            "serializedShareEntity": "GhhVQ0tSbUw3Qk15Q2VMRTRLVW83M1JEenc%3D",
+            "sharePanelType": "SHARE_PANEL_TYPE_UNIFIED_SHARE_PANEL"
+           }
+          }
+         },
+         "videoCountText": "418 videos",
+         "links": [
+          {
+           "channelExternalLinkViewModel": {
+            "title": {
+             "content": "Join My YouTube Community"
+            },
+            "link": {
+             "content": "bit.ly/joinwardonwords",
+             "commandRuns": [
+              {
+               "startIndex": 0,
+               "length": 22,
+               "onTap": {
+                "innertubeCommand": {
+                 "clickTrackingParams": "CAoQobIHGAAiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+                 "commandMetadata": {
+                  "webCommandMetadata": {
+                   "url": "https://www.youtube.com/redirect?event=channel_description&redir_token=QUZZTVljRUgxd0RsWmRhaE5haV92WnFkUDAzYXxBSTVJdTV2ejAwYnF3QW52NzNXcE5hbzEwSEVzV1BvbTRYT3NrSmctSjY3YjNRS2l1bHJocUJUcFNSLXZYX3pUOWx0N3RnMlJzb1N5VGdLWEl0dXU4Zl9qX1gtY1VONmFMTlI5&q=https%3A%2F%2Fbit.ly%2Fjoinwardonwords",
+                   "webPageType": "WEB_PAGE_TYPE_UNKNOWN",
+                   "rootVe": 83769
+                  }
+                 },
+                 "urlEndpoint": {
+                  "url": "https://www.youtube.com/redirect?event=channel_description&redir_token=QUZZTVljRUgxd0RsWmRhaE5haV92WnFkUDAzYXxBSTVJdTV2ejAwYnF3QW52NzNXcE5hbzEwSEVzV1BvbTRYT3NrSmctSjY3YjNRS2l1bHJocUJUcFNSLXZYX3pUOWx0N3RnMlJzb1N5VGdLWEl0dXU4Zl9qX1gtY1VONmFMTlI5&q=https%3A%2F%2Fbit.ly%2Fjoinwardonwords",
+                  "target": "TARGET_NEW_WINDOW",
+                  "nofollow": true
+                 }
+                }
+               }
+              }
+             ]
+            },
+            "favicon": {
+             "sources": [
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcSVg_8FJWgm-ajirsJgYru5F526yF-cOdA9deYf4M7SsAHpzocHphv9hstyvJeRi5E-4_ZHtes6xre0EkK0ZZP057nHI1Eh_UPNWFw",
+               "width": 16,
+               "height": 16
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcRhBaqqxQV7ngdsGS94XFxwpkC_dBxDFvKx337qYPHYAJ4NszwttTmbNpqIyJZUlMGwLAgy3AoKICyVTlzHkn-ko1OZe7sQK3Rm9Zg",
+               "width": 24,
+               "height": 24
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcQF4Jiro6KMwjKX1QwNW4n5CK91Ti7AEwAg3Sio73zYKr6eCu2l-P8tFlsGuzOp9sp4QvHhlqMu_sSlsjNpCCdghcf-6pVk0Xs7vFQ",
+               "width": 32,
+               "height": 32
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcT3HbEgEnAsrlwelZ-Fe3rhCwndOiLAZi_YK7raTCHccq9DIZ-jHhaxzaSwuZke-t8TmWKCqw9W61ksPzvyTiTv9hw9kpbk0CZ0LHQ",
+               "width": 48,
+               "height": 48
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcQ9s6FYfnUGhuaml5jfA_k9I6IWsrXcp1SAEO2pZoJNYSkg6CSfbV0eQeRawWMQxUHBP5DZcQvT8idWRpNDb0XnsrhgylGhRfeBVAQ",
+               "width": 50,
+               "height": 50
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcQelZOTfBDEqTZDaRoNWQ7W7ss5V_7jttcVzxi_nc0c9qpfTX37FsL23XiVAI6Kvnh0tRdEbjeZ5fwSuegnep5Z4NdNuzXCd1-uuL0",
+               "width": 64,
+               "height": 64
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcTwfjE8Ezz4jWpAO4mv_YxREoB1zGZm6lUqwGNOQMe-6rYneFvkpf1KthiAJWwNYeJy7CLaej6KJ2mfQG7oE6YHsxvSt3uA2PGJg_Y",
+               "width": 96,
+               "height": 96
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcSjQ_3hjpaS0Um1u8fw_gZEqZNwFqU7hNaU_6WVeJsZONohypt_jczWr5C7PrwQEwTEhAbk6iUrYOOftotgC6QC8yYaY23mv9zO7xG-",
+               "width": 128,
+               "height": 128
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcSL3MDGBQOS05RO5PBtp6EKfxD9JoBrtzKcMLmd3VDBd_-Qen1GKxkgLxgGhCzIbSyB2uwcGRfVtMVq5qL68DlqrUssacfXAPfkPtYE",
+               "width": 180,
+               "height": 180
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcTx9Dn2msH6beh0eQCiI30b8UOb7mTfU6sEQ9yMUnyQW4FOPFQVfek_Cf3a1Qyr_iBVwugeGk2FLgqfsJmJW1UblZ6UR7-PyyFk7Mc8",
+               "width": 256,
+               "height": 256
+              }
+             ]
+            }
+           }
+          },
+          {
+           "channelExternalLinkViewModel": {
+            "title": {
+             "content": "Support Me at Patreon"
+            },
+            "link": {
+             "content": "patreon.com/mlward",
+             "commandRuns": [
+              {
+               "startIndex": 0,
+               "length": 18,
+               "onTap": {
+                "innertubeCommand": {
+                 "clickTrackingParams": "CAkQobIHGAEiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+                 "commandMetadata": {
+                  "webCommandMetadata": {
+                   "url": "https://www.youtube.com/redirect?event=channel_description&redir_token=QUZZTVljRXI5REVaUDZUeUVkZnFqZ05pQTJYYXxBSTVJdTV2d1BqZWlPdDRWUGpYeVNPVUFpazdHN1Z2RlVVZlQ2TnhodnZnSmZZRllhMmpsRmxkUzI5bV9OUlp2elFXMUppV2J6bnp2Z1FLVjJhM0hoNXhHYzY4VnlhOUx1dlZ4&q=https%3A%2F%2Fpatreon.com%2Fmlward",
+                   "webPageType": "WEB_PAGE_TYPE_UNKNOWN",
+                   "rootVe": 83769
+                  }
+                 },
+                 "urlEndpoint": {
+                  "url": "https://www.youtube.com/redirect?event=channel_description&redir_token=QUZZTVljRXI5REVaUDZUeUVkZnFqZ05pQTJYYXxBSTVJdTV2d1BqZWlPdDRWUGpYeVNPVUFpazdHN1Z2RlVVZlQ2TnhodnZnSmZZRllhMmpsRmxkUzI5bV9OUlp2elFXMUppV2J6bnp2Z1FLVjJhM0hoNXhHYzY4VnlhOUx1dlZ4&q=https%3A%2F%2Fpatreon.com%2Fmlward",
+                  "target": "TARGET_NEW_WINDOW",
+                  "nofollow": true
+                 }
+                }
+               }
+              }
+             ]
+            },
+            "favicon": {
+             "sources": [
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcShIJKoKEYs4pXjUcCwLhDVmCT8As-dYNvaAJcqJoHFF57XlGxbVH8DajFzv5nE4smFTSAeY9kKbxGODAh8dTqqIo5A6-Vq8impZ5XctQGcBg",
+               "width": 16,
+               "height": 16
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcQHFt17rwL8vffEY-DJn84v66hJHAWj1JXicU2S1XENwLEMOJfMD0d9k3kprpFOlgzw8SUzPDFf7Y_zHvTnbLzUcxtCsbrJNMxsD8kw6hZEwQ",
+               "width": 24,
+               "height": 24
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcQHvc99uEbNSC1UNYzKk2vgntbnzykVICXXemtOHE2LkEQTCdq59IdTrFmwVLDUd_F4uhrgedQvB3-pe1KYo-6Jg5ncmV3Tsx_f-YSRTImZMA",
+               "width": 32,
+               "height": 32
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcRzKjVnCtXVgt3PLDrCTduGyq1a-uQLtaYuELo-Z6hBOVelxmgS73QheT0WcJ81MKJIJxiI80eK2x_pmQ-IXDyqhWK-YXFYDPSiAQ3GzpDWdA",
+               "width": 48,
+               "height": 48
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcRCKhrXPfpUPlynpdCsWiq43S8JwSYVEtZ6Jl_JXYBu3dnfvmAyDJqxqlLhMjTdLRUKzrw2mDUJ313pcCg31EYGLekcNqejPsda1jkpTq0BdA",
+               "width": 50,
+               "height": 50
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcS1FQm_LEDNtClJ7Ts7rZoqiekN1kIif9MdX-DLJ17SLGwszqOemhG0lkDfNZlc_B6o5dGSRhZklqQHRVQ-P6_mIVdLJcbkITuJdeTff-j6Sw",
+               "width": 64,
+               "height": 64
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcTEVR2ats4pd66RnhU0C11_bJBJvMg-K13u8okrcxsJVa5DDSib2HJpdr96i5ipvqDB8NBQ6CiDeMKWATOjK3qGUfaoP6dIUQR7L3vFCG6fUA",
+               "width": 96,
+               "height": 96
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcR0TYJe8wMhjL9eolVmI8UZx8e9xjAXJbohtjsDcSvh17a78AmCG3MrnFlcVflOQLBt3LnOogkmjE3LskGAs84KzKpfgD2PFH6nlCZnYGDmWKU",
+               "width": 128,
+               "height": 128
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcQ8xvwkMYUBf1IJiHzoVz-q7v-CUyudBH_D8yp8eAGpSdOioIwh1RXQ_9sTNiB1RKVoMMTcWff9lfhhBJEee3DInalKfd5VQRFVyYejkGM8T0c",
+               "width": 180,
+               "height": 180
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcT3zB4OiIquDGZcEX5EibBXRJiWcYoxfoqiGYHPkN7Vl4zZo6B21ju0bdGOv1jvXcpdifoEfjHvCfgP9Lro0h-BwRv8E3RGGbqO3Hw5WtFjqDA",
+               "width": 256,
+               "height": 256
+              }
+             ]
+            }
+           }
+          },
+          {
+           "channelExternalLinkViewModel": {
+            "title": {
+             "content": "Give Me Work"
+            },
+            "link": {
+             "content": "forwarddesigner.net",
+             "commandRuns": [
+              {
+               "startIndex": 0,
+               "length": 19,
+               "onTap": {
+                "innertubeCommand": {
+                 "clickTrackingParams": "CAgQobIHGAIiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+                 "commandMetadata": {
+                  "webCommandMetadata": {
+                   "url": "https://www.youtube.com/redirect?event=channel_description&redir_token=QUZZTVljSFdKdWRYTUxBSGY2c29CMmg1ZjVGdXxBSTVJdTV1NlBRUlJDTXU1dEtnVkJEYzNTU3ZZYzJJdTYwMmZldUFBMUtVVnpCRVZaemhKVlFpOHFYU250SHJuQ0JMVjhCTkhWejZmZnRSSUVYZ1luc1ZOazB0ZmNnT3hLUmNX&q=https%3A%2F%2Fforwarddesigner.net",
+                   "webPageType": "WEB_PAGE_TYPE_UNKNOWN",
+                   "rootVe": 83769
+                  }
+                 },
+                 "urlEndpoint": {
+                  "url": "https://www.youtube.com/redirect?event=channel_description&redir_token=QUZZTVljSFdKdWRYTUxBSGY2c29CMmg1ZjVGdXxBSTVJdTV1NlBRUlJDTXU1dEtnVkJEYzNTU3ZZYzJJdTYwMmZldUFBMUtVVnpCRVZaemhKVlFpOHFYU250SHJuQ0JMVjhCTkhWejZmZnRSSUVYZ1luc1ZOazB0ZmNnT3hLUmNX&q=https%3A%2F%2Fforwarddesigner.net",
+                  "target": "TARGET_NEW_WINDOW",
+                  "nofollow": true
+                 }
+                }
+               }
+              }
+             ]
+            },
+            "favicon": {
+             "sources": [
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcQ50lqVlSekRQjJHwIC5FdvAl2IxEhpfviuASFG6Ez4BsdZWnhY4I1Dztf-DZ6GA8ZRy9mKOPQHopTMkjr7VLLidJnieBnVJo2CCuqrtWQDpRhrWzUN0Lqx",
+               "width": 16,
+               "height": 16
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcTBvJcaiRJGbYG0JrjvlYBDeDiSK5bgr1hDLIZAx1AcdMhy_YTmdYtX8cDYYgEaxa5arfsjdmDLnZS7j9zPtCk7uvmjSvrhIVn87wGrO47BxCPnNluEC5kw",
+               "width": 24,
+               "height": 24
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcTJGEMNFNj5lVs8Y8hmiGZhPUXgv9if-cG21rIo3mZYD-XS_tD9CXW_nhdegngCcv69gASkZdxdeQGu_UcL03Xs3eFcNTqWZfKcF_xAMxdj9mpzoOlsW0oq",
+               "width": 32,
+               "height": 32
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcTqHiJZzEejO7YOAUgRS3OxwxwBRMeAt4w_9SjYkwUFMfQ78zkiXcMTVroJcZ4oIgUe2CdkK3DhNBYOvre7v465Fi5lIxO_vq4pyObmLWCUsl6Bd8tXL4QQ",
+               "width": 48,
+               "height": 48
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcSJ3Supwu4gz0VV8MSArIrEDgsYSV6aPUF01IrpJccVe1JNaAg_ZfeUdvkFGVyWFLaruJ3fxH3fANiz84xIfkKpXgVN6xUxnO-RXThNA0zp_Iwx51tGNqNU",
+               "width": 50,
+               "height": 50
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcT0bbTFumHMs-qdRPJUKzf6USTd9rqoljoL3dHZjOB-lZ1LFhB62tpAxR9fnXXy1k-INNHRZCX2dX67CvqH4c4UgpHNWd04J0Vi5LViX5IZ_GCEheSZjtn3",
+               "width": 64,
+               "height": 64
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcTWo6YhSEQycNFT9TVgUm1C_toLD7oYuRq2Akrx2GY_4DPAzd73lpOfZ0kHE0LY31cG3Bo7eNnzKm75jg9Y51a-0cTfaf0BQYJHqehTmOwTNSP-7LbHI6xh",
+               "width": 96,
+               "height": 96
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcQfqyKmUUPyG5Ycvi5DA3OUp-78M8HAXCJT2BIu03p919yVHMxGXWm9h-MsHTmAg00LrU4cZPPQNKoeSjbz3UaXoojsN7DJcvr4E2ipi1QuXBUyX_08U-JM4A",
+               "width": 128,
+               "height": 128
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcQ6gCR8YQNhc3ahtxlFcThAal8cT55DPSu6MNGME-yw6M3QhO1DeYHfxxC2QluW3hQa6ecF7L7B6nvMLEskIiDrqZnNgOHbKBLNeCtqe9jqln_ikob1FVxBhg",
+               "width": 180,
+               "height": 180
+              },
+              {
+               "url": "https://encrypted-tbn3.gstatic.com/favicon-tbn?q=tbn:ANd9GcQWiz_QE9-nTPv8_R5-dhSAQERouX-mlfxTNx86iMRxOJPc-l01-A6oq9OJTZa3oO0u1EDD_x5ysdXifNF5k7dEcU479JcLcz0U2vVYOpSV7ORd4D4YMNGYWw",
+               "width": 256,
+               "height": 256
+              }
+             ]
+            }
+           }
+          },
+          {
+           "channelExternalLinkViewModel": {
+            "title": {
+             "content": "Get Weekly Emails"
+            },
+            "link": {
+             "content": "wardonwords.com",
+             "commandRuns": [
+              {
+               "startIndex": 0,
+               "length": 15,
+               "onTap": {
+                "innertubeCommand": {
+                 "clickTrackingParams": "CAcQobIHGAMiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+                 "commandMetadata": {
+                  "webCommandMetadata": {
+                   "url": "https://www.youtube.com/redirect?event=channel_description&redir_token=QUZZTVljRjJXX2ZLUEZCUkdLNVRubDVfbFhTcnxBSTVJdTV1VklBbVczdXlvTzNiamdhLW1kLUhWX1IyTGVyajBMQThMM1JNdUJJVjVBRUstMi1TczNuWk9CQTAzMmxRWndmTjdFNklMUWZhNXRGTkVXZ1I1RVV6eVBQazNCX2Jm&q=https%3A%2F%2Fwardonwords.com",
+                   "webPageType": "WEB_PAGE_TYPE_UNKNOWN",
+                   "rootVe": 83769
+                  }
+                 },
+                 "urlEndpoint": {
+                  "url": "https://www.youtube.com/redirect?event=channel_description&redir_token=QUZZTVljRjJXX2ZLUEZCUkdLNVRubDVfbFhTcnxBSTVJdTV1VklBbVczdXlvTzNiamdhLW1kLUhWX1IyTGVyajBMQThMM1JNdUJJVjVBRUstMi1TczNuWk9CQTAzMmxRWndmTjdFNklMUWZhNXRGTkVXZ1I1RVV6eVBQazNCX2Jm&q=https%3A%2F%2Fwardonwords.com",
+                  "target": "TARGET_NEW_WINDOW",
+                  "nofollow": true
+                 }
+                }
+               }
+              }
+             ]
+            },
+            "favicon": {
+             "sources": [
+              {
+               "url": "https://encrypted-tbn2.gstatic.com/favicon-tbn?q=tbn:ANd9GcRptpZmoxh9u2cPt6AfVNPMy-Rw-gVwGvoDv6E9_GWNc0Qa7JWoziIlm-Iswf6yoy6d96cibFW_5c1hb8P_hXxO4gp661juAnaEJFbgKYlcyQGKgac",
+               "width": 16,
+               "height": 16
+              },
+              {
+               "url": "https://encrypted-tbn2.gstatic.com/favicon-tbn?q=tbn:ANd9GcS520M0f8PMWIXWXy9DqYIwsea1CtC-U1wY8IkMCIb-UhB7UAYBawCTQzromnmiCdyRCNra7KOy8GCRq-jSn2NSRw1NedqaPhoM2_GwLGunYj6yUjk",
+               "width": 24,
+               "height": 24
+              },
+              {
+               "url": "https://encrypted-tbn2.gstatic.com/favicon-tbn?q=tbn:ANd9GcRMkCzWueLJq82HWMVUitvlbxRCgpbSbUZ3jF1XokeTJCiG4VZolK4AjpQyX7j_oIW4usvgyKeP7NIaqPFpv0yyUH_7VTzyRLCQxZ7OnF9xr6IZTQg",
+               "width": 32,
+               "height": 32
+              },
+              {
+               "url": "https://encrypted-tbn2.gstatic.com/favicon-tbn?q=tbn:ANd9GcSWi3a9Ib7pup9P2ZUO_LFSTVvmC3ZZBvS-DrBknIHD3b6vuXkq3HtqRVPnVrY-U92FPtQPlSTnuh1J3SsU-t2qdsujQMhDuA4YCCUis9FrmIoyOdc",
+               "width": 48,
+               "height": 48
+              },
+              {
+               "url": "https://encrypted-tbn2.gstatic.com/favicon-tbn?q=tbn:ANd9GcRV5lT0OXWhLHgrnPeQMawBzY-EYt6TYrkrwBmuh3MgF8Z8u-vCJl12Rjf6y0XB8JsEGE7QE5MYI2x3BqYkLQ8lDGTJrzbPa6eWPxNDsLtY6iTocLc",
+               "width": 50,
+               "height": 50
+              },
+              {
+               "url": "https://encrypted-tbn2.gstatic.com/favicon-tbn?q=tbn:ANd9GcQjWdKnpNHOe-rvisTlUpfw4ZixC47OKL3AtDWaLp1P8hSH_NgpZtfaX93IL40SWTNEIsIDSesBqojptoaQ0yRg09kdiIuk9yp5GFxeD94dca_HD08",
+               "width": 64,
+               "height": 64
+              },
+              {
+               "url": "https://encrypted-tbn2.gstatic.com/favicon-tbn?q=tbn:ANd9GcQxfxlwE6-h8T8Es9t6J09VBJU5nGaPpvtZxtUEC6aGSgpr9WybgadJexVvlZJ3pAU0QlRFiItUalFDo5Ybi0hAIaOon4wyfK_piuLapyJV04TEC-4",
+               "width": 96,
+               "height": 96
+              },
+              {
+               "url": "https://encrypted-tbn2.gstatic.com/favicon-tbn?q=tbn:ANd9GcTDhMFCKsdkHOOK_rae0FWPZa1sCbxRl3HU61_Xn7eNDK1a9jkF-jqTQ0AJRu4-LG7ZuZb2m3VnqCR1h9DLGibbpwR3pDvE891GhoIXAnUS8tqSqkBW",
+               "width": 128,
+               "height": 128
+              },
+              {
+               "url": "https://encrypted-tbn2.gstatic.com/favicon-tbn?q=tbn:ANd9GcTWEP3Hr5Cchb7FPEjlUpWUFqMjuVQra7DhNgEA9rvX853AJs0ORQM4z0dhu1S-JZ35EXqz-Uq7X8rPCWZoBWhvxD087SZnkwqwxtII7zXCUIAQqxPQ",
+               "width": 180,
+               "height": 180
+              },
+              {
+               "url": "https://encrypted-tbn2.gstatic.com/favicon-tbn?q=tbn:ANd9GcQHRUVQP3IcxfNbk8akg-wIG_IQXtHD_OyL2yFvDFgMDuTF_0qJXFO413FTRURr5m9xUZJ_R6uLzqRBeBMaJcdJHHtQ5md0J8EngXR2cT6cOFC4qwAb",
+               "width": 256,
+               "height": 256
+              }
+             ]
+            }
+           }
+          }
+         ],
+         "displayCanonicalChannelUrl": "www.youtube.com/@wardonwords",
+         "rendererContext": {
+          "loggingContext": {
+           "loggingDirectives": {
+            "trackingParams": "CAYQo4sSIhMIi6DJpIi4lwMVI4TlBx0yVxCe",
+            "visibility": {
+             "types": "12"
+            }
+           }
+          }
+         }
+        }
+       },
+       "shareChannel": {
+        "buttonRenderer": {
+         "style": "STYLE_DEFAULT",
+         "size": "SIZE_DEFAULT",
+         "text": {
+          "runs": [
+           {
+            "text": "Share channel"
+           }
+          ]
+         },
+         "icon": {
+          "iconType": "SHARE"
+         },
+         "trackingParams": "CAEQ8FsiEwiLoMmkiLiXAxUjhOUHHTJXEJ4=",
+         "accessibilityData": {
+          "accessibilityData": {
+           "label": "Share channel"
+          }
+         },
+         "command": {
+          "clickTrackingParams": "CAEQ8FsiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+          "commandMetadata": {
+           "webCommandMetadata": {
+            "sendPost": true
+           }
+          },
+          "signalServiceEndpoint": {
+           "signal": "CLIENT_SIGNAL",
+           "actions": [
+            {
+             "clickTrackingParams": "CAEQ8FsiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+             "openPopupAction": {
+              "popup": {
+               "menuPopupRenderer": {
+                "items": [
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Share channel"
+                     }
+                    ]
+                   },
+                   "trackingParams": "CAQQ0rYLGAEiEwiLoMmkiLiXAxUjhOUHHTJXEJ4=",
+                   "command": {
+                    "clickTrackingParams": "CAQQ0rYLGAEiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+                    "commandMetadata": {
+                     "webCommandMetadata": {
+                      "sendPost": true,
+                      "apiUrl": "/youtubei/v1/share/get_share_panel"
+                     }
+                    },
+                    "shareEntityServiceEndpoint": {
+                     "serializedShareEntity": "GhhVQ0tSbUw3Qk15Q2VMRTRLVW83M1JEenc%3D",
+                     "commands": [
+                      {
+                       "clickTrackingParams": "CAQQ0rYLGAEiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+                       "openPopupAction": {
+                        "popup": {
+                         "unifiedSharePanelRenderer": {
+                          "trackingParams": "CAUQjmIiEwiLoMmkiLiXAxUjhOUHHTJXEJ4=",
+                          "showLoadingSpinner": true
+                         }
+                        },
+                        "popupType": "DIALOG",
+                        "beReused": true
+                       }
+                      }
+                     ]
+                    }
+                   }
+                  }
+                 },
+                 {
+                  "menuServiceItemRenderer": {
+                   "text": {
+                    "runs": [
+                     {
+                      "text": "Copy channel ID"
+                     }
+                    ]
+                   },
+                   "trackingParams": "CAIQ07YLGAIiEwiLoMmkiLiXAxUjhOUHHTJXEJ4=",
+                   "command": {
+                    "clickTrackingParams": "CAIQ07YLGAIiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+                    "copyTextEndpoint": {
+                     "text": "UCKRmL7BMyCeLE4KUo73RDzw",
+                     "successActions": [
+                      {
+                       "clickTrackingParams": "CAIQ07YLGAIiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+                       "commandMetadata": {
+                        "webCommandMetadata": {
+                         "sendPost": true
+                        }
+                       },
+                       "signalServiceEndpoint": {
+                        "signal": "CLIENT_SIGNAL",
+                        "actions": [
+                         {
+                          "clickTrackingParams": "CAIQ07YLGAIiEwiLoMmkiLiXAxUjhOUHHTJXEJ7KAQQweXBQ",
+                          "openPopupAction": {
+                           "popup": {
+                            "notificationActionRenderer": {
+                             "responseText": {
+                              "runs": [
+                               {
+                                "text": "Channel ID copied to clipboard"
+                               }
+                              ]
+                             },
+                             "trackingParams": "CAMQuWoiEwiLoMmkiLiXAxUjhOUHHTJXEJ4="
+                            }
+                           },
+                           "popupType": "TOAST"
+                          }
+                         }
+                        ]
+                       }
+                      }
+                     ]
+                    }
+                   }
+                  }
+                 }
+                ]
+               }
+              },
+              "popupType": "RESPONSIVE_DROPDOWN"
+             }
+            }
+           ]
+          }
+         }
+        }
+       }
+      }
+     }
+    ],
+    "targetId": "6b462986-0000-21f0-82e0-d4f547e655c0"
+   }
+  }
+ ]
+}
