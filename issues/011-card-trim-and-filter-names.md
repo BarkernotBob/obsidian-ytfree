@@ -1,5 +1,7 @@
 # 011 — No blurb, a bigger target, and lists that say what they are
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-29 — awaiting manual test.**
 
 Three asks from BarkernotBob, all phone, all in the hub. Two of them undo parts of

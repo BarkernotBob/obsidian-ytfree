@@ -1,6 +1,8 @@
 # 047 — A search Remove that lasts, and a way to mute a channel in search
 
-**Status:** Scoped 2026-09-01. **Not built.** This is **stage two of
+**Status:** **Built 2026-10-13** — awaiting manual test. Rules in `src/search-blocklist.ts`
+(tested in `tests/search-blocklist.test.ts`), store methods and the `⋯` chip in `hub.ts`, the
+Settings lists in `SearchBlocklistModal`. This is **stage two of
 [docs/V1-SCOPE-CARD-CONTROLS.md](../docs/V1-SCOPE-CARD-CONTROLS.md)**, written
 2026-07-30, listed as "next" in the write-ups for both
 [023](023-card-controls-layout.md) and [024](024-preview-plays.md), and never
@@ -95,8 +97,33 @@ and a growth bound is part of building this, not a later tidy.
 
 ## Manual test (for BarkernotBob)
 
-To be written when this is built, per the repo rule. Criteria 1 and 6 need both
-devices.
+Criteria 1 and 6 need both devices.
+
+1. Search anything. Remove the third result. The "Removed — Undo" strip takes its place at the
+   same height. Press Undo: the card comes back where it was.
+2. Remove it again. Search the same words again: it is not in the results. Restart Obsidian and
+   search again: still not there. On the phone (after the state file syncs): not there either.
+3. Hidden filter in the hub: the removed video is not in it.
+4. Settings → Subscriptions hub → **Removed from search** → Show list…: the video is listed.
+   Press **Show in search**, close, search again: it is back.
+5. On a search card from a channel you do **not** subscribe to, the `⋯` chip sits in the top-right
+   corner of the thumbnail, readable on a light thumbnail. Tap it → **Hide this channel**. Every
+   card from that channel leaves the list without the list jumping; a Notice says where the undo is.
+6. Search again (and on the phone): nothing from that channel. Open the channel from a hub
+   video's preview instead: its channel screen still shows everything.
+7. The hub, the poll and notifications are unchanged for that channel.
+8. Settings → **Hidden from search** lists the channel; **Unhide** restores its results.
+9. Hide a channel, then subscribe to it (import, or account sync on the Mac): a Notice says it is
+   no longer hidden, and its results return.
+10. Cards from channels you subscribe to have no `⋯` chip.
+
+Decisions taken while building:
+
+- Removed videos are also left out of channel screens (you turned the video down, wherever it
+  appears). Channel hides affect search only.
+- Bounds: 500 removed videos, 200 hidden channels, oldest first off the end. An undo is kept
+  as an entry for 30 days so it outlives the other device's stale copy, then dropped.
+- Merge: the newest decision per ID wins, undo included. See `search-blocklist.ts`.
 
 ## Notes
 

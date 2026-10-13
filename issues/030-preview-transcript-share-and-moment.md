@@ -1,5 +1,7 @@
 # 030 — Preview's transcript, the share icon, and "this moment"
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Six corrections from using 028 and 029 on a screen.
 
 ## What was wrong

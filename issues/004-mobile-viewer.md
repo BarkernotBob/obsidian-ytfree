@@ -1,5 +1,7 @@
 # 004 — A viewer that works on Obsidian mobile
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 **Status:** Re-scoped 2026-07-27 after the iframe spike failed. **Not built.**
 **Created:** 2026-07-27
 **Follow-on:** [005 — full quality on mobile](005-mobile-full-quality.md). This issue deliberately

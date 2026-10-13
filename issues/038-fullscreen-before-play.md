@@ -1,5 +1,7 @@
 # 038 — Fullscreen pressed before playback starts
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-08-06 — not yet tested on the phone.** From BarkernotBob's manual test:
 
 > "Full screen is broken now too in preview and in a note."

@@ -4,6 +4,9 @@ Settled by grilling on 2026-07-30, with the button layout decided against a
 throwaway prototype (`prototypes/card-controls/`, branch
 `prototype/card-controls`, never merged).
 
+**Status (2026-10-13):** closed. Stage one and three shipped earlier; stage two (the persistent
+search blocklist and Hide channel) was built as issue 047.
+
 ## The problem
 
 A hub card and a search result card each have exactly one interaction: the whole

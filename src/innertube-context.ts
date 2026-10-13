@@ -12,6 +12,8 @@ export const PLAYER_URL = "https://www.youtube.com/youtubei/v1/player";
 export const SEARCH_URL = "https://www.youtube.com/youtubei/v1/search";
 /** The watch page's data, and the only place the replay heatmap exists. */
 export const NEXT_URL = "https://www.youtube.com/youtubei/v1/next";
+/** A channel's tabs, and the continuation of one. Issue 045. */
+export const BROWSE_URL = "https://www.youtube.com/youtubei/v1/browse";
 
 export interface ClientProfile {
   ctx: Record<string, string | number>;

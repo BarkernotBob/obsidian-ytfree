@@ -1,5 +1,7 @@
 # 012 — Where you left off, transcripts on the phone, and a row you can hit
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-29 — awaiting manual test.**
 
 Five asks from BarkernotBob. Two are the card layout finishing what

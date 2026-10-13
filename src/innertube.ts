@@ -14,7 +14,14 @@
  */
 
 import { requestUrl } from "obsidian";
-import { CLIENTS, NEXT_URL, PLAYER_URL, SEARCH_URL, playerBody } from "./innertube-context.ts";
+import { BROWSE_URL, CLIENTS, NEXT_URL, PLAYER_URL, SEARCH_URL, playerBody } from "./innertube-context.ts";
+import {
+  CHANNEL_SEARCH_PARAMS,
+  CHANNEL_VIDEOS_PARAMS,
+  parseChannelResponse,
+  parsePlayerPublishDate,
+} from "./channel.ts";
+import type { ChannelPage } from "./channel.ts";
 import { parseSearchResponse } from "./search.ts";
 import type { SearchPage } from "./search.ts";
 import { defaultFilters, encodeSearchParams } from "./search-params.ts";
@@ -95,11 +102,36 @@ export async function searchYouTube(
   return parseSearchResponse(await callInnertube(SEARCH_URL, "android", body));
 }
 
+/**
+ * One page of a channel's catalogue: its Videos tab, a search inside it, or the
+ * next page of either. Issue 045.
+ *
+ * WEB, not ANDROID: ANDROID answers a channel `browse` with HTTP 400 (measured
+ * 2026-10-13). A continuation needs only its token, the same as search.
+ */
+export async function browseChannel(
+  channel: { channelId: string; channelTitle: string },
+  query: string | null = null,
+  continuation: string | null = null,
+): Promise<ChannelPage> {
+  const body = continuation
+    ? { continuation }
+    : query
+      ? { browseId: channel.channelId, params: CHANNEL_SEARCH_PARAMS, query }
+      : { browseId: channel.channelId, params: CHANNEL_VIDEOS_PARAMS };
+  return parseChannelResponse(await callInnertube(BROWSE_URL, "web", body), channel);
+}
+
 /** What one player call is worth to the hub: the two facts a feed lacks. */
 export interface VideoDetails {
   description: string;
   /** Seconds, or null when the video would not answer. */
   durationSeconds: number | null;
+  /** The uploader, for "open this video's channel" from a note. "" when unknown. */
+  channelId: string;
+  channelTitle: string;
+  /** The video's title, for a link opened with no hub item behind it. "" when unknown. */
+  title: string;
 }
 
 /**
@@ -116,16 +148,39 @@ export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> 
   try {
     const response = await callInnertube(PLAYER_URL, "android", playerBody(videoId));
     const details = (response as {
-      videoDetails?: { shortDescription?: unknown; lengthSeconds?: unknown };
+      videoDetails?: {
+        shortDescription?: unknown;
+        lengthSeconds?: unknown;
+        channelId?: unknown;
+        author?: unknown;
+        title?: unknown;
+      };
     }).videoDetails;
     // `lengthSeconds` is a *string* of digits in every player response measured.
     const length = Number(details?.lengthSeconds);
     return {
       description: typeof details?.shortDescription === "string" ? details.shortDescription : "",
       durationSeconds: Number.isFinite(length) && length > 0 ? length : null,
+      channelId: typeof details?.channelId === "string" ? details.channelId : "",
+      channelTitle: typeof details?.author === "string" ? details.author : "",
+      title: typeof details?.title === "string" ? details.title : "",
     };
   } catch {
-    return { description: "", durationSeconds: null };
+    return { description: "", durationSeconds: null, channelId: "", channelTitle: "", title: "" };
+  }
+}
+
+/**
+ * A video's publish date, as an ISO string, or "" when YouTube would not say.
+ *
+ * WEB, because only the WEB player carries `microformat`. One call per video,
+ * and only the backfill (048) makes it — a path that runs a few times a year.
+ */
+export async function fetchPublishDate(videoId: string): Promise<string> {
+  try {
+    return parsePlayerPublishDate(await callInnertube(PLAYER_URL, "web", playerBody(videoId)));
+  } catch {
+    return "";
   }
 }
 

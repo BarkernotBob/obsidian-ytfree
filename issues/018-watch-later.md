@@ -1,5 +1,7 @@
 # 018 — What Watch Later is for now
 
+**Status (2026-10-13): Parked.** Isaiah: "Forget watch later for right now." Not to be built or re-asked until Isaiah raises it.
+
 Status: **Scoped — needs a decision from BarkernotBob. Nothing built.**
 
 > "Look at how to handle watch later moving forward"

@@ -1,5 +1,7 @@
 # 046 — An "In progress" list: what you started and did not finish
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 **Status:** **Built 2026-09-02.** Scoped 2026-09-01, decided by BarkernotBob on
 2026-08-06 and left in HANDOFF prose until then.
 

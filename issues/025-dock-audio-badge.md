@@ -1,5 +1,7 @@
 # 025 — A ▶ on the dock icon while audio plays
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built and verified working 2026-07-31.**
 
 Verified end to end by `ytfree:selftest-dock-badge`, which plays a real tone

@@ -1,5 +1,7 @@
 # 044 — Subscriptions that never came back: a wedged session, a silent one, and unsubscribes that do nothing
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 **Status:** **Built 2026-09-02.** Scoped 2026-09-01. Raised by BarkernotBob:
 
 > "adding or removing subs on youtube isn't publishing back to the app"

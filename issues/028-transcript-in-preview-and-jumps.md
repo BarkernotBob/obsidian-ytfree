@@ -1,5 +1,7 @@
 # 028 — The transcript in Preview, and a jump from a peak to it
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-31 — awaiting manual test.**
 
 ## The problem

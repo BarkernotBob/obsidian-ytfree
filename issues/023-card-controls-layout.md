@@ -1,5 +1,7 @@
 # 023 — Four buttons on every card, and the layout that fits them
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-30 — awaiting manual test.**
 
 Stage one of [docs/V1-SCOPE-CARD-CONTROLS.md](../docs/V1-SCOPE-CARD-CONTROLS.md):

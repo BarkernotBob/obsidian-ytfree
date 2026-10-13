@@ -1,5 +1,7 @@
 # 022 — Adaptive silence floor: no chipmunks, no swallowed words
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Planned 2026-07-30 — not started.**
 
 > Smart speed is not working very well. […] "and his name," is being sped up

@@ -1,5 +1,7 @@
 # 017 — Skip the silence, fold the transcript, tidy the leftovers
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-30 — awaiting manual test.**
 
 Six items off BarkernotBob's list, in one pass. Five are done and one is half done for

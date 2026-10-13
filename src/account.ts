@@ -227,6 +227,71 @@ export function mergeWatchLater(
 }
 
 /**
+ * How far down the subscription feed a sync reads for collabs (GitHub #2).
+ *
+ * The feed is newest first and a sync runs every 12 hours, so the first 60
+ * entries reach well past the last sync for any plausible set of
+ * subscriptions. The first sync after this shipped reads deeper, once, so the
+ * collabs already sitting in the feed — the one that started #2 was 145th of
+ * 800 on 2026-10-13 — come in too.
+ */
+export const COLLAB_FEED_LIMIT = 60;
+export const COLLAB_FEED_FIRST_LIMIT = 200;
+
+export interface CollabContext {
+  items: HubItem[];
+  channels: ReadonlyArray<{ id: string }>;
+  removedChannels?: ReadonlyArray<{ id: string }>;
+  unsubscribedChannels?: ReadonlyArray<{ id: string }>;
+  deletedVideos?: ReadonlyArray<{ id: string }>;
+}
+
+/**
+ * Collabs out of the subscription feed: every video in it whose uploader is a
+ * channel the hub does not poll.
+ *
+ * Isaiah's rule (2026-10-13): any such video gets in. Every entry in that feed
+ * is there because YouTube tied it to one of your subscriptions, so a video
+ * from a channel you never subscribed to can only be a collaboration one of
+ * yours is on. Channels you removed in the hub or unsubscribed from on YouTube
+ * are excluded too — their videos must not come back by this side door — and
+ * so are videos already in the hub or whose note you deleted.
+ *
+ * The card names the uploader, because that is what the feed reports and what
+ * the note, Delete and Hide already key on.
+ */
+export function collabsFromSubsFeed(context: CollabContext, rows: PrintRow[], now: Date): HubItem[] {
+  const polled = new Set<string>();
+  for (const list of [context.channels, context.removedChannels, context.unsubscribedChannels]) {
+    for (const channel of list ?? []) polled.add(channel.id);
+  }
+  const known = new Set(context.items.map((item) => item.videoId));
+  for (const entry of context.deletedVideos ?? []) known.add(entry.id);
+
+  const added: HubItem[] = [];
+  for (const row of rows) {
+    if (!VIDEO_ID_RE.test(row.id) || known.has(row.id)) continue;
+    if (!row.channelId || !CHANNEL_ID_RE.test(row.channelId) || polled.has(row.channelId)) continue;
+    known.add(row.id);
+    added.push({
+      videoId: row.id,
+      channelId: row.channelId,
+      channelTitle: row.channelTitle ?? "",
+      title: row.title ?? row.id,
+      published: "",
+      thumbnail: `https://i.ytimg.com/vi/${row.id}/mqdefault.jpg`,
+      description: "",
+      views: null,
+      isShort: null,
+      state: "new",
+      seenAt: now.toISOString(),
+      origin: "collab",
+    });
+  }
+  return added;
+}
+
+/**
  * Mark anything already watched elsewhere.
  *
  * One-directional, always: history is read in so the hub can stop showing you

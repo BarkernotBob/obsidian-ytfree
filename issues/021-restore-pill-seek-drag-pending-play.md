@@ -1,5 +1,7 @@
 # 021 — A way back, a line that lines up, and a Play button that never lies
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-30 — awaiting manual test.**
 
 Five items off BarkernotBob's list.

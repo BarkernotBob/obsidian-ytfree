@@ -1,5 +1,7 @@
 # 024 — Preview plays
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-31 — awaiting manual test.**
 
 Stage three of [docs/V1-SCOPE-CARD-CONTROLS.md](../docs/V1-SCOPE-CARD-CONTROLS.md):

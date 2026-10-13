@@ -129,3 +129,79 @@ export function searchScreen(input: SearchScreenInput): SearchScreenCopy {
     retry: false,
   };
 }
+
+/** What the channel screen (issue 045) is showing, in the same shapes as search. */
+export interface ChannelScreenInput {
+  /** The channel's name, once anything has said it. */
+  title: string;
+  /** A search inside the channel, or null for its plain catalogue. */
+  query: string | null;
+  state: "idle" | "loading" | "error";
+  error: string;
+  results: number;
+  /** "418 videos", from the header, or "". */
+  videosText: string;
+}
+
+/**
+ * The channel screen's words. Same contract as `searchScreen`: a one-line
+ * status and, when there are no cards, a block with a headline and what next.
+ *
+ * Nothing here is ever "already in your hub" — a catalogue shows everything,
+ * marked, because "what else has this person made" includes what you have.
+ */
+export function channelScreen(input: ChannelScreenInput): SearchScreenCopy {
+  const name = input.title || "this channel";
+  if (input.state === "error") {
+    return {
+      kind: "error",
+      status: `Could not load ${name} — ${input.error}`,
+      headline: `Could not load ${name}`,
+      help: input.error || "YouTube did not answer. Check your connection and try again.",
+      retry: true,
+    };
+  }
+  if (input.state === "loading" && input.results === 0) {
+    return {
+      kind: "loading",
+      status: input.query ? `Searching ${name} for ${quoted(input.query)}…` : `Loading ${name}…`,
+      headline: input.query ? "Searching this channel…" : "Loading this channel…",
+      help: "",
+      retry: false,
+    };
+  }
+  if (input.results === 0) {
+    return input.query
+      ? {
+          kind: "none",
+          status: `Nothing in ${name} for ${quoted(input.query)}`,
+          headline: `Nothing in ${name} for ${quoted(input.query)}`,
+          help: "Try fewer words, or clear the box to see every video.",
+          retry: false,
+        }
+      : {
+          kind: "none",
+          status: `${name} has no videos to show`,
+          headline: "No videos here",
+          help: "The channel has nothing public on its Videos tab.",
+          retry: false,
+        };
+  }
+  if (input.query) {
+    return {
+      kind: "results",
+      status: `${plural(input.results, "result")} for ${quoted(input.query)} in ${name}`,
+      headline: "",
+      help: "",
+      retry: false,
+    };
+  }
+  const total = input.videosText ? ` of ${input.videosText}` : "";
+  return {
+    kind: "results",
+    status: `${input.results} shown${total} · newest first`,
+    headline: "",
+    help: "",
+    retry: false,
+  };
+}

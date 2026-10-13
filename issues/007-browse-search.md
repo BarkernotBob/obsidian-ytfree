@@ -1,5 +1,7 @@
 # 007 — Browse: search YouTube from inside the hub
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 **Status:** Built 2026-07-28 — awaiting manual test.
 **Created:** 2026-07-28
 **Scope:** [docs/V1-SCOPE-BROWSE.md](../docs/V1-SCOPE-BROWSE.md) (gate passed before build)

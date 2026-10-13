@@ -22,12 +22,16 @@ import {
   applyWatched,
   channelsFromChannelsPage,
   channelsFromSubsFeed,
+  COLLAB_FEED_FIRST_LIMIT,
+  COLLAB_FEED_LIMIT,
+  collabsFromSubsFeed,
   COOKIE_FILE_MISSING,
   describeSession,
   emptySession,
   ImportedChannel,
   looksLikeExpiry,
   mergeWatchLater,
+  PrintRow,
   syncIsDue,
   unwedgeSession,
   videoIdsFrom,
@@ -40,6 +44,13 @@ import {
 } from "./capture";
 import type { DownloadHandle } from "./desktop/download.ts";
 import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
+import {
+  HANDOFF_ACTION,
+  HANDOFF_BOOKMARKLET,
+  isYouTubeUrl,
+  parseYouTubeLink,
+  youTubeLinkAt,
+} from "./handoff";
 import type { SeekMode } from "./description";
 import { formatTimestamp } from "./format";
 import {
@@ -48,6 +59,7 @@ import {
   HubView,
   PreviewHandle,
   ImportSubscriptionsModal,
+  SearchBlocklistModal,
   SubscriptionsStore,
 } from "./hub";
 import { YT_ICON, registerIcons } from "./icon";
@@ -90,7 +102,7 @@ import {
   TRANSCRIPT_REST_MARGIN_PX,
   upsertSection,
 } from "./transcript";
-import { fetchCaptionTrack, fetchHeatmap } from "./innertube";
+import { fetchCaptionTrack, fetchHeatmap, fetchVideoDetails } from "./innertube";
 import type { NotePosition, SectionName } from "./sections";
 import {
   SECTION_HEADINGS,
@@ -141,6 +153,8 @@ interface YtFreeSettings {
   pinnedPlayer: boolean;
   pinnedHeightVh: number;
   pinnedFrontmatterKeys: string;
+  /** YouTube links clicked in a note open in YT Free, not the browser (GitHub #3). */
+  openYouTubeLinksHere: boolean;
   collapseProperties: boolean;
   collapseSections: boolean;
   linkifyTimestamps: boolean;
@@ -187,6 +201,11 @@ interface YtFreeSettings {
   accountSyncHours: number;
   accountHistoryLimit: number;
   accountShowWatched: boolean;
+  /**
+   * Whether a sync has read the subscription feed deep once for collabs
+   * (GitHub #2). After that, each sync reads only the top of it.
+   */
+  accountCollabBackfillDone: boolean;
   /** Blank means `defaultCookieFile()` — which needs `os.homedir()`, so it
    * cannot be spelled out in the defaults any more than the download folder can. */
   accountCookieFile: string;
@@ -299,6 +318,9 @@ const SILENCE_REFRESH_DEBOUNCE_MS = 1200;
  */
 const DELETE_CONFIRM_MS = 5_000;
 
+/** How long a link opened in Obsidian waits for its note's player before skipping the seek. */
+const HANDOFF_PLAYER_WAIT_MS = 8_000;
+
 const TIDY_SETTLE_MS = 60_000;
 const TIDY_INTERVAL_MS = 24 * 3600_000;
 
@@ -349,6 +371,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   pinnedPlayer: true,
   pinnedHeightVh: 40,
   pinnedFrontmatterKeys: "media_link, url",
+  openYouTubeLinksHere: true,
   collapseProperties: true,
   collapseSections: true,
   linkifyTimestamps: true,
@@ -382,6 +405,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   accountSyncHours: 12,
   accountHistoryLimit: 200,
   accountShowWatched: false,
+  accountCollabBackfillDone: false,
   accountCookieFile: "",
   accountSession: emptySession(),
   // On by default. It is the feature, not an option about the feature — and it
@@ -655,6 +679,10 @@ export default class YtFreePlugin extends Plugin {
   private lastActiveVideoId: string | null = null;
   /** Seek link under the mouse at mousedown, consumed by the matching click. */
   private armedSeekLink: SeekTarget | null = null;
+  /** A YouTube link under a Live Preview mousedown, fired by the matching click (GitHub #3). */
+  private armedEditorYouTube: string | null = null;
+  /** A YouTube link under a touchstart, reading view or Live Preview, fired on touchend. */
+  private armedYouTubeTap: { href: string; x: number; y: number } | null = null;
   /**
    * Where a touch started, so a scroll can be told from a tap.
    *
@@ -771,6 +799,42 @@ export default class YtFreePlugin extends Plugin {
           },
         }),
       ),
+      // GitHub #3 in Live Preview: a YouTube link there is a span, not an
+      // anchor, so it is found in the text under the click like a timestamp is.
+      Prec.highest(
+        EditorView.domEventHandlers({
+          mousedown: (evt, view) => {
+            this.armedEditorYouTube = this.editorYouTubeLinkAt(evt, view, true);
+            return false;
+          },
+          click: (evt, view) => {
+            const armed = this.armedEditorYouTube;
+            this.armedEditorYouTube = null;
+            if (!armed || this.editorYouTubeLinkAt(evt, view, false) !== armed) return false;
+            evt.preventDefault();
+            evt.stopPropagation();
+            void this.openYouTubeUrl(armed);
+            return true;
+          },
+          touchstart: (evt, view) => {
+            const touch = evt.touches[0];
+            const url = touch ? this.editorYouTubeLinkAt(touch, view, true) : null;
+            this.armedYouTubeTap = url && touch ? { href: url, x: touch.clientX, y: touch.clientY } : null;
+            return false;
+          },
+          touchend: (evt, view) => {
+            const armed = this.armedYouTubeTap;
+            this.armedYouTubeTap = null;
+            if (!armed) return false;
+            const touch = evt.changedTouches[0];
+            if (!touch || !withinTapSlop(armed, touch)) return false;
+            if (this.editorYouTubeLinkAt(touch, view, false) !== armed.href) return false;
+            evt.preventDefault();
+            void this.openYouTubeUrl(armed.href);
+            return true;
+          },
+        }),
+      ),
     ]);
 
     this.addCommand({
@@ -876,6 +940,69 @@ export default class YtFreePlugin extends Plugin {
       },
       { capture: true },
     );
+
+    // GitHub #3: YouTube links open in YT Free. The door every outside router
+    // (Finicky, the bookmarklet, the iPhone Shortcut) knocks on.
+    this.registerObsidianProtocolHandler(HANDOFF_ACTION, (params) => {
+      void this.openYouTubeUrl(params.url ?? "");
+    });
+
+    // …and links clicked inside a note. Capture phase, for the same reason as
+    // the timestamp anchors above: Obsidian's own handler would hand the link
+    // to the browser first. Touch as well as click, for the phone.
+    this.registerDomEvent(
+      document,
+      "click",
+      (evt) => {
+        const href = this.youTubeAnchorHref(evt.target);
+        if (!href) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        void this.openYouTubeUrl(href);
+      },
+      { capture: true },
+    );
+    this.registerDomEvent(
+      document,
+      "touchstart",
+      (evt) => {
+        const touch = evt.touches[0];
+        const href = touch ? this.youTubeAnchorHref(evt.target) : null;
+        this.armedYouTubeTap = href && touch ? { href, x: touch.clientX, y: touch.clientY } : null;
+      },
+      { capture: true, passive: true },
+    );
+    this.registerDomEvent(
+      document,
+      "touchend",
+      (evt) => {
+        const armed = this.armedYouTubeTap;
+        this.armedYouTubeTap = null;
+        if (!armed) return;
+        const touch = evt.changedTouches[0];
+        if (!touch || !withinTapSlop(armed, touch)) return;
+        const href = this.youTubeAnchorHref(document.elementFromPoint(touch.clientX, touch.clientY));
+        if (href !== armed.href) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        void this.openYouTubeUrl(href);
+      },
+      { capture: true },
+    );
+
+    this.addCommand({
+      id: "open-youtube-url-from-clipboard",
+      name: "Open YouTube URL from clipboard",
+      callback: async () => {
+        let text = "";
+        try {
+          text = await navigator.clipboard.readText();
+        } catch {
+          // Refused or empty: the Notice below says the same thing.
+        }
+        await this.openYouTubeUrl(text);
+      },
+    });
 
     // The video folds away while the keyboard is up. Focus is what makes it
     // immediate — waiting for the keyboard's own animation would collapse the
@@ -1053,6 +1180,22 @@ export default class YtFreePlugin extends Plugin {
           return;
         }
         void this.shareVideo(videoId, null);
+      },
+    });
+
+    // The channel screen (045), from a note. The hub item knows the channel
+    // when there is one; a note made some other way costs one player call to
+    // ask YouTube who uploaded it.
+    this.addCommand({
+      id: "open-video-channel",
+      name: "Open this video's channel",
+      callback: () => {
+        const videoId = this.shareTargetVideoId();
+        if (!videoId) {
+          new Notice("YT Free: no video in this note.");
+          return;
+        }
+        void this.openVideoChannel(videoId);
       },
     });
 
@@ -1735,6 +1878,12 @@ export default class YtFreePlugin extends Plugin {
       let channels: ImportedChannel[] = [];
       let source = "subscription manager";
       let complete = false;
+      // The feed is read once per sync at most: the fallback below may need it
+      // for channels, and the collab pass after it always does.
+      let feedRows: PrintRow[] | null = null;
+      const feedLimit = this.settings.accountCollabBackfillDone
+        ? COLLAB_FEED_LIMIT
+        : COLLAB_FEED_FIRST_LIMIT;
       try {
         channels = channelsFromChannelsPage(
           await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.channelsPage),
@@ -1746,17 +1895,33 @@ export default class YtFreePlugin extends Plugin {
         console.error("YT Free: the subscription manager would not load.", err);
       }
       if (channels.length === 0) {
-        channels = channelsFromSubsFeed(
-          await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.subsFeed, {
-            limit: 300,
-          }),
-        );
+        feedRows = await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.subsFeed, {
+          limit: Math.max(300, feedLimit),
+        });
+        channels = channelsFromSubsFeed(feedRows);
         source = "subscription feed";
       }
       const applied = complete
         ? this.subscriptions.applyAccountChannels(channels)
         : { added: channels.length > 0 ? this.subscriptions.addChannels(channels) : 0, removed: 0 };
       const addedChannels = applied.added;
+
+      // Collabs (GitHub #2): videos in your subscription feed from a channel the
+      // hub does not poll. After the channels, so a channel you just subscribed
+      // to counts as polled and its uploads arrive through its own feed instead.
+      feedRows ??= await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.subsFeed, {
+        limit: feedLimit,
+      });
+      const collabs = collabsFromSubsFeed(this.subscriptions.state, feedRows, new Date());
+      // The one player call each, for the description and length a flat listing
+      // lacks. A handful per sync at most; a failure leaves the item without
+      // them, which is what an unanswered call means everywhere else too.
+      for (const item of collabs) {
+        const details = await fetchVideoDetails(item.videoId);
+        item.description = details.description;
+        item.durationSeconds = details.durationSeconds;
+      }
+      this.subscriptions.state.items.push(...collabs);
 
       // Watch Later.
       const wlRows = await api.listWithCookies(
@@ -1779,6 +1944,7 @@ export default class YtFreePlugin extends Plugin {
 
       await this.subscriptions.save();
       this.refreshHub();
+      this.settings.accountCollabBackfillDone = true;
 
       const finishedAt = new Date().toISOString();
       this.settings.accountSession = {
@@ -1795,7 +1961,7 @@ export default class YtFreePlugin extends Plugin {
         const gone = applied.removed > 0 ? `, ${applied.removed} unsubscribed` : "";
         new Notice(
           `YT Free: ${channels.length} channels from the ${source} (${addedChannels} new${gone}), ` +
-            `${merged.added} new from Watch Later, ${marked} marked watched.`,
+            `${merged.added} new from Watch Later, ${collabs.length} collabs, ${marked} marked watched.`,
           8000,
         );
       }
@@ -1844,6 +2010,121 @@ export default class YtFreePlugin extends Plugin {
     for (const leaf of this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)) {
       if (leaf.view instanceof HubView) leaf.view.renderAll();
     }
+  }
+
+  /** The channel screen for whoever uploaded `videoId`. */
+  /**
+   * A rendered YouTube link an event landed on, or null (GitHub #3).
+   *
+   * Only links in a note's own content, and only with the setting on: the
+   * plugin's own "open on YouTube" fallback must still reach YouTube, or a
+   * video that will not play here would have nowhere to go.
+   */
+  private youTubeAnchorHref(target: EventTarget | null): string | null {
+    if (!this.settings.openYouTubeLinksHere) return null;
+    const anchor = (target as HTMLElement | null)?.closest?.("a");
+    if (!anchor || !anchor.closest(".markdown-rendered")) return null;
+    if (anchor.closest(".ytfree-fallback")) return null;
+    const href = anchor.getAttribute("href") ?? "";
+    return isYouTubeUrl(href) && parseYouTubeLink(href) ? href : null;
+  }
+
+  /** The YouTube link under a pointer in Live Preview, with the same guards as a seek link. */
+  private editorYouTubeLinkAt(
+    at: { clientX: number; clientY: number },
+    view: EditorView,
+    guardSelection: boolean,
+  ): string | null {
+    if (!this.settings.openYouTubeLinksHere) return null;
+    if (!view.state.field(editorLivePreviewField, false)) return null;
+    const pos = view.posAtCoords({ x: at.clientX, y: at.clientY });
+    if (pos === null) return null;
+    const line = view.state.doc.lineAt(pos);
+    const link = youTubeLinkAt(line.text, pos - line.from);
+    if (!link || !parseYouTubeLink(link.url)) return null;
+    if (guardSelection) {
+      for (const range of view.state.selection.ranges) {
+        if (range.from <= line.from + link.to && range.to >= line.from + link.from) return null;
+      }
+    }
+    return link.url;
+  }
+
+  /**
+   * Open any YouTube URL as its note, at the link's second (GitHub #3).
+   *
+   * An existing note wins — the hub's, or any note whose frontmatter names the
+   * video (a Web Clipper note). Otherwise the note is made exactly as the hub
+   * makes one. Never a blank note: a link with no video in it, or a video
+   * YouTube will not name, gets a Notice and nothing else.
+   */
+  async openYouTubeUrl(url: string): Promise<void> {
+    // A cold start from a link: the state file loads during onload.
+    await new Promise<void>((resolve) => this.app.workspace.onLayoutReady(resolve));
+    const link = parseYouTubeLink(url);
+    if (!link) {
+      new Notice("YT Free: that is not a link to a YouTube video.");
+      return;
+    }
+    const existing = this.noteForVideo(link.videoId);
+    if (existing) {
+      await this.app.workspace.getLeaf(false).openFile(existing);
+    } else {
+      const item = await this.subscriptions.addLinkedVideo(link.videoId);
+      if (!item) {
+        new Notice("YT Free: YouTube would not say what that video is. It may be private or removed.");
+        return;
+      }
+      await this.subscriptions.openItem(item);
+    }
+    if (link.seconds > 0) await this.seekWhenMounted(link.videoId, link.seconds);
+  }
+
+  /** The note for this video, if there is one: the hub's first, then any frontmatter match. */
+  private noteForVideo(videoId: string): TFile | null {
+    const path = this.subscriptions.itemFor(videoId)?.notePath;
+    const recorded = path ? this.app.vault.getAbstractFileByPath(path) : null;
+    if (recorded instanceof TFile) return recorded;
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      if (this.videoIdInFrontmatter(fm) === videoId) return file;
+    }
+    return null;
+  }
+
+  /**
+   * Start the note's player at a second, once the note has mounted it. The
+   * player appears a moment after the note opens; give up quietly after a few
+   * seconds (the pinned player may be off), and say so.
+   */
+  private async seekWhenMounted(videoId: string, seconds: number): Promise<void> {
+    for (let waited = 0; waited < HANDOFF_PLAYER_WAIT_MS; waited += 250) {
+      const entry = this.players.get(videoId);
+      if (entry) {
+        await this.seekEntry(entry, seconds);
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+    new Notice(`YT Free: opened the note, but could not start it at ${formatTimestamp(seconds)}.`);
+  }
+
+  private async openVideoChannel(videoId: string): Promise<void> {
+    const item = this.subscriptions.itemFor(videoId);
+    let channelId = item?.channelId ?? "";
+    let channelTitle = item?.channelTitle ?? "";
+    if (!channelId) {
+      const details = await fetchVideoDetails(videoId);
+      channelId = details.channelId;
+      channelTitle = details.channelTitle;
+    }
+    if (!channelId) {
+      new Notice("YT Free: YouTube would not say whose video this is.");
+      return;
+    }
+    await this.openHub();
+    const leaf = this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)[0];
+    if (leaf?.view instanceof HubView) leaf.view.showChannel(channelId, channelTitle);
   }
 
   private async openHub(screen: "hub" | "search" = "hub"): Promise<void> {
@@ -5550,6 +5831,60 @@ class YtFreeSettingTab extends PluginSettingTab {
           this.plugin.settings.subscriptionsIncludeShorts = value;
           await this.plugin.saveSettings();
           this.plugin.refreshHub();
+        }),
+      );
+
+    const removedCount = this.plugin.subscriptions.removedSearchVideos().length;
+    new Setting(containerEl)
+      .setName("Removed from search")
+      .setDesc(
+        `${removedCount} ${removedCount === 1 ? "video" : "videos"}. Remove on a search result keeps it out of later searches on both devices. Undo any of them here.`,
+      )
+      .addButton((button) =>
+        button.setButtonText("Show list…").onClick(() =>
+          new SearchBlocklistModal(this.app, this.plugin.subscriptions, "videos", () =>
+            this.display(),
+          ).open(),
+        ),
+      );
+
+    const hiddenCount = this.plugin.subscriptions.hiddenSearchChannels().length;
+    new Setting(containerEl)
+      .setName("Hidden from search")
+      .setDesc(
+        `${hiddenCount} ${hiddenCount === 1 ? "channel" : "channels"}. Hidden with the ⋯ on a search result. Only search is affected; subscribing to one un-hides it.`,
+      )
+      .addButton((button) =>
+        button.setButtonText("Show list…").onClick(() =>
+          new SearchBlocklistModal(this.app, this.plugin.subscriptions, "channels", () =>
+            this.display(),
+          ).open(),
+        ),
+      );
+
+    new Setting(containerEl).setName("YouTube links").setHeading();
+
+    new Setting(containerEl)
+      .setName("Open YouTube links here")
+      .setDesc(
+        "A YouTube link clicked in a note opens that video's note in YT Free, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.openYouTubeLinksHere).onChange(async (value) => {
+          this.plugin.settings.openYouTubeLinksHere = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Browser bookmarklet")
+      .setDesc(
+        "Copies a bookmarklet that sends the YouTube tab you are on to YT Free. Make a new bookmark and paste this as its address.",
+      )
+      .addButton((button) =>
+        button.setButtonText("Copy").onClick(async () => {
+          await navigator.clipboard.writeText(HANDOFF_BOOKMARKLET);
+          new Notice("YT Free: bookmarklet copied.");
         }),
       );
 

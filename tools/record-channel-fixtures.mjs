@@ -53,7 +53,10 @@ const VIDEOS_TAB = "EgZ2aWRlb3PyBgQKAjoA";
 for (const client of ["web", "android"]) {
   const page1 = await call("browse", client, { browseId: target, params: VIDEOS_TAB });
   save(`browse-videos-${client}.json`, page1);
-  const tokens = findAll(page1.json, "token").filter((t) => typeof t === "string");
+  // The grid's own token — the last item of the Videos tab's richGridRenderer.
+  // The header carries tokens too (the About panel), and the first version of
+  // this script followed one of those by mistake.
+  const tokens = findAll(findAll(page1.json, "richGridRenderer")[0] ?? {}, "token").filter((t) => typeof t === "string");
   console.log(client, "continuation tokens:", tokens.length);
   if (tokens.length) save(`browse-videos-${client}-continuation.json`, await call("browse", client, { continuation: tokens[tokens.length - 1] }));
   save(`browse-search-${client}.json`, await call("browse", client, { browseId: target, params: "EgZzZWFyY2jyBgQKAloA", query: "baptism" }));

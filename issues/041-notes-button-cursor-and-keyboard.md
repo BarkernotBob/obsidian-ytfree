@@ -1,5 +1,7 @@
 # 041 — The Notes button gives you a cursor and a keyboard on the phone
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-08-06 — not yet tested on the phone.** From BarkernotBob's manual test of
 [035](035-follow-unfold-cursor-progress.md):
 

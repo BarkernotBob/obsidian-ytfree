@@ -15,6 +15,13 @@ import { escapeDescription, linkifyTimestamps } from "./description.ts";
 import { mergeNotified } from "./notify.ts";
 import { DESCRIPTION_HEADING, NOTES_HEADING } from "./sections.ts";
 import type { SearchResult } from "./search.ts";
+import {
+  HIDDEN_CHANNELS_LIMIT,
+  REMOVED_VIDEOS_LIMIT,
+  mergeBlockLists,
+  normalizeBlockList,
+} from "./search-blocklist.ts";
+import type { BlockEntry } from "./search-blocklist.ts";
 
 /** A channel we poll. */
 export interface Channel {
@@ -99,7 +106,13 @@ export interface HubItem {
 }
 
 /** A channel feed, your Watch Later list, both, or a search you ran. */
-export type ItemOrigin = "feed" | "watchlater" | "both" | "search";
+/**
+ * `collab`: a video from your signed-in subscription feed, uploaded by a
+ * channel the hub does not poll — a collaboration one of your channels is on
+ * (GitHub #2). The uploader's RSS feed is the only one that lists it, and the
+ * uploader is not one of yours.
+ */
+export type ItemOrigin = "feed" | "watchlater" | "both" | "search" | "collab";
 
 export interface SubscriptionsState {
   version: 1;
@@ -148,6 +161,13 @@ export interface SubscriptionsState {
    * actually went out. See `docs/V1-SCOPE-NOTIFICATIONS.md`.
    */
   notifiedVideos?: Array<{ id: string; at: string }>;
+  /**
+   * Search results you removed, and channels you hid from search (issue 047).
+   * Not the Hidden list and not tombstones for items: nothing here was ever in
+   * the hub. See `search-blocklist.ts` for why an undo is an entry too.
+   */
+  searchRemovedVideos?: BlockEntry[];
+  searchHiddenChannels?: BlockEntry[];
 }
 
 export function emptyState(): SubscriptionsState {
@@ -160,6 +180,8 @@ export function emptyState(): SubscriptionsState {
     unsubscribedChannels: [],
     deletedVideos: [],
     notifiedVideos: [],
+    searchRemovedVideos: [],
+    searchHiddenChannels: [],
   };
 }
 
@@ -206,6 +228,8 @@ export function normalizeState(raw: unknown): SubscriptionsState {
         Boolean(r) && typeof r.id === "string" && typeof r.at === "string",
     );
   }
+  state.searchRemovedVideos = normalizeBlockList(data.searchRemovedVideos);
+  state.searchHiddenChannels = normalizeBlockList(data.searchHiddenChannels);
   return state;
 }
 
@@ -501,6 +525,20 @@ export function mergeStates(
       .filter(([id]) => !live.has(id))
       .map(([id, at]) => ({ id, at }))
       .slice(-DELETED_LIMIT),
+    // Newest decision per ID, undo included. Not pruned against anything: a
+    // search result is never stored, so there is nothing for these to lose to.
+    searchRemovedVideos: mergeBlockLists(
+      mine.searchRemovedVideos,
+      theirs.searchRemovedVideos,
+      REMOVED_VIDEOS_LIMIT,
+      new Date(),
+    ),
+    searchHiddenChannels: mergeBlockLists(
+      mine.searchHiddenChannels,
+      theirs.searchHiddenChannels,
+      HIDDEN_CHANNELS_LIMIT,
+      new Date(),
+    ),
   };
 }
 
@@ -990,6 +1028,14 @@ export function expireItems(
     if (item.state === "dismissed") return true;
     if (days <= 0) return true;
     if (item.origin === "search") return true;
+    // A collab arrives undated — the flat feed listing carries no date — so it
+    // ages from when it arrived instead. Undated otherwise means "never
+    // expires", and a collab is an Inbox item like any feed item, not a list
+    // you built on purpose.
+    if (item.origin === "collab") {
+      const seen = Date.parse(item.seenAt);
+      return Number.isFinite(seen) ? seen >= cutoff : true;
+    }
     const published = Date.parse(item.published);
     return Number.isFinite(published) ? published >= cutoff : true;
   });
@@ -1165,7 +1211,7 @@ export function buildWatchLaterNote(item: HubItem, now: Date): string {
       ? linkifyTimestamps(escapeDescription(item.description), item.videoId)
       : item.origin === "watchlater"
         ? "_From your YouTube Watch Later, which carries no description. It will fill in if this channel's feed still holds the video._"
-        : item.origin === "search"
+        : item.origin === "search" || item.origin === "collab"
           ? "_YouTube returned no description for this video._"
           : "_No description in the channel feed._",
     "",
@@ -1208,6 +1254,7 @@ export function deskSub(item: HubItem, now: Date): string {
   // A search item carries no publish date either, for the same reason: say
   // where it came from and the missing age reads as a fact, not a bug.
   if (item.origin === "search") bits.push("Search");
+  if (item.origin === "collab") bits.push("Collab");
   if (item.watched) bits.push("Watched");
   return bits.filter(Boolean).join(" · ");
 }
@@ -1244,7 +1291,9 @@ export function phoneSubParts(item: HubItem, now: Date): { channel: string; trai
   const origin =
     item.origin === "search"
       ? "Search"
-      : item.origin === "watchlater" || item.origin === "both"
+      : item.origin === "collab"
+        ? "Collab"
+        : item.origin === "watchlater" || item.origin === "both"
         ? "Watch Later"
         : "";
   return { channel: item.channelTitle, trailing: age || origin };

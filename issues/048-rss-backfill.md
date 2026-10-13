@@ -1,8 +1,9 @@
 # 048 — The 15-entry window loses videos permanently
 
-**Status:** Scoped 2026-09-01. **Not built. Depends on
-[045](045-channel-screen-and-subscribe.md).** Documented as a known limitation
-on 2026-07-28 and never filed as work.
+**Status:** **Built 2026-10-13** — awaiting manual test. Rules in `src/backfill.ts` (tested in
+`tests/backfill.test.ts`), fetching in `HubView.backfillChannel`, publish dates from
+`fetchPublishDate`. Two live shapes (Videos-tab page 2, the player's `publishDate`) are checked by
+`npm run smoke` (`tests/channel.smoke.ts`), not yet run against YouTube.
 
 **Created:** 2026-09-01
 
@@ -89,17 +90,37 @@ because a backfill found it again.
 
 ## Manual test (for BarkernotBob)
 
-To be written when this is built, per the repo rule. It can be forced by editing
-`subscriptions.json` to remove a channel's recent items and pushing its newest
-retained item back past the feed window.
+Needs a channel that posts often (at least 15 videos in the last 30 days).
+
+1. Quit Obsidian. Open `subscriptions.json` in the plugin folder and, for that channel, delete
+   every item whose video is in its current feed (the newest 15), keeping at least one older item.
+   Keep a copy of the file first.
+2. Reopen Obsidian and run **Refresh subscriptions**.
+3. Expect one Notice: "<Channel>: N videos from <date> to <date> were missed by the feed and added
+   to your Inbox."
+4. The Inbox has the 15 feed videos plus the older ones in between, each with a real publish date,
+   thumbnail and duration, and nothing older than 30 days (or your expiry setting if it is on).
+5. Run **Refresh subscriptions** again. No second Notice: the gap is closed.
+6. Delete one backfilled video, repeat steps 1–2. It does not come back.
+
+What the plugin does on a gap:
+
+- Detects it before merging the feed: a full 15-entry feed, a channel the hub already has items
+  for, no entry the hub knows (as an item or a deleted video), oldest entry inside the horizon.
+  A failed fetch is no feed at all, so it can never look like a gap.
+- Horizon: the expiry setting when on, else 30 days.
+- Reads the channel's Videos tab (no cookies), up to 5 pages, newest first, stopping at the first
+  known video or the first one past the horizon. Each found video gets a player call for its exact
+  publish date; a guessed date from "3 weeks ago" is never stored.
+- A failure logs and leaves the poll's results as they were. The next poll sees the feed it just
+  merged, so it does not retry.
 
 ## Notes
 
 - The related 2026-08-06 finding is **not** this bug and is not fixed by it: a
   collaboration uploaded to someone else's channel never appears in your
   subscribed channel's feed, because per-channel RSS lists only that channel's
-  own uploads. The answer there is to subscribe to the other channel, which is
-  [045](045-channel-screen-and-subscribe.md).
+  own uploads. That is GitHub issue #2, answered from the account's subscription feed.
 - Feed fetches are already retried four times with backoff, and a channel is
   only painted as failed after `FEED_FAILURE_GRACE` consecutive failed polls,
   because this endpoint 404s at random. A gap detector must not treat a failed

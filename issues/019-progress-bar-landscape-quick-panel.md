@@ -1,5 +1,7 @@
 # 019 — A line, a rotation, and the dials where you are watching
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-30 — awaiting manual test.**
 
 Four items off BarkernotBob's list. The first corrects something 017 shipped.

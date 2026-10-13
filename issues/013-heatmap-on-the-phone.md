@@ -1,5 +1,7 @@
 # 013 — Most-replayed moments on the phone, and backfilled without asking
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-29 — awaiting manual test.**
 
 BarkernotBob: *"develop so mobile pulls in the top moments as well, or that it

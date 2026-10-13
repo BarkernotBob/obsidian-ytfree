@@ -1,5 +1,7 @@
 # 033 — A button that says Search, and a screen that looks like one
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 BarkernotBob, from the dev inbox: *"the search YouTube command needs to be clearer.
 Right now it's too vague of a symbol, and in the search menu the UI needs an
 overhaul to be more professional."*
