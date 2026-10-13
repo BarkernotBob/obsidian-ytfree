@@ -22,12 +22,16 @@ import {
   applyWatched,
   channelsFromChannelsPage,
   channelsFromSubsFeed,
+  COLLAB_FEED_FIRST_LIMIT,
+  COLLAB_FEED_LIMIT,
+  collabsFromSubsFeed,
   COOKIE_FILE_MISSING,
   describeSession,
   emptySession,
   ImportedChannel,
   looksLikeExpiry,
   mergeWatchLater,
+  PrintRow,
   syncIsDue,
   unwedgeSession,
   videoIdsFrom,
@@ -187,6 +191,11 @@ interface YtFreeSettings {
   accountSyncHours: number;
   accountHistoryLimit: number;
   accountShowWatched: boolean;
+  /**
+   * Whether a sync has read the subscription feed deep once for collabs
+   * (GitHub #2). After that, each sync reads only the top of it.
+   */
+  accountCollabBackfillDone: boolean;
   /** Blank means `defaultCookieFile()` — which needs `os.homedir()`, so it
    * cannot be spelled out in the defaults any more than the download folder can. */
   accountCookieFile: string;
@@ -382,6 +391,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   accountSyncHours: 12,
   accountHistoryLimit: 200,
   accountShowWatched: false,
+  accountCollabBackfillDone: false,
   accountCookieFile: "",
   accountSession: emptySession(),
   // On by default. It is the feature, not an option about the feature — and it
@@ -1751,6 +1761,12 @@ export default class YtFreePlugin extends Plugin {
       let channels: ImportedChannel[] = [];
       let source = "subscription manager";
       let complete = false;
+      // The feed is read once per sync at most: the fallback below may need it
+      // for channels, and the collab pass after it always does.
+      let feedRows: PrintRow[] | null = null;
+      const feedLimit = this.settings.accountCollabBackfillDone
+        ? COLLAB_FEED_LIMIT
+        : COLLAB_FEED_FIRST_LIMIT;
       try {
         channels = channelsFromChannelsPage(
           await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.channelsPage),
@@ -1762,17 +1778,33 @@ export default class YtFreePlugin extends Plugin {
         console.error("YT Free: the subscription manager would not load.", err);
       }
       if (channels.length === 0) {
-        channels = channelsFromSubsFeed(
-          await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.subsFeed, {
-            limit: 300,
-          }),
-        );
+        feedRows = await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.subsFeed, {
+          limit: Math.max(300, feedLimit),
+        });
+        channels = channelsFromSubsFeed(feedRows);
         source = "subscription feed";
       }
       const applied = complete
         ? this.subscriptions.applyAccountChannels(channels)
         : { added: channels.length > 0 ? this.subscriptions.addChannels(channels) : 0, removed: 0 };
       const addedChannels = applied.added;
+
+      // Collabs (GitHub #2): videos in your subscription feed from a channel the
+      // hub does not poll. After the channels, so a channel you just subscribed
+      // to counts as polled and its uploads arrive through its own feed instead.
+      feedRows ??= await api.listWithCookies(ytDlpPath, cookieFile, api.ACCOUNT_TARGETS.subsFeed, {
+        limit: feedLimit,
+      });
+      const collabs = collabsFromSubsFeed(this.subscriptions.state, feedRows, new Date());
+      // The one player call each, for the description and length a flat listing
+      // lacks. A handful per sync at most; a failure leaves the item without
+      // them, which is what an unanswered call means everywhere else too.
+      for (const item of collabs) {
+        const details = await fetchVideoDetails(item.videoId);
+        item.description = details.description;
+        item.durationSeconds = details.durationSeconds;
+      }
+      this.subscriptions.state.items.push(...collabs);
 
       // Watch Later.
       const wlRows = await api.listWithCookies(
@@ -1795,6 +1827,7 @@ export default class YtFreePlugin extends Plugin {
 
       await this.subscriptions.save();
       this.refreshHub();
+      this.settings.accountCollabBackfillDone = true;
 
       const finishedAt = new Date().toISOString();
       this.settings.accountSession = {
@@ -1811,7 +1844,7 @@ export default class YtFreePlugin extends Plugin {
         const gone = applied.removed > 0 ? `, ${applied.removed} unsubscribed` : "";
         new Notice(
           `YT Free: ${channels.length} channels from the ${source} (${addedChannels} new${gone}), ` +
-            `${merged.added} new from Watch Later, ${marked} marked watched.`,
+            `${merged.added} new from Watch Later, ${collabs.length} collabs, ${marked} marked watched.`,
           8000,
         );
       }

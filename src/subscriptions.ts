@@ -99,7 +99,13 @@ export interface HubItem {
 }
 
 /** A channel feed, your Watch Later list, both, or a search you ran. */
-export type ItemOrigin = "feed" | "watchlater" | "both" | "search";
+/**
+ * `collab`: a video from your signed-in subscription feed, uploaded by a
+ * channel the hub does not poll — a collaboration one of your channels is on
+ * (GitHub #2). The uploader's RSS feed is the only one that lists it, and the
+ * uploader is not one of yours.
+ */
+export type ItemOrigin = "feed" | "watchlater" | "both" | "search" | "collab";
 
 export interface SubscriptionsState {
   version: 1;
@@ -990,6 +996,14 @@ export function expireItems(
     if (item.state === "dismissed") return true;
     if (days <= 0) return true;
     if (item.origin === "search") return true;
+    // A collab arrives undated — the flat feed listing carries no date — so it
+    // ages from when it arrived instead. Undated otherwise means "never
+    // expires", and a collab is an Inbox item like any feed item, not a list
+    // you built on purpose.
+    if (item.origin === "collab") {
+      const seen = Date.parse(item.seenAt);
+      return Number.isFinite(seen) ? seen >= cutoff : true;
+    }
     const published = Date.parse(item.published);
     return Number.isFinite(published) ? published >= cutoff : true;
   });
@@ -1165,7 +1179,7 @@ export function buildWatchLaterNote(item: HubItem, now: Date): string {
       ? linkifyTimestamps(escapeDescription(item.description), item.videoId)
       : item.origin === "watchlater"
         ? "_From your YouTube Watch Later, which carries no description. It will fill in if this channel's feed still holds the video._"
-        : item.origin === "search"
+        : item.origin === "search" || item.origin === "collab"
           ? "_YouTube returned no description for this video._"
           : "_No description in the channel feed._",
     "",
@@ -1208,6 +1222,7 @@ export function deskSub(item: HubItem, now: Date): string {
   // A search item carries no publish date either, for the same reason: say
   // where it came from and the missing age reads as a fact, not a bug.
   if (item.origin === "search") bits.push("Search");
+  if (item.origin === "collab") bits.push("Collab");
   if (item.watched) bits.push("Watched");
   return bits.filter(Boolean).join(" · ");
 }
@@ -1244,7 +1259,9 @@ export function phoneSubParts(item: HubItem, now: Date): { channel: string; trai
   const origin =
     item.origin === "search"
       ? "Search"
-      : item.origin === "watchlater" || item.origin === "both"
+      : item.origin === "collab"
+        ? "Collab"
+        : item.origin === "watchlater" || item.origin === "both"
         ? "Watch Later"
         : "";
   return { channel: item.channelTitle, trailing: age || origin };

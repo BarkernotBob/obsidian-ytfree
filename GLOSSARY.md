@@ -16,7 +16,8 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Channel screen**: one channel's whole uploads catalogue via InnerTube `browse` with
   continuation, with a search box over it (045).
 - **Collab video**: a video uploaded by channel A that lists subscribed channel B as a
-  collaborator. Never in B's RSS feed (GitHub #2).
+  collaborator. Never in B's RSS feed or B's Videos tab; it is in your subscription feed
+  (GitHub #2). Hub items from there carry `origin: "collab"`.
 
 ## Decisions
 
@@ -27,11 +28,14 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Channel screen (045)**: the v1 scope in `docs/V1-SCOPE-CHANNEL-SCREEN.md` is approved as written.
 - **Collab videos (GitHub #2)**:
   1. They should reach the hub without subscribing to the uploader.
-  2. Caught by checking each subscribed channel's Videos tab (InnerTube `browse`), not by
-     reading the signed-in subscription feed, provided the cost stays small. This reverses the
-     2026-08-06 rejection of the same approach.
-  3. Any video on that tab that the hub doesn't already have gets in.
-  4. The card's channel name is whichever is easier to get.
+  2. First chosen: check each subscribed channel's Videos tab. **Reversed the same day** after
+     measuring: a channel's Videos tab does not list collabs it is on (Ward on Words' tab omits
+     the RBN collab), and it cost about 1 MB per channel per check. Isaiah then chose the
+     signed-in **subscription feed** during account sync, which does list it (145th of 800).
+  3. Any video in that feed from a channel the hub doesn't poll gets in (origin `collab`),
+     except channels removed in the hub or unsubscribed on YouTube, and deleted videos.
+  4. The card names the uploader (what the feed reports). Collabs age out of the Inbox 30 days
+     after they arrive, like feed items; the flat listing has no publish date.
 - **Web Clipper (049)**: still in use. The template blockquotes the description, so a clipped
   note can never be broken by a fence, heading, quote or `[[` in it. The look changes (indented,
   quoted); readability alone is kept.
