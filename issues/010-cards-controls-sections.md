@@ -1,5 +1,7 @@
 # 010 — Hub cards, a designed control bar, and note sections
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-29 — awaiting manual test.**
 
 Seven asks from BarkernotBob. Items 4–7 are the note's structure and are one change;

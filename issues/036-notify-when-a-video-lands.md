@@ -1,5 +1,7 @@
 # 036 — A notification when a new video lands in the Inbox
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 BarkernotBob: *"I'd like an iOS notification when a new video is added to the inbox."*
 
 Scope gate: [docs/V1-SCOPE-NOTIFICATIONS.md](../docs/V1-SCOPE-NOTIFICATIONS.md).

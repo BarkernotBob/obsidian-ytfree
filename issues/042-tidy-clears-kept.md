@@ -1,5 +1,7 @@
 # 042 — A tidied note takes its hub item with it
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-08-06 — not yet tested on the phone.** Asked for by
 BarkernotBob:
 

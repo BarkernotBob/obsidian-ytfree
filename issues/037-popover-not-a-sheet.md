@@ -1,5 +1,7 @@
 # 037 — The phone pop-out is a popover again, and still does not clip
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-08-06 — not yet tested on the phone.** From BarkernotBob's manual
 test of [032](032-mobile-preview-window.md):
 

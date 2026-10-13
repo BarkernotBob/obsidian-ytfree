@@ -1,5 +1,7 @@
 # 034 — State that disagrees between devices
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Two reports, one file:
 
 > Things are getting out of sync on removing videos between mobile and desktop.

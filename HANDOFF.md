@@ -4,31 +4,34 @@ Current state only; keep it under 80 lines and replace, don't append. Full histo
 2026-09-22 is in [docs/archive/HANDOFF-history-2026-09.md](docs/archive/HANDOFF-history-2026-09.md).
 Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual test section).
 
-## Status (2026-09-22)
+## Status (2026-10-13)
 
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
-- Last build (2026-09-02): 573 unit tests pass, `tsc` clean, build clean.
+- 573 unit tests pass, `tsc` clean, build clean (2026-10-13).
+- Isaiah's answers of 2026-10-13 are recorded in [GLOSSARY.md](GLOSSARY.md): every ticket built
+  up to 046 passed its manual test, 018 is parked, 045's scope is approved, 049 is built
+  (blockquote), and collab videos (GitHub #2) are caught from each channel's Videos tab.
+- New follow-ups are filed as GitHub issues from now on, not as files in `issues/`.
 
 ## Tickets
 
-- **About 27 built and waiting on Isaiah's manual test:** 001, 007–015, 017, 019–021, 023, 024,
-  026, 028, 029, 037–042 (phone), 044, 046. This is the bottleneck, not build speed.
-- **Not built:** 004 → 005 (mobile viewer), 016 (partly built), 022, 043, 045 → 048, 047, 049.
-- **Waiting on a decision from Isaiah:**
-  - 045: react to the scope in [docs/V1-SCOPE-CHANNEL-SCREEN.md](docs/V1-SCOPE-CHANNEL-SCREEN.md).
-    048 is blocked until then.
-  - 049: is the Obsidian Web Clipper still part of the workflow? If not, deleting `templates/` is
-    the whole fix.
-  - 018: needs a decision (see the issue).
+- **Building now, in this order:** 045 (channel screen) → GitHub #2 (collab videos, reuses 045's
+  browse call) → 048 (backfill, same call) → 047 (search blocklist).
+- **Scoped, not built:** YouTube links open in Obsidian
+  ([docs/V1-SCOPE-URL-HANDOFF.md](docs/V1-SCOPE-URL-HANDOFF.md)), 005 (mobile full quality,
+  unblocked), 043 (desktop full quality).
+- **Parked:** 018 (Watch Later). Do not re-ask.
 
 ## Next step
 
-1. Isaiah: run the manual tests, oldest first. 044 and 046 need the iPhone for their second half.
-   Tell Claude which already pass so their Status can move to done.
-2. Answer 045 and 049 (one line each).
-3. Then build 047, or 048 once 045 is answered.
+1. Record live InnerTube channel responses with `node tools/record-channel-fixtures.mjs` on a
+   machine that reaches youtube.com (the cloud sandbox cannot). They are the fixtures 045 and #2
+   are built against.
+2. Build 045, then #2. Measure the Videos-tab response size before choosing #2's poll cadence;
+   Isaiah's condition is "as long as this isn't too resource intensive".
+3. Isaiah: re-import the Web Clipper template and run 049's manual test.
 
 ## How to ship and test
 

@@ -1,5 +1,7 @@
 # 009 — Mobile polish: space, tap states, controls, rows
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-28 — awaiting manual test.**
 
 Four asks from BarkernotBob, all on the phone. Nothing on the desktop changes except

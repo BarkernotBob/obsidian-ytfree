@@ -1,6 +1,8 @@
 # 049 — The Web Clipper template inserts a raw description and breaks the note
 
-**Status:** Scoped 2026-09-01. **Not built.** Documented as "still open" in the
+**Status:** **Built 2026-10-13** with option 1 (blockquote, plus `[[` written as `&#91;&#91;`, which reads as `[[` but never links; a backslash escape was avoided because the clipper's own escaping of `\` is undocumented). Isaiah confirmed the
+clipper is still in use, so option 2 would have left clipped notes without a description.
+Scoped 2026-09-01. Documented as "still open" in the
 2026-07-30 HANDOFF entry that built the escaping, and never filed.
 
 **Created:** 2026-09-01
@@ -72,9 +74,15 @@ properly; duplicating that badly in a template is the actual problem.
 
 ## Manual test (for BarkernotBob)
 
-To be written when this is built, per the repo rule. It needs one real YouTube
-video whose description contains a `#hashtag` on its own line and a timestamp
-list.
+1. In the Web Clipper settings, delete the old **YT Free video** template and import
+   `templates/webclipper-ytfree.json` again.
+2. Clip a video whose description has a `#hashtag` on its own line, a timestamp list, and
+   ideally a line starting with `>`. A long sermon or lecture upload usually has all three.
+3. Open the note. The description sits in one quoted block under `# Video Description`.
+4. `# Notes` is still the first heading in the outline, and nothing below the description
+   turned into a code block.
+5. If the description contained `[[`, it reads as `[[` in reading view and is not a link
+   (in the editor you will see `&#91;&#91;`).
 
 ## Notes
 

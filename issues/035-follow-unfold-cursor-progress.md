@@ -1,5 +1,7 @@
 # 035 — The transcript follows in the note, and three things that got in its way
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Four notes from the dev inbox, all about reading a transcript in the note
 rather than in the Preview sheet.
 

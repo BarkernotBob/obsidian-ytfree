@@ -1,5 +1,7 @@
 # 016 — Smart Speed round two: skip the fluff, and keep up with playback
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Scoped 2026-07-29, building.** Follows [015](015-smart-speed.md) after BarkernotBob's
 first real session with it.
 

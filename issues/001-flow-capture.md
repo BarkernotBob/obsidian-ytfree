@@ -1,5 +1,7 @@
 # 001 — Flow capture: auto-timestamp new lines, pause while typing
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 **Status:** Built 2026-07-26. Automated tests pass. Awaiting the manual test below.
 
 **Created:** 2026-07-26

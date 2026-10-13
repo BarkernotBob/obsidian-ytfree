@@ -1,5 +1,7 @@
 # 015 — Smart Speed: compress pauses like Overcast
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Status: **Built 2026-07-29 — awaiting BarkernotBob's manual test.** Scope and design decisions
 live in [docs/V1-SCOPE-SMART-SPEED.md](../docs/V1-SCOPE-SMART-SPEED.md), including three
 recorded deviations from the original scope (one shared pause-length setting instead of

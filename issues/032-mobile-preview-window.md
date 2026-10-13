@@ -1,5 +1,7 @@
 # 032 — The Preview window on a phone
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 Five defects from using Preview (024, 028, 030) on an iPhone. Four are layout;
 the fifth is a question about what a closing sheet owes a video that is still
 playing.

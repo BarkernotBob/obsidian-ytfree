@@ -55,7 +55,10 @@ whole point of taking notes against a video.
 ### Getting videos in
 - **Templater:** `templates/templater-ytfree.md` prompts for a URL and builds the note.
 - **Web Clipper:** import `templates/webclipper-ytfree.json`. It fires automatically on
-  any `youtube.com/watch` page.
+  any `youtube.com/watch` page. The description arrives as a blockquote, with `[[` written as an HTML entity, on
+  purpose: the clipper cannot run the plugin's own escaping, and a raw description can open a
+  code fence or a heading that breaks the rest of the note (049). Re-import the template after
+  updating.
 
 ## How the expiry problem is handled
 

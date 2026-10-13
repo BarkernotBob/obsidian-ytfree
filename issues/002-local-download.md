@@ -1,5 +1,7 @@
 # 002 — Download a video for offline, and play the local copy
 
+**Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
+
 **Status:** Built 2026-07-26. 51 unit tests pass; the yt-dlp argument shape was verified
 against a real 19-second download. Awaiting the manual test below.
 
