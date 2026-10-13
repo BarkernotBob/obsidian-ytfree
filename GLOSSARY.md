@@ -34,8 +34,8 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
      signed-in **subscription feed** during account sync, which does list it (145th of 800).
   3. Any video in that feed from a channel the hub doesn't poll gets in (origin `collab`),
      except channels removed in the hub or unsubscribed on YouTube, and deleted videos.
-  4. The card names the uploader (what the feed reports). Collabs age out of the Inbox 30 days
-     after they arrive, like feed items; the flat listing has no publish date.
+  4. The card names the uploader (what the feed reports). Collabs follow the same expiry setting as feed
+     items (off by default), counted from when they arrived: the flat listing has no date.
 - **Web Clipper (049)**: still in use. The template blockquotes the description, so a clipped
   note can never be broken by a fence, heading, quote or `[[` in it. The look changes (indented,
   quoted); readability alone is kept.

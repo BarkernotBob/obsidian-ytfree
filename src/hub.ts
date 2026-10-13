@@ -24,7 +24,7 @@ import {
 import { SEARCH_YT_ICON, SHARE_ICON, YT_ICON } from "./icon";
 import type { AccountLine, AccountSession } from "./account";
 import { accountStatusLine } from "./account";
-import type { HubFilter, HubItem, SubscriptionsState } from "./subscriptions";
+import type { Channel, HubFilter, HubItem, SubscriptionsState } from "./subscriptions";
 import {
   applyUnsubscribes,
   buildWatchLaterNote,
@@ -76,7 +76,21 @@ import type { NotificationSettings, Post, SendOutcome } from "./notify";
 import { NOTES_HEADING } from "./sections";
 import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
-import { browseChannel, fetchTranscriptCues, fetchVideoDetails, searchYouTube } from "./innertube";
+import {
+  browseChannel,
+  fetchPublishDate,
+  fetchTranscriptCues,
+  fetchVideoDetails,
+  searchYouTube,
+} from "./innertube";
+import {
+  BACKFILL_MAX_PAGES,
+  backfillItem,
+  backfillMessage,
+  feedWindowRolled,
+  horizonDays,
+  walkBackfillPage,
+} from "./backfill";
 import { channelUrl } from "./channel";
 import type { ChannelHeader } from "./channel";
 import { followIndexAt, groupCues, restingScrollTop } from "./transcript";
@@ -544,6 +558,10 @@ export class SubscriptionsStore {
     // itself with a push about fifteen hundred videos it just discovered.
     const seeding = this.state.lastPolledAt === null;
     const added: HubItem[] = [];
+    // Channels whose whole feed window rolled since the last poll (048), with
+    // what the hub knew before this poll merged anything.
+    const gaps: Array<{ channel: Channel; knownBefore: Set<string> }> = [];
+    const horizon = horizonDays(this.settings().expiryDays);
     try {
       await mapLimit(this.state.channels, 5, async (channel) => {
         try {
@@ -558,6 +576,16 @@ export class SubscriptionsStore {
           // The feed's own title is authoritative; a Takeout export goes stale.
           if (feed.channelTitle) channel.title = feed.channelTitle;
           noteFeedSuccess(channel);
+          // Before the merge, or every entry is "known" and no gap is ever seen.
+          // A failed fetch never gets here, so a flaky endpoint cannot look
+          // like an empty window and trigger a backfill.
+          const channelItems = this.state.items.filter((item) => item.channelId === channel.id);
+          const deleted = this.state.deletedVideos ?? [];
+          if (!seeding && feedWindowRolled(feed.entries, channelItems, deleted, now, horizon)) {
+            const knownBefore = new Set(this.state.items.map((item) => item.videoId));
+            for (const entry of deleted) knownBefore.add(entry.id);
+            gaps.push({ channel, knownBefore });
+          }
           const merged = mergeItems(
             this.state.items,
             channel,
@@ -574,6 +602,18 @@ export class SubscriptionsStore {
           noteFeedFailure(channel, err instanceof Error ? err.message : String(err));
         }
       });
+
+      // One channel at a time, and only the ones that showed a gap. A failure
+      // leaves the poll's own results alone, and is not retried: the feed has
+      // been merged, so the next poll overlaps and sees no gap.
+      for (const gap of gaps) {
+        try {
+          const filled = await this.backfillChannel(gap.channel, gap.knownBefore, horizon, now);
+          added.push(...filled);
+        } catch (err) {
+          console.error(`YT Free: backfill for ${gap.channel.title} failed.`, err);
+        }
+      }
 
       // Expire before probing: on a fresh import this is the difference between
       // a few dozen probes and fifteen hundred.
@@ -604,6 +644,54 @@ export class SubscriptionsStore {
       // nothing about a notification can decide whether a poll succeeded.
       await this.notifyNewItems(added, seeding);
     }
+  }
+
+  /**
+   * Fill one channel's gap from its Videos tab (048): newest first, from just
+   * below what the feed delivered, until a video the hub already knew or the
+   * horizon. Real publish dates, so expiry and sorting treat these exactly as
+   * feed items. Says what it did, once.
+   */
+  private async backfillChannel(
+    channel: Channel,
+    knownBefore: ReadonlySet<string>,
+    horizon: number,
+    now: Date,
+  ): Promise<HubItem[]> {
+    const justAdded = new Set(
+      this.state.items
+        .filter((item) => item.channelId === channel.id && !knownBefore.has(item.videoId))
+        .map((item) => item.videoId),
+    );
+    const identity = { channelId: channel.id, channelTitle: channel.title };
+    const found: SearchResult[] = [];
+    let continuation: string | null = null;
+    for (let page = 0; page < BACKFILL_MAX_PAGES; page++) {
+      const result = await browseChannel(identity, null, continuation);
+      const walk = walkBackfillPage(result.results, knownBefore, justAdded, horizon);
+      found.push(...walk.take);
+      continuation = result.continuation;
+      if (walk.done || !continuation) break;
+    }
+    if (found.length === 0) return [];
+
+    const items: HubItem[] = [];
+    await mapLimit(found, 3, async (result) => {
+      const [details, published] = await Promise.all([
+        fetchVideoDetails(result.videoId),
+        fetchPublishDate(result.videoId),
+      ]);
+      items.push(
+        backfillItem(result, channel, { ...details, published }, now),
+      );
+    });
+    // Checked again after the round trips: a merge from the other device can
+    // have landed one of these meanwhile. Never a duplicate.
+    const present = new Set(this.state.items.map((item) => item.videoId));
+    const fresh = items.filter((item) => !present.has(item.videoId));
+    this.state.items.push(...fresh);
+    if (fresh.length) new Notice(`YT Free: ${backfillMessage(channel.title, fresh)}`, 10000);
+    return fresh;
   }
 
   /**

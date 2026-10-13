@@ -327,3 +327,22 @@ export function parseChannelResponse(
 
   return { header, results, continuation };
 }
+
+/**
+ * When a video was published, from a WEB player response, as an ISO string.
+ *
+ * The WEB player's `microformat` carries it (`publishDate`, else `uploadDate`);
+ * the ANDROID player the rest of the plugin uses carries no microformat at all.
+ * "" when the response has neither, which every caller treats as undated.
+ * Used by the backfill (048), which must write real dates: its items have to
+ * be indistinguishable from feed items, and expiry runs on this field.
+ */
+export function parsePlayerPublishDate(raw: unknown): string {
+  const micro = at(raw, "microformat", "playerMicroformatRenderer");
+  for (const key of ["publishDate", "uploadDate"]) {
+    const value = str(at(micro, key));
+    const time = Date.parse(value);
+    if (value && Number.isFinite(time)) return new Date(time).toISOString();
+  }
+  return "";
+}

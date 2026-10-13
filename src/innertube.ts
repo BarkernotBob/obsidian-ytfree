@@ -15,7 +15,12 @@
 
 import { requestUrl } from "obsidian";
 import { BROWSE_URL, CLIENTS, NEXT_URL, PLAYER_URL, SEARCH_URL, playerBody } from "./innertube-context.ts";
-import { CHANNEL_SEARCH_PARAMS, CHANNEL_VIDEOS_PARAMS, parseChannelResponse } from "./channel.ts";
+import {
+  CHANNEL_SEARCH_PARAMS,
+  CHANNEL_VIDEOS_PARAMS,
+  parseChannelResponse,
+  parsePlayerPublishDate,
+} from "./channel.ts";
 import type { ChannelPage } from "./channel.ts";
 import { parseSearchResponse } from "./search.ts";
 import type { SearchPage } from "./search.ts";
@@ -158,6 +163,20 @@ export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> 
     };
   } catch {
     return { description: "", durationSeconds: null, channelId: "", channelTitle: "" };
+  }
+}
+
+/**
+ * A video's publish date, as an ISO string, or "" when YouTube would not say.
+ *
+ * WEB, because only the WEB player carries `microformat`. One call per video,
+ * and only the backfill (048) makes it — a path that runs a few times a year.
+ */
+export async function fetchPublishDate(videoId: string): Promise<string> {
+  try {
+    return parsePlayerPublishDate(await callInnertube(PLAYER_URL, "web", playerBody(videoId)));
+  } catch {
+    return "";
   }
 }
 
