@@ -39,6 +39,11 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Web Clipper (049)**: still in use. The template blockquotes the description, so a clipped
   note can never be broken by a fence, heading, quote or `[[` in it. The look changes (indented,
   quoted); readability alone is kept.
+- **Search blocklist (047)**, decided while building: Remove on a search result lasts and syncs;
+  removed videos also stay off channel screens; Hide channel filters search only; subscribing
+  un-hides. Bounds 500 videos / 200 channels; undos kept 30 days. Newest decision per ID wins.
+- **Backfill (048)**, decided while building: horizon is the expiry setting, or 30 days when
+  expiry is off; at most 5 Videos-tab pages per gap; publish date from the player, never guessed.
 - **YouTube links open in Obsidian**: wanted. Scoped in `docs/V1-SCOPE-URL-HANDOFF.md`.
 
 ### Earlier

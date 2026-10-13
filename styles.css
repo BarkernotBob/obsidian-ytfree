@@ -1990,6 +1990,30 @@ body.ytfree-immersive-open {
   font-variant-numeric: tabular-nums;
 }
 
+/* Hide channel (issue 047): the `⋯` chip in a search card's thumbnail corner.
+   The same scrim as the duration badge, so it reads on a white thumbnail. */
+.ytfree-hub-thumb .ytfree-hub-chip {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: rgba(0, 0, 0, 0.75);
+  box-shadow: none;
+  color: #fff;
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.ytfree-hub-thumb .ytfree-hub-chip:hover {
+  background: rgba(0, 0, 0, 0.9);
+}
+
 .ytfree-hub-duration:empty {
   visibility: hidden;
 }

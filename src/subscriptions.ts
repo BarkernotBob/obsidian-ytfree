@@ -15,6 +15,13 @@ import { escapeDescription, linkifyTimestamps } from "./description.ts";
 import { mergeNotified } from "./notify.ts";
 import { DESCRIPTION_HEADING, NOTES_HEADING } from "./sections.ts";
 import type { SearchResult } from "./search.ts";
+import {
+  HIDDEN_CHANNELS_LIMIT,
+  REMOVED_VIDEOS_LIMIT,
+  mergeBlockLists,
+  normalizeBlockList,
+} from "./search-blocklist.ts";
+import type { BlockEntry } from "./search-blocklist.ts";
 
 /** A channel we poll. */
 export interface Channel {
@@ -154,6 +161,13 @@ export interface SubscriptionsState {
    * actually went out. See `docs/V1-SCOPE-NOTIFICATIONS.md`.
    */
   notifiedVideos?: Array<{ id: string; at: string }>;
+  /**
+   * Search results you removed, and channels you hid from search (issue 047).
+   * Not the Hidden list and not tombstones for items: nothing here was ever in
+   * the hub. See `search-blocklist.ts` for why an undo is an entry too.
+   */
+  searchRemovedVideos?: BlockEntry[];
+  searchHiddenChannels?: BlockEntry[];
 }
 
 export function emptyState(): SubscriptionsState {
@@ -166,6 +180,8 @@ export function emptyState(): SubscriptionsState {
     unsubscribedChannels: [],
     deletedVideos: [],
     notifiedVideos: [],
+    searchRemovedVideos: [],
+    searchHiddenChannels: [],
   };
 }
 
@@ -212,6 +228,8 @@ export function normalizeState(raw: unknown): SubscriptionsState {
         Boolean(r) && typeof r.id === "string" && typeof r.at === "string",
     );
   }
+  state.searchRemovedVideos = normalizeBlockList(data.searchRemovedVideos);
+  state.searchHiddenChannels = normalizeBlockList(data.searchHiddenChannels);
   return state;
 }
 
@@ -507,6 +525,20 @@ export function mergeStates(
       .filter(([id]) => !live.has(id))
       .map(([id, at]) => ({ id, at }))
       .slice(-DELETED_LIMIT),
+    // Newest decision per ID, undo included. Not pruned against anything: a
+    // search result is never stored, so there is nothing for these to lose to.
+    searchRemovedVideos: mergeBlockLists(
+      mine.searchRemovedVideos,
+      theirs.searchRemovedVideos,
+      REMOVED_VIDEOS_LIMIT,
+      new Date(),
+    ),
+    searchHiddenChannels: mergeBlockLists(
+      mine.searchHiddenChannels,
+      theirs.searchHiddenChannels,
+      HIDDEN_CHANNELS_LIMIT,
+      new Date(),
+    ),
   };
 }
 

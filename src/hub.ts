@@ -10,6 +10,7 @@ import {
   App,
   ButtonComponent,
   ItemView,
+  Menu,
   Modal,
   MarkdownView,
   Notice,
@@ -92,6 +93,16 @@ import {
   walkBackfillPage,
 } from "./backfill";
 import { channelUrl } from "./channel";
+import {
+  HIDDEN_CHANNELS_LIMIT,
+  REMOVED_VIDEOS_LIMIT,
+  activeBlocks,
+  blockedIds,
+  isResultBlocked,
+  liftHides,
+  setBlocked,
+} from "./search-blocklist";
+import type { BlockEntry } from "./search-blocklist";
 import type { ChannelHeader } from "./channel";
 import { followIndexAt, groupCues, restingScrollTop } from "./transcript";
 import type { Paragraph } from "./transcript";
@@ -471,10 +482,74 @@ export class SubscriptionsStore {
         error: null,
       });
     }
+    const fresh = incoming.filter((c) => !this.state.channels.some((k) => k.id === c.id));
     this.state.channels = [...byId.values()];
+    this.liftSearchHides(fresh.map((c) => c.id));
     this.emit();
     void this.save();
     return this.state.channels.length - before;
+  }
+
+  // ------------------------------------------------------ search blocklist
+
+  /** Whether a search or channel-screen result stays off the screen (issue 047). */
+  isBlockedResult(
+    result: { videoId: string; channelId: string },
+    where: "search" | "channel",
+  ): boolean {
+    return isResultBlocked(
+      result,
+      where,
+      blockedIds(this.state.searchRemovedVideos),
+      blockedIds(this.state.searchHiddenChannels),
+      new Set(this.state.channels.map((c) => c.id)),
+    );
+  }
+
+  /** Remove a search result for good, or (with `removed` false) undo it. */
+  setSearchRemoved(video: { videoId: string; title: string }, removed: boolean): void {
+    this.state.searchRemovedVideos = setBlocked(
+      this.state.searchRemovedVideos,
+      { id: video.videoId, title: video.title },
+      removed,
+      new Date(),
+      REMOVED_VIDEOS_LIMIT,
+    );
+    this.emit();
+    void this.save();
+  }
+
+  /** Hide a channel from search, or (with `hidden` false) show it again. */
+  setSearchHidden(channel: { id: string; title: string }, hidden: boolean): void {
+    this.state.searchHiddenChannels = setBlocked(
+      this.state.searchHiddenChannels,
+      channel,
+      hidden,
+      new Date(),
+      HIDDEN_CHANNELS_LIMIT,
+    );
+    this.emit();
+    void this.save();
+  }
+
+  removedSearchVideos(): BlockEntry[] {
+    return activeBlocks(this.state.searchRemovedVideos);
+  }
+
+  hiddenSearchChannels(): BlockEntry[] {
+    return activeBlocks(this.state.searchHiddenChannels);
+  }
+
+  /**
+   * Subscribing to a channel you hid from search drops the hide, and says so:
+   * a channel you follow vanishing from search would read as a bug.
+   */
+  private liftSearchHides(channelIds: string[]): void {
+    const { list, lifted } = liftHides(this.state.searchHiddenChannels, channelIds, new Date());
+    if (lifted.length === 0) return;
+    this.state.searchHiddenChannels = list;
+    const names = lifted.map((entry) => entry.title || entry.id).join(", ");
+    new Notice(`YT Free: subscribed, so ${names} is no longer hidden from search.`);
   }
 
   /**
@@ -495,10 +570,12 @@ export class SubscriptionsStore {
     const known = new Set(this.state.channels.map((c) => c.id));
     const now = new Date();
     let added = 0;
+    const fresh: string[] = [];
     for (const channel of live) {
       if (known.has(channel.id)) continue;
       known.add(channel.id);
       added++;
+      fresh.push(channel.id);
       this.state.channels.push({
         id: channel.id,
         title: channel.title,
@@ -515,6 +592,7 @@ export class SubscriptionsStore {
     );
     this.state.channels = result.channels;
     this.state.unsubscribedChannels = result.unsubscribedChannels;
+    this.liftSearchHides(fresh);
 
     this.emit();
     void this.save();
@@ -773,6 +851,10 @@ export class SubscriptionsStore {
   }
 
   // --------------------------------------------------------------- search
+
+  isSubscribed(channelId: string): boolean {
+    return this.state.channels.some((c) => c.id === channelId);
+  }
 
   hasItem(videoId: string): boolean {
     return this.state.items.some((item) => item.videoId === videoId);
@@ -1244,11 +1326,9 @@ export class HubView extends ItemView {
   /** Result cards on screen, so Remove and Undo can swap one in place. */
   private results = new Map<string, HTMLElement>();
   /**
-   * Results removed by hand, until the next search.
-   *
-   * Session-only on purpose at this stage: the persistent blocklist and the
-   * Settings list that undoes it are stage two of the card-controls scope, and
-   * a button that only pretends to persist is worse than one that says so.
+   * Results removed by hand on the screen showing now, so they draw as the
+   * "Removed — Undo" strip rather than vanish. The removal itself is in the
+   * store's blocklist (issue 047); the next search simply never shows them.
    */
   private removedResults = new Set<string>();
   /** Bumped per search, so a slow first page cannot land over a newer one. */
@@ -1751,7 +1831,7 @@ export class HubView extends ItemView {
       query: channel?.query ?? null,
       state: channel?.state ?? "loading",
       error: channel?.error ?? "",
-      results: channel?.results.length ?? 0,
+      results: this.shownResults(channel?.results ?? [], "channel"),
       videosText: channel?.header?.videos ?? "",
     });
   }
@@ -2142,12 +2222,20 @@ export class HubView extends ItemView {
    * behind it, from one pure function so the two cannot disagree. They did:
    * the strip said "Nothing found for “x”." while the block said "No results.".
    */
+  /** Results that draw as something: a card, or this screen's Removed strip. */
+  private shownResults(results: SearchResult[], where: "search" | "channel"): number {
+    return results.filter(
+      (result) =>
+        this.removedResults.has(result.videoId) || !this.store.isBlockedResult(result, where),
+    ).length;
+  }
+
   private searchCopy(): SearchScreenCopy {
     return searchScreen({
       query: this.searchQuery,
       state: this.searchState,
       error: this.searchError,
-      results: this.searchResults.length,
+      results: this.shownResults(this.searchResults, "search"),
       skipped: this.searchSkipped,
       filtersSet: !isDefaultFilters(this.searchFilters),
     });
@@ -2494,6 +2582,8 @@ export class HubView extends ItemView {
       host.appendChild(this.buildRemovedStrip(result));
       return;
     }
+    const where = this.mode === "channel" ? "channel" : "search";
+    if (this.store.isBlockedResult(result, where)) return;
 
     const facts = (): CardFacts => ({
       inHub: this.store.hasItem(result.videoId),
@@ -2519,8 +2609,55 @@ export class HubView extends ItemView {
     // A search card is not tracked in `cards` — a results list is rebuilt whole
     // — but Remove has to find this one element to swap it for the strip, and
     // Undo has to swap it back without redrawing anything above it.
+    // Hide channel lives on search cards only: on a channel screen you went to
+    // that channel on purpose, and a channel you subscribe to cannot be hidden.
+    if (where === "search" && result.channelId && !this.store.isSubscribed(result.channelId)) {
+      this.addChannelChip(card, result);
+    }
     this.results.set(result.videoId, card);
     host.appendChild(card);
+  }
+
+  /**
+   * The `⋯` chip in a search card's thumbnail corner. A menu rather than a
+   * fifth button, so later secondary actions have somewhere to go without
+   * competing with the four. One item today.
+   */
+  private addChannelChip(card: HTMLElement, result: SearchResult): void {
+    const thumb = card.querySelector<HTMLElement>(".ytfree-hub-thumb");
+    if (!thumb) return;
+    const chip = thumb.createEl("button", {
+      cls: "ytfree-hub-chip",
+      text: "⋯",
+      attr: { type: "button", "aria-label": "More" },
+    });
+    chip.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      const menu = new Menu();
+      menu.addItem((item) =>
+        item
+          .setTitle("Hide this channel")
+          .setIcon("eye-off")
+          .onClick(() => this.hideChannelFromSearch(result)),
+      );
+      menu.showAtMouseEvent(evt);
+    });
+  }
+
+  /**
+   * Take a channel out of search. Its cards go one by one rather than through
+   * a redraw, so the list keeps its scroll position; the undo is in Settings.
+   */
+  private hideChannelFromSearch(result: SearchResult): void {
+    const title = result.channelTitle || result.channelId;
+    this.store.setSearchHidden({ id: result.channelId, title }, true);
+    for (const other of this.searchResults) {
+      if (other.channelId !== result.channelId) continue;
+      this.results.get(other.videoId)?.remove();
+      this.results.delete(other.videoId);
+    }
+    new Notice(`YT Free: ${title} is hidden from search. Undo it in Settings → Subscriptions hub.`);
   }
 
   /**
@@ -2554,15 +2691,16 @@ export class HubView extends ItemView {
   }
 
   /**
-   * Remove on a search card: session-only, and undoable where it happened.
+   * Remove on a search card: lasting, and undoable where it happened.
    *
    * The card collapses in place to a strip of the same height, so removing the
-   * third result does not pull the fourth up under your thumb. It survives
-   * until the next search and no further — the persistent blocklist and the
-   * Settings list are stage two of `docs/V1-SCOPE-CARD-CONTROLS.md`.
+   * third result does not pull the fourth up under your thumb. The removal is
+   * stored (issue 047) and syncs; later searches leave the video out, and
+   * Settings → Subscriptions hub lists it for undoing later.
    */
   private removeResult(result: SearchResult): void {
     this.removedResults.add(result.videoId);
+    this.store.setSearchRemoved(result, true);
     const card = this.results.get(result.videoId);
     if (!card?.isConnected) return;
     const strip = this.buildRemovedStrip(result);
@@ -2591,6 +2729,7 @@ export class HubView extends ItemView {
     undo.addEventListener("click", (evt) => {
       evt.stopPropagation();
       this.removedResults.delete(result.videoId);
+      this.store.setSearchRemoved(result, false);
       const host = strip.parentElement;
       if (!host) return;
       const marker = strip.nextSibling;
@@ -3751,5 +3890,54 @@ export class ImportSubscriptionsModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+  }
+}
+
+/**
+ * The Settings list that undoes search removals or channel hides (issue 047).
+ * One row per entry, newest first, each with its own undo. Undoing a row takes
+ * it out of the list in place rather than redrawing, for the same no-reflow
+ * reason the Removed strip exists.
+ */
+export class SearchBlocklistModal extends Modal {
+  constructor(
+    app: App,
+    private store: SubscriptionsStore,
+    private kind: "videos" | "channels",
+    private onDone: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    const videos = this.kind === "videos";
+    contentEl.createEl("h2", { text: videos ? "Removed from search" : "Hidden from search" });
+    const entries = videos ? this.store.removedSearchVideos() : this.store.hiddenSearchChannels();
+    if (entries.length === 0) {
+      contentEl.createEl("p", {
+        cls: "ytfree-hub-hint",
+        text: videos ? "No videos removed." : "No channels hidden.",
+      });
+      return;
+    }
+    for (const entry of entries) {
+      new Setting(contentEl)
+        .setName(entry.title || entry.id)
+        .setDesc(`${videos ? "Removed" : "Hidden"} ${entry.at.slice(0, 10)}`)
+        .addButton((button) =>
+          button.setButtonText(videos ? "Show in search" : "Unhide").onClick(() => {
+            if (videos) this.store.setSearchRemoved({ videoId: entry.id, title: entry.title }, false);
+            else this.store.setSearchHidden({ id: entry.id, title: entry.title }, false);
+            button.setDisabled(true).setButtonText("Undone");
+          }),
+        );
+    }
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    this.onDone();
   }
 }

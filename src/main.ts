@@ -52,6 +52,7 @@ import {
   HubView,
   PreviewHandle,
   ImportSubscriptionsModal,
+  SearchBlocklistModal,
   SubscriptionsStore,
 } from "./hub";
 import { YT_ICON, registerIcons } from "./icon";
@@ -5619,6 +5620,34 @@ class YtFreeSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
           this.plugin.refreshHub();
         }),
+      );
+
+    const removedCount = this.plugin.subscriptions.removedSearchVideos().length;
+    new Setting(containerEl)
+      .setName("Removed from search")
+      .setDesc(
+        `${removedCount} ${removedCount === 1 ? "video" : "videos"}. Remove on a search result keeps it out of later searches on both devices. Undo any of them here.`,
+      )
+      .addButton((button) =>
+        button.setButtonText("Show list…").onClick(() =>
+          new SearchBlocklistModal(this.app, this.plugin.subscriptions, "videos", () =>
+            this.display(),
+          ).open(),
+        ),
+      );
+
+    const hiddenCount = this.plugin.subscriptions.hiddenSearchChannels().length;
+    new Setting(containerEl)
+      .setName("Hidden from search")
+      .setDesc(
+        `${hiddenCount} ${hiddenCount === 1 ? "channel" : "channels"}. Hidden with the ⋯ on a search result. Only search is affected; subscribing to one un-hides it.`,
+      )
+      .addButton((button) =>
+        button.setButtonText("Show list…").onClick(() =>
+          new SearchBlocklistModal(this.app, this.plugin.subscriptions, "channels", () =>
+            this.display(),
+          ).open(),
+        ),
       );
 
     this.displayNotifications(containerEl);
