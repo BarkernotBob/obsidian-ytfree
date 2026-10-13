@@ -130,6 +130,8 @@ export interface VideoDetails {
   /** The uploader, for "open this video's channel" from a note. "" when unknown. */
   channelId: string;
   channelTitle: string;
+  /** The video's title, for a link opened with no hub item behind it. "" when unknown. */
+  title: string;
 }
 
 /**
@@ -151,6 +153,7 @@ export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> 
         lengthSeconds?: unknown;
         channelId?: unknown;
         author?: unknown;
+        title?: unknown;
       };
     }).videoDetails;
     // `lengthSeconds` is a *string* of digits in every player response measured.
@@ -160,9 +163,10 @@ export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> 
       durationSeconds: Number.isFinite(length) && length > 0 ? length : null,
       channelId: typeof details?.channelId === "string" ? details.channelId : "",
       channelTitle: typeof details?.author === "string" ? details.author : "",
+      title: typeof details?.title === "string" ? details.title : "",
     };
   } catch {
-    return { description: "", durationSeconds: null, channelId: "", channelTitle: "" };
+    return { description: "", durationSeconds: null, channelId: "", channelTitle: "", title: "" };
   }
 }
 

@@ -900,6 +900,44 @@ export class SubscriptionsStore {
     return "added";
   }
 
+  /**
+   * Add a video by ID alone — a YouTube link opened in Obsidian (GitHub #3).
+   *
+   * The same item a search add makes, built from the one player call: the
+   * link carries nothing but the ID. Null when YouTube would not name the
+   * video (private, removed), so the caller says so instead of making a note
+   * titled with an ID.
+   */
+  async addLinkedVideo(videoId: string): Promise<HubItem | null> {
+    const existing = this.itemFor(videoId);
+    if (existing) return existing;
+    const details = await fetchVideoDetails(videoId);
+    if (!details.title) return null;
+    const again = this.itemFor(videoId);
+    if (again) return again;
+    rememberVideo(this.state, videoId);
+    const item = searchResultToItem(
+      {
+        videoId,
+        title: details.title,
+        channelId: details.channelId,
+        channelTitle: details.channelTitle,
+        publishedText: "",
+        views: null,
+        duration: "",
+        thumbnail: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+        secondary: false,
+      },
+      details.description,
+      new Date(),
+      details.durationSeconds,
+    );
+    this.state.items.push(item);
+    this.emit();
+    void this.save();
+    return item;
+  }
+
   // ----------------------------------------------------------------- note
 
   /**

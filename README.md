@@ -48,6 +48,7 @@ not reimplemented.
 |---|---|
 | Insert timestamp at cursor | Writes a clickable `[12:34]` link at the current playback position |
 | Insert player from YouTube URL in clipboard | Turns a copied URL into a `ytfree` block |
+| Open YouTube URL from clipboard | Opens (or makes) the copied video's note, at its timestamp |
 
 Clicking a timestamp seeks the player. Bind the timestamp command to a hotkey — it is the
 whole point of taking notes against a video.
@@ -59,6 +60,27 @@ whole point of taking notes against a video.
   purpose: the clipper cannot run the plugin's own escaping, and a raw description can open a
   code fence or a heading that breaks the rest of the note (049). Re-import the template after
   updating.
+
+### YouTube links open in Obsidian
+Any YouTube video link can open its note in YT Free instead of youtube.com, at the link's
+timestamp. An existing note for the video is reused (the hub's, or any note whose `url` /
+`media_link` names it); otherwise the note is made the way the hub makes one.
+
+- **In a note:** on by default (Settings → YouTube links → *Open YouTube links here*).
+- **The door:** `obsidian://ytfree?url=<YouTube URL, URL-encoded>`. Everything below uses it.
+- **Other Mac apps** (Mail, Messages, Slack): install [Finicky](https://github.com/johnste/finicky),
+  copy `tools/finicky.js` to `~/.finicky.js`, and set `defaultBrowser` in it to your browser.
+  Video links go to Obsidian; everything else goes to the browser as before.
+- **Inside the browser:** Settings → YouTube links → *Browser bookmarklet* → Copy. Make a
+  bookmark and paste that as its address. Click it on a YouTube video tab.
+- **iPhone:** build a Shortcut named *Open in YT Free*:
+  1. Shortcuts → + → tap the (i) → turn on **Show in Share Sheet**; accept **URLs** and **Text**.
+  2. Add **URL Encode** with *Shortcut Input*.
+  3. Add **Text**: `obsidian://ytfree?url=` followed by the *URL Encoded Text* variable.
+  4. Add **Open URLs** with that Text.
+
+  Share any YouTube link (from the YouTube app, Messages, Safari) → *Open in YT Free*.
+- **Anything else:** copy the link and run *Open YouTube URL from clipboard*.
 
 ## How the expiry problem is handled
 

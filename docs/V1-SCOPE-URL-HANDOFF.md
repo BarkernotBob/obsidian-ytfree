@@ -5,6 +5,10 @@
 > "A way for any youtube URL that I have to be able to be auto passed to obsidian rather than to
 > youtube, and for it to open the video that URL is for."
 
+**Status:** **Built 2026-10-13** (GitHub #3) — awaiting manual test, below. Parsing in
+`src/handoff.ts` (tested in `tests/handoff.test.ts`), opening in `openYouTubeUrl` in `main.ts`,
+Finicky config in `tools/finicky.js`, setup in the README.
+
 Per the repo rule: the smallest version worth having. Everything under *Out of scope* is a v2
 ticket, not a stretch goal.
 
@@ -79,3 +83,26 @@ friend meant. They never saw youtube.com.
 
 Which browser is the Mac default? It only changes which bookmarklet instructions the README
 leads with.
+
+## Manual test (for BarkernotBob)
+
+1. In a note, write `[talk](https://youtu.be/-X4ZD3fisSs?t=90)`. Click it in Reading view, then
+   in Live Preview: the video's note opens (made if missing) and the player starts at 1:30.
+   Nothing opens in the browser.
+2. Settings → YouTube links → turn *Open YouTube links here* off. The same click goes to the
+   browser. Turn it back on.
+3. In Safari's address bar, open
+   `obsidian://ytfree?url=https%3A%2F%2Fyoutu.be%2F-X4ZD3fisSs%3Ft%3D90`: same result as step 1.
+4. Open `obsidian://ytfree?url=https%3A%2F%2Fwww.youtube.com%2F%40wardonwords`: a Notice says
+   it is not a video link, and no note is made.
+5. Mac: install Finicky, copy `tools/finicky.js` to `~/.finicky.js`, set `defaultBrowser`. Send
+   yourself the link from step 1 in Mail or Messages and click it: same result. A non-YouTube link
+   still opens in your browser.
+6. Copy the bookmarklet from Settings, save it as a bookmark, click it on a YouTube video tab.
+7. iPhone: build the Shortcut from the README, share a video from the YouTube app to it.
+8. Copy a YouTube link, run *Open YouTube URL from clipboard*.
+9. Open a link to a video you already clipped with the Web Clipper: that note opens; no second
+   note is made.
+
+Known v1 edges: on the iPhone the player may need a tap to start (iOS blocks playback that no
+tap started); the note still opens at the right video, and the seek applies once it plays.

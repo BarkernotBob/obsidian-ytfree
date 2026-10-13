@@ -9,29 +9,29 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
-- 573 unit tests pass, `tsc` clean, build clean (2026-10-13).
+- 635 unit tests pass, `tsc` clean, build clean (2026-10-13).
 - Isaiah's answers of 2026-10-13 are recorded in [GLOSSARY.md](GLOSSARY.md): every ticket built
   up to 046 passed its manual test, 018 is parked, 045's scope is approved, 049 is built
-  (blockquote), and collab videos (GitHub #2) are caught from each channel's Videos tab.
+  (blockquote), and collab videos (GitHub #2) come from the signed-in subscription feed.
 - New follow-ups are filed as GitHub issues from now on, not as files in `issues/`.
 
 ## Tickets
 
-- **Building now, in this order:** 045 (channel screen) → GitHub #2 (collab videos, reuses 045's
-  browse call) → 048 (backfill, same call) → 047 (search blocklist).
-- **Scoped, not built:** YouTube links open in Obsidian
-  ([docs/V1-SCOPE-URL-HANDOFF.md](docs/V1-SCOPE-URL-HANDOFF.md)), 005 (mobile full quality,
-  unblocked), 043 (desktop full quality).
+- **Built 2026-10-13 on PR #4, awaiting manual test:** 045 (channel screen), GitHub #2 (collab
+  videos), 048 (feed backfill), 047 (search blocklist and Hide channel), GitHub #3 (YouTube links
+  open in Obsidian, [docs/V1-SCOPE-URL-HANDOFF.md](docs/V1-SCOPE-URL-HANDOFF.md)). Each has a
+  manual test in its issue file or scope doc.
+- **Scoped, not built:** 005 (mobile full quality, unblocked), 043 (desktop full quality).
 - **Parked:** 018 (Watch Later). Do not re-ask.
 
 ## Next step
 
-1. Record live InnerTube channel responses with `node tools/record-channel-fixtures.mjs` on a
-   machine that reaches youtube.com (the cloud sandbox cannot). They are the fixtures 045 and #2
-   are built against.
-2. Build 045, then #2. Measure the Videos-tab response size before choosing #2's poll cadence;
-   Isaiah's condition is "as long as this isn't too resource intensive".
-3. Isaiah: re-import the Web Clipper template and run 049's manual test.
+1. Isaiah: run `npm run smoke` on the Mac. `tests/channel.smoke.ts` checks the two live shapes
+   built blind: the Videos-tab continuation (page 2) and the WEB player's `publishDate` (048).
+   If either fails, fix the parser in `src/channel.ts` before merging.
+2. Isaiah: run the manual tests for 045, #2, 048, 047, #3, and 049 (re-import the clipper
+   template first). Then merge PR #4.
+3. After merge: 005 or 043, whichever Isaiah picks.
 
 ## How to ship and test
 

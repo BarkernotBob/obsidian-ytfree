@@ -44,7 +44,11 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   un-hides. Bounds 500 videos / 200 channels; undos kept 30 days. Newest decision per ID wins.
 - **Backfill (048)**, decided while building: horizon is the expiry setting, or 30 days when
   expiry is off; at most 5 Videos-tab pages per gap; publish date from the player, never guessed.
-- **YouTube links open in Obsidian**: wanted. Scoped in `docs/V1-SCOPE-URL-HANDOFF.md`.
+- **YouTube links open in Obsidian (GitHub #3)**: wanted. Scoped in `docs/V1-SCOPE-URL-HANDOFF.md`
+  and built. Decided while building: an existing note wins, including a Web Clipper note found
+  by its `url` / `media_link` frontmatter; links in notes are intercepted by default (one
+  setting); video links only, so a channel link still goes to the browser.
+- **Handoff** (term): `obsidian://ytfree?url=…`, the door every outside router uses.
 
 ### Earlier
 

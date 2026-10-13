@@ -44,6 +44,13 @@ import {
 } from "./capture";
 import type { DownloadHandle } from "./desktop/download.ts";
 import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
+import {
+  HANDOFF_ACTION,
+  HANDOFF_BOOKMARKLET,
+  isYouTubeUrl,
+  parseYouTubeLink,
+  youTubeLinkAt,
+} from "./handoff";
 import type { SeekMode } from "./description";
 import { formatTimestamp } from "./format";
 import {
@@ -146,6 +153,8 @@ interface YtFreeSettings {
   pinnedPlayer: boolean;
   pinnedHeightVh: number;
   pinnedFrontmatterKeys: string;
+  /** YouTube links clicked in a note open in YT Free, not the browser (GitHub #3). */
+  openYouTubeLinksHere: boolean;
   collapseProperties: boolean;
   collapseSections: boolean;
   linkifyTimestamps: boolean;
@@ -309,6 +318,9 @@ const SILENCE_REFRESH_DEBOUNCE_MS = 1200;
  */
 const DELETE_CONFIRM_MS = 5_000;
 
+/** How long a link opened in Obsidian waits for its note's player before skipping the seek. */
+const HANDOFF_PLAYER_WAIT_MS = 8_000;
+
 const TIDY_SETTLE_MS = 60_000;
 const TIDY_INTERVAL_MS = 24 * 3600_000;
 
@@ -359,6 +371,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   pinnedPlayer: true,
   pinnedHeightVh: 40,
   pinnedFrontmatterKeys: "media_link, url",
+  openYouTubeLinksHere: true,
   collapseProperties: true,
   collapseSections: true,
   linkifyTimestamps: true,
@@ -666,6 +679,10 @@ export default class YtFreePlugin extends Plugin {
   private lastActiveVideoId: string | null = null;
   /** Seek link under the mouse at mousedown, consumed by the matching click. */
   private armedSeekLink: SeekTarget | null = null;
+  /** A YouTube link under a Live Preview mousedown, fired by the matching click (GitHub #3). */
+  private armedEditorYouTube: string | null = null;
+  /** A YouTube link under a touchstart, reading view or Live Preview, fired on touchend. */
+  private armedYouTubeTap: { href: string; x: number; y: number } | null = null;
   /**
    * Where a touch started, so a scroll can be told from a tap.
    *
@@ -782,6 +799,42 @@ export default class YtFreePlugin extends Plugin {
           },
         }),
       ),
+      // GitHub #3 in Live Preview: a YouTube link there is a span, not an
+      // anchor, so it is found in the text under the click like a timestamp is.
+      Prec.highest(
+        EditorView.domEventHandlers({
+          mousedown: (evt, view) => {
+            this.armedEditorYouTube = this.editorYouTubeLinkAt(evt, view, true);
+            return false;
+          },
+          click: (evt, view) => {
+            const armed = this.armedEditorYouTube;
+            this.armedEditorYouTube = null;
+            if (!armed || this.editorYouTubeLinkAt(evt, view, false) !== armed) return false;
+            evt.preventDefault();
+            evt.stopPropagation();
+            void this.openYouTubeUrl(armed);
+            return true;
+          },
+          touchstart: (evt, view) => {
+            const touch = evt.touches[0];
+            const url = touch ? this.editorYouTubeLinkAt(touch, view, true) : null;
+            this.armedYouTubeTap = url && touch ? { href: url, x: touch.clientX, y: touch.clientY } : null;
+            return false;
+          },
+          touchend: (evt, view) => {
+            const armed = this.armedYouTubeTap;
+            this.armedYouTubeTap = null;
+            if (!armed) return false;
+            const touch = evt.changedTouches[0];
+            if (!touch || !withinTapSlop(armed, touch)) return false;
+            if (this.editorYouTubeLinkAt(touch, view, false) !== armed.href) return false;
+            evt.preventDefault();
+            void this.openYouTubeUrl(armed.href);
+            return true;
+          },
+        }),
+      ),
     ]);
 
     this.addCommand({
@@ -887,6 +940,69 @@ export default class YtFreePlugin extends Plugin {
       },
       { capture: true },
     );
+
+    // GitHub #3: YouTube links open in YT Free. The door every outside router
+    // (Finicky, the bookmarklet, the iPhone Shortcut) knocks on.
+    this.registerObsidianProtocolHandler(HANDOFF_ACTION, (params) => {
+      void this.openYouTubeUrl(params.url ?? "");
+    });
+
+    // …and links clicked inside a note. Capture phase, for the same reason as
+    // the timestamp anchors above: Obsidian's own handler would hand the link
+    // to the browser first. Touch as well as click, for the phone.
+    this.registerDomEvent(
+      document,
+      "click",
+      (evt) => {
+        const href = this.youTubeAnchorHref(evt.target);
+        if (!href) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        void this.openYouTubeUrl(href);
+      },
+      { capture: true },
+    );
+    this.registerDomEvent(
+      document,
+      "touchstart",
+      (evt) => {
+        const touch = evt.touches[0];
+        const href = touch ? this.youTubeAnchorHref(evt.target) : null;
+        this.armedYouTubeTap = href && touch ? { href, x: touch.clientX, y: touch.clientY } : null;
+      },
+      { capture: true, passive: true },
+    );
+    this.registerDomEvent(
+      document,
+      "touchend",
+      (evt) => {
+        const armed = this.armedYouTubeTap;
+        this.armedYouTubeTap = null;
+        if (!armed) return;
+        const touch = evt.changedTouches[0];
+        if (!touch || !withinTapSlop(armed, touch)) return;
+        const href = this.youTubeAnchorHref(document.elementFromPoint(touch.clientX, touch.clientY));
+        if (href !== armed.href) return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        void this.openYouTubeUrl(href);
+      },
+      { capture: true },
+    );
+
+    this.addCommand({
+      id: "open-youtube-url-from-clipboard",
+      name: "Open YouTube URL from clipboard",
+      callback: async () => {
+        let text = "";
+        try {
+          text = await navigator.clipboard.readText();
+        } catch {
+          // Refused or empty: the Notice below says the same thing.
+        }
+        await this.openYouTubeUrl(text);
+      },
+    });
 
     // The video folds away while the keyboard is up. Focus is what makes it
     // immediate — waiting for the keyboard's own animation would collapse the
@@ -1897,6 +2013,102 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /** The channel screen for whoever uploaded `videoId`. */
+  /**
+   * A rendered YouTube link an event landed on, or null (GitHub #3).
+   *
+   * Only links in a note's own content, and only with the setting on: the
+   * plugin's own "open on YouTube" fallback must still reach YouTube, or a
+   * video that will not play here would have nowhere to go.
+   */
+  private youTubeAnchorHref(target: EventTarget | null): string | null {
+    if (!this.settings.openYouTubeLinksHere) return null;
+    const anchor = (target as HTMLElement | null)?.closest?.("a");
+    if (!anchor || !anchor.closest(".markdown-rendered")) return null;
+    if (anchor.closest(".ytfree-fallback")) return null;
+    const href = anchor.getAttribute("href") ?? "";
+    return isYouTubeUrl(href) && parseYouTubeLink(href) ? href : null;
+  }
+
+  /** The YouTube link under a pointer in Live Preview, with the same guards as a seek link. */
+  private editorYouTubeLinkAt(
+    at: { clientX: number; clientY: number },
+    view: EditorView,
+    guardSelection: boolean,
+  ): string | null {
+    if (!this.settings.openYouTubeLinksHere) return null;
+    if (!view.state.field(editorLivePreviewField, false)) return null;
+    const pos = view.posAtCoords({ x: at.clientX, y: at.clientY });
+    if (pos === null) return null;
+    const line = view.state.doc.lineAt(pos);
+    const link = youTubeLinkAt(line.text, pos - line.from);
+    if (!link || !parseYouTubeLink(link.url)) return null;
+    if (guardSelection) {
+      for (const range of view.state.selection.ranges) {
+        if (range.from <= line.from + link.to && range.to >= line.from + link.from) return null;
+      }
+    }
+    return link.url;
+  }
+
+  /**
+   * Open any YouTube URL as its note, at the link's second (GitHub #3).
+   *
+   * An existing note wins — the hub's, or any note whose frontmatter names the
+   * video (a Web Clipper note). Otherwise the note is made exactly as the hub
+   * makes one. Never a blank note: a link with no video in it, or a video
+   * YouTube will not name, gets a Notice and nothing else.
+   */
+  async openYouTubeUrl(url: string): Promise<void> {
+    // A cold start from a link: the state file loads during onload.
+    await new Promise<void>((resolve) => this.app.workspace.onLayoutReady(resolve));
+    const link = parseYouTubeLink(url);
+    if (!link) {
+      new Notice("YT Free: that is not a link to a YouTube video.");
+      return;
+    }
+    const existing = this.noteForVideo(link.videoId);
+    if (existing) {
+      await this.app.workspace.getLeaf(false).openFile(existing);
+    } else {
+      const item = await this.subscriptions.addLinkedVideo(link.videoId);
+      if (!item) {
+        new Notice("YT Free: YouTube would not say what that video is. It may be private or removed.");
+        return;
+      }
+      await this.subscriptions.openItem(item);
+    }
+    if (link.seconds > 0) await this.seekWhenMounted(link.videoId, link.seconds);
+  }
+
+  /** The note for this video, if there is one: the hub's first, then any frontmatter match. */
+  private noteForVideo(videoId: string): TFile | null {
+    const path = this.subscriptions.itemFor(videoId)?.notePath;
+    const recorded = path ? this.app.vault.getAbstractFileByPath(path) : null;
+    if (recorded instanceof TFile) return recorded;
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      if (this.videoIdInFrontmatter(fm) === videoId) return file;
+    }
+    return null;
+  }
+
+  /**
+   * Start the note's player at a second, once the note has mounted it. The
+   * player appears a moment after the note opens; give up quietly after a few
+   * seconds (the pinned player may be off), and say so.
+   */
+  private async seekWhenMounted(videoId: string, seconds: number): Promise<void> {
+    for (let waited = 0; waited < HANDOFF_PLAYER_WAIT_MS; waited += 250) {
+      const entry = this.players.get(videoId);
+      if (entry) {
+        await this.seekEntry(entry, seconds);
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+    new Notice(`YT Free: opened the note, but could not start it at ${formatTimestamp(seconds)}.`);
+  }
+
   private async openVideoChannel(videoId: string): Promise<void> {
     const item = this.subscriptions.itemFor(videoId);
     let channelId = item?.channelId ?? "";
@@ -5648,6 +5860,32 @@ class YtFreeSettingTab extends PluginSettingTab {
             this.display(),
           ).open(),
         ),
+      );
+
+    new Setting(containerEl).setName("YouTube links").setHeading();
+
+    new Setting(containerEl)
+      .setName("Open YouTube links here")
+      .setDesc(
+        "A YouTube link clicked in a note opens that video's note in YT Free, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.openYouTubeLinksHere).onChange(async (value) => {
+          this.plugin.settings.openYouTubeLinksHere = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Browser bookmarklet")
+      .setDesc(
+        "Copies a bookmarklet that sends the YouTube tab you are on to YT Free. Make a new bookmark and paste this as its address.",
+      )
+      .addButton((button) =>
+        button.setButtonText("Copy").onClick(async () => {
+          await navigator.clipboard.writeText(HANDOFF_BOOKMARKLET);
+          new Notice("YT Free: bookmarklet copied.");
+        }),
       );
 
     this.displayNotifications(containerEl);
