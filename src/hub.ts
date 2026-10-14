@@ -3496,6 +3496,7 @@ class PreviewModal extends Modal {
   private mountPlayer(contentEl: HTMLElement): void {
     if (!this.spec.mount) return;
     const stage = contentEl.createDiv({ cls: "ytfree-preview-player" });
+    this.mountClose(stage);
     void this.spec.mount(stage, this.spec.videoId).then(
       (handle) => {
         // Dismissed while the stream was resolving. Nobody will call the
@@ -3508,8 +3509,31 @@ class PreviewModal extends Modal {
         console.error("YT Free: preview player could not be built.", err);
         stage.setText("This video could not be played here.");
         stage.addClass("ytfree-preview-player-failed");
+        // `setText` took the close button with everything else.
+        this.mountClose(stage);
       },
     );
+  }
+
+  /**
+   * The phone's close button, on the picture's top-right corner (GitHub #8).
+   *
+   * Obsidian's own close button is not ours to place. Its class changed
+   * between releases — `modal-close-button` in 1.10, `modal-header-button` by
+   * 1.14 — and it is positioned against the modal's top edge, which on a
+   * full-screen sheet is the status bar. Three builds styled the old class and
+   * moved nothing on a phone running the new one. So on a phone the sheet draws
+   * its own, inside the player box, and hides Obsidian's: a button that is a
+   * child of the picture cannot end up anywhere but on it.
+   */
+  private mountClose(stage: HTMLElement): void {
+    if (!Platform.isPhone) return;
+    const button = stage.createEl("button", {
+      cls: "ytfree-preview-close",
+      attr: { type: "button", "aria-label": "Close", title: "Close" },
+    });
+    setIcon(button, "x");
+    button.addEventListener("click", () => this.close());
   }
 
   /**

@@ -29,8 +29,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
-1. Isaiah: on the iPhone, open any Preview. It should cover the whole screen, close button
-   under the status bar, in both orientations. On the Mac it is unchanged (#8).
+1. Isaiah: on the iPhone, open any Preview. The picture starts right under the status bar with
+   the ✕ on its top-right corner; opening Description or Transcript widens it to full width and
+   hides the other, shutting it puts both back side by side (#8, PR #12). Mac unchanged.
 2. Isaiah: on the iPhone, press Play then Fullscreen at once. The Fullscreen button is dimmed
    and the status line says it will be ready once the video has loaded; nothing changes size.
    Press it again once the video plays: the phone's own fullscreen. Same in a note (#9).
