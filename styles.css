@@ -3487,19 +3487,54 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
  * space needs a definite container height to be free space in, and a
  * content-sized box has none to give.
  */
+/*
+ * The phone's Preview is the whole screen (GitHub #8).
+ *
+ * Obsidian used to draw a phone modal as a full-width sheet, and the Preview was
+ * laid out for that. From 1.10 or so a phone modal is a card inset from every
+ * edge with rounded corners, capped at 640px wide: measured against each
+ * version's own app.css at 390x844, portrait lost 31pt of width and landscape a
+ * quarter of it, and the picture went from 403pt wide to 297. Nothing in this
+ * file changed; the box it was drawn in did.
+ *
+ * So the Preview stops borrowing Obsidian's modal box on a phone and takes the
+ * screen: the container is already the whole viewport, and the modal fills it.
+ * The safe areas are padding, so the notch and the home bar sit on the modal's
+ * own background rather than over the picture or the buttons.
+ */
+.is-phone .modal.ytfree-preview-modal {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  padding: var(--safe-area-inset-top, 0px) var(--safe-area-inset-right, 0px)
+    var(--safe-area-inset-bottom, 0px) var(--safe-area-inset-left, 0px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Under the status bar, not behind it. It sits over the picture's top-right
+   corner, as it did on the full-width sheet. */
+.is-phone .ytfree-preview-modal .modal-close-button {
+  top: calc(var(--safe-area-inset-top, 0px) + var(--size-4-2));
+  inset-inline-end: calc(var(--safe-area-inset-right, 0px) + var(--size-4-3));
+}
+
 .is-phone .ytfree-preview-modal .modal-content {
   /*
-   * A height, not a cap. A percentage would not do: the modal above it is
-   * content-sized, and a percentage of `auto` is `auto` — which is how a sheet
-   * with `height: 100%` still comes out exactly as tall as its own contents and
-   * has no free space to give anyone.
-   *
-   * Nearly the whole screen, where the laptop's rule is 82vh. The 82 is about a
-   * modal floating on a desktop with its own backdrop showing round the edges;
-   * a phone's Preview is full-width and edge-to-edge already, and every point
-   * not spent here is a point of transcript.
+   * A definite height, which is what makes the foot of the sheet one region:
+   * a flex column only hands out free space inside a box that has a height.
+   * The modal above it is now exactly the screen less its safe areas, so the
+   * content takes all of that rather than a guess at it from `100vh`.
    */
-  height: calc(100vh - var(--safe-area-inset-top, 0px) - 2em);
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
   max-height: none;
 }
 
