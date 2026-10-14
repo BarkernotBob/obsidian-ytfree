@@ -3532,11 +3532,50 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
   overflow: hidden;
 }
 
-/* Under the status bar, not behind it. It sits over the picture's top-right
-   corner, as it did on the full-width sheet. */
+/*
+ * The close button sits on the picture's top-right corner, and the picture sits
+ * as high as the safe area allows (Isaiah's second phone test).
+ *
+ * Obsidian 1.10+ gives a modal a header row (title and close) above its
+ * content. The Preview has no title, so on a phone that row was only a band of
+ * blank space between the notch and the picture with the close button floating
+ * in it. The header now takes no space and is not a positioning box, so the
+ * close button is placed against the modal itself, over the picture.
+ */
+.is-phone .ytfree-preview-modal .modal-header {
+  position: static;
+  height: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.is-phone .ytfree-preview-modal .modal-title {
+  display: none;
+}
+
 .is-phone .ytfree-preview-modal .modal-close-button {
   top: calc(var(--ytfree-sheet-top) + var(--size-4-2));
-  inset-inline-end: calc(var(--safe-area-inset-right, 0px) + var(--size-4-3));
+  inset-inline-end: calc(var(--safe-area-inset-right, 0px) + var(--size-4-4) + var(--size-4-2));
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* It is on a picture, which can be any colour, so it carries its own disc. */
+  background: rgba(0, 0, 0, 0.5);
+  --icon-color: #fff;
+  --icon-color-hover: #fff;
+  --icon-color-active: #fff;
+  --icon-color-focus: #fff;
+  color: #fff;
+}
+
+/* In the in-app fullscreen the picture is the whole screen; the close belongs to the sheet. */
+body.ytfree-immersive-open .ytfree-preview-modal .modal-close-button {
+  display: none;
 }
 
 .is-phone .ytfree-preview-modal .modal-content {
@@ -3550,6 +3589,14 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
   height: auto;
   min-height: 0;
   max-height: none;
+  /* The picture starts at the safe area, not a gutter below it. */
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.is-phone .ytfree-preview-modal .ytfree-preview-player {
+  margin-top: 0;
+  padding-top: 0;
 }
 
 /*
@@ -3718,6 +3765,11 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
 @media (max-height: 520px) {
   .is-phone .modal.ytfree-preview-modal {
     --ytfree-sheet-top: max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px));
+  }
+
+  /* No status bar sideways, so a little room above the picture instead. */
+  .is-phone .ytfree-preview-modal .modal-content {
+    padding-top: var(--size-4-2);
   }
 
   .is-phone .ytfree-preview-modal .modal-content {
