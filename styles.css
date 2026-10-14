@@ -375,6 +375,12 @@
   opacity: 0.45;
 }
 
+/* Fullscreen while the stream is still resolving: it will wait, so it looks it
+   (GitHub #9). Not `:disabled`, because the tap still has work to do. */
+.ytfree-controls .ytfree-btn.is-waiting {
+  opacity: 0.45;
+}
+
 /*
  * "10", under the chevrons of the skip buttons.
  *
