@@ -21,6 +21,17 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Decisions
 
+### 2026-10-14 (Isaiah)
+
+- **Preview (GitHub #8)**: fullscreen on the phone, not a card. Decided while building: the
+  phone only; the tablet and desktop sheets are unchanged.
+- **Fullscreen before the stream resolves (GitHub #9)**: it waits; a press does not go
+  fullscreen until there is media, and the delay is acceptable. Replaces 038's "a cold press
+  goes to the in-app fullscreen". Decided while building: the button is dimmed while it would
+  wait, and a press on a player nobody started begins loading it without playing.
+- **Paste to Preview (GitHub #10, #11)**: wanted, on phone and desktop. Scope written, not yet
+  approved.
+
 ### 2026-10-13 (Isaiah)
 
 - **Manual tests**: every ticket built up to 046 is treated as passing. Status lines say so.
