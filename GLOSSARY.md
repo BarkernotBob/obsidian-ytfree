@@ -25,6 +25,10 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - **Preview (GitHub #8)**: fullscreen on the phone, not a card. Decided while building: the
   phone only; the tablet and desktop sheets are unchanged.
+- **Preview, after the first phone test (GitHub #8)**: nothing tappable in the status bar
+  (the sheet's top inset has a 59pt floor upright); the Description and Transcript headers sit
+  side by side under the player and never move; while one is open the title, facts and the four
+  buttons are hidden and the region takes the rest. Upright phone only; landscape unchanged.
 - **Fullscreen before the stream resolves (GitHub #9)**: it waits; a press does not go
   fullscreen until there is media, and the delay is acceptable. Replaces 038's "a cold press
   goes to the in-app fullscreen". Decided while building: the button is dimmed while it would

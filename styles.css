@@ -3509,6 +3509,14 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
  * own background rather than over the picture or the buttons.
  */
 .is-phone .modal.ytfree-preview-modal {
+  /*
+   * The top inset, with a floor. On Isaiah's iPhone the first fullscreen build
+   * put the close button in the status bar, where iOS takes the touches, so the
+   * inset Obsidian reported there was not the one the screen has. 59pt is the
+   * tallest status bar an iPhone has (the Dynamic Island models); held sideways
+   * there is no status bar, and the floor goes — see the landscape rules.
+   */
+  --ytfree-sheet-top: max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px), 59px);
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -3517,7 +3525,7 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
   margin: 0;
   border: none;
   border-radius: 0;
-  padding: var(--safe-area-inset-top, 0px) var(--safe-area-inset-right, 0px)
+  padding: var(--ytfree-sheet-top) var(--safe-area-inset-right, 0px)
     var(--safe-area-inset-bottom, 0px) var(--safe-area-inset-left, 0px);
   display: flex;
   flex-direction: column;
@@ -3527,7 +3535,7 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
 /* Under the status bar, not behind it. It sits over the picture's top-right
    corner, as it did on the full-width sheet. */
 .is-phone .ytfree-preview-modal .modal-close-button {
-  top: calc(var(--safe-area-inset-top, 0px) + var(--size-4-2));
+  top: calc(var(--ytfree-sheet-top) + var(--size-4-2));
   inset-inline-end: calc(var(--safe-area-inset-right, 0px) + var(--size-4-3));
 }
 
@@ -3579,6 +3587,120 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
   font-size: var(--font-ui-medium);
 }
 
+/* ------------------------------------- the phone, upright, reading — #8 ---
+ *
+ * From Isaiah's test of the fullscreen sheet: the reading region needed more of
+ * the screen without collapsing the video. So, upright on a phone:
+ *
+ * - The two disclosure headers sit side by side directly under the player, in
+ *   a row of their own that never moves: nothing above them changes height when
+ *   a region opens or shuts, so they cannot reflow under the finger.
+ * - While a region is open, the title, the facts and the four buttons are not
+ *   on the sheet, and the region takes everything below the headers. Shut the
+ *   region and they come back.
+ * - The header you are not reading is hidden but keeps its slot, so the one
+ *   you are reading stays exactly where you tapped it.
+ *
+ * Done with a grid and `display: contents` on the boxes that group the
+ * headers with their bodies, so the DOM the laptop and landscape layouts rely
+ * on is unchanged.
+ */
+@media (min-height: 521px) {
+  .is-phone .ytfree-preview-modal .modal-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "player player"
+      "dhead thead"
+      "title title"
+      "facts facts"
+      "body body"
+      "actions actions";
+    column-gap: 0.5em;
+  }
+
+  .is-phone .ytfree-preview-modal .ytfree-preview-player {
+    grid-area: player;
+    margin-bottom: 0.5em;
+  }
+
+  .is-phone .ytfree-preview-read,
+  .is-phone .ytfree-preview-describe,
+  .is-phone .ytfree-preview-transcript,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-describe:not(.is-open),
+  .is-phone .ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) {
+    display: contents;
+  }
+
+  .is-phone .ytfree-preview-disclose {
+    grid-area: dhead;
+  }
+
+  .is-phone .ytfree-preview-transcript-head {
+    grid-area: thead;
+  }
+
+  .is-phone .ytfree-preview-disclose,
+  .is-phone .ytfree-preview-transcript-head {
+    min-width: 0;
+    justify-content: center;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+  }
+
+  .is-phone .ytfree-preview-disclose-label,
+  .is-phone .ytfree-preview-transcript-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-disclose,
+  .is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-head {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+
+  /* Hidden, not removed: its slot is what keeps the open one where it was. */
+  .is-phone .ytfree-sheet-reading .ytfree-preview-describe:not(.is-open) .ytfree-preview-disclose,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) .ytfree-preview-transcript-head {
+    visibility: hidden;
+  }
+
+  .is-phone .ytfree-preview-title {
+    grid-area: title;
+    margin-top: 0.6em;
+  }
+
+  .is-phone .ytfree-preview-facts {
+    grid-area: facts;
+  }
+
+  /* Both bodies share the region; only the open one has any height. */
+  .is-phone .ytfree-preview-description,
+  .is-phone .ytfree-preview-transcript-body {
+    grid-area: body;
+    min-height: 0;
+  }
+
+  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-description,
+  .is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
+    margin-top: 0.5em;
+  }
+
+  .is-phone .ytfree-preview-actions {
+    grid-area: actions;
+    margin-top: 0.5em;
+  }
+
+  .is-phone .ytfree-sheet-reading .ytfree-preview-title,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-facts,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-actions {
+    display: none;
+  }
+}
+
 /* ------------------------------------------ the phone, held sideways — 039 ---
  *
  * Landscape is the same sheet with the two resources swapped: 844 points of
@@ -3594,6 +3716,10 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
  * keyboard produces the same shortage the same way.
  */
 @media (max-height: 520px) {
+  .is-phone .modal.ytfree-preview-modal {
+    --ytfree-sheet-top: max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px));
+  }
+
   .is-phone .ytfree-preview-modal .modal-content {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
