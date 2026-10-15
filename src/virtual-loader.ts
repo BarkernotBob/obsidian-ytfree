@@ -64,7 +64,11 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
     load(context: LoaderContext, config: LoaderConfiguration, callbacks: LoaderCallbacks<LoaderContext>): void {
       this.context = context;
       this.done = false;
-      this.stats = newStats();
+      // Reset in place, never replace: hls.js keeps a reference to `stats` from
+      // before `load` (a fragment's stats are this object), and a fresh one
+      // left its bandwidth estimate at zero — it never climbed past the lowest
+      // rung.
+      Object.assign(this.stats, newStats());
       this.stats.loading.start = now();
 
       const limit = config.loadPolicy?.maxLoadTimeMs || config.timeout;
@@ -86,8 +90,11 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
           this.done = true;
           this.clearTimer();
           const size = typeof data === "string" ? data.length : data.byteLength;
+          // No first-byte time from `requestUrl`, so call it the start: the
+          // whole request then counts as transfer, which under-reads bandwidth
+          // a little rather than reading it as infinite.
           const t = now();
-          this.stats.loading.first = t;
+          this.stats.loading.first = this.stats.loading.start;
           this.stats.loading.end = t;
           this.stats.loaded = size;
           this.stats.total = size;
@@ -120,4 +127,38 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
       this.timer = null;
     }
   };
+}
+
+/** The slice of an Hls instance `dropOnJump` touches. */
+interface LevelSwitch {
+  nextLoadLevel: number;
+  autoLevelEnabled: boolean;
+}
+
+/** Is `t` inside what the element already has? */
+function isBuffered(video: HTMLMediaElement, t: number): boolean {
+  const ranges = video.buffered;
+  for (let i = 0; i < ranges.length; i++) {
+    if (t >= ranges.start(i) && t < ranges.end(i) - 0.5) return true;
+  }
+  return false;
+}
+
+/**
+ * A jump into what has not loaded yet starts on the lowest rung.
+ *
+ * Isaiah's rule (2026-10-15): a jump should play at once, "even if that means
+ * a quick buffer at lower res". hls.js would otherwise fetch the landing
+ * segment at the rung it was on — a 1080p segment is several times the bytes
+ * of a 240p one — and the reader waits on it. Dropping only the next load
+ * keeps hls.js in automatic mode, so it climbs back to HD by itself as soon as
+ * the bandwidth it measures allows. Returns the unhook.
+ */
+export function dropOnJump(hls: LevelSwitch, video: HTMLMediaElement): () => void {
+  const onSeeking = () => {
+    if (!hls.autoLevelEnabled || isBuffered(video, video.currentTime)) return;
+    hls.nextLoadLevel = 0;
+  };
+  video.addEventListener("seeking", onSeeking);
+  return () => video.removeEventListener("seeking", onSeeking);
 }

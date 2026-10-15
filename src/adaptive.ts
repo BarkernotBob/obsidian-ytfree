@@ -36,6 +36,14 @@ export interface AdaptiveFormat {
   indexRange?: { start?: string; end?: string };
   contentLength?: string;
   approxDurationMs?: string;
+  /**
+   * Present when a video has more than one sound track — YouTube's automatic
+   * dubs. Each language is a separate format with the same itag, and the dubs
+   * can outrank the original on bitrate.
+   */
+  audioTrack?: { id?: string; displayName?: string; audioIsDefault?: boolean };
+  /** `acont=original` / `acont=dubbed-auto` live in here as well. */
+  xtags?: string;
 }
 
 export interface AdaptiveTrack {
@@ -50,9 +58,19 @@ export interface AdaptiveTrack {
 }
 
 export interface AdaptivePair {
+  /** The top rung of `ladder`. */
   video: AdaptiveTrack;
+  /**
+   * One picture per height, highest first, down to 240p. hls.js switches
+   * between them: a jump lands on a low rung so it plays at once, then climbs
+   * back to `video` (Isaiah, 2026-10-15: "a quick buffer at lower res").
+   */
+  ladder: AdaptiveTrack[];
   audio: AdaptiveTrack;
 }
+
+/** The lowest rung worth offering. Below this a jump looks broken, not fast. */
+export const MIN_LADDER_HEIGHT = 240;
 
 /** One chunk of a file: where it is and how long it plays. */
 export interface Segment {
@@ -89,6 +107,21 @@ function toTrack(f: AdaptiveFormat): AdaptiveTrack | null {
 }
 
 /**
+ * Which sound track to prefer, highest first: the one YouTube plays by
+ * default, then one marked original, then a format with no track info (a
+ * single-language video), and a dub last. Picking by bitrate alone handed
+ * Isaiah a dubbed track on 2026-10-15.
+ */
+export function audioRank(f: AdaptiveFormat): number {
+  const track = f.audioTrack;
+  const tags = `${f.xtags ?? ""} ${track?.displayName ?? ""} ${track?.id ?? ""}`.toLowerCase();
+  if (track?.audioIsDefault) return 3;
+  if (tags.includes("original")) return 2;
+  if (!track && !tags.includes("dubbed")) return 1;
+  return 0;
+}
+
+/**
  * The best H.264 picture at or below `maxHeight`, and the best AAC sound.
  *
  * MP4 only: WebM carries its index as Cues, not `sidx`, and VP9/AV1 cost
@@ -103,14 +136,22 @@ export function pickPair(formats: AdaptiveFormat[], maxHeight = DEFAULT_MAX_HEIG
     .sort((a, b) => (b.height ?? 0) - (a.height ?? 0) || (b.fps ?? 0) - (a.fps ?? 0) || (b.bitrate ?? 0) - (a.bitrate ?? 0));
   const audios = formats
     .filter((f) => f.mimeType?.startsWith("audio/mp4") && codecsOf(f.mimeType).startsWith("mp4a"))
-    .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
+    .sort((a, b) => audioRank(b) - audioRank(a) || (b.bitrate ?? 0) - (a.bitrate ?? 0));
 
-  const video = videos.map(toTrack).find((t) => t !== null) ?? null;
+  const ladder: AdaptiveTrack[] = [];
+  for (const f of videos) {
+    const track = toTrack(f);
+    if (!track || track.height < MIN_LADDER_HEIGHT) continue;
+    // Sorted best-first, so the first track at each height is the one to keep.
+    if (ladder.some((t) => t.height === track.height)) continue;
+    ladder.push(track);
+  }
   const audio = audios.map(toTrack).find((t) => t !== null) ?? null;
+  const video = ladder[0] ?? null;
   // Nothing above 360p is not worth a second player: the muxed stream already
   // plays at 360p.
   if (!video || !audio || video.height <= 360) return null;
-  return { video, audio };
+  return { video, ladder, audio };
 }
 
 /**
@@ -195,37 +236,42 @@ function mediaPlaylist(track: AdaptiveTrack, segments: Segment[]): string {
   return lines.join("\n");
 }
 
-/** The master playlist and the two media playlists, keyed by their URLs. */
+export interface Rung {
+  track: AdaptiveTrack;
+  segments: Segment[];
+}
+
+/** The master playlist and every media playlist, keyed by their URLs. */
 export function buildPlaylists(
   videoId: string,
-  pair: AdaptivePair,
-  videoSegments: Segment[],
-  audioSegments: Segment[],
+  videos: Rung[],
+  audio: Rung,
 ): { master: string; files: Record<string, string> } {
   const base = virtualBase(videoId);
   const master = `${base}master.m3u8`;
-  const videoUrl = `${base}video.m3u8`;
   const audioUrl = `${base}audio.m3u8`;
-  const { video, audio } = pair;
-  const codecs = [video.codecs, audio.codecs].filter(Boolean).join(",");
-  const masterText = [
+  const files: Record<string, string> = { [audioUrl]: mediaPlaylist(audio.track, audio.segments) };
+  const lines = [
     "#EXTM3U",
     "#EXT-X-VERSION:7",
     "#EXT-X-INDEPENDENT-SEGMENTS",
     `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="audio",DEFAULT=YES,AUTOSELECT=YES,URI="${audioUrl}"`,
-    `#EXT-X-STREAM-INF:BANDWIDTH=${video.bitrate + audio.bitrate},CODECS="${codecs}",` +
-      `RESOLUTION=${video.width}x${video.height},AUDIO="a"`,
-    videoUrl,
-    "",
-  ].join("\n");
-  return {
-    master,
-    files: {
-      [master]: masterText,
-      [videoUrl]: mediaPlaylist(video, videoSegments),
-      [audioUrl]: mediaPlaylist(audio, audioSegments),
-    },
-  };
+  ];
+  // Lowest first: hls.js numbers levels in manifest order, and the player
+  // drops to level 0 for a jump.
+  for (const { track, segments } of [...videos].sort((x, y) => x.track.height - y.track.height)) {
+    const url = `${base}video-${track.height}.m3u8`;
+    const codecs = [track.codecs, audio.track.codecs].filter(Boolean).join(",");
+    lines.push(
+      `#EXT-X-STREAM-INF:BANDWIDTH=${track.bitrate + audio.track.bitrate},CODECS="${codecs}",` +
+        `RESOLUTION=${track.width}x${track.height},AUDIO="a"`,
+      url,
+    );
+    files[url] = mediaPlaylist(track, segments);
+  }
+  lines.push("");
+  files[master] = lines.join("\n");
+  return { master, files };
 }
 
 /**
@@ -245,13 +291,19 @@ export async function streamFromPair(
   fetchRange: FetchRange,
   ua?: string,
 ): Promise<ResolvedStream> {
-  const [videoIndex, audioIndex] = await Promise.all([
-    fetchRange(pair.video.url, pair.video.index.start, pair.video.index.end, ua),
-    fetchRange(pair.audio.url, pair.audio.index.start, pair.audio.index.end, ua),
+  const read = async (track: AdaptiveTrack): Promise<Rung> => ({
+    track,
+    segments: parseSidx(await fetchRange(track.url, track.index.start, track.index.end, ua), track.index.start),
+  });
+  // The top rung and the sound must work: they are the point. A lower rung
+  // that will not answer is only left off the ladder.
+  const [top, audio, ...lower] = await Promise.all([
+    read(pair.video),
+    read(pair.audio),
+    ...pair.ladder.slice(1).map((t) => read(t).catch(() => null)),
   ]);
-  const videoSegments = parseSidx(videoIndex, pair.video.index.start);
-  const audioSegments = parseSidx(audioIndex, pair.audio.index.start);
-  const { master, files } = buildPlaylists(videoId, pair, videoSegments, audioSegments);
+  const videos = [top, ...lower.filter((r): r is Rung => r !== null)];
+  const { master, files } = buildPlaylists(videoId, videos, audio);
 
   const virtual: VirtualPlaylist = {
     files,

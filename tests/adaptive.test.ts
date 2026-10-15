@@ -100,20 +100,32 @@ test("parseSidx reads version 1 and refuses a nested index", () => {
   assert.throws(() => parseSidx(new ArrayBuffer(4), 0), /no sidx/);
 });
 
-test("buildPlaylists writes a VOD master with alternate audio and byte-range media", () => {
+test("pickPair builds a ladder, one rung per height, best first", () => {
+  const pair = pickPair(formats)!;
+  assert.deepEqual(pair.ladder.map((t) => t.height), [1080, 720]);
+  assert.equal(pair.video, pair.ladder[0]);
+});
+
+test("buildPlaylists writes a VOD master, lowest rung first, with alternate audio", () => {
   const pair = pickPair(formats)!;
   const v = parseSidx(sidx([[1000, 5000], [2000, 4000]]), 741);
   const a = parseSidx(sidx([[100, 5000], [200, 4000]]), 632);
-  const { master, files } = buildPlaylists("abcdefghijk", pair, v, a);
-  assert.equal(master, `${virtualBase("abcdefghijk")}master.m3u8`);
+  const base = virtualBase("abcdefghijk");
+  const { master, files } = buildPlaylists(
+    "abcdefghijk",
+    pair.ladder.map((track) => ({ track, segments: v })),
+    { track: pair.audio, segments: a },
+  );
+  assert.equal(master, `${base}master.m3u8`);
   assert.match(files[master], /CODECS="avc1\.640028,mp4a\.40\.2"/);
-  assert.match(files[master], /RESOLUTION=1920x1080,AUDIO="a"/);
-  const video = files[`${virtualBase("abcdefghijk")}video.m3u8`];
+  assert.ok(files[master].indexOf("1280x720") < files[master].indexOf("1920x1080"), "lowest rung must be level 0");
+  const video = files[`${base}video-1080.m3u8`];
   assert.match(video, /#EXT-X-MAP:URI="[^"]+itag=137[^"]*",BYTERANGE="741@0"/);
   assert.match(video, /#EXT-X-TARGETDURATION:5\n/);
   assert.match(video, new RegExp(`#EXT-X-BYTERANGE:1000@${741 + 32 + 2 * 12}\n`));
   assert.match(video, /#EXT-X-ENDLIST/);
-  assert.match(files[`${virtualBase("abcdefghijk")}audio.m3u8`], /BYTERANGE="632@0"/);
+  assert.match(files[`${base}video-720.m3u8`], /itag=136/);
+  assert.match(files[`${base}audio.m3u8`], /BYTERANGE="632@0"/);
 });
 
 /** Serves a sidx for any index-range request; everything else is bytes. */
@@ -128,12 +140,24 @@ function fakeFetch(log: string[], refuse = false) {
 test("streamFromPair reads both indexes with the client's UA and expires with the URLs", async () => {
   const log: string[] = [];
   const stream = await streamFromPair("abcdefghijk", pickPair(formats)!, fakeFetch(log), "UA");
-  assert.deepEqual(log.sort(), ["137:741-800:UA", "140:632-700:UA"]);
+  assert.deepEqual(log.sort(), ["136:741-800:UA", "137:741-800:UA", "140:632-700:UA"]);
   assert.equal(stream.mode, "quality");
   assert.equal(stream.isHls, true);
   assert.equal(stream.height, 1080);
   assert.ok(stream.virtual?.files[stream.url]);
   assert.ok(stream.expiresAt < EXPIRE * 1000);
+});
+
+test("streamFromPair drops a lower rung that refuses, but not the top one", async () => {
+  const pair = pickPair(formats)!;
+  const only = (bad: string) => async (u: string, s: number, e: number) => {
+    if (u.includes(`itag=${bad}`)) throw new Error("HTTP 403");
+    return fakeFetch([])(u, s, e);
+  };
+  const stream = await streamFromPair("abcdefghijk", pair, only("136"));
+  assert.ok(stream.virtual!.files[`${virtualBase("abcdefghijk")}video-1080.m3u8`]);
+  assert.equal(stream.virtual!.files[`${virtualBase("abcdefghijk")}video-720.m3u8`], undefined);
+  await assert.rejects(streamFromPair("abcdefghijk", pair, only("137")), /403/);
 });
 
 test("resolveHd falls through clients, then to an HLS manifest, then throws", async () => {
@@ -252,4 +276,17 @@ test("the loader reports the HTTP status and stays quiet after abort", async () 
   loader.abort();
   await new Promise((r) => setTimeout(r, 10));
   assert.deepEqual(b.events, []);
+});
+
+test("pickPair keeps the original language over a higher-bitrate dub", () => {
+  const dubbed: AdaptiveFormat[] = [
+    formats[1],
+    { ...formats[3], url: url(140) + "&lang=es", bitrate: 200e3, audioTrack: { id: "es.3", displayName: "Spanish", audioIsDefault: false } },
+    { ...formats[3], url: url(140) + "&lang=en", bitrate: 130e3, audioTrack: { id: "en.4", displayName: "English original", audioIsDefault: true } },
+    { ...formats[3], url: url(140) + "&lang=de", bitrate: 210e3, xtags: "acont=dubbed-auto" },
+  ];
+  assert.match(pickPair(dubbed)!.audio.url, /lang=en/);
+  // No default flag at all: "original" still wins.
+  const noDefault = dubbed.map((f) => (f.audioTrack ? { ...f, audioTrack: { ...f.audioTrack, audioIsDefault: false } } : f));
+  assert.match(pickPair(noDefault)!.audio.url, /lang=en/);
 });

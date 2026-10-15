@@ -31,8 +31,9 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - Desktop plays without yt-dlp by falling back to the phone's path; Download and Smart Speed
   still need yt-dlp.
-- HD comes from stitched HD first, yt-dlp's HLS second. Cap 1080p, H.264 only, one height (no
-  picker yet). On by default on desktop; opt-in on the phone ("HD on this phone", iOS 17.1+).
+- HD comes from stitched HD first, yt-dlp's HLS second. Cap 1080p, H.264 only. After Isaiah's
+  first test: a ladder from 240p up, a jump lands low and climbs back, original-language audio
+  only, and a broken HD stream drops to 360p rather than retrying. On by default on desktop; opt-in on the phone ("HD on this phone", iOS 17.1+).
 
 ### 2026-10-13 (Isaiah)
 

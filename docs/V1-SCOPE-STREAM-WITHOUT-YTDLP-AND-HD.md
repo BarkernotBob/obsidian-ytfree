@@ -35,16 +35,24 @@ quality) and the opt-in half of 005 (phone full quality).
    in memory that points at byte ranges of those files. hls.js plays it through Media Source
    Extensions, fetching a few seconds ahead, exactly like any stream. Nothing is written to disk.
    Every byte request goes through Obsidian's `requestUrl`, so there is no CORS problem.
-3. **Order of attempts for HD:** InnerTube `ANDROID` pair, then `IOS` pair, then the `IOS` HLS
+3. **A ladder, not one height** (added 2026-10-15 after Isaiah's first test: "jump ahead and have
+   it load the new point quickly, even if that means a quick buffer at lower res"). Every H.264
+   height from 240p up to 1080p is offered; hls.js picks by measured bandwidth. A jump into
+   unloaded video fetches its first chunk at the lowest rung, so it plays at once, then climbs
+   back to HD on its own. The sound is the video's original language, never an automatic dub
+   (YouTube lists dubs as separate formats, and one outranked the original on bitrate).
+4. **If HD breaks mid-video**, the player drops to 360p at the same spot instead of retrying HD
+   (an expired URL hours in still gets a fresh HD resolve).
+5. **Order of attempts for HD:** InnerTube `ANDROID` pair, then `IOS` pair, then the `IOS` HLS
    manifest, then (desktop with yt-dlp) the old yt-dlp HLS lookup. First one that serves bytes
    wins; if none do, 360p keeps playing and nothing is shown (043's contract).
-4. **Desktop: on by default** under the existing "Upgrade to high quality" setting.
-5. **Phone: opt-in**, new setting "HD on this phone (experimental)", off by default. iOS needs
+6. **Desktop: on by default** under the existing "Upgrade to high quality" setting.
+7. **Phone: opt-in**, new setting "HD on this phone (experimental)", off by default. iOS needs
    17.1+ (ManagedMediaSource); without it the phone stays on 360p.
 
 ## Out of scope (backlog)
 
-- A quality picker or Auto/ABR between several heights (v1 plays one height).
+- A manual quality picker (#15). Automatic switching between heights is in.
 - VP9/AV1 above 1080p (4K). H.264 tops out at 1080p on YouTube.
 - Making InnerTube the *first* path on desktop even when yt-dlp is installed.
 - Smart Speed and Download without yt-dlp: both still need yt-dlp (and ffmpeg).

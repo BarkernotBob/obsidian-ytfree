@@ -11,7 +11,7 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 // touches the player, which is one of the two reasons the plugin could not load
 // on mobile.
 import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
-import { virtualLoader } from "./virtual-loader.ts";
+import { dropOnJump, virtualLoader } from "./virtual-loader.ts";
 
 export type { StreamProvider };
 
@@ -263,6 +263,7 @@ let nowPlayingOwner: YtFreePlayer | null = null;
 export class YtFreePlayer {
   readonly video: HTMLVideoElement;
   private hls: Hls | null = null;
+  private unhookJump: (() => void) | null = null;
   private recoveries = 0;
   private recovering = false;
   private destroyed = false;
@@ -2217,14 +2218,32 @@ export class YtFreePlayer {
         lowLatencyMode: false,
         // A stitched stream's playlists exist only in memory and its bytes
         // come through `requestUrl`; see `virtual-loader.ts`.
-        ...(stream.virtual ? { loader: virtualLoader(stream.virtual) } : {}),
+        // A minute ahead at most: this is a stream, and every byte past what
+        // the reader will watch is a byte of download by another name.
+        ...(stream.virtual
+          ? { loader: virtualLoader(stream.virtual), maxBufferLength: 30, maxMaxBufferLength: 60 }
+          : {}),
       });
       this.hls = hls;
       hls.loadSource(stream.url);
       hls.attachMedia(this.video);
+      if (stream.virtual) this.unhookJump = dropOnJump(hls, this.video);
       hls.on(Hls.Events.MANIFEST_PARSED, resume);
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (!data.fatal) return;
+        if (stream.virtual) {
+          console.warn("YT Free: HD stream failed", data.type, data.details, data.error?.message ?? "");
+          // Hours in, an expired URL is the likely cause, and a fresh HD
+          // resolve is the cure. Any other failure means HD does not work for
+          // this video right now: go back to 360p where the reader is, rather
+          // than retrying HD into "Playback failed repeatedly" and a player
+          // that will not seek.
+          if (Date.now() < stream.expiresAt) {
+            this.upgraded = false;
+            void this.recover("HD unavailable, back to 360p");
+            return;
+          }
+        }
         // A fatal network error on a manifest is what an expired URL looks like.
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
           void this.recover("stream expired");
@@ -2447,6 +2466,8 @@ export class YtFreePlayer {
   }
 
   private teardownHls(): void {
+    this.unhookJump?.();
+    this.unhookJump = null;
     if (this.hls) {
       this.hls.destroy();
       this.hls = null;

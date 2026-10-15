@@ -280,7 +280,7 @@ test("InnerTube still hands out an HD pair that serves bytes with a readable ind
   assert.ok((stream.height ?? 0) > 360, `HD pair is only ${stream.height}p`);
 
   // One real media segment, through the same loader path the player uses.
-  const video = Object.entries(stream.virtual.files).find(([u]) => u.endsWith("video.m3u8"))![1];
+  const video = Object.entries(stream.virtual.files).find(([u]) => u.endsWith(`video-${stream.height}.m3u8`))![1];
   const [, len, at] = video.match(/#EXT-X-BYTERANGE:(\d+)@(\d+)\n(\S+)/)!;
   const url = video.match(/#EXT-X-BYTERANGE:\d+@\d+\n(\S+)/)![1];
   const bytes = await stream.virtual.fetchRange(url, Number(at), Number(at) + Number(len) - 1);
