@@ -29,12 +29,18 @@ test("the quality lookup resolves a stream with a real expiry (HLS reported, not
   assert.ok(stream.url.startsWith("https://"), "must be an https URL");
   // Informational only (GitHub #17). Signed out, yt-dlp offers an HLS ladder on
   // about one video in five (issue 043), so asserting it failed on most days.
-  // Once the stitched HD pair (PR #14) lands it is the HD path, and this lookup
-  // is only its last fallback.
+  // So whether it was HLS is printed, and only the URL shape is required.
   t.diagnostic(
     stream.isHls
       ? "HLS: yes, yt-dlp returned an HLS manifest"
       : "HLS: no, yt-dlp fell back to a progressive stream (expected most days signed out)",
+  );
+  // Match the field itself: `parseExpiry` falls back to "now + 1h" when there is
+  // none, so checking its result alone could never fail.
+  assert.match(
+    stream.url,
+    /[?&]expire=\d+|\/expire\/\d+/,
+    "no expire field — googlevideo changed its URL shape",
   );
   assert.ok(
     parseExpiry(stream.url) > Date.now(),
