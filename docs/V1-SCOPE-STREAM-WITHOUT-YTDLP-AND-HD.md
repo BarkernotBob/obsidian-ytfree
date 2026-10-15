@@ -9,7 +9,7 @@
 > "It seems that high res videos aren't working oftentimes. I want to get high res video faster,
 > more automatically, still without downloading the video."
 
-**Status:** **Built 2026-10-15** — awaiting manual test, below. Builds issue 043 (desktop full
+**Status:** **Built 2026-10-15. Manual test passed 2026-10-15** (Isaiah, work computer, after the language and seeking fixes). Builds issue 043 (desktop full
 quality) and the opt-in half of 005 (phone full quality).
 
 ## Why it happens (the answer to "why")

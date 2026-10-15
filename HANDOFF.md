@@ -21,7 +21,7 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   videos), 048 (feed backfill), 047 (search blocklist and Hide channel), GitHub #3 (YouTube links
   open in Obsidian, [docs/V1-SCOPE-URL-HANDOFF.md](docs/V1-SCOPE-URL-HANDOFF.md)). Each has a
   manual test in its issue file or scope doc.
-- **Built 2026-10-15, awaiting manual test:** desktop plays without yt-dlp, and stitched HD
+- **Built 2026-10-15, manual test passed 2026-10-15, PR #14:** desktop plays without yt-dlp, and stitched HD
   (043, plus 005 as an opt-in phone setting). Scope and manual test:
   [docs/V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD.md](docs/V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD.md).
   Code: `src/adaptive.ts` (pure), `src/virtual-loader.ts`, `src/hd.ts`, providers in `main.ts`.
@@ -29,9 +29,7 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
-0. Isaiah: run the manual test in the stream-without-yt-dlp scope doc on the work computer and
-   the Mac, and `npm run smoke` (new case: "InnerTube still hands out an HD pair"). Never
-   measured live from the build machine, so the smoke result is the first real evidence.
+0. Merge PR #14 (manual test passed 2026-10-15; smoke HD case passed on the Mac).
 
 1. Isaiah: run `npm run smoke` on the Mac. `tests/channel.smoke.ts` checks the two live shapes
    built blind: the Videos-tab continuation (page 2) and the WEB player's `publishDate` (048).
