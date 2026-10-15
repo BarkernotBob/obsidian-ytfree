@@ -54,4 +54,6 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   the `asar` command in `tools/phone-hub-harness.mjs`. `/app.css` is gitignored; never commit it.
 - Obsidian rewrites `community-plugins.json` from memory while it's running, so `setup.sh` only
   edits that file when Obsidian is closed.
+- The smoke test's quality lookup only prints `HLS: yes/no` (GitHub #17). `HLS: no` is normal
+  signed out (issue 043); it fails only if there's no https URL with an `expire` field.
 - `PROGRESS_TTL_DAYS` stays 365 on purpose (decided 2026-09-02).
