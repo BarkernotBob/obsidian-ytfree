@@ -22,12 +22,20 @@ test("yt-dlp is installed and findable without a shell PATH", async () => {
   assert.ok(path.endsWith("yt-dlp"), `unexpected path: ${path}`);
 });
 
-test("HLS resolution returns a manifest with a real expiry", async () => {
+test("the quality lookup resolves a stream with a real expiry (HLS reported, not required)", async (t) => {
   const ytDlp = await findYtDlp("");
   const stream = await resolveStream(VIDEO_ID, ytDlp, "quality");
 
   assert.ok(stream.url.startsWith("https://"), "must be an https URL");
-  assert.equal(stream.isHls, true, "preferHls should yield an HLS manifest");
+  // Informational only (GitHub #17). Signed out, yt-dlp offers an HLS ladder on
+  // about one video in five (issue 043), so asserting it failed on most days.
+  // Once the stitched HD pair (PR #14) lands it is the HD path, and this lookup
+  // is only its last fallback.
+  t.diagnostic(
+    stream.isHls
+      ? "HLS: yes, yt-dlp returned an HLS manifest"
+      : "HLS: no, yt-dlp fell back to a progressive stream (expected most days signed out)",
+  );
   assert.ok(
     parseExpiry(stream.url) > Date.now(),
     "expiry must parse to a future time — if this fails, googlevideo changed its URL shape",
