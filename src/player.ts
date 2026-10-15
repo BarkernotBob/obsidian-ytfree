@@ -11,6 +11,7 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 // touches the player, which is one of the two reasons the plugin could not load
 // on mobile.
 import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
+import { virtualLoader } from "./virtual-loader.ts";
 
 export type { StreamProvider };
 
@@ -2179,6 +2180,9 @@ export class YtFreePlayer {
     }
     if (this.destroyed || this.recovering || this.local) return;
     if (!stream.isHls) return; // no quality gain, so don't disturb playback
+    // A stitched stream only exists for hls.js; with no MSE there is nothing
+    // that could play it, and 360p is already playing.
+    if (stream.virtual && !Hls.isSupported()) return;
 
     const resumeAt = this.video.currentTime;
     const wasPlaying = !this.video.paused && !this.video.ended;
@@ -2208,7 +2212,13 @@ export class YtFreePlayer {
     };
 
     if (stream.isHls && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        // A stitched stream's playlists exist only in memory and its bytes
+        // come through `requestUrl`; see `virtual-loader.ts`.
+        ...(stream.virtual ? { loader: virtualLoader(stream.virtual) } : {}),
+      });
       this.hls = hls;
       hls.loadSource(stream.url);
       hls.attachMedia(this.video);
@@ -2241,7 +2251,7 @@ export class YtFreePlayer {
     if (Date.now() - this.lastRecoveryAt > 60_000) this.recoveries = 0;
 
     if (this.recoveries >= MAX_CONSECUTIVE_RECOVERIES) {
-      this.onStatus("Playback failed repeatedly. Try `brew upgrade yt-dlp`, then reopen this note.");
+      this.onStatus("Playback failed repeatedly. Reopen this note; if it keeps happening, try `brew upgrade yt-dlp`.");
       return;
     }
 

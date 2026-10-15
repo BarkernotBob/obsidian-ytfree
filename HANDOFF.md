@@ -4,12 +4,12 @@ Current state only; keep it under 80 lines and replace, don't append. Full histo
 2026-09-22 is in [docs/archive/HANDOFF-history-2026-09.md](docs/archive/HANDOFF-history-2026-09.md).
 Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual test section).
 
-## Status (2026-10-13)
+## Status (2026-10-15)
 
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
-- 635 unit tests pass, `tsc` clean, build clean (2026-10-13).
+- 645 unit tests pass, `tsc` clean, build clean (2026-10-15).
 - Isaiah's answers of 2026-10-13 are recorded in [GLOSSARY.md](GLOSSARY.md): every ticket built
   up to 046 passed its manual test, 018 is parked, 045's scope is approved, 049 is built
   (blockquote), and collab videos (GitHub #2) come from the signed-in subscription feed.
@@ -21,17 +21,24 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   videos), 048 (feed backfill), 047 (search blocklist and Hide channel), GitHub #3 (YouTube links
   open in Obsidian, [docs/V1-SCOPE-URL-HANDOFF.md](docs/V1-SCOPE-URL-HANDOFF.md)). Each has a
   manual test in its issue file or scope doc.
-- **Scoped, not built:** 005 (mobile full quality, unblocked), 043 (desktop full quality).
+- **Built 2026-10-15, awaiting manual test:** desktop plays without yt-dlp, and stitched HD
+  (043, plus 005 as an opt-in phone setting). Scope and manual test:
+  [docs/V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD.md](docs/V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD.md).
+  Code: `src/adaptive.ts` (pure), `src/virtual-loader.ts`, `src/hd.ts`, providers in `main.ts`.
 - **Parked:** 018 (Watch Later). Do not re-ask.
 
 ## Next step
+
+0. Isaiah: run the manual test in the stream-without-yt-dlp scope doc on the work computer and
+   the Mac, and `npm run smoke` (new case: "InnerTube still hands out an HD pair"). Never
+   measured live from the build machine, so the smoke result is the first real evidence.
 
 1. Isaiah: run `npm run smoke` on the Mac. `tests/channel.smoke.ts` checks the two live shapes
    built blind: the Videos-tab continuation (page 2) and the WEB player's `publishDate` (048).
    If either fails, fix the parser in `src/channel.ts` before merging.
 2. Isaiah: run the manual tests for 045, #2, 048, 047, #3, and 049 (re-import the clipper
    template first). Then merge PR #4.
-3. After merge: 005 or 043, whichever Isaiah picks.
+3. Backlog for HD is on GitHub (quality picker / ABR, InnerTube-first on desktop).
 
 ## How to ship and test
 

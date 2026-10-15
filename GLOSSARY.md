@@ -19,7 +19,20 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   collaborator. Never in B's RSS feed or B's Videos tab; it is in your subscription feed
   (GitHub #2). Hub items from there carry `origin: "collab"`.
 
+- **Stitched HD**: YouTube's separate picture and sound MP4 files, described as byte ranges in an
+  HLS playlist built in memory from each file's `sidx` index, played by hls.js. Streaming, not a
+  download (`src/adaptive.ts`).
+- **Desktop fallback**: when yt-dlp is missing or fails, the desktop resolves the way the phone
+  does (InnerTube `ANDROID`, 360p).
+
 ## Decisions
+
+### 2026-10-15 (Isaiah asked; defaults picked by Claude, open to change)
+
+- Desktop plays without yt-dlp by falling back to the phone's path; Download and Smart Speed
+  still need yt-dlp.
+- HD comes from stitched HD first, yt-dlp's HLS second. Cap 1080p, H.264 only, one height (no
+  picker yet). On by default on desktop; opt-in on the phone ("HD on this phone", iOS 17.1+).
 
 ### 2026-10-13 (Isaiah)
 
