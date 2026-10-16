@@ -375,6 +375,12 @@
   opacity: 0.45;
 }
 
+/* Fullscreen while the stream is still resolving: it will wait, so it looks it
+   (GitHub #9). Not `:disabled`, because the tap still has work to do. */
+.ytfree-controls .ytfree-btn.is-waiting {
+  opacity: 0.45;
+}
+
 /*
  * "10", under the chevrons of the skip buttons.
  *
@@ -3487,20 +3493,135 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
  * space needs a definite container height to be free space in, and a
  * content-sized box has none to give.
  */
+/*
+ * The phone's Preview is the whole screen (GitHub #8).
+ *
+ * Obsidian used to draw a phone modal as a full-width sheet, and the Preview was
+ * laid out for that. From 1.10 or so a phone modal is a card inset from every
+ * edge with rounded corners, capped at 640px wide: measured against each
+ * version's own app.css at 390x844, portrait lost 31pt of width and landscape a
+ * quarter of it, and the picture went from 403pt wide to 297. Nothing in this
+ * file changed; the box it was drawn in did.
+ *
+ * So the Preview stops borrowing Obsidian's modal box on a phone and takes the
+ * screen: the container is already the whole viewport, and the modal fills it.
+ * The safe areas are padding, so the notch and the home bar sit on the modal's
+ * own background rather than over the picture or the buttons.
+ */
+.is-phone .modal.ytfree-preview-modal {
+  /*
+   * The top inset, which is where the picture starts. An earlier build put a
+   * 59pt floor under it on the theory that Obsidian under-reported the inset;
+   * the close button in the status bar was really Obsidian's own button under
+   * a class name this file never matched (see `.ytfree-preview-close`), so
+   * the floor only pushed the picture down on phones with a shorter status bar.
+   */
+  --ytfree-sheet-top: max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px));
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  padding: var(--ytfree-sheet-top) var(--safe-area-inset-right, 0px)
+    var(--safe-area-inset-bottom, 0px) var(--safe-area-inset-left, 0px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/*
+ * The picture sits as high as the safe area allows, with the close button on
+ * its top-right corner (Isaiah's second and third phone tests).
+ *
+ * Obsidian 1.10+ gives a modal a header row (title and close) above its
+ * content. The Preview has no title, so on a phone that row was only a band of
+ * blank space between the notch and the picture. The header takes no space.
+ *
+ * Obsidian's close button is hidden on a phone, under both of the class names
+ * it has had: `modal-close-button` up to 1.10, `modal-header-button` by 1.14.
+ * Every earlier attempt styled the first name, so on Isaiah's phone the button
+ * stayed where Obsidian puts it — 12px below the top of the modal, which on a
+ * full-screen sheet is the status bar. The sheet draws its own instead, inside
+ * the player box: `.ytfree-preview-close`, below.
+ */
+.is-phone .ytfree-preview-modal .modal-header {
+  position: static;
+  height: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.is-phone .ytfree-preview-modal .modal-title,
+.is-phone .ytfree-preview-modal > .modal-close-button,
+.is-phone .ytfree-preview-modal > .modal-header-button {
+  display: none;
+}
+
+/* A child of the player box, which is `position: sticky`, so this is placed
+   against the picture. Element and modal in the selector to outrank
+   Obsidian's `button:not(.clickable-icon)`, which would paint it a light pill. */
+.ytfree-preview-modal button.ytfree-preview-close,
+.ytfree-preview-modal button.ytfree-preview-close:hover,
+.ytfree-preview-modal button.ytfree-preview-close:active {
+  position: absolute;
+  top: var(--size-4-2);
+  right: var(--size-4-2);
+  /* Above the picture, below the settings pop-out (20) that can open over it. */
+  z-index: 5;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* It is on a picture, which can be any colour, so it carries its own disc. */
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  --icon-color: #fff;
+  --icon-size: 20px;
+  box-shadow: none;
+}
+
+/*
+ * Collapsed, the picture is gone and the control bar is the top of the player,
+ * with buttons at both ends. The close button gets a row of its own above it
+ * rather than landing on one of them.
+ */
+.ytfree-preview-modal .ytfree-preview-player:has(.ytfree-preview-wrapper.is-collapsed) {
+  padding-top: 44px;
+}
+
+/* In the in-app fullscreen the picture is the whole screen and has its own way out. */
+body.ytfree-immersive-open .ytfree-preview-close {
+  display: none;
+}
+
 .is-phone .ytfree-preview-modal .modal-content {
   /*
-   * A height, not a cap. A percentage would not do: the modal above it is
-   * content-sized, and a percentage of `auto` is `auto` — which is how a sheet
-   * with `height: 100%` still comes out exactly as tall as its own contents and
-   * has no free space to give anyone.
-   *
-   * Nearly the whole screen, where the laptop's rule is 82vh. The 82 is about a
-   * modal floating on a desktop with its own backdrop showing round the edges;
-   * a phone's Preview is full-width and edge-to-edge already, and every point
-   * not spent here is a point of transcript.
+   * A definite height, which is what makes the foot of the sheet one region:
+   * a flex column only hands out free space inside a box that has a height.
+   * The modal above it is now exactly the screen less its safe areas, so the
+   * content takes all of that rather than a guess at it from `100vh`.
    */
-  height: calc(100vh - var(--safe-area-inset-top, 0px) - 2em);
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
   max-height: none;
+  /* The picture starts at the safe area, not a gutter below it. */
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.is-phone .ytfree-preview-modal .ytfree-preview-player {
+  margin-top: 0;
+  padding-top: 0;
 }
 
 /*
@@ -3538,6 +3659,129 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
   font-size: var(--font-ui-medium);
 }
 
+/* ------------------------------------- the phone, upright, reading — #8 ---
+ *
+ * From Isaiah's test of the fullscreen sheet: the reading region needed more of
+ * the screen without collapsing the video. So, upright on a phone:
+ *
+ * - The two disclosure headers sit side by side directly under the player, in
+ *   a row of their own that never moves: nothing above them changes height when
+ *   a region opens or shuts, so they cannot reflow under the finger.
+ * - While a region is open, the title, the facts and the four buttons are not
+ *   on the sheet, and the region takes everything below the headers. Shut the
+ *   region and they come back.
+ * - The header you are reading widens to the full row and the other one goes;
+ *   shut it and the two are side by side again.
+ *
+ * Done with a grid and `display: contents` on the boxes that group the
+ * headers with their bodies, so the DOM the laptop and landscape layouts rely
+ * on is unchanged.
+ */
+@media (min-height: 521px) {
+  .is-phone .ytfree-preview-modal .modal-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "player player"
+      "dhead thead"
+      "title title"
+      "facts facts"
+      "body body"
+      "actions actions";
+    column-gap: 0.5em;
+  }
+
+  .is-phone .ytfree-preview-modal .ytfree-preview-player {
+    grid-area: player;
+    margin-bottom: 0.5em;
+  }
+
+  .is-phone .ytfree-preview-read,
+  .is-phone .ytfree-preview-describe,
+  .is-phone .ytfree-preview-transcript,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-describe:not(.is-open),
+  .is-phone .ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) {
+    display: contents;
+  }
+
+  .is-phone .ytfree-preview-disclose {
+    grid-area: dhead;
+  }
+
+  .is-phone .ytfree-preview-transcript-head {
+    grid-area: thead;
+  }
+
+  .is-phone .ytfree-preview-disclose,
+  .is-phone .ytfree-preview-transcript-head {
+    min-width: 0;
+    justify-content: center;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+  }
+
+  .is-phone .ytfree-preview-disclose-label,
+  .is-phone .ytfree-preview-transcript-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-disclose,
+  .is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-head {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+
+  /*
+   * Open, the header you are reading takes the whole row and the other one
+   * goes; shut, they are two halves again (Isaiah's third phone test). The row
+   * itself stays put either way, so nothing below the picture jumps.
+   */
+  .is-phone .ytfree-sheet-reading .ytfree-preview-describe:not(.is-open) .ytfree-preview-disclose,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) .ytfree-preview-transcript-head {
+    display: none;
+  }
+
+  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-disclose,
+  .is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-head {
+    grid-area: dhead-start / dhead-start / dhead-end / thead-end;
+  }
+
+  .is-phone .ytfree-preview-title {
+    grid-area: title;
+    margin-top: 0.6em;
+  }
+
+  .is-phone .ytfree-preview-facts {
+    grid-area: facts;
+  }
+
+  /* Both bodies share the region; only the open one has any height. */
+  .is-phone .ytfree-preview-description,
+  .is-phone .ytfree-preview-transcript-body {
+    grid-area: body;
+    min-height: 0;
+  }
+
+  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-description,
+  .is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
+    margin-top: 0.5em;
+  }
+
+  .is-phone .ytfree-preview-actions {
+    grid-area: actions;
+    margin-top: 0.5em;
+  }
+
+  .is-phone .ytfree-sheet-reading .ytfree-preview-title,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-facts,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-actions {
+    display: none;
+  }
+}
+
 /* ------------------------------------------ the phone, held sideways — 039 ---
  *
  * Landscape is the same sheet with the two resources swapped: 844 points of
@@ -3553,6 +3797,15 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
  * keyboard produces the same shortage the same way.
  */
 @media (max-height: 520px) {
+  .is-phone .modal.ytfree-preview-modal {
+    --ytfree-sheet-top: max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px));
+  }
+
+  /* No status bar sideways, so a little room above the picture instead. */
+  .is-phone .ytfree-preview-modal .modal-content {
+    padding-top: var(--size-4-2);
+  }
+
   .is-phone .ytfree-preview-modal .modal-content {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

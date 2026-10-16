@@ -27,6 +27,26 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Decisions
 
+### 2026-10-14 (Isaiah)
+
+- **Preview (GitHub #8)**: fullscreen on the phone, not a card. Decided while building: the
+  phone only; the tablet and desktop sheets are unchanged.
+- **Preview, after the first phone test (GitHub #8)**: nothing tappable in the status bar;
+  the Description and Transcript headers sit side by side under the player; while one is open
+  the title, facts and the four buttons are hidden and the region takes the rest. Upright phone
+  only; landscape unchanged.
+- **Preview, after the third phone test (GitHub #8)**: the picture starts right at the safe
+  area (the 59pt floor is gone); the close ✕ is on the picture's top-right corner, drawn by the
+  plugin, and Obsidian's own close is hidden on a phone; an open header goes full width and the
+  other one is hidden, both go back to half width when it is shut. Cause of three failed ✕ fixes:
+  Obsidian renamed its close button from `.modal-close-button` (1.10) to `.modal-header-button`
+  (1.14), so the CSS never matched. Verify phone layout against current Obsidian's app.css.
+- **Fullscreen before the stream resolves (GitHub #9)**: it waits; a press does not go
+  fullscreen until there is media, and the delay is acceptable. Replaces 038's "a cold press
+  goes to the in-app fullscreen". Decided while building: the button is dimmed while it would
+  wait, and a press on a player nobody started begins loading it without playing.
+- **Paste to Preview (GitHub #10, #11)**: wanted, on phone and desktop. Scope written, not yet
+  approved.
 ### 2026-10-15 (Isaiah asked; defaults picked by Claude, open to change)
 
 - Desktop plays without yt-dlp by falling back to the phone's path; Download and Smart Speed
