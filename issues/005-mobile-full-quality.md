@@ -1,6 +1,6 @@
 # 005 — Full quality on mobile (above 360p)
 
-**Status:** Scoped 2026-07-27. **Not built. Blocked on [004](004-mobile-viewer.md).**
+**Status:** **Built 2026-10-15** as stitched HD (route B, HLS + hls.js), awaiting manual test in [V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD](../docs/V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD.md); phone is opt-in. Originally: Scoped 2026-07-27. **Not built. Blocked on [004](004-mobile-viewer.md).**
 **Created:** 2026-07-27
 
 ## Problem

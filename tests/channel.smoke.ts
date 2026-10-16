@@ -7,11 +7,12 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BROWSE_URL, CLIENTS } from "../src/innertube-context.ts";
+import { BROWSE_URL, CLIENTS, PLAYER_URL, playerBody } from "../src/innertube-context.ts";
 import {
   CHANNEL_SEARCH_PARAMS,
   CHANNEL_VIDEOS_PARAMS,
   parseChannelResponse,
+  parsePlayerPublishDate,
 } from "../src/channel.ts";
 
 const CHANNEL = { channelId: "UCKRmL7BMyCeLE4KUo73RDzw", channelTitle: "Ward on Words" };
@@ -48,4 +49,16 @@ test("a search inside the channel finds that channel's videos", async () => {
   );
   assert.ok(page.results.length > 0);
   assert.ok(page.results.every((r) => r.channelId === CHANNEL.channelId));
+});
+
+test("the WEB player names a publish date, which the backfill (048) stores", async () => {
+  const { ctx, ua } = CLIENTS.web;
+  const res = await fetch(PLAYER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": ua },
+    body: JSON.stringify({ ...playerBody("-X4ZD3fisSs"), context: { client: { ...ctx, hl: "en", gl: "US" } } }),
+  });
+  assert.equal(res.status, 200, `player answered HTTP ${res.status}`);
+  const published = parsePlayerPublishDate(await res.json());
+  assert.match(published, /^2026-08-0[2-4]/, `unexpected publish date: "${published}"`);
 });

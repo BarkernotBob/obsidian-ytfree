@@ -22,12 +22,26 @@ test("yt-dlp is installed and findable without a shell PATH", async () => {
   assert.ok(path.endsWith("yt-dlp"), `unexpected path: ${path}`);
 });
 
-test("HLS resolution returns a manifest with a real expiry", async () => {
+test("the quality lookup resolves a stream with a real expiry (HLS reported, not required)", async (t) => {
   const ytDlp = await findYtDlp("");
   const stream = await resolveStream(VIDEO_ID, ytDlp, "quality");
 
   assert.ok(stream.url.startsWith("https://"), "must be an https URL");
-  assert.equal(stream.isHls, true, "preferHls should yield an HLS manifest");
+  // Informational only (GitHub #17). Signed out, yt-dlp offers an HLS ladder on
+  // about one video in five (issue 043), so asserting it failed on most days.
+  // So whether it was HLS is printed, and only the URL shape is required.
+  t.diagnostic(
+    stream.isHls
+      ? "HLS: yes, yt-dlp returned an HLS manifest"
+      : "HLS: no, yt-dlp fell back to a progressive stream (expected most days signed out)",
+  );
+  // Match the field itself: `parseExpiry` falls back to "now + 1h" when there is
+  // none, so checking its result alone could never fail.
+  assert.match(
+    stream.url,
+    /[?&]expire=\d+|\/expire\/\d+/,
+    "no expire field — googlevideo changed its URL shape",
+  );
   assert.ok(
     parseExpiry(stream.url) > Date.now(),
     "expiry must parse to a future time — if this fails, googlevideo changed its URL shape",
@@ -247,4 +261,42 @@ test("the WEB next endpoint still carries a replay heatmap", async () => {
   // The peaks are the point: an all-equal heatmap would parse and mean nothing.
   const values = buckets.map((b) => b.value!);
   assert.ok(Math.max(...values) > Math.min(...values), "heatmap is flat");
+});
+
+test("InnerTube still hands out an HD pair that serves bytes with a readable index", async () => {
+  // The stitched HD stream (docs/V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD.md) and
+  // the desktop's yt-dlp-free path both rest on this: an unauthenticated
+  // ANDROID or IOS answer whose separate picture and sound files serve their
+  // `sidx` index with no PO token. Same attempt order as `src/hd.ts`.
+  const { pickPair, resolveHd, withRange } = await import("../src/adaptive.ts");
+  const { CLIENTS, PLAYER_URL, playerBody } = await import("../src/innertube-context.ts");
+
+  const ask = async (client: string) => {
+    const { ctx, ua } = CLIENTS[client as "android" | "ios"];
+    const response = await fetch(PLAYER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": ua },
+      body: JSON.stringify({ ...playerBody(VIDEO_ID), context: { client: { ...ctx, hl: "en", gl: "US" } } }),
+    });
+    const json = await response.json();
+    if (json.playabilityStatus?.status !== "OK") return null;
+    assert.ok(pickPair(json.streamingData?.adaptiveFormats ?? []), `${client}: no H.264 + AAC pair`);
+    return { adaptiveFormats: json.streamingData.adaptiveFormats, hlsManifestUrl: json.streamingData.hlsManifestUrl ?? null, ua };
+  };
+  const fetchRange = async (url: string, start: number, end: number, ua?: string) => {
+    const res = await fetch(withRange(url, start, end), { headers: ua ? { "User-Agent": ua } : {} });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.arrayBuffer();
+  };
+
+  const stream = await resolveHd(VIDEO_ID, ["android", "ios"], ask, fetchRange);
+  assert.ok(stream.virtual, "fell through to an HLS manifest: the separate pair no longer serves");
+  assert.ok((stream.height ?? 0) > 360, `HD pair is only ${stream.height}p`);
+
+  // One real media segment, through the same loader path the player uses.
+  const video = Object.entries(stream.virtual.files).find(([u]) => u.endsWith(`video-${stream.height}.m3u8`))![1];
+  const [, len, at] = video.match(/#EXT-X-BYTERANGE:(\d+)@(\d+)\n(\S+)/)!;
+  const url = video.match(/#EXT-X-BYTERANGE:\d+@\d+\n(\S+)/)![1];
+  const bytes = await stream.virtual.fetchRange(url, Number(at), Number(at) + Number(len) - 1);
+  assert.equal(bytes.byteLength, Number(len), "segment came back the wrong size");
 });

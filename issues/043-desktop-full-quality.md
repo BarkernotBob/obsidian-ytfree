@@ -1,6 +1,6 @@
 # 043 — Full quality on the desktop (above 360p), signed out
 
-**Status:** Backlog, scoped 2026-08-17. **Not built.** Asked for by BarkernotBob after
+**Status:** **Built 2026-10-15** as stitched HD (route B, HLS + hls.js), awaiting manual test in [V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD](../docs/V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD.md). Originally: Backlog, scoped 2026-08-17. **Not built.** Asked for by BarkernotBob after
 the 2026-08-17 outage:
 
 > "Add the teaching of the player to play 2 files at once as a backlog item to
