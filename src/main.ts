@@ -145,6 +145,8 @@ function desktop(): Promise<DesktopApi> {
 interface YtFreeSettings {
   ytDlpPath: string;
   upgradeToHighQuality: boolean;
+  /** Stitched HD on the phone. Off by default: iOS 17.1+, and more data. */
+  phoneHighQuality: boolean;
   timestampFormat: string;
   autoStampNewLine: boolean;
   lookbackSeconds: number;
@@ -363,6 +365,7 @@ function withinTapSlop(origin: { x: number; y: number }, touch: Touch): boolean 
 const DEFAULT_SETTINGS: YtFreeSettings = {
   ytDlpPath: "",
   upgradeToHighQuality: true,
+  phoneHighQuality: false,
   timestampFormat: "[{ts}]({link}) ",
   autoStampNewLine: true,
   lookbackSeconds: 5,
@@ -698,6 +701,9 @@ export default class YtFreePlugin extends Plugin {
   /** Reading-view seek anchor under a touchstart, consumed by its touchend. */
   private armedSeekAnchor: HTMLAnchorElement | null = null;
   private ytDlpPath: string | null = null;
+  /** yt-dlp was looked for and is not on this machine. Reset with `ytDlpPath`. */
+  private ytDlpUnavailable = false;
+  private noYtDlpNoticeShown = false;
   private resumeTimer: number | null = null;
   private downloads = new Map<string, DownloadHandle>();
   /** undefined = not probed yet; null = probed and absent. */
@@ -4485,7 +4491,7 @@ export default class YtFreePlugin extends Plugin {
       if (err instanceof YtDlpMissingError) {
         this.renderError(
           wrapper,
-          "yt-dlp is not installed, or Obsidian cannot find it.",
+          "Could not play this video. yt-dlp is not installed here, and the phone's way of playing (without yt-dlp) did not work for this video either.",
           "brew install yt-dlp",
         );
       } else {
@@ -5080,37 +5086,98 @@ export default class YtFreePlugin extends Plugin {
     }, SILENCE_REFRESH_DEBOUNCE_MS);
   }
 
-  /** yt-dlp, via the stream cache. Desktop only. */
+  /**
+   * yt-dlp, via the stream cache, with the phone's path as the fallback.
+   * Desktop only.
+   *
+   * "fast" is yt-dlp when it is there. When it is missing, or fails, the
+   * desktop resolves the way the phone does (InnerTube, 360p) rather than
+   * showing an install message — a computer without Homebrew is still a
+   * computer that can play video.
+   *
+   * "quality" tries the stitched HD stream first (a few seconds, most videos),
+   * then yt-dlp's HLS lookup (~30s, about one video in five signed out).
+   */
   private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
       if (forceRefresh) this.cache.invalidate(videoId);
       const cached = this.cache.get(videoId, mode);
       if (cached) return cached;
 
-      const { findYtDlp, resolveStream } = await desktop();
-      if (!this.ytDlpPath) {
-        this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-      }
-      const stream = await resolveStream(videoId, this.ytDlpPath, mode);
+      const stream = mode === "quality"
+        ? await this.desktopQuality(videoId)
+        : await this.desktopFast(videoId);
       this.cache.set(videoId, stream);
       return stream;
     };
   }
 
+  private async desktopFast(videoId: string): Promise<ResolvedStream> {
+    let ytDlpError: unknown = null;
+    if (!this.ytDlpUnavailable) {
+      try {
+        const { findYtDlp, resolveStream } = await desktop();
+        if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
+        return await resolveStream(videoId, this.ytDlpPath, "fast");
+      } catch (err) {
+        ytDlpError = err;
+        // Probing four paths on every video is not worth it once it is known
+        // to be absent. A resolve failure is per-video, so it is not cached.
+        if (err instanceof YtDlpMissingError) this.ytDlpUnavailable = true;
+      }
+    }
+
+    try {
+      const { resolveMobileStream } = await import("./mobile/innertube.ts");
+      const stream = await resolveMobileStream(videoId);
+      if (this.ytDlpUnavailable && !this.noYtDlpNoticeShown) {
+        this.noYtDlpNoticeShown = true;
+        new Notice(
+          "YT Free: yt-dlp isn't installed here, so videos play the way they do on the phone. " +
+            "Downloads and Smart Speed need yt-dlp.",
+          8000,
+        );
+      }
+      return stream;
+    } catch (fallbackError) {
+      // Report the yt-dlp failure when there was one: its message is the one
+      // the error box knows how to explain.
+      throw ytDlpError ?? fallbackError;
+    }
+  }
+
+  private async desktopQuality(videoId: string): Promise<ResolvedStream> {
+    try {
+      const { resolveHdStream } = await import("./hd.ts");
+      return await resolveHdStream(videoId);
+    } catch (hdError) {
+      if (this.ytDlpUnavailable) throw hdError;
+      const { findYtDlp, resolveStream } = await desktop();
+      if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
+      return await resolveStream(videoId, this.ytDlpPath, "quality");
+    }
+  }
+
   /**
    * InnerTube, via the same cache. Mobile only.
    *
-   * The mode is ignored: 360p is all this resolver can reach, so asking for
-   * "quality" would only mean resolving the same thing twice.
+   * "fast" is the 360p single file. "quality" is only asked for when HD on
+   * this phone is turned on, and is the stitched stream (`adaptive.ts`).
    */
   private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
-    return async (_mode, forceRefresh) => {
+    return async (mode, forceRefresh) => {
       if (forceRefresh) this.cache.invalidate(videoId);
-      const cached = this.cache.get(videoId, "fast");
+      const cached = this.cache.get(videoId, mode);
       if (cached) return cached;
 
-      const { resolveMobileStream } = await import("./mobile/innertube.ts");
-      const stream = await resolveMobileStream(videoId);
+      let stream: ResolvedStream;
+      if (mode === "quality") {
+        const { resolveHdStream } = await import("./hd.ts");
+        stream = await resolveHdStream(videoId);
+      } else {
+        const { resolveMobileStream } = await import("./mobile/innertube.ts");
+        stream = await resolveMobileStream(videoId);
+      }
       this.cache.set(videoId, stream);
       return stream;
     };
@@ -5179,7 +5246,7 @@ export default class YtFreePlugin extends Plugin {
      * waits on the resolve already in flight rather than starting a second one.
      */
     let resolved: Promise<void> | null = null;
-    const resolve = (): Promise<void> => (resolved ??= player.load(false));
+    const resolve = (): Promise<void> => (resolved ??= player.load(this.settings.phoneHighQuality));
 
     // Metadata now, so the first press of Fullscreen is the phone's own
     // fullscreen rather than our substitute. Failures are swallowed: nothing
@@ -5442,6 +5509,7 @@ export default class YtFreePlugin extends Plugin {
 
   resetResolver(): void {
     this.ytDlpPath = null;
+    this.ytDlpUnavailable = false;
     this.cache.clear();
   }
 
@@ -5704,7 +5772,7 @@ class YtFreeSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName("Upgrade to high quality")
         .setDesc(
-          "Video always starts fast at 360p, then silently upgrades to 1080p once the higher-quality stream resolves (about 30 seconds). Turn off to stay at 360p and save bandwidth.",
+          "Video always starts fast at 360p, then silently upgrades to HD (up to 1080p) a few seconds later, still streaming. Turn off to stay at 360p and save bandwidth.",
         )
         .addToggle((toggle) =>
           toggle.setValue(this.plugin.settings.upgradeToHighQuality).onChange(async (value) => {
@@ -5718,9 +5786,21 @@ class YtFreeSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName("On this device")
         .setDesc(
-          "Playback here resolves the stream in the plugin and plays it in a normal video element — ad-free, at 360p. " +
+          "Playback here resolves the stream in the plugin and plays it in a normal video element — ad-free, at 360p unless HD is on below. " +
             "Transcripts and most-replayed moments both work here, read straight off YouTube. " +
-            "Quality above 360p and downloading need yt-dlp, which only exists on the desktop app.",
+            "Downloading needs yt-dlp, which only exists on the desktop app.",
+        );
+
+      new Setting(containerEl)
+        .setName("HD on this phone (experimental)")
+        .setDesc(
+          "Starts at 360p, then switches to HD (up to 1080p) a few seconds in, still streaming. Needs iOS 17.1 or later, and uses several times the data.",
+        )
+        .addToggle((toggle) =>
+          toggle.setValue(this.plugin.settings.phoneHighQuality).onChange(async (value) => {
+            this.plugin.settings.phoneHighQuality = value;
+            await this.plugin.saveSettings();
+          }),
         );
     }
 

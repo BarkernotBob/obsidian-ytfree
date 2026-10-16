@@ -34,6 +34,21 @@ export interface ResolvedStream {
   mode: ResolveMode;
   /** Epoch ms, already reduced by the safety margin. */
   expiresAt: number;
+  /**
+   * Set when `url` is an HLS playlist that exists only in memory: YouTube's
+   * separate picture and sound files, stitched by `adaptive.ts`. The player
+   * hands this to hls.js as its loader, so the playlists are answered from
+   * `files` and every media byte comes through `fetchRange`.
+   */
+  virtual?: VirtualPlaylist;
+  /** The picture height, when the resolver knows it. */
+  height?: number;
+}
+
+export interface VirtualPlaylist {
+  files: Record<string, string>;
+  /** Inclusive byte range `[start, end]` of a media URL. */
+  fetchRange: (url: string, start: number, end: number) => Promise<ArrayBuffer>;
 }
 
 /**
