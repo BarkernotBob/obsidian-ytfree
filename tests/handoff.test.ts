@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  handoffTarget,
   handoffUri,
   isYouTubeUrl,
   parseStartTime,
@@ -98,4 +99,17 @@ test("youTubeLinkAt ignores embeds and other sites", () => {
 test("the bookmarklet points at the handler", async () => {
   const { HANDOFF_BOOKMARKLET } = await import("../src/handoff.ts");
   assert.match(HANDOFF_BOOKMARKLET, /^javascript:location\.href='obsidian:\/\/ytfree\?url='\+encodeURIComponent\(location\.href\)$/);
+});
+
+test("open= on the link wins over the setting (GitHub #11)", () => {
+  assert.equal(handoffTarget("note", "preview"), "note");
+  assert.equal(handoffTarget("preview", "note"), "preview");
+  assert.equal(handoffTarget(" Preview ", "note"), "preview");
+});
+
+test("no open=, or one that names no place, follows the setting", () => {
+  for (const open of [undefined, null, "", "browser"]) {
+    assert.equal(handoffTarget(open, "preview"), "preview");
+    assert.equal(handoffTarget(open, "note"), "note");
+  }
 });

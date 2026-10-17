@@ -121,3 +121,16 @@ export function youTubeLinkAt(
   }
   return null;
 }
+
+/** Where a routed link lands (GitHub #11). */
+export type OpenIn = "preview" | "note";
+
+/**
+ * The `open=` a link carries, if it names a place, else the setting. Anything
+ * else in `open=` is ignored rather than refused: a typo in a Finicky rule
+ * should still open the video.
+ */
+export function handoffTarget(open: string | null | undefined, setting: OpenIn): OpenIn {
+  const asked = (open ?? "").trim().toLowerCase();
+  return asked === "preview" || asked === "note" ? asked : setting;
+}

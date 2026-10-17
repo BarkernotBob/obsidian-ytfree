@@ -27,6 +27,14 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Decisions
 
+### 2026-10-17 (Isaiah)
+
+- **Paste to Preview (GitHub #10, #11)**: scope approved by answering its question. Links
+  clicked inside a note open in Preview too: one setting, *YouTube links open in*, Preview by
+  default, covers every route. `obsidian://ytfree?url=…&open=note|preview` overrides it per link.
+  Decided while building: *Open YouTube URL from clipboard* still opens the note, and the new
+  *Preview YouTube URL from clipboard* opens the Preview.
+
 ### 2026-10-14 (Isaiah)
 
 - **Preview (GitHub #8)**: fullscreen on the phone, not a card. Decided while building: the

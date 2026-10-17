@@ -7,7 +7,9 @@
 > 4. Stretch goal of the above, reroute all youtube URL's straight to obsidian when clicked, no
 >    pasting into a special area needed.
 
-**Status:** scope only, awaiting Isaiah's approval. Not built.
+**Status:** approved 2026-10-17 (Isaiah: links in notes open in Preview too). **Built
+2026-10-17**, awaiting manual test, below. `HubView.previewVideo` in `src/hub.ts`, `handoffTarget`
+in `src/handoff.ts`, routing in `openYouTubeUrl` in `main.ts`.
 
 ## The one sentence
 
@@ -69,7 +71,18 @@ Every one of them lands in the video's **note**. That is the gap: none of them l
 - A pasted channel URL searches; a pasted non-YouTube URL searches.
 - Unit tests cover the search box's "is this a video link" decision and the `open=` parsing.
 
-## Question for Isaiah
+## Answered
 
-Should a link clicked **inside a note** also open the Preview, or keep opening the video's note?
-Recommended: follow the same setting, so there is one answer everywhere.
+Links clicked inside a note follow the same setting (Isaiah, 2026-10-17).
+
+## Manual test (for Isaiah)
+
+1. iPhone: open the hub, paste `https://youtu.be/-X4ZD3fisSs?t=90` into the search box, press
+   search. That video's Preview opens and plays from 1:30. No note is made.
+2. Paste `https://www.youtube.com/@wardonwords` instead: it searches, as before.
+3. In a note, tap `[talk](https://youtu.be/-X4ZD3fisSs?t=90)`: the Preview opens, not the note.
+4. Settings → YT Free → YouTube links → *YouTube links open in* → Note. Tap the same link: the
+   video's note opens, as before. Set it back to Preview.
+5. Copy a YouTube link, run *Preview YouTube URL from clipboard*: the Preview opens.
+6. Mac: the same paste in the hub's search box, and a link in Mail with Finicky set up.
+7. In a Preview opened from a link, press Keep: the video lands in the hub's Kept list.

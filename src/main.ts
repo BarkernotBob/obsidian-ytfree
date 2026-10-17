@@ -50,7 +50,9 @@ import {
   isYouTubeUrl,
   parseYouTubeLink,
   youTubeLinkAt,
+  handoffTarget,
 } from "./handoff";
+import type { OpenIn } from "./handoff";
 import type { SeekMode } from "./description";
 import { formatTimestamp } from "./format";
 import {
@@ -157,6 +159,8 @@ interface YtFreeSettings {
   pinnedFrontmatterKeys: string;
   /** YouTube links clicked in a note open in YT Free, not the browser (GitHub #3). */
   openYouTubeLinksHere: boolean;
+  /** Where a routed YouTube link lands: the video's Preview, or its note (GitHub #11). */
+  youTubeLinksOpenIn: OpenIn;
   collapseProperties: boolean;
   collapseSections: boolean;
   linkifyTimestamps: boolean;
@@ -375,6 +379,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   pinnedHeightVh: 40,
   pinnedFrontmatterKeys: "media_link, url",
   openYouTubeLinksHere: true,
+  youTubeLinksOpenIn: "preview",
   collapseProperties: true,
   collapseSections: true,
   linkifyTimestamps: true,
@@ -950,7 +955,7 @@ export default class YtFreePlugin extends Plugin {
     // GitHub #3: YouTube links open in YT Free. The door every outside router
     // (Finicky, the bookmarklet, the iPhone Shortcut) knocks on.
     this.registerObsidianProtocolHandler(HANDOFF_ACTION, (params) => {
-      void this.openYouTubeUrl(params.url ?? "");
+      void this.openYouTubeUrl(params.url ?? "", params.open);
     });
 
     // …and links clicked inside a note. Capture phase, for the same reason as
@@ -1006,7 +1011,22 @@ export default class YtFreePlugin extends Plugin {
         } catch {
           // Refused or empty: the Notice below says the same thing.
         }
-        await this.openYouTubeUrl(text);
+        await this.openYouTubeUrl(text, "note");
+      },
+    });
+
+    // GitHub #10: the same, straight into the video's Preview.
+    this.addCommand({
+      id: "preview-youtube-url-from-clipboard",
+      name: "Preview YouTube URL from clipboard",
+      callback: async () => {
+        let text = "";
+        try {
+          text = await navigator.clipboard.readText();
+        } catch {
+          // Refused or empty: the Notice in openYouTubeUrl says the same thing.
+        }
+        await this.openYouTubeUrl(text, "preview");
       },
     });
 
@@ -2064,13 +2084,22 @@ export default class YtFreePlugin extends Plugin {
    * makes one. Never a blank note: a link with no video in it, or a video
    * YouTube will not name, gets a Notice and nothing else.
    */
-  async openYouTubeUrl(url: string): Promise<void> {
+  async openYouTubeUrl(url: string, open?: string): Promise<void> {
     // A cold start from a link: the state file loads during onload.
     await new Promise<void>((resolve) => this.app.workspace.onLayoutReady(resolve));
     const link = parseYouTubeLink(url);
     if (!link) {
       new Notice("YT Free: that is not a link to a YouTube video.");
       return;
+    }
+    // GitHub #11: the link's own `open=` wins, then the setting.
+    if (handoffTarget(open, this.settings.youTubeLinksOpenIn) === "preview") {
+      await this.openHub();
+      const leaf = this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)[0];
+      if (leaf?.view instanceof HubView) {
+        await leaf.view.previewVideo(link.videoId, link.seconds);
+        return;
+      }
     }
     const existing = this.noteForVideo(link.videoId);
     if (existing) {
@@ -5947,13 +5976,29 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Open YouTube links here")
       .setDesc(
-        "A YouTube link clicked in a note opens that video's note in YT Free, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
+        "A YouTube link clicked in a note opens in YT Free, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.openYouTubeLinksHere).onChange(async (value) => {
           this.plugin.settings.openYouTubeLinksHere = value;
           await this.plugin.saveSettings();
         }),
+      );
+
+    new Setting(containerEl)
+      .setName("YouTube links open in")
+      .setDesc(
+        "Where a YouTube link lands: the video's Preview, with no note made until you press Watch or Keep, or the video's note. Covers links clicked in notes, links from other apps and the bookmarklet.",
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("preview", "Preview")
+          .addOption("note", "Note")
+          .setValue(this.plugin.settings.youTubeLinksOpenIn)
+          .onChange(async (value) => {
+            this.plugin.settings.youTubeLinksOpenIn = value === "note" ? "note" : "preview";
+            await this.plugin.saveSettings();
+          }),
       );
 
     new Setting(containerEl)

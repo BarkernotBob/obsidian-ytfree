@@ -93,6 +93,7 @@ import {
   walkBackfillPage,
 } from "./backfill";
 import { channelUrl } from "./channel";
+import { parseYouTubeLink } from "./handoff";
 import {
   HIDDEN_CHANNELS_LIMIT,
   REMOVED_VIDEOS_LIMIT,
@@ -1351,6 +1352,12 @@ export class HubView extends ItemView {
    */
   private searchQuery: string | null = null;
   private searchResults: SearchResult[] = [];
+  /**
+   * A video reached by a pasted or clicked link (GitHub #10, #11), which is in
+   * neither the hub nor a search. Shaped as a search result so the Preview and
+   * its buttons treat it exactly as they treat one.
+   */
+  private linkedResult: SearchResult | null = null;
   private searchContinuation: string | null = null;
   private searchState: "idle" | "loading" | "error" = "idle";
   private searchError = "";
@@ -2414,6 +2421,14 @@ export class HubView extends ItemView {
       return;
     }
 
+    // A pasted video link is a video, not a query (GitHub #10). Channel and
+    // playlist links name no video, so they still search.
+    const link = parseYouTubeLink(text);
+    if (link) {
+      void this.previewVideo(link.videoId, link.seconds);
+      return;
+    }
+
     const token = ++this.searchToken;
     this.searchQuery = text;
     this.searchResults = [];
@@ -3191,6 +3206,42 @@ export class HubView extends ItemView {
   }
 
   /**
+   * Preview any video by ID, at a second (GitHub #10, #11): a link pasted in
+   * the search box, the clipboard command, or a YouTube link routed here.
+   *
+   * A video already in the hub or on screen previews as it always has. Any
+   * other is looked up first, so the sheet has a title, a channel and a length
+   * like every other Preview; one YouTube will not describe (private, removed)
+   * gets a Notice and no sheet.
+   */
+  async previewVideo(videoId: string, seconds = 0): Promise<void> {
+    const known =
+      this.store.itemFor(videoId) ??
+      this.searchResults.find((entry) => entry.videoId === videoId) ??
+      this.channel?.results.find((entry) => entry.videoId === videoId) ??
+      (this.linkedResult?.videoId === videoId ? this.linkedResult : null);
+    if (!known) {
+      const details = await fetchVideoDetails(videoId);
+      if (!details.title) {
+        new Notice("YT Free: YouTube would not say what that video is. It may be private or removed.");
+        return;
+      }
+      this.linkedResult = {
+        videoId,
+        title: details.title,
+        channelId: details.channelId,
+        channelTitle: details.channelTitle,
+        publishedText: "",
+        views: null,
+        duration: details.durationSeconds ? formatDuration(details.durationSeconds) : "",
+        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        secondary: false,
+      };
+    }
+    this.openPreview(videoId, () => undefined, seconds);
+  }
+
+  /**
    * Preview: everything the card had no room for, in a modal.
    *
    * A modal rather than an inline expansion or a second pane, and that is what
@@ -3203,12 +3254,12 @@ export class HubView extends ItemView {
    * timestamp capture and pinning do not, and withholding those is what keeps
    * Watch worth pressing.
    */
-  private openPreview(videoId: string, repaintCard: () => void): void {
+  private openPreview(videoId: string, repaintCard: () => void, startAt = 0): void {
     const item = this.store.itemFor(videoId);
     const result =
       this.searchResults.find((entry) => entry.videoId === videoId) ??
       this.channel?.results.find((entry) => entry.videoId === videoId) ??
-      null;
+      (this.linkedResult?.videoId === videoId ? this.linkedResult : null);
     if (!item && !result) return;
     const channelId = item?.channelId || result?.channelId || "";
     const channelTitle = item?.channelTitle || result?.channelTitle || "";
@@ -3220,6 +3271,7 @@ export class HubView extends ItemView {
 
     new PreviewModal(this.app, {
       videoId,
+      startAt,
       mount: this.mountPreview,
       title: item?.title ?? result?.title ?? "",
       channel: item?.channelTitle ?? result?.channelTitle ?? "",
@@ -3269,6 +3321,8 @@ export class HubView extends ItemView {
  */
 interface PreviewSpec {
   videoId: string;
+  /** Where the player starts, from a link's `t=`. 0 for the remembered position. */
+  startAt?: number;
   /** Absent, the sheet is information only — see `PreviewMount`. */
   mount: PreviewMount | null;
   title: string;
@@ -3502,8 +3556,12 @@ class PreviewModal extends Modal {
         // Dismissed while the stream was resolving. Nobody will call the
         // teardown later, so it is called now — otherwise a sheet closed during
         // a slow resolve leaves a stream running for the rest of the session.
-        if (this.closed) handle.destroy();
-        else this.player = handle;
+        if (this.closed) {
+          handle.destroy();
+          return;
+        }
+        this.player = handle;
+        if (this.spec.startAt) handle.seek(this.spec.startAt);
       },
       (err: unknown) => {
         console.error("YT Free: preview player could not be built.", err);

@@ -9,7 +9,7 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
-- 653 unit tests pass, `tsc` clean, build clean (2026-10-16, PR #12 merged with main).
+- 653 unit tests pass, `tsc` clean, build clean (2026-10-16, main at PR #12).
 - Isaiah's answers of 2026-10-13 are recorded in [GLOSSARY.md](GLOSSARY.md): every ticket built
   up to 046 passed its manual test, 018 is parked, 045's scope is approved, 049 is built
   (blockquote), and collab videos (GitHub #2) come from the signed-in subscription feed.
@@ -17,10 +17,10 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Tickets
 
-- **Built 2026-10-14 on branch `claude/project-thread-zamhn2`, awaiting manual test:**
-  GitHub #8 (Preview fullscreen on the phone) and #9 (Fullscreen waits for the stream).
-- **Scoped 2026-10-14, awaiting Isaiah's approval:** GitHub #10 (paste a URL, land in its
-  Preview) and #11 (every YouTube link lands in Preview), one scope:
+- **Merged 2026-10-17 (PR #12), manual test passed:** GitHub #8 (Preview fullscreen on the
+  phone) and #9 (Fullscreen waits for the stream).
+- **Built 2026-10-17, awaiting manual test:** GitHub #10 (paste a URL, land in its Preview) and
+  #11 (every YouTube link lands in Preview, one setting), scope and test:
   [docs/V1-SCOPE-PASTE-TO-PREVIEW.md](docs/V1-SCOPE-PASTE-TO-PREVIEW.md).
 - **Built 2026-10-13 (PR #4, merged):** 045, GitHub #2, 048, 047, GitHub #3. Manual tests are in
   each issue file or scope doc.
@@ -33,14 +33,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
-1. Isaiah: on the iPhone, open any Preview. The picture starts right under the status bar with
-   the ✕ on its top-right corner; opening Description or Transcript widens it to full width and
-   hides the other, shutting it puts both back side by side (#8, PR #12). Mac unchanged.
-2. Isaiah: on the iPhone, press Play then Fullscreen at once. The Fullscreen button is dimmed
-   and the status line says it will be ready once the video has loaded; nothing changes size.
-   Press it again once the video plays: the phone's own fullscreen. Same in a note (#9).
-3. Isaiah: approve or change the #10/#11 scope, and answer its one question. Then build it.
-4. Backlog for HD is on GitHub (quality picker / ABR, InnerTube-first on desktop).
+1. Isaiah: run the #10/#11 manual test in the scope doc, on the iPhone and the Mac.
+2. Backlog for HD is on GitHub (quality picker / ABR, InnerTube-first on desktop).
 
 ## How to ship and test
 
