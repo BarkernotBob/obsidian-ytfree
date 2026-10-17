@@ -2,6 +2,9 @@
 
 **Status (2026-10-13): Done.** Isaiah confirmed the manual test passed. The status below is the build-time record.
 
+**Superseded in part (2026-10-14, GitHub #9):** a press before the stream has media no longer
+goes to the in-app fullscreen. It waits, dims the button and says so; see `src/fullscreen.ts`.
+
 Status: **Built 2026-08-06 — not yet tested on the phone.** From BarkernotBob's manual test:
 
 > "Full screen is broken now too in preview and in a note."

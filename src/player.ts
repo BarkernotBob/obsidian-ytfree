@@ -11,6 +11,7 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 // touches the player, which is one of the two reasons the plugin could not load
 // on mobile.
 import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
+import { fullscreenPress } from "./fullscreen.ts";
 import { dropOnJump, virtualLoader } from "./virtual-loader.ts";
 
 export type { StreamProvider };
@@ -340,6 +341,8 @@ export class YtFreePlayer {
   private pinBtn: HTMLButtonElement | null = null;
   /** The plugin's own fullscreen — see `setImmersive`. */
   private immersive = false;
+  /** Kept so it can be dimmed while there is nothing to show — see `paintFullscreen`. */
+  private fullscreenBtn: HTMLButtonElement | null = null;
   /** Kept so `destroy` can take them off `document`, which outlives this player. */
   private onDocPointer: ((event: Event) => void) | null = null;
   private onDocKey: ((event: KeyboardEvent) => void) | null = null;
@@ -882,9 +885,15 @@ export class YtFreePlayer {
       void this.withMedia(() => this.togglePip());
     });
 
-    button("left", "Fullscreen", "maximize", "Fullscreen", () => {
+    this.fullscreenBtn = button("left", "Fullscreen", "maximize", "Fullscreen", () => {
       this.fullscreenPressed();
     });
+    // Dimmed until there is media to show (GitHub #9). These are the events
+    // that move `readyState` across the line `fullscreenPress` draws.
+    for (const event of ["loadstart", "loadedmetadata", "emptied", "error"]) {
+      this.video.addEventListener(event, () => this.paintFullscreen());
+    }
+    this.paintFullscreen();
 
     // Right is what this player does to the *note*: keep a copy of it, pin it,
     // fold it away — and the pop-out, last, because an overflow menu belongs at
@@ -1800,7 +1809,9 @@ export class YtFreePlayer {
       this.primeForGesture();
       this.loading ??= ensure().finally(() => {
         this.loading = null;
+        this.paintFullscreen();
       });
+      this.paintFullscreen();
       try {
         await this.loading;
       } catch {
@@ -1926,37 +1937,59 @@ export class YtFreePlayer {
    * `withMedia` (038).
    *
    * `webkitEnterFullscreen` is honoured only inside the task that handled the
-   * tap. On a warm player `withMedia` never awaits, which is why Fullscreen
-   * always worked mid-playback; on a cold one it awaits a network round trip,
-   * the gesture is long gone by the time the call is made, and the press landed
-   * silently in the CSS fallback instead. So: warm players go straight through,
-   * with nothing in front of the call, and a cold player is told what it is
-   * getting rather than being quietly given the other thing.
+   * tap, so when there is media the call is made here with nothing in front of
+   * it. When there is not — the stream is still resolving, or nobody has
+   * started it — the press waits rather than going fullscreen late (GitHub #9):
+   * the late path is the one that left the player mis-sized and broken. It
+   * starts the resolve if nothing has, so the next press is the real thing.
    */
   private fullscreenPressed(): void {
     const el = this.video as HTMLVideoElement & { webkitSupportsFullscreen?: boolean };
-    this.options.debug?.("fullscreen: pressed", {
+    const decision = fullscreenPress({
+      inFullscreen: this.immersive || Boolean(document.fullscreenElement),
       readyState: this.video.readyState,
+      resolving: this.loading !== null,
+    });
+    this.options.debug?.("fullscreen: pressed", {
+      decision,
+      readyState: this.video.readyState,
+      resolving: this.loading !== null,
       webkitSupportsFullscreen: el.webkitSupportsFullscreen ?? null,
       hasRequestFullscreen: typeof this.video.requestFullscreen === "function",
       immersive: this.immersive,
     });
 
-    // On the way out, or already warm: inside the gesture, no await in front.
-    if (this.immersive || document.fullscreenElement || this.video.readyState > 0) {
+    if (decision !== "wait") {
       void this.toggleFullscreen();
       return;
     }
 
-    // Cold. The resolve outlives the tap, so the native call would be refused;
-    // start the video anyway — the press is still a request to watch it — and
-    // enter our own fullscreen, having said which one this is.
-    this.options.debug?.("fullscreen: cold press, resolving first");
-    this.onStatus("Full screen in the app — press it again once it is playing for the phone's own");
-    window.setTimeout(() => this.onStatus(null), 4000);
-    void this.withMedia(() => {
-      this.setImmersive(true);
-    });
+    if (this.loading === null && this.video.readyState === 0) {
+      void this.withMedia(() => undefined);
+    }
+    this.onStatus("Full screen is ready once the video has loaded");
+    window.setTimeout(() => {
+      if (!this.destroyed) this.onStatus(null);
+    }, 3000);
+  }
+
+  /**
+   * Dim the Fullscreen button while a press would only wait.
+   *
+   * Dimmed, not `disabled`: a disabled button swallows the tap, and the tap is
+   * what starts the resolve and puts the "once it has loaded" line on screen.
+   */
+  private paintFullscreen(): void {
+    const btn = this.fullscreenBtn;
+    if (!btn || this.destroyed) return;
+    const waiting =
+      fullscreenPress({
+        inFullscreen: this.immersive || Boolean(document.fullscreenElement),
+        readyState: this.video.readyState,
+        resolving: this.loading !== null,
+      }) === "wait";
+    btn.toggleClass("is-waiting", waiting);
+    btn.setAttribute("aria-disabled", String(waiting));
   }
 
   /**
