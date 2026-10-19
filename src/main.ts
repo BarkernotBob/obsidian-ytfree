@@ -684,8 +684,15 @@ export default class YtFreePlugin extends Plugin {
   private armedSeekLink: SeekTarget | null = null;
   /** A YouTube link under a Live Preview mousedown, fired by the matching click (GitHub #3). */
   private armedEditorYouTube: string | null = null;
-  /** A YouTube link under a touchstart, reading view or Live Preview, fired on touchend. */
+  /**
+   * A YouTube link under a touchstart, fired on touchend: one for Reading view
+   * anchors, one for Live Preview text. Separate for the same reason as the
+   * touch origins below: the document's capture handler runs first on every
+   * touch, and while they shared a field it cleared the editor's tap before
+   * the editor handler read it, so a Live Preview tap fell through to YouTube.
+   */
   private armedYouTubeTap: { href: string; x: number; y: number } | null = null;
+  private armedEditorYouTubeTap: { href: string; x: number; y: number } | null = null;
   /**
    * Where a touch started, so a scroll can be told from a tap.
    *
@@ -825,12 +832,12 @@ export default class YtFreePlugin extends Plugin {
           touchstart: (evt, view) => {
             const touch = evt.touches[0];
             const url = touch ? this.editorYouTubeLinkAt(touch, view, true) : null;
-            this.armedYouTubeTap = url && touch ? { href: url, x: touch.clientX, y: touch.clientY } : null;
+            this.armedEditorYouTubeTap = url && touch ? { href: url, x: touch.clientX, y: touch.clientY } : null;
             return false;
           },
           touchend: (evt, view) => {
-            const armed = this.armedYouTubeTap;
-            this.armedYouTubeTap = null;
+            const armed = this.armedEditorYouTubeTap;
+            this.armedEditorYouTubeTap = null;
             if (!armed) return false;
             const touch = evt.changedTouches[0];
             if (!touch || !withinTapSlop(armed, touch)) return false;
@@ -2072,18 +2079,21 @@ export default class YtFreePlugin extends Plugin {
       new Notice("YT Free: that is not a link to a YouTube video.");
       return;
     }
+    // Isaiah, 2026-10-19: the video's note if it has one, else its Preview.
+    // Never a new note: that waits for Watch or Keep in the Preview.
     const existing = this.noteForVideo(link.videoId);
     if (existing) {
       await this.app.workspace.getLeaf(false).openFile(existing);
-    } else {
-      const item = await this.subscriptions.addLinkedVideo(link.videoId);
-      if (!item) {
-        new Notice("YT Free: YouTube would not say what that video is. It may be private or removed.");
-        return;
-      }
-      await this.subscriptions.openItem(item);
+      if (link.seconds > 0) await this.cueWhenMounted(link.videoId, link.seconds);
+      return;
     }
-    if (link.seconds > 0) await this.seekWhenMounted(link.videoId, link.seconds);
+    await this.openHub();
+    const leaf = this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)[0];
+    if (leaf?.view instanceof HubView) {
+      await leaf.view.previewVideo(link.videoId, link.seconds);
+    } else {
+      new Notice("YT Free: could not open the hub to preview that video.");
+    }
   }
 
   /** The note for this video, if there is one: the hub's first, then any frontmatter match. */
@@ -2099,15 +2109,16 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * Start the note's player at a second, once the note has mounted it. The
-   * player appears a moment after the note opens; give up quietly after a few
-   * seconds (the pinned player may be off), and say so.
+   * Put the note's player at a second, paused, once the note has mounted it.
+   * A followed link is not a Play press (Isaiah, 2026-10-19). The player
+   * appears a moment after the note opens; give up after a few seconds (the
+   * pinned player may be off), and say so.
    */
-  private async seekWhenMounted(videoId: string, seconds: number): Promise<void> {
+  private async cueWhenMounted(videoId: string, seconds: number): Promise<void> {
     for (let waited = 0; waited < HANDOFF_PLAYER_WAIT_MS; waited += 250) {
       const entry = this.players.get(videoId);
       if (entry) {
-        await this.seekEntry(entry, seconds);
+        this.cueEntry(entry, seconds);
         return;
       }
       await new Promise((resolve) => window.setTimeout(resolve, 250));
@@ -4546,6 +4557,9 @@ export default class YtFreePlugin extends Plugin {
         entry.player.primeForGesture();
         void this.seekEntry(entry, seconds);
       },
+      cue: (seconds) => {
+        if (entry) this.cueEntry(entry, seconds);
+      },
       currentTime: () => entry?.player.currentTime ?? 0,
     };
   }
@@ -5306,6 +5320,16 @@ export default class YtFreePlugin extends Plugin {
    *
    * On desktop `activate` is null and this is the plain seek it always was.
    */
+  /**
+   * Seek without playing: the media is left paused at `seconds`, and on the
+   * phone the poster stays up, so Play is still the reader's tap. The phone's
+   * player resolves only when asked, so the seek waits for its metadata.
+   */
+  private cueEntry(entry: PlayerEntry, seconds: number): void {
+    this.pendingSeek.set(entry.videoId, seconds);
+    entry.player.cueWhenReady(seconds);
+  }
+
   private async seekEntry(entry: PlayerEntry, seconds: number): Promise<void> {
     if (entry.activate) {
       this.pendingSeek.set(entry.videoId, seconds);
@@ -5947,7 +5971,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Open YouTube links here")
       .setDesc(
-        "A YouTube link clicked in a note opens that video's note in YT Free, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
+        "A YouTube link clicked in a note opens in YT Free, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.openYouTubeLinksHere).onChange(async (value) => {
