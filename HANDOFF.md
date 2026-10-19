@@ -19,8 +19,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 - **Merged 2026-10-17 (PR #12), manual test passed:** GitHub #8 (Preview fullscreen on the
   phone) and #9 (Fullscreen waits for the stream).
-- **Built 2026-10-17, awaiting manual test:** GitHub #10 (paste a URL, land in its Preview) and
-  #11 (every YouTube link lands in Preview, one setting), scope and test:
+- **PR #19, in manual test:** GitHub #10 (paste a URL, land in its Preview) and #11 (a YouTube
+  link opens its note if one exists, else its Preview; never makes a note; never auto-plays;
+  changed 2026-10-19 from a setting). Paste steps 1-2 passed on the iPhone 2026-10-19. Scope and test:
   [docs/V1-SCOPE-PASTE-TO-PREVIEW.md](docs/V1-SCOPE-PASTE-TO-PREVIEW.md).
 - **Built 2026-10-13 (PR #4, merged):** 045, GitHub #2, 048, 047, GitHub #3. Manual tests are in
   each issue file or scope doc.
@@ -33,7 +34,7 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
-1. Isaiah: run the #10/#11 manual test in the scope doc, on the iPhone and the Mac.
+1. Isaiah: finish the #10/#11 manual test (steps 3-6) in the scope doc; then merge PR #19.
 2. Backlog for HD is on GitHub (quality picker / ABR, InnerTube-first on desktop).
 
 ## How to ship and test

@@ -50,9 +50,7 @@ import {
   isYouTubeUrl,
   parseYouTubeLink,
   youTubeLinkAt,
-  handoffTarget,
 } from "./handoff";
-import type { OpenIn } from "./handoff";
 import type { SeekMode } from "./description";
 import { formatTimestamp } from "./format";
 import {
@@ -159,8 +157,6 @@ interface YtFreeSettings {
   pinnedFrontmatterKeys: string;
   /** YouTube links clicked in a note open in YT Free, not the browser (GitHub #3). */
   openYouTubeLinksHere: boolean;
-  /** Where a routed YouTube link lands: the video's Preview, or its note (GitHub #11). */
-  youTubeLinksOpenIn: OpenIn;
   collapseProperties: boolean;
   collapseSections: boolean;
   linkifyTimestamps: boolean;
@@ -379,7 +375,6 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   pinnedHeightVh: 40,
   pinnedFrontmatterKeys: "media_link, url",
   openYouTubeLinksHere: true,
-  youTubeLinksOpenIn: "preview",
   collapseProperties: true,
   collapseSections: true,
   linkifyTimestamps: true,
@@ -962,7 +957,7 @@ export default class YtFreePlugin extends Plugin {
     // GitHub #3: YouTube links open in YT Free. The door every outside router
     // (Finicky, the bookmarklet, the iPhone Shortcut) knocks on.
     this.registerObsidianProtocolHandler(HANDOFF_ACTION, (params) => {
-      void this.openYouTubeUrl(params.url ?? "", params.open);
+      void this.openYouTubeUrl(params.url ?? "");
     });
 
     // …and links clicked inside a note. Capture phase, for the same reason as
@@ -1018,22 +1013,7 @@ export default class YtFreePlugin extends Plugin {
         } catch {
           // Refused or empty: the Notice below says the same thing.
         }
-        await this.openYouTubeUrl(text, "note");
-      },
-    });
-
-    // GitHub #10: the same, straight into the video's Preview.
-    this.addCommand({
-      id: "preview-youtube-url-from-clipboard",
-      name: "Preview YouTube URL from clipboard",
-      callback: async () => {
-        let text = "";
-        try {
-          text = await navigator.clipboard.readText();
-        } catch {
-          // Refused or empty: the Notice in openYouTubeUrl says the same thing.
-        }
-        await this.openYouTubeUrl(text, "preview");
+        await this.openYouTubeUrl(text);
       },
     });
 
@@ -2091,7 +2071,7 @@ export default class YtFreePlugin extends Plugin {
    * makes one. Never a blank note: a link with no video in it, or a video
    * YouTube will not name, gets a Notice and nothing else.
    */
-  async openYouTubeUrl(url: string, open?: string): Promise<void> {
+  async openYouTubeUrl(url: string): Promise<void> {
     // A cold start from a link: the state file loads during onload.
     await new Promise<void>((resolve) => this.app.workspace.onLayoutReady(resolve));
     const link = parseYouTubeLink(url);
@@ -2099,27 +2079,21 @@ export default class YtFreePlugin extends Plugin {
       new Notice("YT Free: that is not a link to a YouTube video.");
       return;
     }
-    // GitHub #11: the link's own `open=` wins, then the setting.
-    if (handoffTarget(open, this.settings.youTubeLinksOpenIn) === "preview") {
-      await this.openHub();
-      const leaf = this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)[0];
-      if (leaf?.view instanceof HubView) {
-        await leaf.view.previewVideo(link.videoId, link.seconds);
-        return;
-      }
-    }
+    // Isaiah, 2026-10-19: the video's note if it has one, else its Preview.
+    // Never a new note: that waits for Watch or Keep in the Preview.
     const existing = this.noteForVideo(link.videoId);
     if (existing) {
       await this.app.workspace.getLeaf(false).openFile(existing);
-    } else {
-      const item = await this.subscriptions.addLinkedVideo(link.videoId);
-      if (!item) {
-        new Notice("YT Free: YouTube would not say what that video is. It may be private or removed.");
-        return;
-      }
-      await this.subscriptions.openItem(item);
+      if (link.seconds > 0) await this.cueWhenMounted(link.videoId, link.seconds);
+      return;
     }
-    if (link.seconds > 0) await this.seekWhenMounted(link.videoId, link.seconds);
+    await this.openHub();
+    const leaf = this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)[0];
+    if (leaf?.view instanceof HubView) {
+      await leaf.view.previewVideo(link.videoId, link.seconds);
+    } else {
+      new Notice("YT Free: could not open the hub to preview that video.");
+    }
   }
 
   /** The note for this video, if there is one: the hub's first, then any frontmatter match. */
@@ -2135,15 +2109,16 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * Start the note's player at a second, once the note has mounted it. The
-   * player appears a moment after the note opens; give up quietly after a few
-   * seconds (the pinned player may be off), and say so.
+   * Put the note's player at a second, paused, once the note has mounted it.
+   * A followed link is not a Play press (Isaiah, 2026-10-19). The player
+   * appears a moment after the note opens; give up after a few seconds (the
+   * pinned player may be off), and say so.
    */
-  private async seekWhenMounted(videoId: string, seconds: number): Promise<void> {
+  private async cueWhenMounted(videoId: string, seconds: number): Promise<void> {
     for (let waited = 0; waited < HANDOFF_PLAYER_WAIT_MS; waited += 250) {
       const entry = this.players.get(videoId);
       if (entry) {
-        await this.seekEntry(entry, seconds);
+        this.cueEntry(entry, seconds);
         return;
       }
       await new Promise((resolve) => window.setTimeout(resolve, 250));
@@ -4582,6 +4557,9 @@ export default class YtFreePlugin extends Plugin {
         entry.player.primeForGesture();
         void this.seekEntry(entry, seconds);
       },
+      cue: (seconds) => {
+        if (entry) this.cueEntry(entry, seconds);
+      },
       currentTime: () => entry?.player.currentTime ?? 0,
     };
   }
@@ -5342,6 +5320,16 @@ export default class YtFreePlugin extends Plugin {
    *
    * On desktop `activate` is null and this is the plain seek it always was.
    */
+  /**
+   * Seek without playing: the media is left paused at `seconds`, and on the
+   * phone the poster stays up, so Play is still the reader's tap. The phone's
+   * player resolves only when asked, so the seek waits for its metadata.
+   */
+  private cueEntry(entry: PlayerEntry, seconds: number): void {
+    this.pendingSeek.set(entry.videoId, seconds);
+    entry.player.cueWhenReady(seconds);
+  }
+
   private async seekEntry(entry: PlayerEntry, seconds: number): Promise<void> {
     if (entry.activate) {
       this.pendingSeek.set(entry.videoId, seconds);
@@ -5990,22 +5978,6 @@ class YtFreeSettingTab extends PluginSettingTab {
           this.plugin.settings.openYouTubeLinksHere = value;
           await this.plugin.saveSettings();
         }),
-      );
-
-    new Setting(containerEl)
-      .setName("YouTube links open in")
-      .setDesc(
-        "Where a YouTube link lands: the video's Preview, with no note made until you press Watch or Keep, or the video's note. Covers links clicked in notes, links from other apps and the bookmarklet.",
-      )
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("preview", "Preview")
-          .addOption("note", "Note")
-          .setValue(this.plugin.settings.youTubeLinksOpenIn)
-          .onChange(async (value) => {
-            this.plugin.settings.youTubeLinksOpenIn = value === "note" ? "note" : "preview";
-            await this.plugin.saveSettings();
-          }),
       );
 
     new Setting(containerEl)

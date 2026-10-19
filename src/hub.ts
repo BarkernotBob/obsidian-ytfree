@@ -154,6 +154,8 @@ export interface PreviewHandle {
    */
   release: (handingOver: boolean) => boolean;
   seek: (seconds: number) => void;
+  /** Seek and stay paused: a link's timestamp, not a Play press. */
+  cue: (seconds: number) => void;
   currentTime: () => number;
 }
 
@@ -3561,7 +3563,7 @@ class PreviewModal extends Modal {
           return;
         }
         this.player = handle;
-        if (this.spec.startAt) handle.seek(this.spec.startAt);
+        if (this.spec.startAt) handle.cue(this.spec.startAt);
       },
       (err: unknown) => {
         console.error("YT Free: preview player could not be built.", err);

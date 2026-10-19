@@ -2347,6 +2347,16 @@ export class YtFreePlayer {
    * media to seek. Setting `currentTime` on an element with no duration is
    * silently dropped, which would look exactly like a broken link.
    */
+  /** `seekWhenReady` without the play: the media waits at `seconds`, paused. */
+  cueWhenReady(seconds: number): void {
+    if (this.destroyed) return;
+    if (this.video.readyState >= 1) {
+      this.video.currentTime = seconds;
+      return;
+    }
+    this.video.addEventListener("loadedmetadata", () => (this.video.currentTime = seconds), { once: true });
+  }
+
   seekWhenReady(seconds: number): void {
     if (this.destroyed) return;
     if (this.video.readyState >= 1) {
