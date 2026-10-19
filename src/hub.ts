@@ -874,9 +874,14 @@ export class SubscriptionsStore {
   }
 
   /** A note for this video exists — which is what Kept means. */
+  /**
+   * A note for this video is in the vault now. Not just a recorded path: a
+   * note deleted by hand, or swept by tidy, leaves the path behind, and Watch
+   * and Save drawn as done for a note that is gone is a lie (Isaiah, 2026-10-19).
+   */
   hasNote(videoId: string): boolean {
-    const item = this.itemFor(videoId);
-    return Boolean(item?.notePath);
+    const path = this.itemFor(videoId)?.notePath;
+    return Boolean(path) && this.app.vault.getAbstractFileByPath(path ?? "") instanceof TFile;
   }
 
   /**
@@ -2965,7 +2970,7 @@ export class HubView extends ItemView {
 
     const facts = (): CardFacts => ({
       inHub: true,
-      noteExists: Boolean(this.store.itemFor(item.videoId)?.notePath),
+      noteExists: this.store.hasNote(item.videoId),
     });
 
     // "Short" only where there is no length to state — a 45-second video says
@@ -3263,6 +3268,24 @@ export class HubView extends ItemView {
       this.channel?.results.find((entry) => entry.videoId === videoId) ??
       (this.linkedResult?.videoId === videoId ? this.linkedResult : null);
     if (!item && !result) return;
+    // What the buttons fall back to if the item leaves the hub while the sheet
+    // is open: a deleted note's video is forgotten a few seconds after the
+    // delete, and Watch pressed after that found neither and did nothing.
+    const fallback: SearchResult | null =
+      result ??
+      (item
+        ? {
+            videoId,
+            title: item.title,
+            channelId: item.channelId,
+            channelTitle: item.channelTitle,
+            publishedText: relativeAge(item.published, new Date()),
+            views: null,
+            duration: formatDuration(item.durationSeconds),
+            thumbnail: item.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+            secondary: false,
+          }
+        : null);
     const channelId = item?.channelId || result?.channelId || "";
     const channelTitle = item?.channelTitle || result?.channelTitle || "";
 
@@ -3310,7 +3333,7 @@ export class HubView extends ItemView {
         // can replace the item object while it is open.
         const live = this.store.itemFor(videoId);
         if (live) await this.runItemAction(key, live, repaint);
-        else if (result) await this.runResultAction(key, result, repaint);
+        else if (fallback) await this.runResultAction(key, fallback, repaint);
         repaintCard();
       },
     }).open();
