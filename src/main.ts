@@ -689,8 +689,15 @@ export default class YtFreePlugin extends Plugin {
   private armedSeekLink: SeekTarget | null = null;
   /** A YouTube link under a Live Preview mousedown, fired by the matching click (GitHub #3). */
   private armedEditorYouTube: string | null = null;
-  /** A YouTube link under a touchstart, reading view or Live Preview, fired on touchend. */
+  /**
+   * A YouTube link under a touchstart, fired on touchend: one for Reading view
+   * anchors, one for Live Preview text. Separate for the same reason as the
+   * touch origins below: the document's capture handler runs first on every
+   * touch, and while they shared a field it cleared the editor's tap before
+   * the editor handler read it, so a Live Preview tap fell through to YouTube.
+   */
   private armedYouTubeTap: { href: string; x: number; y: number } | null = null;
+  private armedEditorYouTubeTap: { href: string; x: number; y: number } | null = null;
   /**
    * Where a touch started, so a scroll can be told from a tap.
    *
@@ -830,12 +837,12 @@ export default class YtFreePlugin extends Plugin {
           touchstart: (evt, view) => {
             const touch = evt.touches[0];
             const url = touch ? this.editorYouTubeLinkAt(touch, view, true) : null;
-            this.armedYouTubeTap = url && touch ? { href: url, x: touch.clientX, y: touch.clientY } : null;
+            this.armedEditorYouTubeTap = url && touch ? { href: url, x: touch.clientX, y: touch.clientY } : null;
             return false;
           },
           touchend: (evt, view) => {
-            const armed = this.armedYouTubeTap;
-            this.armedYouTubeTap = null;
+            const armed = this.armedEditorYouTubeTap;
+            this.armedEditorYouTubeTap = null;
             if (!armed) return false;
             const touch = evt.changedTouches[0];
             if (!touch || !withinTapSlop(armed, touch)) return false;
