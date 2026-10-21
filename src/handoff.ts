@@ -85,6 +85,30 @@ export function handoffUri(youtubeUrl: string): string {
   return `obsidian://${HANDOFF_ACTION}?url=${encodeURIComponent(youtubeUrl)}`;
 }
 
+/** The screens `obsidian://ytfree?view=…` can open. */
+export const HANDOFF_VIEWS = { subscriptions: "hub", search: "search" } as const;
+
+export type HandoffTarget =
+  | { kind: "video"; url: string }
+  | { kind: "hub"; screen: (typeof HANDOFF_VIEWS)[keyof typeof HANDOFF_VIEWS] }
+  | { kind: "unknown-view"; view: string };
+
+/**
+ * What an `obsidian://ytfree` call asks for. A `url` wins; otherwise `view`
+ * names a hub screen, and no parameters at all means the hub, so the bare link
+ * is a home button rather than an error.
+ */
+export function handoffTarget(params: Record<string, string | undefined>): HandoffTarget {
+  const url = params.url?.trim();
+  if (url) return { kind: "video", url };
+  const view = (params.view ?? "").trim().toLowerCase();
+  if (!view) return { kind: "hub", screen: "hub" };
+  if (Object.prototype.hasOwnProperty.call(HANDOFF_VIEWS, view)) {
+    return { kind: "hub", screen: HANDOFF_VIEWS[view as keyof typeof HANDOFF_VIEWS] };
+  }
+  return { kind: "unknown-view", view };
+}
+
 /**
  * A bookmark whose address is this sends the current tab to the handler. Works
  * in Safari, Chrome, Arc and Firefox with no extension.
