@@ -47,6 +47,8 @@ import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
 import {
   HANDOFF_ACTION,
   HANDOFF_BOOKMARKLET,
+  HANDOFF_VIEWS,
+  handoffTarget,
   isYouTubeUrl,
   parseYouTubeLink,
   youTubeLinkAt,
@@ -949,8 +951,18 @@ export default class YtFreePlugin extends Plugin {
 
     // GitHub #3: YouTube links open in YT Free. The door every outside router
     // (Finicky, the bookmarklet, the iPhone Shortcut) knocks on.
+    // `view=` opens the hub itself, for a home-screen Shortcut.
     this.registerObsidianProtocolHandler(HANDOFF_ACTION, (params) => {
-      void this.openYouTubeUrl(params.url ?? "");
+      const target = handoffTarget(params);
+      if (target.kind === "video") {
+        void this.openYouTubeUrl(target.url);
+      } else if (target.kind === "hub") {
+        this.app.workspace.onLayoutReady(() => void this.openHub(target.screen));
+      } else {
+        new Notice(
+          `YT Free: no screen called "${target.view}". Try view=${Object.keys(HANDOFF_VIEWS).join(" or view=")}.`,
+        );
+      }
     });
 
     // …and links clicked inside a note. Capture phase, for the same reason as
