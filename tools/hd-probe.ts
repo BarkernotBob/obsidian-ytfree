@@ -91,3 +91,54 @@ for (const id of ids) {
     }
   }
 }
+
+// Per client: does a segment deep in the file serve, or only the first minute?
+// YouTube refuses unsigned stream URLs "after some time" on some clients
+// (NewPipe saw 403s at 1:09), which would look exactly like a stall near 55 s
+// with a 30 s buffer ahead. ANDROID_SDKLESS is ANDROID without
+// `androidSdkVersion`, which yt-dlp found does not trigger the token check.
+const { pickPair, parseSidx } = await import("../src/adaptive.ts");
+const variants: Record<string, { ctx: Record<string, string | number>; ua: string }> = {
+  android: CLIENTS.android,
+  android_sdkless: {
+    ctx: Object.fromEntries(Object.entries(CLIENTS.android.ctx).filter(([k]) => k !== "androidSdkVersion")),
+    ua: CLIENTS.android.ua,
+  },
+  ios: CLIENTS.ios,
+};
+for (const id of ids) {
+  console.log(`\n=== ${id} by client`);
+  for (const [name, { ctx, ua }] of Object.entries(variants)) {
+    const res = await fetch(PLAYER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": ua },
+      body: JSON.stringify({ ...playerBody(id), context: { client: { ...ctx, hl: "en", gl: "US" } } }),
+    });
+    const json = await res.json();
+    const pair = json.playabilityStatus?.status === "OK" ? pickPair(json.streamingData?.adaptiveFormats ?? []) : null;
+    if (!pair) {
+      console.log(`${name}: ${json.playabilityStatus?.status ?? res.status}, no pair, hls=${!!json.streamingData?.hlsManifestUrl}`);
+      continue;
+    }
+    for (const track of [pair.video, pair.audio]) {
+      const idx = await range(track.url, track.index.start, track.index.end, ua);
+      if (idx.status !== 200 && idx.status !== 206) {
+        console.log(`${name} ${track.height || "audio"}: index HTTP ${idx.status}`);
+        continue;
+      }
+      const buf = await (await fetch(withRange(track.url, track.index.start, track.index.end), { headers: { "User-Agent": ua } })).arrayBuffer();
+      const segs = parseSidx(buf, track.index.start);
+      let clock = 0;
+      const starts = segs.map((s) => { const c = clock; clock += s.duration; return c; });
+      const out: string[] = [];
+      for (const t of [0, 40, 60, 75, 90, 120, clock / 2, clock - 1]) {
+        const i = starts.findLastIndex((c) => c <= t);
+        if (i < 0) continue;
+        const s = segs[i];
+        const r = await range(track.url, s.offset, s.offset + s.length - 1, ua);
+        out.push(`${Math.round(t)}s:${r.status}/${r.ms}ms`);
+      }
+      console.log(`${name} ${track.height ? track.height + "p" : "audio"}: ${out.join(" ")}`);
+    }
+  }
+}
