@@ -96,11 +96,21 @@ test("a request Node cannot make at all falls back to the old fetch", async () =
   );
   assert.equal((await fetch("https://g/v", 0, 6)).byteLength, 7);
   assert.equal(fellBack, 1);
+  // Node failed once: later requests go straight to the fallback.
+  assert.equal((await fetch("https://g/v", 0, 6)).byteLength, 7);
+  assert.equal(fellBack, 2);
+  // A connection dropped mid-transfer is hls.js's to retry, not a Node failure.
+  const dropped = streamingWithFallback(
+    async () => ((fellBack += 1), new ArrayBuffer(7)),
+    async (_u, _s, _e, _ua, io) => { io?.onProgress?.(3); throw new Error("googlevideo closed the connection"); },
+  );
+  await assert.rejects(dropped("https://g/v", 0, 6), /closed/);
+  assert.equal(fellBack, 2);
   // A cancel is not a failure: no fallback.
   const cancelled = streamingWithFallback(
     async () => ((fellBack += 1), new ArrayBuffer(7)),
     async () => { throw Object.assign(new Error("x"), { name: "AbortError" }); },
   );
   await assert.rejects(cancelled("https://g/v", 0, 6), { name: "AbortError" });
-  assert.equal(fellBack, 1);
+  assert.equal(fellBack, 2);
 });

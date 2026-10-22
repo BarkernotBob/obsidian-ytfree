@@ -8,7 +8,7 @@
  */
 
 import { requestUrl } from "obsidian";
-import { DEFAULT_MAX_HEIGHT, resolveHd, withRange } from "./adaptive.ts";
+import { DEFAULT_MAX_HEIGHT, refusal, resolveHd, withRange } from "./adaptive.ts";
 import type { AdaptiveFormat, ClientAnswer, FetchRange } from "./adaptive.ts";
 import { callInnertube, CLIENTS, playerBody, PLAYER_URL } from "./innertube.ts";
 import type { ResolvedStream } from "./stream.ts";
@@ -43,11 +43,7 @@ export const fetchRange: FetchRange = async (url, start, end, ua) => {
     headers: ua ? { "User-Agent": ua } : {},
     throw: false,
   });
-  if (response.status < 200 || response.status >= 300) {
-    const err = new Error(`googlevideo answered HTTP ${response.status}`) as Error & { status: number };
-    err.status = response.status;
-    throw err;
-  }
+  if (response.status < 200 || response.status >= 300) throw refusal(response.status);
   return response.arrayBuffer;
 };
 

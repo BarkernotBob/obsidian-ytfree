@@ -376,7 +376,10 @@ export function relinkingFetch(
   const current = (url: string) => links.get(url) ?? { url, ua };
 
   // `null` when no client serves the range; "cancelled" when the player gave
-  // up on the request first, which says nothing about the links.
+  // up on the request that started the re-link, which says nothing about the
+  // links. The asking ignores that cancel, because other requests may be
+  // waiting on the same re-link; only the check read is cancelled, and then
+  // the fresh links are taken unchecked (a refusal on them re-links again).
   const relink = async (
     url: string,
     start: number,
@@ -384,17 +387,25 @@ export function relinkingFetch(
     io?: RangeIO,
   ): Promise<ArrayBuffer | null | "cancelled"> => {
     for (const client of reask!.clients) {
-      if (io?.signal?.aborted) return "cancelled";
       const answer = await reask!.ask(client).catch(() => null);
       const fresh = answer && matchTracks(tracks, answer.adaptiveFormats);
       if (!answer || !fresh) continue;
-      if (io?.signal?.aborted) return "cancelled";
+      const adopt = () => {
+        for (const [from, to] of fresh) links.set(from, { url: to, ua: answer.ua });
+      };
+      if (io?.signal?.aborted) {
+        adopt();
+        return "cancelled";
+      }
       try {
         const bytes = await fetchRange(fresh.get(url) ?? url, start, end, answer.ua, io);
-        for (const [from, to] of fresh) links.set(from, { url: to, ua: answer.ua });
+        adopt();
         return bytes;
       } catch (err) {
-        if (isAbort(err) || io?.signal?.aborted) return "cancelled";
+        if (isAbort(err) || io?.signal?.aborted) {
+          adopt();
+          return "cancelled";
+        }
         // This client is refused at this point too; try the next one.
       }
     }
@@ -428,6 +439,13 @@ export function relinkingFetch(
       return settled;
     }
   };
+}
+
+/** A refusal from googlevideo, carrying its status (what `isRefusal` reads). */
+export function refusal(status: number): Error & { status: number } {
+  const err = new Error(`googlevideo answered HTTP ${status}`) as Error & { status: number };
+  err.status = status;
+  return err;
 }
 
 /** The rejection a cancelled request gives, the shape `fetch` uses. */

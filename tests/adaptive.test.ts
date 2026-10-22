@@ -285,7 +285,7 @@ test("a dropped connection is not re-linked: hls.js retries it", async () => {
   assert.equal(asks, 0);
 });
 
-test("a cancel during a re-link is not a dead link: the next refusal still re-links", async () => {
+test("a cancel during a re-link is not a dead link, and keeps the fresh answer", async () => {
   let asks = 0;
   const controller = new AbortController();
   const fetch = async (u: string, s: number, e: number, _ua?: string, io?: { signal?: AbortSignal }) => {
@@ -302,10 +302,10 @@ test("a cancel during a re-link is not a dead link: the next refusal still re-li
     },
   });
   await assert.rejects(ranged(url(137), 0, 9, { signal: controller.signal }), { name: "AbortError" });
-  assert.equal(asks, 1, "a cancelled request stops asking");
-  // Not marked dead: an uncancelled refusal re-links as usual.
+  assert.equal(asks, 1);
+  // Not marked dead, and the fresh answer was kept: the next read goes to it.
   assert.equal((await ranged(url(137), 0, 9)).byteLength, 10);
-  assert.equal(asks, 2);
+  assert.equal(asks, 1);
 });
 
 test("withRange adds or replaces the range parameter", () => {
