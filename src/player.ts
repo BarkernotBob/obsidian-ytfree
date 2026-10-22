@@ -13,10 +13,14 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
 import { fullscreenPress } from "./fullscreen.ts";
 import { dropOnJump, virtualLoader } from "./virtual-loader.ts";
+import { badgeText, bufferedAhead, HD_WAIT_MS, rungPhase, within } from "./hd-status.ts";
+import type { HdState } from "./hd-status.ts";
 
 export type { StreamProvider };
 
 const MAX_CONSECUTIVE_RECOVERIES = 3;
+/** How long a settled quality badge stays before it fades. */
+const QUALITY_SETTLED_MS = 4000;
 const RECOVERY_COOLDOWN_MS = 2000;
 
 export interface PlayerOptions {
@@ -247,6 +251,12 @@ const MAX_FRAME_SECONDS = 0.5;
  */
 const CONTROLS_HUSH_MS = 6000;
 
+/** A failed HD resolve, in the few words the badge's hover text has room for. */
+function hdReason(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.length > 80 ? `${message.slice(0, 77)}…` : message;
+}
+
 /**
  * Which player currently owns `navigator.mediaSession` — there is one of those
  * per document, and a vault can have several players open at once.
@@ -300,6 +310,13 @@ export class YtFreePlayer {
   /** The purple line along the bottom of the picture, and the part that fills. */
   private progressBar: HTMLElement | null = null;
   private progressFill: HTMLElement | null = null;
+  /** The lighter band under the fill: how far ahead the stream has loaded. */
+  private progressBuffered: HTMLElement | null = null;
+  /** The quality chip on the picture's top-left corner — see `paintQuality`. */
+  private qualityBadge: HTMLElement | null = null;
+  private hdState: HdState = { phase: "off" };
+  /** Fades a settled badge; cleared by any change that unsettles it. */
+  private qualityTimer: number | null = null;
   /** The Play/Pause button, repainted from one place — see `paintPlay`. */
   private playBtn: HTMLButtonElement | null = null;
   /**
@@ -459,14 +476,22 @@ export class YtFreePlayer {
    */
   private buildProgressBar(stage: HTMLElement): void {
     const bar = stage.createDiv({ cls: "ytfree-progress" });
+    // Before the fill, so the fill paints over it: the band only shows from
+    // the playhead on, which is the part that answers "how far has it loaded".
+    this.progressBuffered = bar.createDiv({ cls: "ytfree-progress-buffered" });
     this.progressFill = bar.createDiv({ cls: "ytfree-progress-fill" });
     this.progressBar = bar;
+
+    // Built here because it sits on the picture, like the line. Hidden until
+    // there is something to say; never in the flow, so it moves nothing.
+    this.qualityBadge = stage.createDiv({ cls: "ytfree-quality" });
 
     const paint = (): void => this.paintProgress();
     // `seeked` matters as much as `timeupdate` here: a Smart Speed jump moves
     // the position without playing through it, and a line that only advanced
-    // with playback would lag by the length of every skip.
-    for (const event of ["timeupdate", "seeked", "loadedmetadata", "durationchange", "emptied"]) {
+    // with playback would lag by the length of every skip. `progress` is the
+    // one that moves the buffered band while playback is paused.
+    for (const event of ["timeupdate", "seeked", "loadedmetadata", "durationchange", "emptied", "progress"]) {
       this.video.addEventListener(event, paint);
     }
     paint();
@@ -487,6 +512,54 @@ export class YtFreePlayer {
     const at = this.drag?.live ? this.drag.to : this.video.currentTime;
     const fraction = live ? Math.min(1, Math.max(0, at / duration)) : 0;
     fill.style.transform = `scaleX(${fraction.toFixed(5)})`;
+    if (this.progressBuffered) {
+      const ahead = live && !this.local ? bufferedAhead(this.video.buffered, this.video.currentTime) : 0;
+      const loaded = live ? Math.min(1, Math.max(0, ahead / duration)) : 0;
+      this.progressBuffered.style.transform = `scaleX(${loaded.toFixed(5)})`;
+    }
+  }
+
+  /**
+   * Say where HD has got to (GitHub issue: HD progress). Shown while anything
+   * is still happening; once settled it stays a few seconds and then fades,
+   * coming back on hover — a permanent "1080p" over the picture is noise.
+   */
+  private setHd(next: HdState): void {
+    if (this.destroyed) return;
+    this.hdState = next;
+    this.paintQuality();
+  }
+
+  private paintQuality(): void {
+    const badge = this.qualityBadge;
+    if (!badge) return;
+    if (this.qualityTimer !== null) window.clearTimeout(this.qualityTimer);
+    this.qualityTimer = null;
+    if (this.local) {
+      badge.removeClass("is-visible", "has-text");
+      return;
+    }
+    const { text, title, settled } = badgeText(this.hdState);
+    badge.setText(text);
+    badge.setAttr("title", title);
+    badge.setAttr("aria-label", title);
+    badge.addClass("has-text", "is-visible");
+    badge.toggleClass("is-settled", settled);
+    if (settled) {
+      this.qualityTimer = window.setTimeout(() => {
+        this.qualityTimer = null;
+        badge.removeClass("is-visible");
+      }, QUALITY_SETTLED_MS);
+    }
+  }
+
+  /** The HD state to show, read off hls.js's levels for the rung now playing. */
+  private hdFromLevel(hls: Hls, level: number): void {
+    const heights = hls.levels.map((l) => l.height).filter((h) => h > 0);
+    const height = hls.levels[level]?.height;
+    if (!height || !heights.length) return;
+    const top = Math.max(...heights);
+    this.setHd({ phase: rungPhase(height, top), height, top });
   }
 
   /**
@@ -2127,14 +2200,62 @@ export class YtFreePlayer {
    * failure. Stage 2 fetches the 1080p HLS manifest in the background and swaps
    * it in at the same playback position — deliberately not awaited.
    */
-  async load(upgradeToHighQuality: boolean): Promise<void> {
+  async load(upgradeToHighQuality: boolean, waitForHd = false): Promise<void> {
+    if (upgradeToHighQuality && waitForHd && Hls.isSupported()) return this.loadHdFirst();
     const stream = await this.provider("fast", false);
     // Where this video was left, if it was left anywhere. `attach` seeks once
     // the media reports metadata, so this costs nothing when it is 0 and does
     // not race a timestamp link tapped a moment later — that seek is registered
     // afterwards and therefore lands last.
     this.attach(stream, this.resumeSeconds(), false);
-    if (upgradeToHighQuality) void this.upgrade();
+    if (upgradeToHighQuality) {
+      this.setHd({ phase: "finding", height: stream.height });
+      void this.upgrade();
+    } else {
+      this.setHd({ phase: "off", height: stream.height });
+    }
+  }
+
+  /**
+   * "Start in HD": nothing plays until HD is here, and HD starts on its top
+   * rung rather than climbing to it.
+   *
+   * Both resolves start at once, so falling back costs no extra wait: if HD
+   * fails, or has not answered within `HD_WAIT_MS`, the 360p stream that was
+   * resolving alongside it plays, and an HD that turns up late is swapped in
+   * the ordinary way. A Play pressed meanwhile is held by `pendingPlay`.
+   */
+  private async loadHdFirst(): Promise<void> {
+    const fast = this.provider("fast", false);
+    // Possibly never awaited (HD won), and its rejection must not surface.
+    fast.catch(() => undefined);
+    const quality = this.provider("quality", false);
+    quality.catch(() => undefined);
+
+    this.setHd({ phase: "finding" });
+    this.onStatus("Waiting for HD…");
+    const hd = await within(quality, HD_WAIT_MS);
+    if (this.destroyed) return;
+    if (hd && hd.isHls) {
+      this.upgraded = true;
+      this.attach(hd, this.resumeSeconds(), false, true);
+      this.onStatus(null);
+      return;
+    }
+
+    this.onStatus(null);
+    // Throws when 360p fails too, which is the failure the caller reports.
+    const stream = await fast;
+    this.attach(stream, this.resumeSeconds(), false);
+    if (hd) {
+      // HD answered, but with nothing better than what plays now.
+      this.setHd({ phase: "none", height: stream.height, reason: "no HD stream" });
+      return;
+    }
+    // Timed out or failed. A late HD still gets its normal swap; a failed one
+    // settles into "no HD" inside `upgrade`.
+    this.setHd({ phase: "finding", height: stream.height });
+    void this.upgrade(quality);
   }
 
   /** The remembered position, guarded against a stored value that is not one. */
@@ -2154,6 +2275,7 @@ export class YtFreePlayer {
   loadLocal(url: string, onFail: () => void): void {
     this.local = true;
     this.teardownHls();
+    this.paintQuality();
     const fail = () => {
       if (!this.local) return;
       this.local = false;
@@ -2187,6 +2309,7 @@ export class YtFreePlayer {
 
     this.local = true;
     this.teardownHls();
+    this.paintQuality();
     this.video.src = url;
     this.video.addEventListener(
       "loadedmetadata",
@@ -2205,18 +2328,27 @@ export class YtFreePlayer {
     return this.local;
   }
 
-  private async upgrade(): Promise<void> {
+  private async upgrade(pending?: Promise<ResolvedStream>): Promise<void> {
     let stream: ResolvedStream;
     try {
-      stream = await this.provider("quality", false);
-    } catch {
-      return; // 360p already plays; a failed upgrade is not worth interrupting for.
+      stream = await (pending ?? this.provider("quality", false));
+    } catch (err) {
+      // 360p already plays; a failed upgrade is not worth interrupting for.
+      this.setHd({ ...this.hdState, phase: "none", reason: hdReason(err) });
+      return;
     }
     if (this.destroyed || this.recovering || this.local) return;
-    if (!stream.isHls) return; // no quality gain, so don't disturb playback
+    if (!stream.isHls) {
+      // No quality gain, so don't disturb playback.
+      this.setHd({ ...this.hdState, phase: "none", reason: "no HD stream" });
+      return;
+    }
     // A stitched stream only exists for hls.js; with no MSE there is nothing
     // that could play it, and 360p is already playing.
-    if (stream.virtual && !Hls.isSupported()) return;
+    if (stream.virtual && !Hls.isSupported()) {
+      this.setHd({ ...this.hdState, phase: "none", reason: "this device can't play it" });
+      return;
+    }
 
     const resumeAt = this.video.currentTime;
     const wasPlaying = !this.video.paused && !this.video.ended;
@@ -2224,9 +2356,15 @@ export class YtFreePlayer {
     this.attach(stream, resumeAt, wasPlaying);
   }
 
-  private attach(stream: ResolvedStream, resumeAt: number, autoplay: boolean): void {
+  /**
+   * `atTop` starts an HLS stream on its top rung instead of letting hls.js
+   * test the bandwidth on the lowest one first — "Start in HD" waited for this
+   * stream precisely so it would not open soft.
+   */
+  private attach(stream: ResolvedStream, resumeAt: number, autoplay: boolean, atTop = false): void {
     if (this.destroyed) return;
     this.teardownHls();
+    if (!stream.isHls) this.setHd({ ...this.hdState, height: stream.height });
 
     const volume = this.video.volume;
     const muted = this.video.muted;
@@ -2258,10 +2396,21 @@ export class YtFreePlayer {
           : {}),
       });
       this.hls = hls;
+      if (atTop) {
+        // Before `loadSource`, so it runs ahead of the first fragment request:
+        // hls.js starts loading on media attach, after the manifest is parsed.
+        // Levels are sorted by bitrate, so the last one is the top rung.
+        hls.once(Hls.Events.MANIFEST_PARSED, (_evt, data) => {
+          if (data.levels.length > 1) hls.startLevel = data.levels.length - 1;
+        });
+      }
       hls.loadSource(stream.url);
       hls.attachMedia(this.video);
       if (stream.virtual) this.unhookJump = dropOnJump(hls, this.video);
       hls.on(Hls.Events.MANIFEST_PARSED, resume);
+      // The badge follows the rung actually on screen, not the one being
+      // fetched: a jump's low-res first chunk shows as the dip it is.
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_evt, data) => this.hdFromLevel(hls, data.level));
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (!data.fatal) return;
         if (stream.virtual) {
@@ -2273,6 +2422,7 @@ export class YtFreePlayer {
           // that will not seek.
           if (Date.now() < stream.expiresAt) {
             this.upgraded = false;
+            this.setHd({ phase: "none", height: 360, reason: "HD stream failed" });
             void this.recover("HD unavailable, back to 360p");
             return;
           }
@@ -2515,6 +2665,7 @@ export class YtFreePlayer {
     // this player — and every note in the vault keeps its scrolling locked.
     this.setImmersive(false);
     this.destroyed = true;
+    if (this.qualityTimer !== null) window.clearTimeout(this.qualityTimer);
     this.unhushNativeControls();
     this.stopSmartLoop();
     if (this.onVisibility) {

@@ -124,7 +124,18 @@
   visibility: visible;
 }
 
+/* How far ahead the stream has loaded. Under the fill, so it only shows from
+   the playhead on; scaled like the fill, for the same reason. */
+.ytfree-progress-buffered {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: rgba(255, 255, 255, 0.38);
+}
+
 .ytfree-progress-fill {
+  position: relative;
   height: 100%;
   width: 100%;
   /* Scaled, never re-widthed: a transform is composited and reflows nothing,
@@ -171,6 +182,45 @@
 
 .ytfree-seek.is-visible {
   visibility: visible;
+}
+
+/*
+ * Where HD has got to, top-left of the picture: "360p · finding HD…", then the
+ * rung playing, then the top rung, which fades after a moment and comes back
+ * on hover. Top-left because the phone Preview's ✕ owns top-right and the
+ * native controls own the bottom. Same scrim as the poster's resume chip.
+ */
+.ytfree-quality {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.ytfree-quality.is-visible,
+:hover > .ytfree-quality.has-text {
+  opacity: 1;
+}
+
+:fullscreen .ytfree-quality {
+  visibility: hidden;
+}
+
+/* Its own rule, not grouped with the one above: one selector a browser does not
+   know would drop the pair. */
+:-webkit-full-screen .ytfree-quality {
+  visibility: hidden;
 }
 
 /*
