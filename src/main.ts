@@ -147,6 +147,8 @@ interface YtFreeSettings {
   upgradeToHighQuality: boolean;
   /** Stitched HD on the phone. Off by default: iOS 17.1+, and more data. */
   phoneHighQuality: boolean;
+  /** Hold playback until HD is ready, and start it on the top rung. */
+  startInHd: boolean;
   timestampFormat: string;
   autoStampNewLine: boolean;
   lookbackSeconds: number;
@@ -366,6 +368,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   ytDlpPath: "",
   upgradeToHighQuality: true,
   phoneHighQuality: false,
+  startInHd: false,
   timestampFormat: "[{ts}]({link}) ",
   autoStampNewLine: true,
   lookbackSeconds: 5,
@@ -4468,7 +4471,7 @@ export default class YtFreePlugin extends Plugin {
         // fall back to the network rather than showing a dead player.
         setStatus("Local copy could not be played — streaming instead.");
         window.setTimeout(() => setStatus(null), 6000);
-        void player.load(this.settings.upgradeToHighQuality).catch(() => undefined);
+        void player.load(this.settings.upgradeToHighQuality, this.settings.startInHd).catch(() => undefined);
       });
       this.announceResume(videoId, setStatus);
       return entry;
@@ -4481,7 +4484,7 @@ export default class YtFreePlugin extends Plugin {
 
     setStatus("Resolving stream…");
     try {
-      await player.load(this.settings.upgradeToHighQuality);
+      await player.load(this.settings.upgradeToHighQuality, this.settings.startInHd);
       this.announceResume(videoId, setStatus);
       return entry;
     } catch (err) {
@@ -5246,7 +5249,7 @@ export default class YtFreePlugin extends Plugin {
      * waits on the resolve already in flight rather than starting a second one.
      */
     let resolved: Promise<void> | null = null;
-    const resolve = (): Promise<void> => (resolved ??= player.load(this.settings.phoneHighQuality));
+    const resolve = (): Promise<void> => (resolved ??= player.load(this.settings.phoneHighQuality, this.settings.startInHd));
 
     // Metadata now, so the first press of Fullscreen is the phone's own
     // fullscreen rather than our substitute. Failures are swallowed: nothing
@@ -5749,6 +5752,22 @@ class YtFreeSettingTab extends PluginSettingTab {
     this.notifyStatusEl?.setText(text || " ");
   }
 
+  /** Under whichever HD switch this device has; one setting for both. */
+  private addStartInHd(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName("Start in HD")
+      .setDesc(
+        "Wait for HD before the video starts, and start it at full quality instead of sharpening a few seconds in. " +
+          "If HD isn't ready within 15 seconds it starts at 360p and sharpens later. Only applies while HD is on.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.startInHd).onChange(async (value) => {
+          this.plugin.settings.startInHd = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+  }
+
   display(): void {
     const { containerEl } = this;
     const desktopApp = Platform.isDesktopApp;
@@ -5780,6 +5799,8 @@ class YtFreeSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
         );
+
+      this.addStartInHd(containerEl);
     } else {
       // Saying this once, plainly, beats a mobile user wondering why the
       // picture is soft and where the download button went.
@@ -5802,6 +5823,8 @@ class YtFreeSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
         );
+
+      this.addStartInHd(containerEl);
     }
 
     new Setting(containerEl)
