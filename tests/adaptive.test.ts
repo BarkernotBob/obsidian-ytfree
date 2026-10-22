@@ -9,6 +9,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildPlaylists,
+  relinkingFetch,
+  segmentAt,
   parseSidx,
   pickPair,
   resolveHd,
@@ -140,7 +142,9 @@ function fakeFetch(log: string[], refuse = false) {
 test("streamFromPair reads both indexes with the client's UA and expires with the URLs", async () => {
   const log: string[] = [];
   const stream = await streamFromPair("abcdefghijk", pickPair(formats)!, fakeFetch(log), "UA");
-  assert.deepEqual(log.sort(), ["136:741-800:UA", "137:741-800:UA", "140:632-700:UA"]);
+  // Both indexes, the 720p index, then a small read past the first minute of
+  // the top rung and the sound (the fake's two segments: the last one).
+  assert.deepEqual(log.sort(), ["136:741-800:UA", "137:1797-2796:UA", "137:741-800:UA", "140:1688-2687:UA", "140:632-700:UA"]);
   assert.equal(stream.mode, "quality");
   assert.equal(stream.isHls, true);
   assert.equal(stream.height, 1080);
@@ -192,6 +196,93 @@ test("resolveHd falls through clients, then to an HLS manifest, then throws", as
     resolveHd("abcdefghijk", ["android"], async () => answer(), fakeFetch([], true)),
     /no HD stream \(android: HTTP 403\)/,
   );
+});
+
+test("segmentAt finds the segment at or past a time, else the last", () => {
+  const segs = [0, 1, 2, 3].map((i) => ({ offset: i * 10, length: 10, duration: 40 }));
+  assert.equal(segmentAt(segs, 90).offset, 30); // starts at 120 s
+  assert.equal(segmentAt(segs, 0).offset, 0);
+  assert.equal(segmentAt(segs, 999).offset, 30);
+});
+
+test("a pair that serves only its opening is refused at resolve, and the next client plays", async () => {
+  // The first client's files answer the index and the opening, then 403 —
+  // the stall near 55 s. The second client's serve throughout.
+  const openingOnly = async (u: string, s: number, e: number, ua?: string) => {
+    if (ua === "A" && s > 1000) throw Object.assign(new Error("HTTP 403"), { status: 403 });
+    return fakeFetch([])(u, s, e, ua);
+  };
+  await assert.rejects(streamFromPair("abcdefghijk", pickPair(formats)!, openingOnly, "A"), /serves only the opening \(HTTP 403\)/);
+  const stream = await resolveHd(
+    "abcdefghijk",
+    ["android", "ios"],
+    async (c) => ({ adaptiveFormats: formats, hlsManifestUrl: null, ua: c === "android" ? "A" : "B" }),
+    openingOnly,
+  );
+  assert.ok(stream.virtual);
+});
+
+/** Tracks for `relinkingFetch`, and a fresh answer naming the same itags. */
+const tracks = () => {
+  const pair = pickPair(formats)!;
+  return [...pair.ladder, pair.audio];
+};
+const freshFormats = formats.map((f) => ({ ...f, url: f.url?.replace("rr1", "rr9") }));
+
+test("a refused link is re-linked to the same file from a fresh answer, once for every track", async () => {
+  const log: string[] = [];
+  let asks = 0;
+  const fetch = async (u: string, s: number, e: number, ua?: string) => {
+    log.push(`${u.includes("rr9") ? "new" : "old"}:${u.match(/itag=(\d+)/)?.[1]}:${ua}`);
+    if (u.includes("rr1")) throw Object.assign(new Error("HTTP 403"), { status: 403 });
+    return new ArrayBuffer(e - s + 1);
+  };
+  const ranged = relinkingFetch(tracks(), fetch, "A", {
+    clients: ["android"],
+    ask: async () => ((asks += 1), { adaptiveFormats: freshFormats, hlsManifestUrl: null, ua: "B" }),
+  });
+  // Video and sound refused at once: one ask, both re-linked.
+  const [v, a] = await Promise.all([ranged(url(137), 5000, 5999), ranged(url(140), 5000, 5999)]);
+  assert.equal(v.byteLength, 1000);
+  assert.equal(a.byteLength, 1000);
+  assert.equal(asks, 1);
+  // Later reads go straight to the new link with the new client's UA.
+  log.length = 0;
+  await ranged(url(136), 0, 9);
+  assert.deepEqual(log, ["new:136:B"]);
+});
+
+test("re-linking tries the next client, and gives up for good when none serves", async () => {
+  const served = (bad: string[]) => async (u: string, s: number, e: number, ua?: string) => {
+    if (bad.includes(ua ?? "")) throw Object.assign(new Error("HTTP 403"), { status: 403 });
+    return new ArrayBuffer(e - s + 1);
+  };
+  let asks = 0;
+  const reask = (bad: string[]) => ({
+    clients: ["android", "ios"],
+    ask: async (c: string) => ((asks += 1), { adaptiveFormats: freshFormats, hlsManifestUrl: null, ua: c === "android" ? "A" : "I" }),
+  });
+  // The same client is refused again; the other serves.
+  const ok = relinkingFetch(tracks(), served(["A"]), "A", reask(["A"]));
+  assert.equal((await ok(url(137), 0, 9)).byteLength, 10);
+
+  // Nobody serves: the refusal goes through, and the next one does not ask.
+  asks = 0;
+  const no = relinkingFetch(tracks(), served(["A", "I"]), "A", reask(["A", "I"]));
+  await assert.rejects(no(url(137), 0, 9), /403/);
+  assert.equal(asks, 2);
+  await assert.rejects(no(url(137), 0, 9), /403/);
+  assert.equal(asks, 2);
+});
+
+test("a dropped connection is not re-linked: hls.js retries it", async () => {
+  let asks = 0;
+  const ranged = relinkingFetch(tracks(), async () => { throw new Error("net::ERR_CONNECTION_RESET"); }, "A", {
+    clients: ["android"],
+    ask: async () => ((asks += 1), null),
+  });
+  await assert.rejects(ranged(url(137), 0, 9), /RESET/);
+  assert.equal(asks, 0);
 });
 
 test("withRange adds or replaces the range parameter", () => {

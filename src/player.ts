@@ -12,7 +12,7 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 // on mobile.
 import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
 import { fullscreenPress } from "./fullscreen.ts";
-import { dropOnJump, virtualLoader } from "./virtual-loader.ts";
+import { dropOnJump, VIRTUAL_FRAG_POLICY, virtualLoader } from "./virtual-loader.ts";
 
 export type { StreamProvider };
 
@@ -2253,8 +2253,17 @@ export class YtFreePlayer {
         // come through `requestUrl`; see `virtual-loader.ts`.
         // A minute ahead at most: this is a stream, and every byte past what
         // the reader will watch is a byte of download by another name.
+        // A refused link is re-linked inside the loader, so an error that
+        // still reaches hls.js is one more retries will not cure. The default
+        // ladder (six tries, up to 8 s apart, two minutes per load) held a
+        // jump for most of a minute before the fall back to 360p.
         ...(stream.virtual
-          ? { loader: virtualLoader(stream.virtual), maxBufferLength: 30, maxMaxBufferLength: 60 }
+          ? {
+              loader: virtualLoader(stream.virtual),
+              maxBufferLength: 30,
+              maxMaxBufferLength: 60,
+              fragLoadPolicy: { default: VIRTUAL_FRAG_POLICY },
+            }
           : {}),
       });
       this.hls = hls;

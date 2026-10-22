@@ -27,6 +27,15 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Decisions
 
+### 2026-10-22 (Isaiah reported; fix picked by Claude, open to change)
+
+- **HD stutter at ~55 s and slow jumps**: treated as YouTube refusing a stream URL past its
+  opening. The resolve now reads 1 KB past 90 s before trusting a pair, a refused segment
+  mid-play is re-linked from a fresh client answer instead of failing to 360p, and stitched
+  streams retry briefly. Scope: `docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md`.
+- **Re-link** (term): swapping a stitched stream's googlevideo links for fresh ones for the same
+  files (same itag), keeping every byte offset (`relinkingFetch` in `src/adaptive.ts`).
+
 ### 2026-10-14 (Isaiah)
 
 - **Preview (GitHub #8)**: fullscreen on the phone, not a card. Decided while building: the
