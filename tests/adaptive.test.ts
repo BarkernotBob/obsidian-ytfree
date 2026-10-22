@@ -285,6 +285,29 @@ test("a dropped connection is not re-linked: hls.js retries it", async () => {
   assert.equal(asks, 0);
 });
 
+test("a cancel during a re-link is not a dead link, and keeps the fresh answer", async () => {
+  let asks = 0;
+  const controller = new AbortController();
+  const fetch = async (u: string, s: number, e: number, _ua?: string, io?: { signal?: AbortSignal }) => {
+    if (io?.signal?.aborted) throw Object.assign(new Error("cancelled"), { name: "AbortError" });
+    if (u.includes("rr1")) throw Object.assign(new Error("HTTP 403"), { status: 403 });
+    return new ArrayBuffer(e - s + 1);
+  };
+  const ranged = relinkingFetch(tracks(), fetch, "A", {
+    clients: ["android", "ios"],
+    ask: async () => {
+      asks += 1;
+      controller.abort(); // the player jumps away while the clients are asked
+      return { adaptiveFormats: freshFormats, hlsManifestUrl: null, ua: "B" };
+    },
+  });
+  await assert.rejects(ranged(url(137), 0, 9, { signal: controller.signal }), { name: "AbortError" });
+  assert.equal(asks, 1);
+  // Not marked dead, and the fresh answer was kept: the next read goes to it.
+  assert.equal((await ranged(url(137), 0, 9)).byteLength, 10);
+  assert.equal(asks, 1);
+});
+
 test("withRange adds or replaces the range parameter", () => {
   assert.equal(withRange("https://x/v?a=1", 0, 9), "https://x/v?a=1&range=0-9");
   assert.equal(withRange("https://x/v?range=5-6&a=1", 0, 9), "https://x/v?a=1&range=0-9");
@@ -367,6 +390,100 @@ test("the loader reports the HTTP status and stays quiet after abort", async () 
   loader.abort();
   await new Promise((r) => setTimeout(r, 10));
   assert.deepEqual(b.events, []);
+});
+
+test("an aborted load cancels its download and tells hls.js it was aborted (GitHub #23)", async () => {
+  let signal: AbortSignal | undefined;
+  const Loader = virtualLoader({
+    files: {},
+    fetchRange: (_u, _s, _e, io) =>
+      new Promise((_resolve, reject) => {
+        signal = io?.signal;
+        io?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("cancelled"), { name: "AbortError" })));
+      }),
+  });
+  const a = callbacks();
+  const events = a.events;
+  const loader = new Loader({} as never);
+  loader.load(
+    { url: "https://g/v", responseType: "arraybuffer", rangeStart: 0, rangeEnd: 10 },
+    loaderConfig,
+    { ...a.cb, onAbort: () => events.push("abort") } as never,
+  );
+  assert.equal(signal?.aborted, false);
+  loader.abort();
+  assert.equal(signal?.aborted, true, "the download is cancelled");
+  assert.equal(loader.stats.aborted, true);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(events, ["abort"], "one onAbort, and the cancel's rejection is not an error");
+
+  // destroy() cancels too, silently, as hls.js's own loader does.
+  const b = callbacks();
+  const quiet = new Loader({} as never);
+  quiet.load(
+    { url: "https://g/v", responseType: "arraybuffer", rangeStart: 0, rangeEnd: 10 },
+    loaderConfig,
+    { ...b.cb, onAbort: () => b.events.push("abort") } as never,
+  );
+  quiet.destroy();
+  assert.equal(signal?.aborted, true);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(b.events, []);
+});
+
+test("the loader reports first byte and bytes so far while a segment downloads (GitHub #23)", async () => {
+  let progress!: (n: number) => void;
+  let finish!: () => void;
+  const Loader = virtualLoader({
+    files: {},
+    fetchRange: (_u, s, e, io) =>
+      new Promise((resolve) => {
+        progress = (n) => io?.onProgress?.(n);
+        finish = () => resolve(new ArrayBuffer(e - s + 1));
+      }),
+  });
+  const a = callbacks();
+  const loader = new Loader({} as never);
+  loader.load({ url: "https://g/v", responseType: "arraybuffer", rangeStart: 0, rangeEnd: 1000 }, loaderConfig, a.cb as never);
+  const { stats } = loader;
+  // The size is known up front, nothing loaded, no first byte yet.
+  assert.equal(stats.total, 1000);
+  assert.equal(stats.loaded, 0);
+  assert.equal(stats.loading.first, 0);
+  await new Promise((r) => setTimeout(r, 5));
+  progress(400);
+  const first = stats.loading.first;
+  assert.ok(first > stats.loading.start, "first byte is after the start, not the start");
+  assert.equal(stats.loaded, 400);
+  assert.notEqual(stats.loaded, stats.total, "hls.js reads loaded === total as finished");
+  progress(700);
+  assert.equal(stats.loading.first, first, "the first byte is stamped once");
+  assert.equal(stats.loaded, 700);
+  finish();
+  await a.done;
+  assert.deepEqual(a.events, ["ok:1000"]);
+  assert.equal(stats.loading.first, first);
+  assert.equal(stats.loaded, 1000);
+});
+
+test("a late answer to a superseded load never reaches the next load", async () => {
+  const pending: ((b: ArrayBuffer) => void)[] = [];
+  const Loader = virtualLoader({
+    files: {},
+    fetchRange: () => new Promise((resolve) => pending.push(resolve)),
+  });
+  const loader = new Loader({} as never);
+  const a = callbacks();
+  loader.load({ url: "https://g/v", responseType: "arraybuffer", rangeStart: 0, rangeEnd: 10 }, loaderConfig, a.cb as never);
+  const b = callbacks();
+  loader.load({ url: "https://g/v", responseType: "arraybuffer", rangeStart: 20, rangeEnd: 40 }, loaderConfig, b.cb as never);
+  pending[0](new ArrayBuffer(10));
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(a.events, []);
+  assert.deepEqual(b.events, []);
+  pending[1](new ArrayBuffer(20));
+  await b.done;
+  assert.deepEqual(b.events, ["ok:20"]);
 });
 
 test("pickPair keeps the original language over a higher-bitrate dub", () => {

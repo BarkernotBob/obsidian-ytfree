@@ -36,6 +36,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 0. Isaiah: manual test for the ~55 s HD stutter and slow jumps, in
    [docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md](docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md) (PR #22).
    `node tools/hd-probe.ts` on the Mac gives live per-client numbers if the theory needs checking.
+   GitHub #23 (stacked on PR #22, nightly 2026-10-22): a jump now cancels the segment hls.js
+   gave up on, and desktop HD streams its byte ranges (`src/desktop/range-fetch.ts`) so hls.js
+   sees real first-byte time and bytes so far. Phone unchanged. Same manual test as #22.
 1. Isaiah: on the iPhone, open any Preview. The picture starts right under the status bar with
    the ✕ on its top-right corner; opening Description or Transcript widens it to full width and
    hides the other, shutting it puts both back side by side (#8, PR #12). Mac unchanged.
@@ -65,4 +68,7 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   edits that file when Obsidian is closed.
 - The smoke test's quality lookup only prints `HLS: yes/no` (GitHub #17). `HLS: no` is normal
   signed out (issue 043); it fails only if there's no https URL with an `expire` field.
+- Desktop HD byte ranges go over Node `https`, not `requestUrl`; a request Node cannot make at
+  all (no status, no byte) switches that stream to `requestUrl` for good. The loader does not
+  enforce `maxTimeToFirstByteMs` (only `maxLoadTimeMs`): `requestUrl` reports no first byte.
 - `PROGRESS_TTL_DAYS` stays 365 on purpose (decided 2026-09-02).

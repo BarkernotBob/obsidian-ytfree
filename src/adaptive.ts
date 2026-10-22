@@ -18,7 +18,7 @@
  */
 
 import { EXPIRY_SAFETY_MARGIN_MS, parseExpiry } from "./stream.ts";
-import type { ResolvedStream, VirtualPlaylist } from "./stream.ts";
+import type { RangeIO, ResolvedStream, VirtualPlaylist } from "./stream.ts";
 
 /** H.264 tops out here on YouTube, and it is plenty for a window or a phone. */
 export const DEFAULT_MAX_HEIGHT = 1080;
@@ -282,9 +282,16 @@ export function buildPlaylists(
 
 /**
  * Fetch inclusive byte range `[start, end]` of a googlevideo URL. In the app
- * this is `requestUrl`; `ua` is the client identity the URL was issued to.
+ * this is `requestUrl` (or a streaming Node request on desktop); `ua` is the
+ * client identity the URL was issued to, and `io` lets the player cancel it and
+ * watch its bytes arrive.
  */
-export type FetchRange = (url: string, start: number, end: number, ua?: string) => Promise<ArrayBuffer>;
+export type FetchRange = (url: string, start: number, end: number, ua?: string, io?: RangeIO) => Promise<ArrayBuffer>;
+
+/** A request the player cancelled: never a refusal, never worth a re-link. */
+export function isAbort(err: unknown): boolean {
+  return (err as { name?: string })?.name === "AbortError";
+}
 
 /**
  * How far into a file the resolve looks before trusting it.
@@ -361,54 +368,91 @@ export function relinkingFetch(
   fetchRange: FetchRange,
   ua?: string,
   reask?: Reask,
-): (url: string, start: number, end: number) => Promise<ArrayBuffer> {
+): (url: string, start: number, end: number, io?: RangeIO) => Promise<ArrayBuffer> {
   const links = new Map<string, { url: string; ua?: string }>();
   let relinking: Promise<boolean> | null = null;
   let dead = false;
 
   const current = (url: string) => links.get(url) ?? { url, ua };
 
-  const relink = async (url: string, start: number, end: number): Promise<ArrayBuffer | null> => {
+  // `null` when no client serves the range; "cancelled" when the player gave
+  // up on the request that started the re-link, which says nothing about the
+  // links. The asking ignores that cancel, because other requests may be
+  // waiting on the same re-link; only the check read is cancelled, and then
+  // the fresh links are taken unchecked (a refusal on them re-links again).
+  const relink = async (
+    url: string,
+    start: number,
+    end: number,
+    io?: RangeIO,
+  ): Promise<ArrayBuffer | null | "cancelled"> => {
     for (const client of reask!.clients) {
       const answer = await reask!.ask(client).catch(() => null);
       const fresh = answer && matchTracks(tracks, answer.adaptiveFormats);
       if (!answer || !fresh) continue;
-      try {
-        const bytes = await fetchRange(fresh.get(url) ?? url, start, end, answer.ua);
+      const adopt = () => {
         for (const [from, to] of fresh) links.set(from, { url: to, ua: answer.ua });
+      };
+      if (io?.signal?.aborted) {
+        adopt();
+        return "cancelled";
+      }
+      try {
+        const bytes = await fetchRange(fresh.get(url) ?? url, start, end, answer.ua, io);
+        adopt();
         return bytes;
-      } catch {
+      } catch (err) {
+        if (isAbort(err) || io?.signal?.aborted) {
+          adopt();
+          return "cancelled";
+        }
         // This client is refused at this point too; try the next one.
       }
     }
     return null;
   };
 
-  return async (url, start, end) => {
+  return async (url, start, end, io) => {
     const link = current(url);
     try {
-      return await fetchRange(link.url, start, end, link.ua);
+      return await fetchRange(link.url, start, end, link.ua, io);
     } catch (err) {
-      if (!reask || dead || !isRefusal(err)) throw err;
+      if (!reask || dead || io?.signal?.aborted || isAbort(err) || !isRefusal(err)) throw err;
       // Video and sound tend to be refused together: one re-link serves both.
       if (relinking) {
         await relinking;
         if (dead) throw err;
         const again = current(url);
-        if (again.url === link.url) throw err;
-        return fetchRange(again.url, start, end, again.ua);
+        if (again.url === link.url || io?.signal?.aborted) throw err;
+        return fetchRange(again.url, start, end, again.ua, io);
       }
-      let bytes: ArrayBuffer | null = null;
-      relinking = relink(url, start, end).then((b) => ((bytes = b), b !== null));
-      const ok = await relinking;
+      let result: ArrayBuffer | null | "cancelled" = null;
+      relinking = relink(url, start, end, io).then((r) => ((result = r), r !== null && r !== "cancelled"));
+      await relinking;
       relinking = null;
-      if (!ok) {
+      const settled = result as ArrayBuffer | null | "cancelled";
+      if (settled === "cancelled") throw abortError();
+      if (settled === null) {
         dead = true;
         throw err;
       }
-      return bytes!;
+      return settled;
     }
   };
+}
+
+/** A refusal from googlevideo, carrying its status (what `isRefusal` reads). */
+export function refusal(status: number): Error & { status: number } {
+  const err = new Error(`googlevideo answered HTTP ${status}`) as Error & { status: number };
+  err.status = status;
+  return err;
+}
+
+/** The rejection a cancelled request gives, the shape `fetch` uses. */
+export function abortError(): Error {
+  const err = new Error("the request was cancelled");
+  err.name = "AbortError";
+  return err;
 }
 
 /**

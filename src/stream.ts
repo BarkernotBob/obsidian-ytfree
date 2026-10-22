@@ -45,10 +45,22 @@ export interface ResolvedStream {
   height?: number;
 }
 
+/**
+ * What a byte-range request can be told while it runs. Both are optional: on
+ * the phone `requestUrl` can neither be cancelled nor report bytes as they
+ * arrive, and the request simply ignores them.
+ */
+export interface RangeIO {
+  /** Cancels the download. The request then rejects with an `AbortError`. */
+  signal?: AbortSignal;
+  /** Bytes received so far; the first call marks the first byte. */
+  onProgress?: (loaded: number) => void;
+}
+
 export interface VirtualPlaylist {
   files: Record<string, string>;
   /** Inclusive byte range `[start, end]` of a media URL. */
-  fetchRange: (url: string, start: number, end: number) => Promise<ArrayBuffer>;
+  fetchRange: (url: string, start: number, end: number, io?: RangeIO) => Promise<ArrayBuffer>;
 }
 
 /**

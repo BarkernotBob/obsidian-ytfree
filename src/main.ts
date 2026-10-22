@@ -5148,8 +5148,14 @@ export default class YtFreePlugin extends Plugin {
 
   private async desktopQuality(videoId: string): Promise<ResolvedStream> {
     try {
-      const { resolveHdStream } = await import("./hd.ts");
-      return await resolveHdStream(videoId);
+      const { fetchRange, resolveHdStream } = await import("./hd.ts");
+      // Streamed and cancellable on desktop (GitHub #23); `requestUrl` if the
+      // desktop code will not load.
+      const fetch = await desktop().then(
+        (d) => d.streamingWithFallback(fetchRange),
+        () => fetchRange,
+      );
+      return await resolveHdStream(videoId, undefined, fetch);
     } catch (hdError) {
       if (this.ytDlpUnavailable) throw hdError;
       const { findYtDlp, resolveStream } = await desktop();
