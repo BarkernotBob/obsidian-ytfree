@@ -33,6 +33,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
+0. Isaiah: manual test for the ~55 s HD stutter and slow jumps, in
+   [docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md](docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md) (PR #22).
+   `node tools/hd-probe.ts` on the Mac gives live per-client numbers if the theory needs checking.
 1. Isaiah: on the iPhone, open any Preview. The picture starts right under the status bar with
    the ✕ on its top-right corner; opening Description or Transcript widens it to full width and
    hides the other, shutting it puts both back side by side (#8, PR #12). Mac unchanged.
