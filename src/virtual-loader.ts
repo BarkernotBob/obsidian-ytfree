@@ -3,8 +3,16 @@
  *
  * Playlist URLs are answered from memory. Every other request is a byte range
  * of a googlevideo file, fetched through the injected `fetchRange` — which is
- * `requestUrl` in the app, because googlevideo sends no CORS headers and the
- * renderer's own `fetch` would be refused.
+ * `requestUrl` on the phone (googlevideo sends no CORS headers, so the
+ * renderer's own `fetch` would be refused) and a streaming Node request on
+ * desktop (`desktop/range-fetch.ts`).
+ *
+ * Each media request gets an abort signal and a progress callback. When
+ * hls.js aborts a load (a jump, an emergency switch down) the download is
+ * cancelled, so it stops competing with the segment the player is landing on.
+ * Where the fetch reports progress, `stats` carries the real first-byte time
+ * and bytes so far, which is what hls.js's bandwidth estimate and abandon rule
+ * read. Where it cannot (`requestUrl`), both are filled in at the end.
  *
  * Type-only imports from hls.js: the player already bundles it, and this file
  * has to load under `node --test` without it.
@@ -44,12 +52,18 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
     stats: LoaderStats = newStats();
     private done = false;
     private timer: ReturnType<typeof setTimeout> | null = null;
+    private controller: AbortController | null = null;
+    private callbacks: LoaderCallbacks<LoaderContext> | null = null;
+    /** Which `load` is current: a late answer to an earlier one is dropped. */
+    private generation = 0;
 
     constructor(_config: HlsConfig) {
       // Nothing to configure: the source is closed over.
     }
 
     destroy(): void {
+      // As hls.js's own loader does: cancel, but tell nobody.
+      this.callbacks = null;
       this.abort();
       this.context = null;
     }
@@ -58,11 +72,18 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
       if (this.done) return;
       this.done = true;
       this.stats.aborted = true;
-      this.clearTimer();
+      this.cancel();
+      const callbacks = this.callbacks;
+      this.callbacks = null;
+      if (callbacks?.onAbort && this.context) callbacks.onAbort(this.stats, this.context, null);
     }
 
     load(context: LoaderContext, config: LoaderConfiguration, callbacks: LoaderCallbacks<LoaderContext>): void {
+      this.cancel();
+      const generation = ++this.generation;
+      const stale = () => this.done || generation !== this.generation;
       this.context = context;
+      this.callbacks = callbacks;
       this.done = false;
       // Reset in place, never replace: hls.js keeps a reference to `stats` from
       // before `load` (a fragment's stats are this object), and a fresh one
@@ -74,8 +95,10 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
       const limit = config.loadPolicy?.maxLoadTimeMs || config.timeout;
       if (limit > 0) {
         this.timer = setTimeout(() => {
-          if (this.done) return;
+          if (stale()) return;
           this.done = true;
+          this.cancel();
+          this.callbacks = null;
           callbacks.onTimeout(this.stats, context, null);
         }, limit);
       }
@@ -86,24 +109,29 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
 
       work.then(
         (data) => {
-          if (this.done) return;
+          if (stale()) return;
           this.done = true;
           this.clearTimer();
+          this.controller = null;
+          this.callbacks = null;
           const size = typeof data === "string" ? data.length : data.byteLength;
-          // No first-byte time from `requestUrl`, so call it the start: the
-          // whole request then counts as transfer, which under-reads bandwidth
-          // a little rather than reading it as infinite.
+          // A fetch that never reported progress (`requestUrl`) has no
+          // first-byte time, so call it the start: the whole request then
+          // counts as transfer, which under-reads bandwidth a little rather
+          // than reading it as infinite.
           const t = now();
-          this.stats.loading.first = this.stats.loading.start;
+          if (!this.stats.loading.first) this.stats.loading.first = this.stats.loading.start;
           this.stats.loading.end = t;
           this.stats.loaded = size;
           this.stats.total = size;
           callbacks.onSuccess({ url: context.url, data }, this.stats, context, null);
         },
         (err: unknown) => {
-          if (this.done) return;
+          if (stale()) return;
           this.done = true;
           this.clearTimer();
+          this.controller = null;
+          this.callbacks = null;
           const status = (err as { status?: number })?.status ?? 0;
           const message = err instanceof Error ? err.message : String(err);
           callbacks.onError({ code: status, text: message }, context, null, this.stats);
@@ -118,8 +146,26 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
       if (rangeStart === undefined || rangeEnd === undefined || rangeEnd <= rangeStart) {
         return Promise.reject(new Error("refusing a whole-file request"));
       }
+      const controller = new AbortController();
+      this.controller = controller;
+      // The size is known before a byte arrives. hls.js treats `loaded ===
+      // total` as finished, so `loaded` only moves while bytes do.
+      this.stats.total = rangeEnd - rangeStart;
+      const onProgress = (loaded: number) => {
+        if (this.done || this.controller !== controller) return;
+        if (!this.stats.loading.first) this.stats.loading.first = now();
+        this.stats.loaded = Math.min(loaded, this.stats.total);
+      };
       // hls.js's `rangeEnd` is exclusive; `fetchRange` takes inclusive ends.
-      return source.fetchRange(context.url, rangeStart, rangeEnd - 1);
+      return source.fetchRange(context.url, rangeStart, rangeEnd - 1, { signal: controller.signal, onProgress });
+    }
+
+    /** Stop the timer and the download in flight, if any. */
+    private cancel(): void {
+      this.clearTimer();
+      const controller = this.controller;
+      this.controller = null;
+      controller?.abort();
     }
 
     private clearTimer(): void {
