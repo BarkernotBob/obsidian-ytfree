@@ -1,0 +1,4085 @@
+.ytfree-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /*
+   * The plugin's one colour, in one place. It is the progress line along the
+   * foot of the picture and it is the pop-out's icon while Smart Speed is on —
+   * two things that are true about the video rather than about the app, which
+   * is why they are this purple and not Obsidian's accent, whatever the reader
+   * has set that to.
+   */
+  --ytfree-purple: #a882ff;
+}
+
+/*
+ * Fixed height, always present. The status line appears and disappears during
+ * stream refreshes; reserving its space means the player and the note text
+ * below it never shift.
+ */
+.ytfree-status {
+  min-height: 1.4em;
+  line-height: 1.4em;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  visibility: hidden;
+}
+
+.ytfree-status-visible {
+  visibility: visible;
+}
+
+.ytfree-video {
+  width: 100%;
+  max-height: 70vh;
+  background: #000;
+  border-radius: var(--radius-m);
+}
+
+/*
+ * The native control panel, blacked out for a resume nobody pressed.
+ *
+ * Pause-while-typing starts the video again two seconds after the last
+ * keystroke, and both engines greet every `play` by putting the control bar
+ * across the picture for a few seconds — so a reader who is writing gets a bar
+ * over the video, repeatedly, having asked for nothing. See
+ * `hushNativeControls` in `src/player.ts` for why this is a class rather than
+ * `controls = false`, and for the two things that lift it early.
+ *
+ * Three selectors because the shadow parts are not the same on both engines and
+ * an unrecognised one invalidates only its own rule: `-panel` is the bar itself
+ * in both, `-enclosure` is Chromium's wrapper, and `-webkit-media-controls` is
+ * WebKit's root. `!important` because these are UA styles.
+ */
+.ytfree-video.is-hushed::-webkit-media-controls {
+  display: none !important;
+}
+
+.ytfree-video.is-hushed::-webkit-media-controls-enclosure {
+  display: none !important;
+}
+
+.ytfree-video.is-hushed::-webkit-media-controls-panel {
+  display: none !important;
+}
+
+/*
+ * The box the picture and the progress line share.
+ *
+ * The desktop's only: mobile already docks the video inside `.ytfree-media`,
+ * which is this and more. It is a flex column with nothing but the video in it,
+ * so it is exactly the video's size, and it exists to be the positioning parent
+ * of a line that must not be in the flow.
+ */
+.ytfree-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/*
+ * How far along you are, along the bottom of the picture.
+ *
+ * Out of the flow, so it costs the note no height and nothing below it can
+ * move when it appears; `pointer-events: none`, so it never takes a tap meant
+ * for the scrubber underneath it. It is hidden until the media reports a
+ * duration — a track drawn over an unresolved poster reads as a broken video.
+ *
+ * Nothing has to hide it in fullscreen: fullscreen is requested on the <video>
+ * itself and a sibling of the fullscreen element is not rendered at all. The
+ * `:fullscreen` rules below are there for the day that changes.
+ */
+.ytfree-progress {
+  position: absolute;
+  z-index: 2;
+  /*
+   * Edge to edge, the full width of the picture.
+   *
+   * 021 inset it by 16px to line up with Chromium's own
+   * `-webkit-media-controls-timeline`, which is 16px from each edge at every
+   * width. That alignment only pays while the native scrubber is on screen —
+   * which on a phone is the few seconds after a tap, and never during playback
+   * on iOS — and the rest of the time it read as a line that stopped short of
+   * the picture at both ends. Full width is the answer to "how far along am I"
+   * that needs no reference line beside it. The variable stays, so a snippet
+   * can put the 16 back.
+   */
+  left: var(--ytfree-progress-inset, 0px);
+  right: var(--ytfree-progress-inset, 0px);
+  bottom: 0;
+  height: 3px;
+  /* The picture's own bottom corners, not a pill: at full width the ends of the
+     line are the ends of the video, and a square corner there would sit outside
+     the rounded desktop picture. Mobile's media box is square and loses under
+     two pixels at each extreme end of a three-pixel line — invisible on black. */
+  border-radius: 0 0 var(--radius-m) var(--radius-m);
+  overflow: hidden;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.16);
+  visibility: hidden;
+}
+
+.ytfree-progress.is-live {
+  visibility: visible;
+}
+
+/* How far ahead the stream has loaded. Under the fill, so it only shows from
+   the playhead on; scaled like the fill, for the same reason. */
+.ytfree-progress-buffered {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.ytfree-progress-fill {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  /* Scaled, never re-widthed: a transform is composited and reflows nothing,
+     four times a second, for the length of the video. */
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: var(--ytfree-progress-color, var(--ytfree-purple, #a882ff));
+}
+
+:fullscreen .ytfree-progress {
+  visibility: hidden;
+}
+
+/* Its own rule, not grouped with the one above: one selector a browser does not
+   know would drop the pair. */
+:-webkit-full-screen .ytfree-progress {
+  visibility: hidden;
+}
+
+/*
+ * Where a drag is heading, over the middle of the picture.
+ *
+ * Out of the flow and `visibility`-toggled, like everything else that appears
+ * over the video: it exists from the moment the player is built, so showing it
+ * mid-gesture moves nothing. `pointer-events: none`, or it would take the touch
+ * that is drawing it.
+ */
+.ytfree-seek {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 6px 12px;
+  border-radius: var(--radius-m);
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.ytfree-seek.is-visible {
+  visibility: visible;
+}
+
+/*
+ * Where HD has got to, top-left of the picture: "360p · finding HD…", then the
+ * rung playing, then the top rung, which fades after a moment and comes back
+ * on hover. Top-left because the phone Preview's ✕ owns top-right and the
+ * native controls own the bottom. Same scrim as the poster's resume chip.
+ */
+.ytfree-quality {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.ytfree-quality.is-visible,
+:hover > .ytfree-quality.has-text {
+  opacity: 1;
+}
+
+:fullscreen .ytfree-quality {
+  visibility: hidden;
+}
+
+/* Its own rule, not grouped with the one above: one selector a browser does not
+   know would drop the pair. */
+:-webkit-full-screen .ytfree-quality {
+  visibility: hidden;
+}
+
+/*
+ * Left and right over the picture is a seek, not a scroll and not the host's
+ * swipe. `touch-action` is the half of that the browser has to be told before
+ * the gesture begins — `preventDefault` inside the move handler is too late to
+ * stop a pan the compositor has already started. `pan-y` keeps the other axis,
+ * so the note still scrolls past the video with a vertical drag.
+ */
+.ytfree-media,
+.ytfree-stage {
+  touch-action: pan-y;
+}
+
+/*
+ * The control bar: one surface, one row, transport in the middle.
+ *
+ * Surfaces the controls Chromium buries in its "..." overflow menu, and it is
+ * one design on both platforms now. The desktop used to get a left-packed row
+ * of seven text buttons of seven different widths — it worked and read as a
+ * debug panel. A `1fr auto 1fr` grid instead: Play and the two skips are
+ * centred on the *player*, not on whatever happens to sit beside them, and the
+ * speed picker and secondary controls take the two edges. The middle cell is
+ * `auto`, so it stays centred whatever the sides hold.
+ *
+ * Fixed heights and widths throughout, and every state change is a swap of the
+ * symbol inside a box that does not move: pressing any control here must not
+ * resize it or shift anything around it.
+ */
+.ytfree-controls {
+  /* The per-video pop-out hangs off this row and opens upwards over the video,
+     so the row is its positioning parent. */
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  /*
+   * Two spacings, not one.
+   *
+   * Every control used to be 6px from every other, so the row read as one
+   * undivided run of nine targets and the button next to Play was as easy to
+   * hit as Play. The gap between the groups is now twice the gap inside them:
+   * the transport is a thing of its own with clear air either side, and the
+   * mis-taps that air prevents are exactly the ones that were happening.
+   */
+  gap: 16px;
+  min-height: 56px;
+  padding: 4px 8px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  box-sizing: border-box;
+}
+
+.ytfree-controls-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/*
+ * The transport is the middle cell; the sides push outwards from it.
+ *
+ * Named classes, not `:first-child` / `:last-child`. The pop-out is a child of
+ * this same bar and it is built last, so it held `:last-child` and the right
+ * group silently fell back to `flex-start` — which is the "everything bunched
+ * against the transport with a hole on the outside" the alignment pass found.
+ */
+.ytfree-controls-left {
+  justify-content: flex-start;
+}
+
+.ytfree-controls-right {
+  justify-content: flex-end;
+}
+
+/* Construction order puts Play first, because Play is the button the rest of
+   this file talks about; the order it is *drawn* in belongs here. */
+.ytfree-controls-transport .ytfree-btn-back {
+  order: 1;
+}
+
+.ytfree-controls-transport .ytfree-btn-play {
+  order: 2;
+}
+
+.ytfree-controls-transport .ytfree-btn-forward {
+  order: 3;
+}
+
+/*
+ * One square per control, one size for all of them, no borders. Uniformity is
+ * the whole point: seven identical shapes read as a control bar, seven
+ * different ones read as leftovers.
+ */
+.ytfree-controls .ytfree-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: none;
+  box-sizing: border-box;
+  /* Fixed weight so no state change can re-measure a label. */
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-normal);
+  --icon-size: 20px;
+}
+
+/*
+ * Hover is a pointer state, and a phone has no pointer.
+ *
+ * iOS applies :hover on tap and then leaves it applied — so every control the
+ * reader touched kept a grey box behind it until something else was touched.
+ * Behind the media query it is what it was meant to be: feedback for a mouse.
+ * Every hover rule in this file is gated the same way, for the same reason.
+ */
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-controls .ytfree-btn:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+/* Colour, not size: an active state that grew or gained a border would move
+   the controls beside it. */
+.ytfree-controls .ytfree-btn:active {
+  color: var(--text-normal);
+}
+
+/* The one control that is not the same as the others, because it is the one
+   you reach for: bigger, round, and in the accent colour. */
+.ytfree-controls .ytfree-btn-play {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  --icon-size: 24px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-controls .ytfree-btn-play:hover {
+    background: var(--interactive-accent-hover);
+    color: var(--text-on-accent);
+  }
+}
+
+.ytfree-controls .ytfree-btn-play:active {
+  color: var(--text-on-accent);
+}
+
+/*
+ * Play, pressed before the stream existed.
+ *
+ * The button has already toggled — the reader asked for playback and will get
+ * it — but the video is still being resolved, and a pause symbol sitting
+ * perfectly still over a picture that is not moving is exactly the lie this
+ * state exists to avoid. It pulses instead. Opacity only: no size, no border,
+ * nothing that could move the controls either side of it.
+ */
+.ytfree-controls .ytfree-btn-play.is-waiting {
+  animation: ytfree-waiting 1.1s ease-in-out infinite;
+}
+
+@keyframes ytfree-waiting {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ytfree-controls .ytfree-btn-play.is-waiting {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* An icon this Obsidian build did not have fell back to its word — see
+   `paint()`. The box grows sideways to hold it, once, at build time. */
+.ytfree-controls .ytfree-btn-text {
+  width: auto;
+  min-width: 40px;
+  padding: 0 10px;
+}
+
+/* A running download is a percentage in place of the icon, inside the same
+   square: "100%" at this size fits with room to spare. */
+.ytfree-controls .ytfree-btn-download.is-progress {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-normal);
+}
+
+.ytfree-controls .ytfree-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* Fullscreen while the stream is still resolving: it will wait, so it looks it
+   (GitHub #9). Not `:disabled`, because the tap still has work to do. */
+.ytfree-controls .ytfree-btn.is-waiting {
+  opacity: 0.45;
+}
+
+/*
+ * "10", under the chevrons of the skip buttons.
+ *
+ * It was tucked into the bottom-right corner, which put the two buttons'
+ * numerals 40px apart on the outside edges of a symmetrical pair and read as
+ * two labels that had slipped. Centred instead: the strip spans the button's
+ * full width and centres its text, so the numeral sits on the button's own
+ * axis and the two mirror each other exactly.
+ *
+ * Still absolutely positioned and still static text — a button that stated its
+ * own size would be a button that changed size.
+ */
+.ytfree-btn-badge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: var(--font-semibold);
+  text-align: center;
+  color: inherit;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* And the chevrons move up by the height of the numeral, so the two share the
+   button instead of overlapping in the middle of it. A transform, so nothing
+   about the button's box changes. */
+.ytfree-controls .ytfree-btn-back > svg,
+.ytfree-controls .ytfree-btn-forward > svg {
+  transform: translateY(-4px);
+}
+
+/*
+ * The pinned player, on and off.
+ *
+ * Obsidian's accent rather than the purple: this one is a switch belonging to
+ * the plugin — it turns the pinned player on for every note with a video in it
+ * — and the purple is reserved for the two things that describe the video.
+ */
+.ytfree-controls .ytfree-btn-pin.is-active {
+  color: var(--interactive-accent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-controls .ytfree-btn-pin.is-active:hover {
+    color: var(--interactive-accent-hover);
+  }
+}
+
+/* Same pill as a button, and wide enough for "1.75×" so choosing a speed can
+   never re-measure the row. `text-align-last` is what centres the closed state
+   of a select in WebKit. */
+.ytfree-controls .ytfree-speed {
+  width: 52px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  text-align: center;
+  text-align-last: center;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+/*
+ * The per-video pop-out.
+ *
+ * Absolutely positioned out of the control bar, opening upwards over the
+ * picture: the bar keeps the same geometry open or shut, so the button that
+ * opens it cannot move itself or its neighbours — and `visibility`, not
+ * `display`, so the panel is measured once and never re-laid-out.
+ *
+ * Over the video rather than under the bar deliberately. Under it would push
+ * against the note text on a phone, and the video is the one thing on screen
+ * you are not reading while you are changing how it plays.
+ */
+.ytfree-panel {
+  position: absolute;
+  z-index: 20;
+  right: 6px;
+  bottom: calc(100% + 6px);
+  width: 232px;
+  padding: 6px 10px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-s);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  /* Seven rows is taller than the gap between the control bar and the top of a
+     phone. `togglePanel` measures the room there actually is and caps the
+     height at it; this is what makes the overflow reachable rather than lost. */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* The menu scrolls, not the page behind it. Without this a drag that reaches
+     the end of the panel is handed to the Preview sheet underneath, which
+     scrolls the anchor out from under a panel that cannot follow it. */
+  overscroll-behavior: contain;
+}
+
+.ytfree-panel.is-open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/*
+ * The phone's shape: the same popover, positioned against the viewport.
+ *
+ * `position: fixed`, and that is the fix rather than a preference. An
+ * absolutely positioned panel is clipped by the nearest scrolling ancestor, and
+ * inside the Preview modal that ancestor is the sheet's own scroller — whose
+ * top edge is the top of the video. Five rows and a footer is about 246px; a
+ * 92vw phone modal gives the video about 202px, so the top of the pop-out was
+ * cut off and could not be scrolled to, because the box that clipped it was not
+ * the box that scrolled. No max-height fits inside a box shorter than one row.
+ * A fixed element is not clipped by an ancestor's overflow at all.
+ *
+ * Nothing in Obsidian's modal chain has a transform, a filter or `contain`, so
+ * "fixed" here really does mean the viewport. Verified against app.css: neither
+ * `.modal-container` nor `.modal` sets one.
+ *
+ * What it is *not* is a bottom sheet. 032 made it one — anything fixed to the
+ * foot of the screen is unclippable by construction — and 037 is the report
+ * that it lost the meaning along with the bug: a sheet says nothing about which
+ * button opened it, and inside a Preview window that is itself a panel, it
+ * reads as an unrelated second surface. So `top`, `left`, `width` and
+ * `max-height` are all set inline from the button's rect by `placePanel`, and
+ * this rule only says what is true whichever way it opens.
+ */
+.ytfree-panel.ytfree-panel-anchored {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  /* Overwritten inline the moment it opens; here so a panel that somehow
+     escapes measurement is still on screen rather than at 0,0 behind the bar. */
+  top: 0;
+  left: 0;
+  max-width: calc(100vw - 16px);
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom) * 0.5);
+  border-radius: var(--radius-m);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+  z-index: 21;
+}
+
+/* 44pt rows, like every other list a thumb has to hit on a phone. */
+.ytfree-panel.ytfree-panel-anchored .ytfree-panel-row {
+  min-height: 44px;
+}
+
+.ytfree-panel.ytfree-panel-anchored .ytfree-panel-label {
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-panel.ytfree-panel-anchored .ytfree-panel-link {
+  height: 44px;
+}
+
+/*
+ * The tap-catcher behind the pop-out.
+ *
+ * Without it, one tap outside the panel closes the panel *and* the Preview
+ * modal behind it: our own handler closes the pop-out, and the same tap goes on
+ * to Obsidian's `.modal-bg`. This is the thing the tap lands on instead. It is
+ * built with the panel and only its visibility changes, so it costs no layout
+ * and opening the menu still moves nothing.
+ *
+ * Transparent since 037. It was dimmed while the pop-out was a bottom sheet,
+ * which is the right treatment for a surface that takes over the screen and the
+ * wrong one for a menu hanging off a button.
+ */
+.ytfree-panel-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: transparent;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.ytfree-panel-scrim.is-open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Fixed row height, label left, control right. Nothing in a row changes size
+   when it is pressed, so the panel cannot grow under a finger. */
+.ytfree-panel-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+}
+
+.ytfree-panel-label {
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * The time Smart Speed has saved, beside its label.
+ *
+ * In the label column, which is the `1fr` of a `1fr auto` grid: a readout that
+ * ticks from "" to "−1:04:37" cannot move the switch beside it, cannot widen
+ * the panel, and cannot reach the control bar at all. Tabular figures so the
+ * digits do not shuffle as it climbs.
+ */
+.ytfree-panel .ytfree-panel-value {
+  margin-left: 6px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.ytfree-panel-note {
+  padding-top: 4px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  text-align: right;
+}
+
+/* The way out to the settings screen, at the foot of the pop-out: a line of
+   text, full width, under the note that says everything above it is temporary. */
+.ytfree-panel .ytfree-panel-link {
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-align: center;
+  cursor: pointer;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-panel .ytfree-panel-link:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+.ytfree-panel .ytfree-panel-select {
+  width: 64px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  text-align: center;
+  text-align-last: center;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+.ytfree-panel .ytfree-panel-range {
+  width: 96px;
+  margin: 0;
+}
+
+/* A switch whose only moving part is a transform. */
+.ytfree-panel .ytfree-switch {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: var(--background-modifier-border);
+  box-shadow: none;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background-color 120ms ease;
+}
+
+.ytfree-panel .ytfree-switch.is-on {
+  background: var(--interactive-accent);
+}
+
+.ytfree-panel .ytfree-switch:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ytfree-panel .ytfree-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--background-primary);
+  transition: transform 120ms ease;
+}
+
+.ytfree-panel .ytfree-switch.is-on .ytfree-switch-knob {
+  transform: translateX(16px);
+}
+
+/*
+ * The pop-out's own button says two things at once, so it says them two ways.
+ *
+ * Purple is Smart Speed running — the one thing inside the menu that changes
+ * what you hear, and the reason the menu is worth glancing at while it is shut.
+ * Open is a background, not a colour, so the two states can be true together
+ * and neither can hide the other. Both are paint: no border, no size, nothing
+ * that could move the controls beside it.
+ */
+.ytfree-controls .ytfree-btn-panel.is-smart {
+  color: var(--ytfree-purple, #a882ff);
+}
+
+.ytfree-controls .ytfree-btn-panel.is-active {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.ytfree-controls .ytfree-btn-panel.is-active.is-smart {
+  color: var(--ytfree-purple, #a882ff);
+}
+
+/*
+ * Notes · Description · Transcript — the note's own headings, one tap away.
+ *
+ * Its own surface under the control bar, in the wrapper's 4px gap. Equal
+ * columns rather than fitted widths, because they are one control with several
+ * destinations and equal shares are what says so.
+ */
+.ytfree-sections {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  box-sizing: border-box;
+}
+
+/* With "This moment" on the end. A column count, not a wrap: the row's height
+   is part of the player's fixed geometry, and a fourth link that dropped to a
+   second line would move the note under the tap that added it. */
+.ytfree-sections-four {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.ytfree-sections .ytfree-section-link {
+  height: 32px;
+  padding: 0 4px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-normal);
+  line-height: 32px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-sections .ytfree-section-link:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+.ytfree-sections .ytfree-section-link:active {
+  color: var(--text-normal);
+}
+
+/*
+ * Pinned player: sits above the note body inside .view-content (a flex column),
+ * so the note scrolls under it and the player stays in place.
+ *
+ * Height is fixed from a setting rather than driven by content, so nothing the
+ * player does — status line, control state, quality upgrade — can reflow the
+ * note text below it.
+ */
+/*
+ * `--file-margins-x`, not `--file-margins`: the pair is two values
+ * (`--file-margins-y --file-margins-x`), so putting it in the middle of a
+ * padding shorthand silently produced a *four*-value shorthand — measured as
+ * `8px 8px 24px 6px`, which is where the player's lopsided sides and the dead
+ * strip under it came from.
+ */
+.ytfree-pinned {
+  flex: 0 0 auto;
+  padding: 8px var(--file-margins-x, 16px) 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.ytfree-pinned .ytfree-video {
+  height: var(--ytfree-pinned-height, 40vh);
+  max-height: var(--ytfree-pinned-height, 40vh);
+  object-fit: contain;
+}
+
+/*
+ * The corner grip: drag the bottom-right of the picture to resize it.
+ *
+ * Out of the flow, over the picture's corner, so it costs the note no height
+ * and nothing moves when it appears or is pressed. Desktop only — it is added
+ * from `addResizeGrip`, which mobile never calls. Faint until the pointer is
+ * near it, because it sits on top of video.
+ */
+.ytfree-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 15;
+  width: 18px;
+  height: 18px;
+  cursor: ns-resize;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  /* Two stacked strokes, drawn in the corner: the standard resize gnomon. */
+  background:
+    linear-gradient(135deg, transparent 46%, var(--text-muted) 46%, var(--text-muted) 54%, transparent 54%),
+    linear-gradient(135deg, transparent 70%, var(--text-muted) 70%, var(--text-muted) 78%, transparent 78%);
+}
+
+.ytfree-stage:hover .ytfree-resize,
+.ytfree-resize.is-dragging {
+  opacity: 0.85;
+}
+
+/*
+ * Mobile: docked, not floating.
+ *
+ * Same place in the flex column as the desktop pinned player, but the height
+ * comes from the aspect ratio instead of a setting — a phone has no room to
+ * spare, and 16:9 is what the video is. The space is reserved by .ytfree-media
+ * from the moment the player mounts, so the poster, a spinner, the video and
+ * the fallback notice all occupy exactly the same box. Nothing that happens
+ * inside it moves the note text below.
+ */
+/*
+ * Clearing Obsidian's own chrome.
+ *
+ * On a phone the view header (back, title, "…") is `position: fixed` and floats
+ * over the top of .view-content. Markdown views zero the spacing on the
+ * container and re-apply it *inside* the CodeMirror scroller:
+ *
+ *   .is-phone …[data-type="markdown"]        { --view-top-spacing: 0 }
+ *   .is-phone … .cm-scroller { padding-top: var(--view-top-spacing-markdown) }
+ *
+ * The docked player is prepended *before* that scroller, so it inherited no
+ * spacing at all and sat underneath the header — and inside the fade mask that
+ * dims the first pixels of .view-content. Reserving the same amount here puts
+ * the video below both, from the moment it mounts.
+ *
+ * Where the variable is undefined (floating nav off, tablet, desktop) this is
+ * 0px and the header is in normal flow — nothing to clear.
+ */
+/*
+ * Nothing above the picture but the header it has to clear, and nothing below
+ * it but the controls.
+ *
+ * Obsidian's own spacing is `safe-area-inset-top + view-header-height + 16px`,
+ * and only the first two terms are the header. The 16px is the gap it leaves
+ * before a note's *text* — a video is not text, and against the bottom edge of
+ * the header is where a player is supposed to sit. `max()` because the same
+ * variable is a plain 8px where the header is in normal flow, and there is
+ * nothing to take 16px out of.
+ *
+ * Everything else that used to be up here is gone too: the wrapper's 4px gaps,
+ * and the reserved status line, which now draws over the picture.
+ */
+.ytfree-docked {
+  padding: max(0px, calc(var(--view-top-spacing-markdown, 0px) - var(--size-4-4, 16px))) 0 4px;
+  gap: 0;
+  background: var(--background-primary);
+}
+
+/*
+ * …and the scroller must not reserve it a second time, or the note text would
+ * start a header's height below the video. Redefining the variable on the
+ * following view beats fighting Obsidian's longer selector, and it reverts on
+ * its own when the player is closed and this wrapper is removed.
+ */
+.ytfree-docked ~ .markdown-source-view,
+.ytfree-docked ~ .markdown-reading-view {
+  --view-top-spacing-markdown: var(--size-4-2, 8px);
+}
+
+/*
+ * The note body must give up the height the player takes.
+ *
+ * A markdown `.view-content` is `display: block; height: 100%; overflow: hidden`
+ * and its child view is `height: 100%` — so prepending the player made the
+ * content exactly one player taller than the box that holds it. `overflow:
+ * hidden` hides a scrollbar; it does not stop the engine from scrolling. When
+ * iOS opened the keyboard and scrolled the caret into view it scrolled *this*
+ * box, slid the video off the top, and left it there: nothing else scrolls that
+ * container back, so the offset stuck after the keyboard closed.
+ *
+ * A flex column with a shrinkable body means there is no overflow left to
+ * scroll. Only while a player (or its reopen bar) is docked; removing the class
+ * hands the view straight back to Obsidian.
+ */
+.view-content.ytfree-has-docked {
+  display: flex;
+  flex-direction: column;
+}
+
+.view-content.ytfree-has-docked > .markdown-source-view,
+.view-content.ytfree-has-docked > .markdown-reading-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
+.ytfree-media {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  overflow: hidden;
+}
+
+/*
+ * The docked player's size, which is two constraints rather than one.
+ *
+ * It used to be 16:9 of the note's width and nothing else, and that is the bug
+ * BarkernotBob reported as "player height on mobile not adjusting": the height slider
+ * in settings was wired to the desktop player only, and — worse — a phone turned
+ * on its side wants 16:9 of 844pt, which is 475pt of picture on a 390pt-tall
+ * screen. The note underneath had nowhere to go.
+ *
+ * So: the ratio decides the shape, and the smaller of the two widths decides the
+ * size. `--ytfree-pinned-height` is a *height* the reader picked, so it is
+ * converted to the width that produces it (× 16/9) and the ratio derives the
+ * height back — which is what keeps the picture 16:9 at every setting instead of
+ * letterboxing it inside a box of the wrong shape. Centred, because below the
+ * cap the player is narrower than the note.
+ *
+ * The fallback is deliberately enormous: with no variable set the first term
+ * never wins and this is exactly the old rule.
+ */
+.ytfree-docked .ytfree-media {
+  width: min(100%, calc(var(--ytfree-pinned-height, 1000vh) * 16 / 9));
+  height: auto;
+  margin-inline: auto;
+}
+
+.ytfree-docked .ytfree-video {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  object-fit: contain;
+}
+
+/*
+ * The status line, drawn on the picture rather than above it.
+ *
+ * A reserved row on a phone costs a line of the note permanently to carry a
+ * message that is on screen for a few seconds a session. Absolutely positioned
+ * inside the media box, it costs nothing at all — and it sits at the *top*,
+ * clear of the native control bar along the bottom. The z-index is load-bearing:
+ * the poster is created after it and would otherwise cover the one message that
+ * matters most, "Resolving stream…".
+ */
+.ytfree-media > .ytfree-status {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 0;
+  padding: 5px 10px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * The control row on a phone: symbols, one row, transport in the middle.
+ *
+ * iOS's native video controls look like they make this redundant, but they have
+ * no 10-second skip and no speed picker short of a long-press, and they vanish
+ * entirely once the video is playing — so the row stays.
+ *
+ * What it is not any more is the desktop's row at thumb size. Seven text
+ * buttons of seven different widths, left-packed against the margin, wrapping
+ * onto a second line on a narrow phone: it worked and looked like a debug
+ * panel. A `1fr auto 1fr` grid instead — Play and the two skips are centred on
+ * the screen, not on whatever is beside them, and speed and the secondary
+ * controls take the two edges. The middle cell is `auto`, so it is centred
+ * whatever the sides contain.
+ *
+ * Every box has a fixed size, and every state change is a swap of the symbol
+ * inside one. Pressing anything here still moves nothing.
+ */
+/*
+ * Docked, the two rows span the screen and take an inset of their own.
+ *
+ * Margin rather than padding, because the rows are surfaces now: padding would
+ * put the inset *inside* the grey and leave it running edge to edge. 12px,
+ * because the three groups need the width — at the note's own 24px inset the
+ * row no longer fits a 375pt screen.
+ */
+.ytfree-docked .ytfree-controls,
+.ytfree-docked .ytfree-sections {
+  margin: 4px 12px 0;
+}
+
+/*
+ * Narrow phones: two rows, because one row ran out of width.
+ *
+ * A `1fr auto 1fr` grid whose side tracks cannot shrink below their contents
+ * overflows rather than reflowing — which is the right failure, but it is
+ * still a failure. The single row was already spending 340pt of the 347pt a
+ * docked 375pt phone has (375 − 16 margins − 12 padding); Smart Speed is a
+ * ninth control, and 40pt of button plus 8pt of gap does not fit in 7pt.
+ *
+ * Three ways to pay for it, and only one is free: shrink the targets back to
+ * the 36pt that caused the fat-fingering this file already fixed once, drop a
+ * control the phone currently has, or spend vertical space. Vertical is what
+ * the player has to spare — the media box is the thing worth looking at and it
+ * keeps every pixel it had; the bar below it grows by one row, and the collapse
+ * control already exists for anyone who wants it back.
+ *
+ * So below 460pt: the transport takes a row of its own, perfectly centred, and
+ * the side controls share the row beneath it. Every target stays at its full
+ * 40pt (48 for Play), the gaps stay at 8pt, and the row-2 budget is 44 + 8 + 40
+ * + 8 + 40 (left) + 40 + 8 + 40 (right) = 228pt against 347 — room the single
+ * row never had. `tools/controls-harness.mjs` measures both rows rather than
+ * trusting this sum.
+ */
+@media (max-width: 460px) {
+  .ytfree-controls {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "transport transport"
+      "left right";
+    gap: 8px;
+    padding: 4px 6px;
+    /* 8 padding + 48 transport + 8 row gap + 40 side row. Fixed, so the row
+       count cannot change under a control that has just been pressed. */
+    min-height: 104px;
+  }
+
+  .ytfree-controls-transport {
+    grid-area: transport;
+    justify-self: center;
+  }
+
+  .ytfree-controls-left {
+    grid-area: left;
+  }
+
+  .ytfree-controls-right {
+    grid-area: right;
+  }
+
+  .ytfree-controls-group {
+    gap: 8px;
+  }
+
+  /* Deliberately not smaller than the desktop's: this is the surface a thumb
+     uses, and 40pt is the floor a thumb is entitled to. */
+  .ytfree-controls .ytfree-btn {
+    width: 40px;
+    height: 40px;
+    --icon-size: 20px;
+  }
+
+  .ytfree-controls .ytfree-btn-play {
+    width: 48px;
+    height: 48px;
+    --icon-size: 24px;
+  }
+
+  /* The one control that gives up width instead: it is a picker you set once,
+     and "1.75×" still fits inside it. */
+  .ytfree-controls .ytfree-speed {
+    width: 44px;
+    height: 40px;
+  }
+
+  .ytfree-docked .ytfree-controls,
+  .ytfree-docked .ytfree-sections {
+    margin-inline: 8px;
+  }
+}
+
+/*
+ * Collapsed: the picture folds away, the player does not.
+ *
+ * The media box loses its height and the video is clipped inside it rather
+ * than being hidden — `display: none` on a playing `<video>` stops playback on
+ * iOS WebKit, and the whole point of collapsing is that the audio, the buffer
+ * and the reader's position all survive it. The control row stays put, so
+ * playing, PiP and coming back are all still one tap away.
+ */
+.ytfree-docked.is-collapsed .ytfree-media {
+  aspect-ratio: auto;
+  height: 0;
+}
+
+/*
+ * Collapsed by the keyboard, the controls go too.
+ *
+ * A wrapped control row is three thumb-sized lines — the same space the
+ * collapse was trying to hand back to the note. Nothing needs them here: the
+ * keyboard closing brings the whole player back on its own. A collapse the
+ * reader asked for keeps them, because there they are the way back.
+ */
+.ytfree-docked.is-collapsed-keyboard .ytfree-controls,
+.ytfree-docked.is-collapsed-keyboard .ytfree-status {
+  display: none;
+}
+
+.ytfree-docked.is-collapsed .ytfree-video,
+.ytfree-docked.is-collapsed .ytfree-poster,
+.ytfree-docked.is-collapsed .ytfree-fallback {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 56.25vw;
+}
+
+/*
+ * The immersive view: the plugin's own fullscreen.
+ *
+ * A phone turned sideways cannot ask iOS for fullscreen — there is no user
+ * gesture behind a rotation and WebKit refuses — so it asks nobody. The wrapper
+ * is lifted out of the note and laid over the screen, which is CSS and always
+ * works, and it brings the whole player with it: the picture, the purple line
+ * along the bottom of it, and every control. Apple's own fullscreen has none of
+ * our controls in it, so this is the better half of the trade as well as the
+ * only half that is available.
+ *
+ * `position: fixed` on the wrapper rather than moving the element: reparenting
+ * a playing `<video>` on iOS is how you lose the buffer and the position, and
+ * the whole point is that the picture does not so much as flicker.
+ */
+.ytfree-wrapper.is-immersive {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-modal, 100);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: #000;
+}
+
+/* The picture takes everything the controls do not, at whatever shape it is. */
+.ytfree-wrapper.is-immersive .ytfree-media,
+.ytfree-wrapper.is-immersive .ytfree-stage {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  aspect-ratio: auto;
+}
+
+.ytfree-wrapper.is-immersive .ytfree-video {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  object-fit: contain;
+}
+
+/* The bar floats on the picture instead of sitting under it — there is no
+   "under it" here — and the section links go, because there is no note on
+   screen to jump around in. */
+.ytfree-wrapper.is-immersive .ytfree-controls {
+  margin: 0 8px 8px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.ytfree-wrapper.is-immersive .ytfree-sections {
+  display: none;
+}
+
+/* Nothing behind it scrolls while it is up. */
+body.ytfree-immersive-open {
+  overflow: hidden;
+}
+
+/*
+ * Obsidian fades the first pixels of .view-content on a phone with a floating
+ * header:
+ *
+ *   .is-phone.is-floating-nav … .view-content { mask-image: var(--view-top-fade-mask) }
+ *
+ * A mask forces the whole view into its own composited layer, and on iOS
+ * WebKit a <video> inside one is a known source of the layer drifting out of
+ * position and of black repaints over content that is being edited underneath.
+ * We already reserve space so the video never sits in the faded strip, so the
+ * mask buys us nothing here — drop it while a player is docked.
+ *
+ * Specificity 0,7,0 against Obsidian's 0,6,0; no !important needed.
+ */
+.is-phone.is-floating-nav
+  .mod-root
+  .workspace-leaf-content[data-type="markdown"]
+  .view-content.ytfree-has-docked {
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
+/* And give the video a layer of its own, so it is promoted deliberately rather
+   than by whatever it happens to be nested in. */
+.ytfree-docked .ytfree-media {
+  transform: translateZ(0);
+}
+
+/*
+ * The poster and the fallback both overlay the media box rather than sitting in
+ * the flow, so appearing and disappearing costs no layout.
+ */
+.ytfree-poster,
+.ytfree-fallback {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.ytfree-poster {
+  display: block;
+  background: #000;
+  cursor: pointer;
+}
+
+.ytfree-poster-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* The thumbnail may 404 or arrive late; the box is black underneath either
+     way, so a missing image is a dark poster rather than a jump. */
+  display: block;
+}
+
+.ytfree-poster-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px;
+  height: 56px;
+  line-height: 56px;
+  text-align: center;
+  font-size: 22px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/*
+ * "Resume 12:34", bottom-left of the poster. Absolute like everything else on
+ * the poster, so a video with a saved position and one without are the same
+ * size, and pointer-events off so it can never eat the tap that starts playback.
+ */
+.ytfree-poster-resume {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 18px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.ytfree-fallback {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 16px;
+  box-sizing: border-box;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  text-align: center;
+}
+
+.ytfree-fallback-text {
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-fallback-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.ytfree-fallback-link,
+.ytfree-fallback-retry {
+  height: 32px;
+  line-height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-s);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-small);
+  text-decoration: none;
+  border: 0;
+  box-sizing: border-box;
+}
+
+/* Secondary: opening YouTube is the action that always works, so retrying is
+   not the one competing for attention. */
+.ytfree-fallback-retry {
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+}
+
+/*
+ * The way back when the pinned player is switched off.
+ *
+ * Absolute inside `.view-content`, which is the box the note's scroller sits
+ * *in* rather than the thing that scrolls, so this stays in the corner while
+ * the note moves under it — and, the point of it, adds nothing to the note's
+ * height. `.view-content` is `position: static` in Obsidian's own CSS, hence
+ * the class the plugin puts on it alongside the button.
+ */
+.view-content.ytfree-has-pin-restore {
+  position: relative;
+}
+
+.ytfree-pin-restore {
+  position: absolute;
+  top: var(--ytfree-pin-restore-top, 6px);
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 13px;
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-s);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ytfree-pin-restore:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ytfree-pin-restore .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/*
+ * A fixed width for the label, so hover — which only changes colour — cannot
+ * move the pill, and so the icon sits in the same place in every theme.
+ */
+.ytfree-pin-restore-label {
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+
+/*
+ * On a phone the view header floats over `.view-content`, so the corner it
+ * would otherwise take is the "…" menu's. Drop below the same spacing the
+ * editor's scroller reserves for that header.
+ */
+.is-phone .view-content.ytfree-has-pin-restore {
+  --ytfree-pin-restore-top: calc(var(--view-top-spacing-markdown, 0px) + 4px);
+}
+
+/* And a thumb needs more of it than a pointer does. */
+.is-phone .ytfree-pin-restore {
+  height: 34px;
+  border-radius: 17px;
+  padding: 0 12px;
+}
+
+/* Stands in for a fenced block whose video is already pinned above. */
+.ytfree-pinned-stub {
+  min-height: 1.6em;
+  line-height: 1.6em;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.ytfree-error {
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--text-error);
+  border-radius: var(--radius-m);
+  padding: 0.75em 1em;
+}
+
+.ytfree-error p {
+  margin: 0.4em 0;
+}
+
+.ytfree-error pre {
+  white-space: pre-wrap;
+  font-size: var(--font-ui-smaller);
+  background: var(--background-secondary);
+  padding: 0.5em;
+  border-radius: var(--radius-s);
+  margin: 0;
+}
+
+/* Timestamps linkified out of a pasted description. Styled like Obsidian's own
+   internal links, but with no underline reserve or weight change on hover — a
+   hover must not re-measure the line and shift the text after it. */
+.ytfree-timestamp-link {
+  color: var(--link-color);
+  cursor: var(--cursor-link);
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.ytfree-timestamp-link:hover {
+  color: var(--link-color-hover);
+  text-decoration: underline;
+}
+
+/* ------------------------------------------------------------------ hub ---
+   The subscriptions hub. Every dimension that a click could change is fixed:
+   card height, thumbnail box, the state-marker column and the dismiss button
+   all keep their space whether or not they are filled, so marking a video Kept
+   moves nothing on screen. */
+
+/*
+ * Obsidian styles the view container at `.workspace-leaf-content .view-content`
+ * (0,2,0), which outranks a bare `.ytfree-hub` (0,1,0) — so the hub root was
+ * silently keeping Obsidian's padding and, worse, its `overflow: auto`. On a
+ * phone the view header is `position: fixed`, so a scrollable root meant the
+ * hub's own toolbar scrolled up underneath it and stayed there. Sizing is here
+ * too: `.view-content` is `height: calc(100% - …)`, and on a phone Obsidian
+ * adds `margin-top: var(--view-top-spacing)` to clear that fixed header — a
+ * fixed height plus a margin pushes the bottom of the list off the screen,
+ * whereas a flex item absorbs the margin.
+ *
+ * This is the shape Obsidian uses for its own container views (backlinks,
+ * outline, bases). Match it rather than fight it.
+ */
+.workspace-leaf-content[data-type="ytfree-hub"] .view-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ytfree-hub {
+  display: flex;
+  flex-direction: column;
+}
+
+.ytfree-hub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+  padding: 0.6em 0.8em 0.4em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+
+.ytfree-hub-filters {
+  display: flex;
+  /* Wraps since the fifth chip — "In progress" is two words and a narrow
+     sidebar has no room for five on one line. Wrapping happens on a resize,
+     never on a click: the chips keep their width whatever is selected. */
+  flex-wrap: wrap;
+  gap: 0.3em;
+}
+
+/* Active state is a background change only. A weight or border change would
+   re-measure the button and nudge its neighbours. */
+.ytfree-hub-filter {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: var(--cursor);
+  padding: 0.3em 0.8em;
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+  /* One line each, or a chip would change height when the row got tight and
+     take its neighbours with it. */
+  white-space: nowrap;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-filter:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.ytfree-hub-filter.is-active {
+  background: var(--background-modifier-active-hover);
+  color: var(--text-normal);
+}
+
+.ytfree-hub .ytfree-hub-icon-button {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: var(--cursor);
+  padding: 0.3em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ytfree-hub-dismiss .ytfree-hub-icon-button {
+  padding: 0.45em;
+}
+
+/* The header pair (Search YouTube, Sync now) were icon-sized targets. Fixed
+   boxes — not padding — so the hit area grows without the header reflowing:
+   32px on a pointer, a 44px thumb target on the phone. The glyph keeps its
+   own size, the box around it is what gets bigger. */
+.ytfree-hub-actions .ytfree-hub-icon-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  flex: 0 0 auto;
+  border-radius: var(--radius-s);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-actions .ytfree-hub-icon-button {
+  width: 44px;
+  height: 44px;
+}
+
+.ytfree-hub-actions .ytfree-hub-icon-button .svg-icon {
+  width: var(--icon-m);
+  height: var(--icon-m);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub .ytfree-hub-icon-button:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+}
+
+/* Reserved line: a status message appearing must not push the list down. */
+.ytfree-hub-status {
+  flex: 0 0 auto;
+  height: 1.8em;
+  line-height: 1.8em;
+  padding: 0 0.9em;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The account-sync banner — issue 044.
+ *
+ * Always in the tree, never inserted or removed: it collapses to nothing by
+ * height and opacity so a state change behind it cannot shove the list down
+ * under a finger that is already on a card. The transition is on the collapse,
+ * not on a click. */
+.ytfree-hub-account-alert {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  margin: 0 0.9em;
+  padding: 0 0.7em;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-error-hover, rgba(255, 100, 100, 0.12));
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+}
+
+.ytfree-hub-account-alert.is-visible {
+  height: 2.2em;
+  visibility: visible;
+  margin-bottom: 0.4em;
+}
+
+.ytfree-hub-account-alert-text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ytfree-hub-account-alert-button {
+  flex: 0 0 auto;
+  height: 1.7em;
+  padding: 0 0.7em;
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+/* Lined up with the search field and the filter bar above it, which sit at
+   0.7em rather than the hub's 0.9em. A status line that starts three pixels
+   left of the box it describes is the kind of thing that reads as unfinished
+   without anyone being able to say why. */
+.ytfree-hub-status-browse {
+  height: 2em;
+  line-height: 2em;
+  padding: 0 0.75em;
+}
+
+.ytfree-hub-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ytfree-hub-channels {
+  flex: 0 0 200px;
+  overflow-y: auto;
+  border-right: 1px solid var(--background-modifier-border);
+  padding: 0.4em 0.3em;
+}
+
+.ytfree-hub-channel {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 2em;
+  padding: 0 0.5em;
+  border-radius: var(--radius-s);
+  cursor: var(--cursor);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-channel:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.ytfree-hub-channel.is-active {
+  background: var(--background-modifier-active-hover);
+  color: var(--text-normal);
+}
+
+.ytfree-hub-channel.is-broken .ytfree-hub-channel-count {
+  color: var(--text-error);
+}
+
+.ytfree-hub-channel-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Fixed width whether or not there is a count in it. */
+.ytfree-hub-channel-count {
+  flex: 0 0 2em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-ui-smaller);
+}
+
+.ytfree-hub-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.4em;
+}
+
+.ytfree-hub-empty {
+  padding: 2em 1em;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/*
+ * The card: one definition, two shapes.
+ *
+ * Desktop is a row — picture on the left, title and facts beside it, the four
+ * buttons on a line underneath the text. It is knowingly taller than the 90px
+ * row it replaces (about seven cards visible instead of ten) and buys
+ * left-to-right scanning consistent with the rest of the card. The phone's
+ * two-up grid is at the foot of this file. See docs/V1-SCOPE-CARD-CONTROLS.md.
+ *
+ * `align-items: start` and a thumbnail that spans both rows, so a one-line
+ * title and a three-line one produce the same picture in the same place.
+ */
+.ytfree-hub-card {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "thumb meta"
+    "thumb actions";
+  align-items: start;
+  column-gap: 0.8em;
+  padding: 8px 0.5em;
+  border-radius: var(--radius-m);
+  cursor: var(--cursor-link);
+}
+
+/* A column on a desktop; the phone block below turns it into two. */
+.ytfree-hub-grid {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Watched by an IntersectionObserver, never seen. */
+.ytfree-hub-sentinel {
+  height: 1px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-card:hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+/* Greyed for three seconds, then removed — the grey period is the undo. The
+   card keeps its size throughout, so nothing around it moves until it goes. */
+.ytfree-hub-card.is-dismissed {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+.ytfree-hub-thumb {
+  grid-area: thumb;
+  position: relative;
+  width: 160px;
+  height: 90px;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  background: var(--background-secondary);
+}
+
+.ytfree-hub-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ytfree-hub-meta {
+  grid-area: meta;
+  min-width: 0;
+}
+
+/*
+ * The four buttons.
+ *
+ * Idle and working are two layers stacked in the same single grid cell and
+ * swapped with `visibility`; the border is present in both and the font never
+ * changes weight. That is what makes pressing one incapable of resizing it,
+ * which is what stops the card and its neighbours moving.
+ *
+ * Done used to be a checkmark on its own, on the theory that a done label wider
+ * than the idle one would push its neighbours. It cannot: the cell is 96px
+ * whatever is in it, and the label ellipsises inside it. What the tick did
+ * instead was take away the only thing saying which of four identical squares
+ * had just been pressed — a row of ticks is not a row you can read. So the
+ * label stays in every state and the colour is what changes: text and border go
+ * accent, which is the same signal without the amnesia.
+ */
+.ytfree-card-actions {
+  grid-area: actions;
+  display: grid;
+  grid-template-columns: repeat(4, 96px);
+  grid-auto-rows: 34px;
+  justify-content: start;
+  gap: 4px;
+  padding-top: 6px;
+}
+
+.ytfree-card-act {
+  display: grid;
+  grid-template-areas: "s";
+  place-items: center;
+  box-sizing: border-box;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-normal);
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ytfree-card-act > * {
+  grid-area: s;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-card-act:hover {
+    background: var(--background-modifier-hover);
+    box-shadow: none;
+  }
+}
+
+/* Colour only — a border that appeared with the state would move the label, so
+   it is present in every state and only its colour changes. */
+.ytfree-card-act.is-done {
+  border-color: var(--text-accent);
+  color: var(--text-accent);
+}
+
+.ytfree-card-act.is-danger.is-done {
+  border-color: var(--text-error);
+  color: var(--text-error);
+}
+
+.ytfree-card-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ytfree-card-icon {
+  display: flex;
+  align-items: center;
+  --icon-size: 16px;
+}
+
+.ytfree-card-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Hidden, not absent: both layers occupy the cell at all times. */
+.ytfree-card-busy {
+  visibility: hidden;
+}
+
+/* Working is the one state that replaces the label, and only for as long as the
+   work takes. Done does not: see the note above the block. */
+.ytfree-card-act.is-busy .ytfree-card-idle {
+  visibility: hidden;
+}
+
+.ytfree-card-act.is-busy .ytfree-card-busy {
+  visibility: visible;
+}
+
+.ytfree-card-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--text-accent);
+  animation: ytfree-hub-spin 0.8s linear infinite;
+}
+
+/*
+ * How far in you got, along the foot of the picture — YouTube's own
+ * convention, and the only progress indicator that costs a 178px card no
+ * height. The track is transparent, so a video nobody has started draws
+ * nothing at all while still reserving the same nothing.
+ */
+.ytfree-hub-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+}
+
+.ytfree-hub-progress-fill {
+  height: 100%;
+  background: var(--text-error);
+}
+
+/* Two lines maximum, always: a long title must not make its card taller than
+   the one above it. */
+.ytfree-hub-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+  max-height: 2.7em;
+  color: var(--text-normal);
+}
+
+.ytfree-hub-sub {
+  margin-top: 0.25em;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The restore control on a hidden row — the last user of this column. The
+   marker column and the phone's badge are gone: what used to be a tick in a
+   reserved column is now a state on the button that caused it. */
+.ytfree-hub-dismiss {
+  flex: 0 0 2.6em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.6em;
+  color: var(--text-muted);
+  --icon-size: 20px;
+}
+
+.ytfree-hub-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-hub-file {
+  margin: 0.5em 0;
+}
+
+.ytfree-hub-modal-status {
+  min-height: 1.6em;
+  line-height: 1.6em;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------- hub: search ---
+   Browse: search results rendered as hub cards. See docs/V1-SCOPE-BROWSE.md —
+   a result can do exactly one thing, and it is not playback. */
+
+.ytfree-hub-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.4em 0.7em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+
+.ytfree-hub-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  box-sizing: border-box;
+  font-size: var(--font-ui-small);
+}
+
+/* Bottom-right of the thumbnail, where a YouTube reader already looks for it.
+   Absolutely positioned, so a video with no stated duration leaves the card
+   exactly as it is. */
+.ytfree-hub-duration {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 0 4px;
+  border-radius: var(--radius-s);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hide channel (issue 047): the `⋯` chip in a search card's thumbnail corner.
+   The same scrim as the duration badge, so it reads on a white thumbnail. */
+.ytfree-hub-thumb .ytfree-hub-chip {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: rgba(0, 0, 0, 0.75);
+  box-shadow: none;
+  color: #fff;
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.ytfree-hub-thumb .ytfree-hub-chip:hover {
+  background: rgba(0, 0, 0, 0.9);
+}
+
+.ytfree-hub-duration:empty {
+  visibility: hidden;
+}
+
+@keyframes ytfree-hub-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The two header buttons on the hub screen, as one group. Fixed by content,
+   so the filter chips beside them keep the same room whatever is selected. */
+.ytfree-hub-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
+  flex: 0 0 auto;
+}
+
+/*
+ * "Search YouTube", with the words on it.
+ *
+ * It was a bare YouTube badge — the same glyph as the ribbon icon and the hub's
+ * own tab icon, which said "YouTube" and never said "search". The width is
+ * whatever the label needs and the label never changes, so this is a fixed box
+ * next to the disclosure that truncates: the pill cannot be squeezed and cannot
+ * grow. See `src/icon.ts` for the glyph.
+ */
+.ytfree-hub-browse-button {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 32px;
+  padding: 0 0.7em;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--interactive-normal);
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-normal);
+  cursor: var(--cursor);
+  white-space: nowrap;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-browse-button:hover {
+    background: var(--interactive-hover);
+  }
+}
+
+.ytfree-hub-browse-icon {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-muted);
+  --icon-size: 16px;
+}
+
+.ytfree-hub-browse-label {
+  flex: 0 0 auto;
+}
+
+/* The back arrow on the search screen is not inside `.ytfree-hub-actions`, so
+   it had 0.3em of padding and nothing else — a ~22px target. Same fixed box the
+   action buttons get, for the same reason. */
+.ytfree-hub-back {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  flex: 0 0 auto;
+  border-radius: var(--radius-s);
+}
+
+.ytfree-hub-back .svg-icon {
+  width: var(--icon-m);
+  height: var(--icon-m);
+}
+
+/* Takes the space the filter chips have on the hub screen, so the back arrow
+   sits where the chips start and the header is the same height either side.
+   The glyph is the one on the button that got you here — one symbol for one
+   journey. */
+.ytfree-hub-screen-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+
+.ytfree-hub-screen-icon {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-accent);
+  --icon-size: 18px;
+}
+
+.ytfree-hub-screen-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------ the search screen's field ---
+ * One box, not an input with a button parked beside it.
+ *
+ * The glyph, the box and the run control sit inside a single border that takes
+ * the focus ring, so the row reads as one control with a job rather than three
+ * things that happen to be adjacent. The ring is a `box-shadow`, which paints
+ * outside the layout — focusing the box cannot resize it or move the filters
+ * under it.
+ */
+.ytfree-hub-searchbar {
+  padding: 0.5em 0.7em 0.4em;
+  flex: 0 0 auto;
+}
+
+.ytfree-search-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 34px;
+  padding: 0 4px 0 0.6em;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-modifier-form-field);
+}
+
+.ytfree-search-field:focus-within {
+  border-color: var(--background-modifier-border-focus);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.ytfree-search-field-icon {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-faint);
+  --icon-size: 16px;
+}
+
+/* Stripped back to text on a transparent ground: the border, the background and
+   the focus ring all belong to the box around it now. */
+.ytfree-search-field-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-search-field-input:focus,
+.ytfree-search-field-input:focus-visible {
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+
+/* The one accented thing on the screen, because pressing it is the screen's
+   whole purpose. A fixed square, so nothing about it depends on its state. */
+.ytfree-search-field-go {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-s);
+  background: var(--interactive-accent);
+  box-shadow: none;
+  color: var(--text-on-accent);
+  cursor: var(--cursor);
+  --icon-size: 16px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-search-field-go:hover {
+    background: var(--interactive-accent-hover);
+  }
+}
+
+/* YouTube's filters, as a fixed four-column grid. A grid rather than a wrapping
+   flex row because the column count then cannot change with the text inside the
+   selects — a bar that reflowed when you chose "Creative Commons" would move the
+   results underneath it, which is the one thing a filter must never do. */
+.ytfree-hub-filterbar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4em;
+  padding: 0.2em 0.7em 0.5em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: 0 0 auto;
+}
+
+.ytfree-hub-filterbar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Static text, so it costs nothing and moves nothing. It exists because "Any
+   time" and "Any type" side by side are two dropdowns you have to open to find
+   out what they are. */
+.ytfree-hub-filterbar-label {
+  height: 14px;
+  line-height: 14px;
+  padding-left: 2px;
+  font-size: var(--font-ui-smaller);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ytfree-hub-filterbar-select {
+  min-width: 0;
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  font-size: var(--font-ui-small);
+}
+
+/* A filter away from its default, marked so you can see why a search came back
+   with three results without opening four dropdowns. Colour only — the box was
+   already this size and this border width, so the mark cannot move the results
+   underneath it. */
+.ytfree-hub-filterbar-select.is-set {
+  border-color: var(--text-accent);
+  color: var(--text-accent);
+}
+
+/* Two hosts, both plain: the answer and the related material below it. They
+   exist so an appended page lands in the right half without the other moving. */
+.ytfree-hub-results {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Spans the columns on a phone: a heading in one cell of a two-up grid would
+   put the first related result beside its own title. */
+.ytfree-hub-results-heading {
+  grid-column: 1 / -1;
+  padding: 0.9em 0.6em 0.5em;
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* The first heading on the screen sits directly under the status strip and
+   needs no space above it; the second is separating two sections and does. */
+.ytfree-hub-results:first-child > .ytfree-hub-results-heading {
+  padding-top: 0.3em;
+}
+
+/*
+ * A separator between results, at no cost in layout.
+ *
+ * An `inset` box-shadow paints inside the box without occupying a pixel of it,
+ * so the rule that a result must never change its own or its neighbours' size
+ * holds even while cards are being appended above and below. A real
+ * `border-top` would add 1px to every card after the first.
+ */
+.ytfree-hub-results > .ytfree-hub-card + .ytfree-hub-card {
+  box-shadow: inset 0 1px 0 var(--background-modifier-border);
+}
+
+/* Results are read in a column and clicked one at a time, so they get more room
+   between them than a hub list, which is scanned. */
+.ytfree-hub-result {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+/*
+ * Everything the screen shows when it is not showing results.
+ *
+ * A glyph, a headline and a line of what to do next — the first visit, the
+ * wait, the failure and the two kinds of nothing all get the same shape, so
+ * moving between them changes the words and nothing else. `min-height` is
+ * stated so the block does not grow and shrink under the filter bar as the
+ * copy changes.
+ */
+.ytfree-hub-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  min-height: 260px;
+  padding: 2em 1.5em;
+  text-align: center;
+}
+
+.ytfree-hub-state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--background-modifier-hover);
+  color: var(--text-faint);
+  --icon-size: 24px;
+}
+
+.ytfree-hub-state.is-error .ytfree-hub-state-icon {
+  color: var(--text-error);
+}
+
+.ytfree-hub-state.is-allInHub .ytfree-hub-state-icon {
+  color: var(--text-success);
+}
+
+.ytfree-hub-state.is-idle .ytfree-hub-state-icon {
+  color: var(--text-accent);
+}
+
+/* The same keyframes the card spinner uses. Rotation only: the box is 48px
+   whether it is turning or not. */
+.ytfree-hub-state.is-loading .ytfree-hub-state-icon .svg-icon {
+  animation: ytfree-hub-spin 1s linear infinite;
+}
+
+.ytfree-hub-state-headline {
+  max-width: 30em;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+
+/* Reserved: a state with no help line has to leave the same hole as one with a
+   help line, or the glyph above it jumps between states. */
+.ytfree-hub-state-help {
+  min-height: 2.6em;
+  max-width: 28em;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+}
+
+/* Only the failure offers this. Reserved either way — `visibility`, not
+   `display`, so the two lines above it never move and a hidden button is out of
+   the tab order and out of hit testing. */
+.ytfree-hub-state-retry {
+  height: 32px;
+  padding: 0 1.2em;
+  font-size: var(--font-ui-small);
+  cursor: var(--cursor);
+}
+
+.ytfree-hub-state-retry.is-hidden {
+  visibility: hidden;
+}
+
+/* A hidden video stores no thumbnail — see `hideItem` — so its row is text and
+   a way back, at a height that says so rather than leaving a 160px hole. It is
+   the one list that is deliberately not cards: there is no picture to put on
+   one, and Restore is the only action it has. */
+.ytfree-hub-hidden-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  height: 56px;
+  cursor: default;
+}
+
+/*
+ * A removed search result, collapsed in place.
+ *
+ * The height is set from the card it replaced, so removing the third result
+ * cannot pull the fourth up under your thumb. It lasts until the next search —
+ * the persistent list is stage two.
+ */
+.ytfree-hub-removed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8em;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  cursor: default;
+}
+
+.ytfree-hub-removed-undo {
+  padding: 0.2em 0.8em;
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+.ytfree-hub-hidden-row .ytfree-hub-title {
+  -webkit-line-clamp: 1;
+  max-height: 1.4em;
+  font-size: var(--font-ui-small);
+}
+
+/* The label swaps to "Loading…" on click; the width must not follow it. */
+.ytfree-hub-more {
+  display: block;
+  width: 12em;
+  height: 34px;
+  margin: 1.2em auto 1.6em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  cursor: var(--cursor);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-more:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+}
+
+/* ----------------------------------------------------------- hub: phone ---
+   A phone gets a different menu, not a narrower one. The 200px channel column
+   left a 390pt screen with no room for a title and pushed the card sideways
+   into a horizontal scroll; here the filters and the channels collapse behind
+   one disclosure, and any selection closes it again. See docs/MOBILE-UX.md. */
+
+.ytfree-hub.ytfree-phone .ytfree-hub-header {
+  padding: 0.4em 0.6em;
+  gap: 0.4em;
+}
+
+/* Flexible with min-width:0, so a long channel name truncates instead of
+   pushing the sync button off the screen. */
+.ytfree-hub-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  height: 40px;
+  padding: 0 0.7em;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--interactive-normal);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-normal);
+  box-shadow: none;
+}
+
+.ytfree-hub-select-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Rotation only — no size or weight change, so opening the menu cannot
+   re-measure the bar it lives in. */
+.ytfree-hub-select-chevron {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  --icon-size: 16px;
+}
+
+.ytfree-hub-select.is-open .ytfree-hub-select-chevron {
+  transform: rotate(180deg);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-body {
+  display: block;
+  position: relative;
+}
+
+/*
+ * Full-bleed: the rows carry their own separators, and a separator that stops
+ * short of the edge is what makes a list look unfinished.
+ *
+ * Except at the bottom, where Obsidian's own floating toolbar sits over the
+ * view and covered the last card however far you scrolled. The padding is
+ * scroll room, not a gap — it only exists once you are at the end of the list —
+ * and it clears the toolbar plus whatever the home indicator takes underneath
+ * it. Padding rather than a margin, so it scrolls with the content instead of
+ * shortening the scroller.
+ */
+/* Side padding, which the old edge-to-edge row list did not need: the cards are
+   bordered boxes now, and a box flush against the screen edge reads as clipped. */
+.ytfree-hub.ytfree-phone .ytfree-hub-list {
+  height: 100%;
+  padding: 0 8px calc(88px + env(safe-area-inset-bottom, 0px)) 8px;
+  box-sizing: border-box;
+}
+
+/* Both overlay the list rather than sitting in it, and both toggle with
+   visibility, so opening or closing the menu moves nothing underneath. */
+.ytfree-hub-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--background-primary);
+  opacity: 0.65;
+  visibility: hidden;
+}
+
+.ytfree-hub-scrim.is-open {
+  visibility: visible;
+}
+
+/* Fixed height whichever section you are reading; the content scrolls inside.
+   The panel can never resize under your thumb. */
+.ytfree-hub-menu {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 62%;
+  overflow-y: auto;
+  padding: 0 0.6em 0.8em;
+  box-sizing: border-box;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+  visibility: hidden;
+}
+
+.ytfree-hub-menu.is-open {
+  visibility: visible;
+}
+
+.ytfree-hub-menu-heading {
+  padding: 0.9em 0.2em 0.4em;
+  font-size: var(--font-ui-smaller);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Three equal chips on one row — never a horizontal scroller. */
+.ytfree-hub.ytfree-phone .ytfree-hub-filters {
+  gap: 0.4em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-filter {
+  /* Three across, then two: five 40pt targets do not fit across a phone, and a
+     tap target squeezed to 60pt is worse than a second row in a menu that is
+     already a sheet. */
+  flex: 1 1 30%;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-channels {
+  flex: none;
+  padding: 0;
+  overflow: visible;
+  border-right: none;
+}
+
+/* A real touch target, and vertical — the channel list is the thing that used
+   to be a sideways-scrolling column. */
+.ytfree-hub.ytfree-phone .ytfree-hub-channel {
+  height: 44px;
+  padding: 0 0.4em;
+  font-size: var(--font-ui-medium);
+}
+
+/*
+ * A list, not a stack of floating cards.
+ *
+ * Rounded corners and a hover tint are how a desktop separates rows; a phone
+ * separates them with a hairline, which is also what gives the delete column's
+ * rule something to meet at both ends. Border-box, so adding the line does not
+ * add a pixel to the row.
+ */
+/*
+ * The phone: a two-up grid of cards, not a list of rows.
+ *
+ * This is a rewrite, not a tweak. The dismiss column, the 112×63 thumbnail and
+ * the byline geometry are all gone — Remove is one of four buttons now, and
+ * four buttons need width to be legible. The prototype settled the shape: at
+ * 390pt a two-up grid gives a ~178px card, four buttons across that is ~40px
+ * each, which is a legal target but not a readable label, so the buttons are
+ * 2×2 with an icon and a word. The price, stated plainly: a ~250px card, about
+ * four per screen. See docs/V1-SCOPE-CARD-CONTROLS.md.
+ */
+.ytfree-hub.ytfree-phone .ytfree-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+  padding: 4px 0;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-card {
+  display: block;
+  height: auto;
+  padding: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  overflow: hidden;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-meta {
+  padding: 6px 8px 0;
+  min-width: 0;
+}
+
+/*
+ * Two lines, and a fixed height for them.
+ *
+ * A one-line title and a two-line one have to make the same card, or the two
+ * columns of the grid stop lining up with each other and every row below jogs.
+ */
+.ytfree-hub.ytfree-phone .ytfree-hub-title {
+  font-size: var(--font-ui-small);
+  line-height: 1.3;
+  -webkit-line-clamp: 2;
+  height: 2.6em;
+  max-height: 2.6em;
+}
+
+/*
+ * The byline: who made it, and when. Two segments, and the quiet half of the
+ * card — see `phoneSubParts`. A fixed height, so a card with no date is the
+ * same height as the one beside it.
+ */
+.ytfree-hub.ytfree-phone .ytfree-hub-sub {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  margin-top: 3px;
+  height: 16px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-sub-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Never shrinks and never wraps: how old something is is four or five
+   characters, and it is the fact that kept getting cut. */
+.ytfree-hub.ytfree-phone .ytfree-hub-sub-age {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 2×2, 40px rows. The one shape that carries four equal, legible actions at
+   this width — a row of four cannot, and the labels clip to "Prev / Watc". */
+.ytfree-hub.ytfree-phone .ytfree-card-actions {
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 40px;
+  justify-content: stretch;
+  padding: 6px;
+}
+
+/*
+ * A phone has no pointer, so nothing here may carry a pointer's states.
+ *
+ * The hover rules are already behind `(hover: hover)`. These are the two iOS
+ * adds by itself: the grey flash it paints over the element under your thumb,
+ * and the background it leaves on a <button> that still holds focus after the
+ * row it belonged to is gone.
+ */
+.ytfree-hub.ytfree-phone {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-icon-button:focus,
+.ytfree-hub.ytfree-phone .ytfree-hub-icon-button:active {
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+/* The restore control on a hidden row. The only survivor of the old dismiss
+   column: a bigger target on a phone, and nothing to lay out around. */
+.ytfree-hub.ytfree-phone .ytfree-hub-dismiss {
+  flex: 0 0 56px;
+  height: 44px;
+  --icon-size: 24px;
+}
+
+
+/* A 40px target, and 16px text — anything smaller and iOS zooms the whole view
+   when the box takes focus, which is a zoom nothing ever takes back. */
+.ytfree-hub.ytfree-phone .ytfree-hub-search {
+  padding: 0.4em 0.5em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-search-input {
+  height: 40px;
+  font-size: 16px;
+}
+
+/* The search screen on a phone, sized for a thumb rather than scaled down from
+   the desktop: a 48px field, a 40px accent square inside it, 44px dropdowns,
+   and 16px on everything iOS can focus.
+   The run button was 36px inside a 44px field until the harness measured it —
+   the only control on the screen under 40pt. The field grew to 48 to hold a
+   40pt button with a 4px margin rather than the button shrinking the padding
+   to nothing. */
+.ytfree-hub.ytfree-phone .ytfree-hub-searchbar {
+  padding: 0.4em 0.5em 0.3em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-search-field {
+  height: 48px;
+  padding: 0 4px 0 0.7em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-search-field-input {
+  font-size: 16px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-search-field-go {
+  width: 40px;
+  height: 40px;
+  --icon-size: 18px;
+}
+
+/* Two by two, not four across: four selects on a 390pt screen leaves each one
+   about 80pt wide, which truncates every label to its first word. Two rows of
+   two, and the grid has the same shape whatever is chosen. */
+.ytfree-hub.ytfree-phone .ytfree-hub-filterbar {
+  grid-template-columns: repeat(2, 1fr);
+  padding: 0.2em 0.5em 0.4em;
+  row-gap: 0.5em;
+}
+
+/* 16px, for the same reason as the search box: a smaller font in a control iOS
+   focuses is a zoom nothing ever takes back. */
+.ytfree-hub.ytfree-phone .ytfree-hub-filterbar-select {
+  height: 44px;
+  font-size: 16px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-screen-title {
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-back {
+  width: 44px;
+  height: 44px;
+}
+
+/* The header pill on a phone: a 40pt target, and the label stays — the word
+   "Search" is the one this button was missing, so it is not what gets dropped
+   when the screen is narrow. The disclosure beside it is `flex: 1; min-width: 0`
+   and truncates instead. */
+.ytfree-hub.ytfree-phone .ytfree-hub-browse-button {
+  height: 40px;
+  padding: 0 0.6em;
+  gap: 0.3em;
+}
+
+/* Cards on a phone are separate bordered boxes in a two-up grid, so the desktop
+   list's hairline between them has nothing to separate. */
+.ytfree-hub.ytfree-phone .ytfree-hub-results > .ytfree-hub-card + .ytfree-hub-card {
+  box-shadow: none;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-result {
+  padding: 0;
+}
+
+/* Shorter than the desktop block: on a 390pt screen 260px of empty state pushes
+   the whole message below the fold when the keyboard is up. */
+.ytfree-hub.ytfree-phone .ytfree-hub-state {
+  min-height: 200px;
+  padding: 1.5em 1em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-state-help {
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-state-retry {
+  height: 44px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-more {
+  height: 44px;
+}
+
+/* Lined up with the phone's 0.5em search field rather than the desktop's. */
+.ytfree-hub.ytfree-phone .ytfree-hub-status-browse {
+  padding: 0 0.55em;
+}
+
+/* Taller than the desktop row: the restore button is the only target on it and
+   a 56px row on a phone is a line of text you have to aim at. */
+.ytfree-hub.ytfree-phone .ytfree-hub-hidden-row {
+  height: 64px;
+}
+
+/* --------------------------------------------------------------- preview ---
+   Everything the card had no room for. A modal rather than an inline expansion,
+   which is what keeps the list's scroll position — see the note on
+   `openPreview`. Since 024 it plays, so the sheet is a player with the facts
+   under it rather than a page of text. */
+
+.ytfree-preview-modal {
+  width: min(640px, 92vw);
+}
+
+/*
+ * The laptop sheet, at the size the thing in it is worth.
+ *
+ * 640px was a sheet for reading two paragraphs in. It now holds a player, a
+ * description and an hour of transcript, and at that width the picture is 360pt
+ * and the transcript is a column six words wide. Four fifths of the Obsidian
+ * window in both directions, which on any screen worth watching on is a picture
+ * you can see and a transcript you can read beside it.
+ *
+ * `body:not(.is-mobile)` rather than a width query: a tablet keeps the 640
+ * deliberately — see `panelAnchored` in `src/main.ts` for the same split — and a
+ * narrow desktop window is still a desktop window.
+ *
+ * The height is what the region below the picture is measured against, so it
+ * has to be a length and not a cap. See `.modal-content` under it.
+ *
+ * 88 rather than 80 since the sheet became two columns: everything on it is now
+ * either the picture or the reading, both of them want the room, and the
+ * backdrop showing round the edges is what says "modal" — a job 6% of the
+ * window does as well as 10%.
+ */
+body:not(.is-mobile) .ytfree-preview-modal {
+  display: flex;
+  flex-direction: column;
+  width: 88vw;
+  height: 88vh;
+  max-width: none;
+}
+
+body:not(.is-mobile) .ytfree-preview-modal .modal-content {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+}
+
+/*
+ * The picture, on a laptop, when the sheet is still one column.
+ *
+ * Stacked, the picture and the reading are dividing one height between them,
+ * and 16:9 of the sheet's width is more than all of it — so the width is capped
+ * and the height follows from the ratio, which keeps it a 16:9 picture rather
+ * than a pillarboxed one. This is the narrow-window case only: above 1000px the
+ * sheet is two columns and the picture is not taking anything off the reading
+ * at all, which is where the rule below sends it.
+ */
+body:not(.is-mobile) .ytfree-preview-wrapper {
+  max-width: calc(38vh * 16 / 9);
+  margin-inline: auto;
+}
+
+/*
+ * The sheet scrolls in one place, and the picture rides on top of it.
+ *
+ * Opening the transcript adds a box of text in the middle of the sheet, and a
+ * modal that grows is a modal that centres itself again — which pushed the
+ * video up and off the screen exactly when someone wanted to watch it while
+ * reading. So the content is the scroller, capped at the viewport, and the
+ * player is stuck to its top edge: the same deal a note's pinned player makes.
+ */
+.ytfree-preview-modal .modal-content {
+  display: flex;
+  flex-direction: column;
+  /*
+   * A height, not a cap — this is what makes the foot of the sheet one region.
+   * A flex column only distributes *free* space, and a content-sized box has
+   * none to give: with `max-height` the open section would come out as tall as
+   * its own contents (or as its floor) and the sheet would scroll instead.
+   */
+  height: min(82vh, calc(100vh - 8em));
+  overflow-y: auto;
+  /*
+   * Explicit, because it is not the default it looks like. A box with
+   * `overflow-y: auto` and `overflow-x: visible` computes the x axis to `auto`
+   * too — the pair cannot disagree — so every scroller in this sheet was
+   * silently a sideways scroller as well, waiting for one long word to make it
+   * real. Descriptions are full of them: bare URLs, hashtag runs, `====` rules.
+   */
+  overflow-x: hidden;
+}
+
+.ytfree-preview-modal .ytfree-preview-player {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* Opaque, or the transcript scrolls through the picture. The padding and the
+     pull-up cover the gap the modal's own top padding leaves above it. */
+  background: var(--background-primary);
+  margin-top: -0.4em;
+  padding-top: 0.4em;
+}
+
+/*
+ * The player's slot, sized before it holds a picture.
+ *
+ * A `<video>` with nothing loaded is zero pixels tall, so without the ratio the
+ * sheet would be a title and three buttons for as long as the stream took to
+ * resolve, and then grow underneath the pointer. The box is 16:9 of the modal's
+ * width from the moment it exists, and the picture is fitted into it — a
+ * portrait upload letterboxes rather than making the sheet taller than the
+ * screen.
+ */
+.ytfree-preview-player {
+  margin-bottom: 0.9em;
+}
+
+.ytfree-preview-wrapper .ytfree-stage,
+.ytfree-preview-wrapper .ytfree-media {
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+
+.ytfree-preview-wrapper .ytfree-video {
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  border-radius: 0;
+}
+
+/*
+ * Collapsed, in the Preview sheet.
+ *
+ * The same deal the docked player makes — the picture folds away and the player
+ * does not, so the position, the buffer and the audio all survive it — but the
+ * rules that made it happen were written against `.ytfree-docked` alone, so
+ * even once Collapse was wired up (it was reaching for a note player that a
+ * preview never has) nothing would have moved.
+ *
+ * It matters more here than in a note. The sheet's picture is `sticky`, so
+ * while it is showing it is 202pt of a phone screen that never scrolls away;
+ * folding it is what gives the description the sheet. The control bar stays,
+ * and Collapse turns into Show video, so the way back is the same button.
+ */
+.ytfree-preview-wrapper.is-collapsed .ytfree-media,
+.ytfree-preview-wrapper.is-collapsed .ytfree-stage {
+  aspect-ratio: auto;
+  height: 0;
+}
+
+/* Clipped inside a zero-height box, not hidden: `display: none` on a playing
+   `<video>` stops playback on iOS WebKit, which is the one thing collapsing
+   must not do. The height is the one the picture had — the sheet is
+   `min(640px, 92vw)` wide, so 16:9 of that. */
+.ytfree-preview-wrapper.is-collapsed .ytfree-video,
+.ytfree-preview-wrapper.is-collapsed .ytfree-poster,
+.ytfree-preview-wrapper.is-collapsed .ytfree-fallback {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: min(360px, 51.75vw);
+}
+
+/* The one message this box ever carries instead of a video. Same height as the
+   player it replaces, so a failure looks like a player that will not play
+   rather than like a sheet that lost a section. */
+.ytfree-preview-player-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-preview-title {
+  font-size: var(--font-ui-large);
+  line-height: 1.3;
+  color: var(--text-normal);
+  /* A title can be one 60-character word — a URL, a hash, a German compound.
+     It wraps rather than widening the sheet. */
+  overflow-wrap: anywhere;
+}
+
+.ytfree-preview-facts {
+  margin-top: 0.3em;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+/*
+ * ------------------------------------------- the foot of the sheet is one ---
+ *
+ * The description and the transcript are two disclosures over a single region,
+ * not two boxes stacked in a scroller. Whichever is open takes everything below
+ * the facts and above the buttons, and opening one shuts the other — see
+ * `disclose` in `src/hub.ts`. Two half-height boxes was the alternative and it
+ * is worse at both jobs: a description is paragraphs and a transcript is an
+ * hour of speech, and neither is readable through a letterbox.
+ *
+ * Both headers stay put in both states. That is what makes the swap free of
+ * reflow under the pointer: pressing Description moves the transcript's header
+ * down the sheet, and nothing else on it changes size or place.
+ */
+/*
+ * The box both disclosures live in — one element, because they are one region.
+ *
+ * Shut it is two headers and asks for nothing; open it is the region, and it
+ * takes the space between the facts and the buttons. Off a phone it is also the
+ * right-hand column of the sheet, which is what lets the picture be a picture
+ * and the transcript be a full-height column at the same time.
+ */
+.ytfree-preview-read {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.ytfree-sheet-reading .ytfree-preview-read {
+  /* `flex-basis: 0`, so it asks for the leftover rather than for the height of
+     an hour of transcript. */
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/*
+ * While one region is open, the other one is not on the sheet at all.
+ *
+ * The header of a region you are not reading is a row of the screen spent
+ * saying so. On a phone that is 34 of about 400 points of transcript, and the
+ * cost is worse than the arithmetic: two headers and one body reads as two
+ * boxes sharing the space, which is exactly the letterboxed sheet the single
+ * region was built to avoid. Collapse what you are reading and both headers
+ * come back — that is the way to the other one, and the only one.
+ *
+ * `display: none` rather than a zero height, and only on the *shut* section:
+ * what it hides is a 34pt header with nothing in it to re-wrap, so bringing it
+ * back cannot reflow anything that was measured while it was gone.
+ */
+.ytfree-sheet-reading .ytfree-preview-describe:not(.is-open),
+.ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) {
+  display: none;
+}
+
+.ytfree-preview-describe,
+.ytfree-preview-transcript {
+  display: flex;
+  flex-direction: column;
+  /* Shut, a region is its header and nothing more. */
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+/* The two headers read as one list of two, so they get the same rule above
+   them. The transcript's own comes with its section, further down. */
+.ytfree-preview-describe {
+  margin-top: 0.8em;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Except when it is the first thing in the column: a rule and a margin above
+   the top of the reading column is a seam against nothing. */
+.ytfree-sheet-reading .ytfree-preview-read > .is-open:first-child {
+  margin-top: 0;
+  border-top: none;
+}
+
+.ytfree-preview-describe.is-open,
+.ytfree-preview-transcript.is-open {
+  /*
+   * `flex-basis: 0`, so the region asks for the leftover space rather than for
+   * the height of its own contents. With `auto` an hour of transcript would
+   * size the region, the sheet would grow past the screen, and we would be back
+   * to scrolling to find the words.
+   */
+  flex: 1 1 0;
+  /* A floor, so a two-line transcript is still a region and not a seam. */
+  min-height: 7em;
+}
+
+/* The body scrolls inside the region the region was given. `min-height: 0` is
+   what lets a flex item be shorter than its contents at all — without it the
+   box refuses to shrink and pushes the buttons off the bottom. */
+.ytfree-preview-describe.is-open .ytfree-preview-description,
+.ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* A drag that runs out of text stops there rather than handing the rest of
+     the gesture to the sheet behind it — which would move the picture. */
+  overscroll-behavior: contain;
+}
+
+/*
+ * Shut is zero height and hidden, not `display: none`: a description is a page
+ * of unbreakable URLs and hashtag runs, and a box that has never been laid out
+ * has never wrapped them — opening it would then reflow the sheet under the
+ * finger that opened it, which is the one thing the sheet must never do.
+ */
+.ytfree-preview-describe:not(.is-open) .ytfree-preview-description {
+  max-height: 0;
+  margin-top: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+/*
+ * Both regions shut is a legal state — an empty description and a shut
+ * transcript — and the buttons belong at the foot of the sheet rather than
+ * halfway up it.
+ *
+ * Only then, though, and that is not a nicety. An auto margin on a flex item
+ * takes *all* the positive free space before `flex-grow` is resolved at all, so
+ * an unconditional `margin-top: auto` here leaves the open region with nothing
+ * to grow into: it comes out at its 7em floor, the sheet is over-constrained,
+ * and every fixed thing on it with a shrinkable height gets squeezed — which is
+ * what was clipping the two headers. `ytfree-sheet-shut` is set by `disclose`
+ * in `src/hub.ts` and is the one state where there is no region to feed.
+ */
+.ytfree-sheet-shut .ytfree-preview-actions {
+  margin-top: auto;
+}
+
+.ytfree-preview-description {
+  /*
+   * Never sideways. Two declarations because they answer two different
+   * questions: `overflow-wrap` breaks the 90-character playlist URL that a
+   * description opens with so it *fits*, and `overflow-x` is the backstop for
+   * whatever it cannot break — `pre-wrap` preserves the source's own runs of
+   * `─────` and box-drawing rules, and those are one token to the line breaker.
+   * A description that scrolls left and right is one you read a third of.
+   */
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  margin-top: 0.8em;
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+/*
+ * The transcript, under the description.
+ *
+ * The header row is a fixed height and says its piece at one size in both
+ * states, so opening the transcript moves the buttons below it and nothing
+ * else — the chevron rotates in place rather than being swapped for a wider
+ * glyph, and the label's text changes only when the fetch lands.
+ */
+.ytfree-preview-transcript {
+  margin-top: 0.8em;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* `flex: none` on the height, and it is load-bearing: a header is a flex item
+   in its own section now, and a flex item with a definite height still shrinks
+   below it by default. In a sheet with no room to spare that is a 34px row
+   rendered at 20 with the words cut off. */
+.ytfree-preview-transcript-head,
+.ytfree-preview-disclose {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.4em;
+  width: 100%;
+  height: 34px;
+  padding: 0 0.2em;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ytfree-preview-transcript-head:hover:not([disabled]),
+.ytfree-preview-disclose:hover:not([disabled]) {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ytfree-preview-transcript-head[disabled] {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.ytfree-preview-transcript-chevron,
+.ytfree-preview-disclose-chevron {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.ytfree-preview-transcript-chevron .svg-icon,
+.ytfree-preview-disclose-chevron .svg-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/*
+ * Collapsed is zero height rather than `display: none` so the rows keep their
+ * measured widths — reopening it must not reflow the sheet a second time.
+ */
+.ytfree-preview-transcript-body {
+  max-height: 0;
+  overflow: hidden;
+}
+
+/* The 30vh cap that used to be here is gone: the region above decides the
+   height now, and a cap on top of it was the sheet keeping a box of blank
+   space under an open transcript. */
+.ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
+  padding-bottom: 0.4em;
+}
+
+/*
+ * A row is as tall as its own words.
+ *
+ * These are `<button>`s, and Obsidian's base rule gives every button
+ * `height: var(--input-height)` — one line's worth, fixed. A paragraph of a few
+ * words fitted it by luck; raise the section length and the text runs straight
+ * out of the box and over the row below. `height: auto` is the whole fix, and
+ * the alignment keeps the timestamp beside the first line of a wrapped
+ * paragraph rather than centred against the middle of it.
+ */
+.ytfree-preview-cue {
+  display: flex;
+  align-items: flex-start;
+  height: auto;
+  min-height: 0;
+  gap: 0.6em;
+  width: 100%;
+  padding: 0.25em 0.2em;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  box-shadow: none;
+  font-size: var(--font-ui-small);
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ytfree-preview-cue:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ytfree-preview-cue-time {
+  flex: 0 0 3.4em;
+  color: var(--ytfree-purple, var(--text-accent));
+  font-variant-numeric: tabular-nums;
+}
+
+/* `min-width: 0` so a long paragraph wraps inside the row instead of forcing it
+   wider than the scroller. */
+.ytfree-preview-cue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  white-space: normal;
+  /* Auto-captions run URLs and hyphenless compounds together. `min-width: 0`
+     lets the row shrink; this is what lets the *word* shrink with it. */
+  overflow-wrap: anywhere;
+}
+
+/* The line being spoken. A background, not a weight — bold would reflow it. */
+.ytfree-preview-cue.is-now {
+  background: var(--background-modifier-active-hover);
+}
+
+/*
+ * The same thing in the note, while the transcript is following the video.
+ *
+ * The identical rule and the identical reason: background only. A border, a
+ * padding or a weight on the paragraph being spoken would move the words around
+ * it every twenty seconds, under the eye of someone reading them. It lands on a
+ * `.cm-line` in Live Preview and on a rendered block in reading view, so it
+ * carries no assumptions about either.
+ */
+.ytfree-following {
+  background: var(--background-modifier-active-hover);
+  border-radius: var(--radius-s);
+}
+
+.ytfree-preview-cue.is-now .ytfree-preview-cue-text {
+  color: var(--text-normal);
+}
+
+/* Three across, not four: Preview is what you are already looking at. */
+/*
+ * Four across, like the card that opened this sheet: three slots (Preview is
+ * the one thing not offered in here) plus Share, which is not a slot because it
+ * changes nothing about the video and so has no state to paint.
+ */
+.ytfree-preview-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 40px;
+  justify-content: stretch;
+  padding-top: 1em;
+}
+
+/*
+ * Where a preview plays on after its sheet has closed.
+ *
+ * Picture-in-Picture is a system window over a `<video>` that is still in the
+ * page: destroy the element and the window goes with it, which is why closing
+ * the sheet used to end PiP. The player's shell is re-parented here instead.
+ *
+ * A one-pixel clipped box, and every one of those words is load-bearing.
+ * `display: none` and `visibility: hidden` both stop playback on iOS WebKit,
+ * and a zero-sized element is treated as not rendered by some engines — so it
+ * keeps a pixel, clips the rest, and takes no pointer events. Nothing here is
+ * ever visible: what the reader sees is the floating window iOS is drawing.
+ */
+.ytfree-preview-keepalive {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0.01;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ------------------------------------------- preview, on a wide window ---
+ *
+ * The sheet is two columns: the picture and what the video *is* on the left,
+ * the reading on the right, and the buttons along the foot of both.
+ *
+ * Stacked, the picture and the reading were dividing one height, and every
+ * point given to either was taken off the other — a picture worth watching left
+ * about 150 points of transcript, and a transcript worth reading left a
+ * thumbnail. On a 1512-point screen the sheet is 1330 wide and 60% of the
+ * height, so the two resources are not the same resource: width is what a
+ * laptop has spare. The picture gets a column and grows to fill it, and the
+ * open region gets the other column at the full height of the sheet.
+ *
+ * The same shape the phone uses held sideways, two hundred lines down, and for
+ * the same reason — 16:9 and a short window do not stack.
+ *
+ * 1000px, because below it the right-hand column stops being a column: the
+ * transcript's timestamp is 3.4em before a word of it is drawn, and at half of
+ * 900 points minus that, the text is four words to the line. Under the query
+ * the sheet is the stacked one above, which is what a narrow desktop window and
+ * a tablet both get.
+ */
+@media (min-width: 1000px) {
+  body:not(.is-mobile) .ytfree-preview-modal .modal-content {
+    display: grid;
+    /*
+     * The picture's column, and the reading's. 1.45 : 1 of 1330 points is a 760
+     * point picture — 428 tall, a third more than the whole sheet used to give
+     * it — against a 525 point column for the words, which is wider than this
+     * modal was in total until 2026-08-08.
+     */
+    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+    /* Picture, title, facts, the space left over, and the buttons under both. */
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    column-gap: 1.2em;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-modal .ytfree-preview-player {
+    grid-area: 1 / 1;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-title {
+    grid-area: 2 / 1;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-facts {
+    grid-area: 3 / 1;
+  }
+
+  /* Rows one to four of the second column: everything above the buttons. */
+  body:not(.is-mobile) .ytfree-preview-read {
+    grid-area: 1 / 2 / 5 / 3;
+    min-height: 0;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-actions {
+    grid-area: 5 / 1 / 6 / 3;
+  }
+
+  /*
+   * No width cap in here — the column *is* the cap, and that is the whole point
+   * of the two-column sheet. The height still has one: a very wide, very short
+   * window (a 21:9 monitor, a half-height Obsidian) would otherwise ask for a
+   * picture taller than the sheet and push the title and the facts off it.
+   */
+  body:not(.is-mobile) .ytfree-preview-wrapper {
+    max-width: calc(62vh * 16 / 9);
+    margin-inline: 0;
+  }
+}
+
+/* ------------------------------------------------- preview, on a phone ---
+ *
+ * The buttons are the floor of the sheet rather than the last thing in the
+ * flow: sticky, at a height they already had, so nothing about them moves when
+ * the text behind them does. Everything the description and the transcript used
+ * to say here is now said once, for every platform, in "the foot of the sheet
+ * is one" above — a phone was simply the first surface short enough to need it.
+ */
+
+/* ------------------------------------ the transcript's own region — 039 ---
+ *
+ * Running order was the bug. 032 gave the sheet one scroller and left the
+ * order it inherited — picture, description, transcript — and a description is
+ * arbitrarily long, so the transcript began a screen and a half down and got
+ * further away the more the creator wrote. Since 035 it also follows playback,
+ * which is worthless if you cannot see it and worse than worthless if it is
+ * autoscrolling out of sight.
+ *
+ * So on a phone the sheet is three fixed things and one elastic one: the
+ * picture at the top, the buttons at the foot, the description as a shut
+ * disclosure, and the transcript taking whatever is left. Written as flex on
+ * the same element that scrolls — which is not a contradiction, because a flex
+ * column only distributes *free* space: with the description shut there is
+ * free space and the transcript fills it, and with the description open there
+ * is none, the sheet scrolls exactly as 032 left it, and the transcript falls
+ * back to its floor.
+ *
+ * `height`, not `max-height`, is what makes the first half of that true — free
+ * space needs a definite container height to be free space in, and a
+ * content-sized box has none to give.
+ */
+/*
+ * The phone's Preview is the whole screen (GitHub #8).
+ *
+ * Obsidian used to draw a phone modal as a full-width sheet, and the Preview was
+ * laid out for that. From 1.10 or so a phone modal is a card inset from every
+ * edge with rounded corners, capped at 640px wide: measured against each
+ * version's own app.css at 390x844, portrait lost 31pt of width and landscape a
+ * quarter of it, and the picture went from 403pt wide to 297. Nothing in this
+ * file changed; the box it was drawn in did.
+ *
+ * So the Preview stops borrowing Obsidian's modal box on a phone and takes the
+ * screen: the container is already the whole viewport, and the modal fills it.
+ * The safe areas are padding, so the notch and the home bar sit on the modal's
+ * own background rather than over the picture or the buttons.
+ */
+.is-phone .modal.ytfree-preview-modal {
+  /*
+   * The top inset, which is where the picture starts. An earlier build put a
+   * 59pt floor under it on the theory that Obsidian under-reported the inset;
+   * the close button in the status bar was really Obsidian's own button under
+   * a class name this file never matched (see `.ytfree-preview-close`), so
+   * the floor only pushed the picture down on phones with a shorter status bar.
+   */
+  --ytfree-sheet-top: max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px));
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  padding: var(--ytfree-sheet-top) var(--safe-area-inset-right, 0px)
+    var(--safe-area-inset-bottom, 0px) var(--safe-area-inset-left, 0px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/*
+ * The picture sits as high as the safe area allows, with the close button on
+ * its top-right corner (Isaiah's second and third phone tests).
+ *
+ * Obsidian 1.10+ gives a modal a header row (title and close) above its
+ * content. The Preview has no title, so on a phone that row was only a band of
+ * blank space between the notch and the picture. The header takes no space.
+ *
+ * Obsidian's close button is hidden on a phone, under both of the class names
+ * it has had: `modal-close-button` up to 1.10, `modal-header-button` by 1.14.
+ * Every earlier attempt styled the first name, so on Isaiah's phone the button
+ * stayed where Obsidian puts it — 12px below the top of the modal, which on a
+ * full-screen sheet is the status bar. The sheet draws its own instead, inside
+ * the player box: `.ytfree-preview-close`, below.
+ */
+.is-phone .ytfree-preview-modal .modal-header {
+  position: static;
+  height: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.is-phone .ytfree-preview-modal .modal-title,
+.is-phone .ytfree-preview-modal > .modal-close-button,
+.is-phone .ytfree-preview-modal > .modal-header-button {
+  display: none;
+}
+
+/* A child of the player box, which is `position: sticky`, so this is placed
+   against the picture. Element and modal in the selector to outrank
+   Obsidian's `button:not(.clickable-icon)`, which would paint it a light pill. */
+.ytfree-preview-modal button.ytfree-preview-close,
+.ytfree-preview-modal button.ytfree-preview-close:hover,
+.ytfree-preview-modal button.ytfree-preview-close:active {
+  position: absolute;
+  top: var(--size-4-2);
+  right: var(--size-4-2);
+  /* Above the picture, below the settings pop-out (20) that can open over it. */
+  z-index: 5;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* It is on a picture, which can be any colour, so it carries its own disc. */
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  --icon-color: #fff;
+  --icon-size: 20px;
+  box-shadow: none;
+}
+
+/*
+ * Collapsed, the picture is gone and the control bar is the top of the player,
+ * with buttons at both ends. The close button gets a row of its own above it
+ * rather than landing on one of them.
+ */
+.ytfree-preview-modal .ytfree-preview-player:has(.ytfree-preview-wrapper.is-collapsed) {
+  padding-top: 44px;
+}
+
+/* In the in-app fullscreen the picture is the whole screen and has its own way out. */
+body.ytfree-immersive-open .ytfree-preview-close {
+  display: none;
+}
+
+.is-phone .ytfree-preview-modal .modal-content {
+  /*
+   * A definite height, which is what makes the foot of the sheet one region:
+   * a flex column only hands out free space inside a box that has a height.
+   * The modal above it is now exactly the screen less its safe areas, so the
+   * content takes all of that rather than a guess at it from `100vh`.
+   */
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  /* The picture starts at the safe area, not a gutter below it. */
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.is-phone .ytfree-preview-modal .ytfree-preview-player {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+/*
+ * The picture takes a share of the sheet, not a share of the width.
+ *
+ * 16:9 of a phone held sideways is 400-odd points of picture on a 390pt screen:
+ * the player alone was taller than the sheet, so the transcript and the buttons
+ * were both below the fold before anything else was measured. Capping the
+ * *width* rather than the height is what keeps it a 16:9 picture instead of a
+ * pillarboxed one — the height follows from the ratio.
+ */
+.is-phone .ytfree-preview-wrapper {
+  max-width: calc(42vh * 16 / 9);
+  margin-inline: auto;
+}
+
+.is-phone .ytfree-preview-actions {
+  position: sticky;
+  bottom: 0;
+  /*
+   * Below the picture's 2, not above it. Both ends of the sheet are sticky and
+   * both make their own stacking context, so the number decides which wins
+   * where they meet — and the picture has to win, because the pop-out is a
+   * fixed sheet *inside* the picture's stacking context. At 3 this row would
+   * have been painted over the top of the menu it sits behind.
+   */
+  z-index: 1;
+  /* Opaque, and its own padding, or the description scrolls through the row. */
+  padding-bottom: 0.4em;
+  background: var(--background-primary);
+}
+
+/* The picture is the one thing that stays. The title is not. */
+.is-phone .ytfree-preview-title {
+  font-size: var(--font-ui-medium);
+}
+
+/* ------------------------------------- the phone, upright, reading — #8 ---
+ *
+ * From Isaiah's test of the fullscreen sheet: the reading region needed more of
+ * the screen without collapsing the video. So, upright on a phone:
+ *
+ * - The two disclosure headers sit side by side directly under the player, in
+ *   a row of their own that never moves: nothing above them changes height when
+ *   a region opens or shuts, so they cannot reflow under the finger.
+ * - While a region is open, the title, the facts and the four buttons are not
+ *   on the sheet, and the region takes everything below the headers. Shut the
+ *   region and they come back.
+ * - The header you are reading widens to the full row and the other one goes;
+ *   shut it and the two are side by side again.
+ *
+ * Done with a grid and `display: contents` on the boxes that group the
+ * headers with their bodies, so the DOM the laptop and landscape layouts rely
+ * on is unchanged.
+ */
+@media (min-height: 521px) {
+  .is-phone .ytfree-preview-modal .modal-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "player player"
+      "dhead thead"
+      "title title"
+      "facts facts"
+      "body body"
+      "actions actions";
+    column-gap: 0.5em;
+  }
+
+  .is-phone .ytfree-preview-modal .ytfree-preview-player {
+    grid-area: player;
+    margin-bottom: 0.5em;
+  }
+
+  .is-phone .ytfree-preview-read,
+  .is-phone .ytfree-preview-describe,
+  .is-phone .ytfree-preview-transcript,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-describe:not(.is-open),
+  .is-phone .ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) {
+    display: contents;
+  }
+
+  .is-phone .ytfree-preview-disclose {
+    grid-area: dhead;
+  }
+
+  .is-phone .ytfree-preview-transcript-head {
+    grid-area: thead;
+  }
+
+  .is-phone .ytfree-preview-disclose,
+  .is-phone .ytfree-preview-transcript-head {
+    min-width: 0;
+    justify-content: center;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+  }
+
+  .is-phone .ytfree-preview-disclose-label,
+  .is-phone .ytfree-preview-transcript-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-disclose,
+  .is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-head {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+
+  /*
+   * Open, the header you are reading takes the whole row and the other one
+   * goes; shut, they are two halves again (Isaiah's third phone test). The row
+   * itself stays put either way, so nothing below the picture jumps.
+   */
+  .is-phone .ytfree-sheet-reading .ytfree-preview-describe:not(.is-open) .ytfree-preview-disclose,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) .ytfree-preview-transcript-head {
+    display: none;
+  }
+
+  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-disclose,
+  .is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-head {
+    grid-area: dhead-start / dhead-start / dhead-end / thead-end;
+  }
+
+  .is-phone .ytfree-preview-title {
+    grid-area: title;
+    margin-top: 0.6em;
+  }
+
+  .is-phone .ytfree-preview-facts {
+    grid-area: facts;
+  }
+
+  /* Both bodies share the region; only the open one has any height. */
+  .is-phone .ytfree-preview-description,
+  .is-phone .ytfree-preview-transcript-body {
+    grid-area: body;
+    min-height: 0;
+  }
+
+  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-description,
+  .is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
+    margin-top: 0.5em;
+  }
+
+  .is-phone .ytfree-preview-actions {
+    grid-area: actions;
+    margin-top: 0.5em;
+  }
+
+  .is-phone .ytfree-sheet-reading .ytfree-preview-title,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-facts,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-actions {
+    display: none;
+  }
+}
+
+/* ------------------------------------------ the phone, held sideways — 039 ---
+ *
+ * Landscape is the same sheet with the two resources swapped: 844 points of
+ * width and 390 of height, where portrait has the opposite. Stacked, it does
+ * not fit at any picture size worth watching — picture, title, facts,
+ * disclosure and four buttons come to more than the screen before the
+ * transcript asks for anything — so the answer is not a smaller picture, it is
+ * the other axis. The picture and the facts take the left half, the transcript
+ * takes the right half at full height, and the buttons run along the foot.
+ *
+ * `max-height` rather than an orientation query, because the thing that decides
+ * this is how much vertical room there is: a split-screen or a hardware
+ * keyboard produces the same shortage the same way.
+ */
+@media (max-height: 520px) {
+  .is-phone .modal.ytfree-preview-modal {
+    --ytfree-sheet-top: max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px));
+  }
+
+  /* No status bar sideways, so a little room above the picture instead. */
+  .is-phone .ytfree-preview-modal .modal-content {
+    padding-top: var(--size-4-2);
+  }
+
+  .is-phone .ytfree-preview-modal .modal-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    /*
+     * Picture, title, facts, whatever is left, and the buttons under both
+     * columns. `minmax(0, 1fr)` on the fourth: nothing is placed in it in the
+     * left column any more — the reading is one box in the right-hand column
+     * now — so it is spare space and is allowed to be nothing at all.
+     */
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    column-gap: 0.9em;
+  }
+
+  .is-phone .ytfree-preview-modal .ytfree-preview-player {
+    grid-area: 1 / 1;
+  }
+
+  .is-phone .ytfree-preview-title {
+    grid-area: 2 / 1;
+    /* One line and an ellipsis. A long title in a half-width column is four
+       lines, and on a 390pt screen each one of them comes out of the picture
+       above it — the title is also the first thing in the description, and the
+       sheet was opened from a card that had it in full.
+       `nowrap`, not `-webkit-line-clamp`: a clamped `-webkit-box` reports a
+       min-content height of zero to the grid, so the row it is in collapses to
+       nothing the moment anything else on the sheet asks for space. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* `overflow: hidden` sets a grid item's automatic minimum size to zero, and
+       a row whose only item can be zero tall *is* zero tall as soon as the sheet
+       is over-constrained — which is exactly the moment the description opens.
+       One line, said out loud. */
+    min-height: 1.3em;
+  }
+
+  .is-phone .ytfree-preview-facts {
+    grid-area: 3 / 1;
+  }
+
+  /*
+   * Both regions, in the right-hand column, at the full height of the sheet.
+   *
+   * This used to be the sheet's one honest shortage: the description was pinned
+   * under the facts in the *left* column and capped at 30vh, because a
+   * full-height transcript beside a readable description did not fit. It does
+   * now, because only one of them is ever drawn — the shut one is not on the
+   * sheet at all (see `.ytfree-sheet-reading`), so whichever you are reading
+   * gets the whole column and the cap has nothing left to protect.
+   */
+  .is-phone .ytfree-preview-read {
+    grid-area: 1 / 2 / 5 / 3;
+    min-height: 0;
+  }
+
+  .is-phone .ytfree-preview-read > *:first-child {
+    margin-top: 0;
+    border-top: none;
+  }
+
+  .is-phone .ytfree-preview-actions {
+    grid-area: 5 / 1 / 6 / 3;
+  }
+
+  /*
+   * Still capped, and much lower than portrait's 42vh — this is the number the
+   * whole left column is spent on. Half the width of a phone held sideways is
+   * 16:9 of 420 points, which is 60% of the screen's height on its own: at
+   * anything above about a quarter of the height the description's row is left
+   * with single figures, and opening the description opens an empty box. A
+   * small picture with the words next to it is what landscape is for; if you
+   * want the picture, fullscreen is one button away.
+   */
+  .is-phone .ytfree-preview-wrapper {
+    max-width: calc(24vh * 16 / 9);
+  }
+}
+
+/* ---------------------------------------------------------------- account */
+
+/*
+ * The sign-in window. Sized in the stylesheet rather than inline so the modal
+ * has its final dimensions before the webview loads — a window that grows once
+ * YouTube renders would move the avatar out from under the pointer.
+ */
+.ytfree-signin-modal {
+  width: min(560px, 90vw);
+  height: min(780px, 88vh);
+}
+
+.ytfree-signin-status {
+  min-height: 1.6em;
+  line-height: 1.6em;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.ytfree-signin-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0.4em 0;
+}
+
+.ytfree-signin-navbutton {
+  padding: 0 0.6em;
+}
+
+.ytfree-signin-url {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.ytfree-signin-view {
+  width: 100%;
+  height: calc(100% - 6em);
+  min-height: 520px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+/* Reserved line: the session status changes length as it changes state. */
+.ytfree-account-status {
+  min-height: 1.6em;
+  line-height: 1.6em;
+  margin-top: 0.4em;
+  color: var(--text-accent);
+}
+
+/* The label swaps between "Sign in…" and "Sign out"; the width must not. */
+.ytfree-account-button {
+  min-width: 7.5em;
+}
+
+/* Reserved line: it reports on the webhook and then on the last test, which
+   are three different lengths of sentence. Two lines of room and a fixed
+   height, so pressing Send test never moves the rows under it. */
+.ytfree-notify-status {
+  min-height: 3.2em;
+  line-height: 1.6em;
+  margin-top: 0.4em;
+  color: var(--text-accent);
+}
+
+/* Its label does not change, but a fixed width keeps it aligned with the other
+   buttons in the pane rather than sizing itself to two words. */
+.ytfree-notify-button {
+  min-width: 7.5em;
+}
+
+/* Already seen elsewhere — dimmed, never hidden outside the New filter. */
+.ytfree-hub-card.is-watched .ytfree-hub-thumb {
+  opacity: 0.55;
+}
+
+/* The collapsed Advanced block in settings. Its summary is a control, so it
+   gets the same hit area and cursor as one; the settings inside are indented
+   so it is obvious they belong to it rather than to the section above. */
+.ytfree-advanced > summary {
+  cursor: pointer;
+  padding: 0.6em 0;
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+}
+
+.ytfree-advanced > .setting-item,
+.ytfree-advanced > .setting-item-description {
+  padding-left: 1em;
+  border-left: 2px solid var(--background-modifier-border);
+}
+
+/*
+ * ------------------------------------------------- the channel screen (045) ---
+ *
+ * The search screen's frame with a channel's face on it: avatar and name where
+ * "Search YouTube" sits, Subscribe at the far end of the header, and one line
+ * of facts under it. The facts line is always one line tall, so the header
+ * arriving after the first paint never moves the search box.
+ */
+.ytfree-channel-avatar {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--background-modifier-border);
+}
+
+.ytfree-channel-avatar.is-empty {
+  visibility: hidden;
+}
+
+.ytfree-channel-subscribe {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.ytfree-channel-facts {
+  height: 1.6em;
+  line-height: 1.6em;
+  padding: 0 0.75em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+/* The channel name in Preview's facts line: a way to that channel's screen. */
+.ytfree-preview-channel {
+  display: inline;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  color: var(--text-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+}
+
+.ytfree-preview-channel:hover {
+  text-decoration-color: currentColor;
+}
