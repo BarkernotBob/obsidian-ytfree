@@ -11,7 +11,8 @@ export const HD_WAIT_MS = 15_000;
 /**
  * Where HD has got to for one player.
  *
- * - `off`: HD was not asked for (the setting is off, or a local file).
+ * - `off`: HD was not asked for (the setting is off, 360p was picked for this
+ *   video, or a local file). `reason`, when set, replaces the hover text.
  * - `finding`: the HD resolve is running; `height` is what plays meanwhile.
  * - `none`: HD is not coming for this video right now; `reason` says why.
  * - `climbing`: HD is attached and playing below its top rung.
@@ -65,7 +66,7 @@ export function badgeText(state: HdState): BadgeText {
       };
     case "off":
     default:
-      return { text: p(state.height), title: "HD is off in Settings → YT Free.", settled: true };
+      return { text: p(state.height), title: state.reason ?? "HD is off in Settings → YT Free.", settled: true };
   }
 }
 

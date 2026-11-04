@@ -185,6 +185,15 @@ export interface QuickPanelOptions {
    */
   pauseWhileTyping?: boolean;
   onPauseWhileTyping?: (value: boolean) => void;
+  /**
+   * HD or 360p for this video, when the reader already picked one here.
+   * Absent, `load`'s argument (the setting) decides. `onQuality` hears every
+   * pick so a rebuilt player opens on it.
+   */
+  hd?: boolean;
+  onQuality?: (hd: boolean) => void;
+  /** What the setting will say, so the row reads right before `load` runs. */
+  hdDefault?: boolean;
 }
 
 /** The lock screen's three fields. */
@@ -315,6 +324,20 @@ export class YtFreePlayer {
   /** The quality chip on the picture's top-left corner — see `paintQuality`. */
   private qualityBadge: HTMLElement | null = null;
   private hdState: HdState = { phase: "off" };
+  /**
+   * HD or 360p for this player: the reader's pick in the pop-out, else the
+   * setting `load` was given. Null until one of those has spoken.
+   */
+  private wantHd: boolean | null = null;
+  /** The pick came from the pop-out, not from the setting. */
+  private qualityPicked = false;
+  /** Bumped on every pick, so an HD resolve started before it is ignored. */
+  private qualityGen = 0;
+  /** A source has been attached: before that, a pick is only remembered. */
+  private sourced = false;
+  /** Ends "Start in HD"'s wait early when 360p is picked during it. */
+  private onPick: (() => void) | null = null;
+  private qualitySelect: HTMLSelectElement | null = null;
   /** Fades a settled badge; cleared by any change that unsettles it. */
   private qualityTimer: number | null = null;
   /** The Play/Pause button, repainted from one place — see `paintPlay`. */
@@ -1261,6 +1284,24 @@ export class YtFreePlayer {
       return el;
     };
 
+    {
+      // First, because it is the one that changes what you see. A select, not
+      // a switch: "HD" and "360p" are two answers, not a feature on and off.
+      if (quick.hd !== undefined) {
+        this.wantHd = quick.hd;
+        this.qualityPicked = true;
+      }
+      const el = row("Quality").createEl("select", {
+        cls: "ytfree-panel-select ytfree-panel-quality",
+        attr: { "aria-label": "Quality for this video" },
+      });
+      el.createEl("option", { text: "HD", value: "hd" });
+      el.createEl("option", { text: "360p", value: "sd" });
+      el.addEventListener("change", () => this.setQuality(el.value === "hd"));
+      this.qualitySelect = el;
+      this.paintQualityChoice();
+    }
+
     if (this.options.smartSpeed) {
       // Smart Speed's only control now, and the pop-out button on the bar is
       // its only indicator — both painted from `paintSmart`, so the switch, the
@@ -2201,19 +2242,92 @@ export class YtFreePlayer {
    * it in at the same playback position — deliberately not awaited.
    */
   async load(upgradeToHighQuality: boolean, waitForHd = false): Promise<void> {
-    if (upgradeToHighQuality && waitForHd && Hls.isSupported()) return this.loadHdFirst();
+    // A pick in the pop-out (this time or a rebuilt player's) beats the setting.
+    if (this.wantHd === null) this.wantHd = upgradeToHighQuality;
+    this.paintQualityChoice();
+    if (this.wantHd && waitForHd && Hls.isSupported()) return this.loadHdFirst();
     const stream = await this.provider("fast", false);
     // Where this video was left, if it was left anywhere. `attach` seeks once
     // the media reports metadata, so this costs nothing when it is 0 and does
     // not race a timestamp link tapped a moment later — that seek is registered
     // afterwards and therefore lands last.
     this.attach(stream, this.resumeSeconds(), false);
-    if (upgradeToHighQuality) {
+    // Read after the await: a pick made while 360p resolved counts.
+    if (this.wantHd) {
       this.setHd({ phase: "finding", height: stream.height });
       void this.upgrade();
     } else {
-      this.setHd({ phase: "off", height: stream.height });
+      this.setHd(this.sdState(stream.height));
     }
+  }
+
+  /** The badge for 360p by choice: the setting's, or this video's pick. */
+  private sdState(height?: number): HdState {
+    return this.qualityPicked
+      ? { phase: "off", height, reason: "360p, chosen for this video. Change it in the ⋯ pop-out." }
+      : { phase: "off", height };
+  }
+
+  /**
+   * HD or 360p for this video only (the pop-out's Quality row). Never writes
+   * a setting. Before anything is attached the pick is only remembered: the
+   * load in flight reads it once its first resolve is back.
+   */
+  setQuality(hd: boolean): void {
+    if (this.destroyed || this.local || hd === this.wantHd) return;
+    this.qualityPicked = true;
+    this.wantHd = hd;
+    const gen = ++this.qualityGen;
+    this.paintQualityChoice();
+    this.options.quick?.onQuality?.(hd);
+    // "Start in HD" is waiting: 360p ends the wait now.
+    if (!hd) this.onPick?.();
+    if (!this.sourced) return;
+    if (hd) {
+      if (this.upgraded) return;
+      this.setHd({ phase: "finding", height: this.hdState.height });
+      void this.upgrade(undefined, gen);
+    } else {
+      void this.downgrade(gen);
+    }
+  }
+
+  /** 360p in place of HD, at the same second and play state. */
+  private async downgrade(gen: number): Promise<void> {
+    if (!this.upgraded) {
+      // 360p already plays; only an HD lookup may be in flight, and `gen`
+      // has already told it to stand down.
+      this.setHd(this.sdState(this.hdState.height));
+      return;
+    }
+    this.onStatus("Switching to 360p…");
+    let stream: ResolvedStream;
+    try {
+      stream = await this.provider("fast", false);
+    } catch (err) {
+      if (gen !== this.qualityGen || this.destroyed) return;
+      this.onStatus(`Could not switch to 360p: ${hdReason(err)}`);
+      window.setTimeout(() => {
+        if (!this.destroyed) this.onStatus(null);
+      }, 6000);
+      return;
+    }
+    if (gen !== this.qualityGen || this.destroyed || this.local || this.recovering) return;
+    this.onStatus(null);
+    const resumeAt = this.video.currentTime;
+    const wasPlaying = !this.video.paused && !this.video.ended;
+    this.upgraded = false;
+    this.setHd(this.sdState(stream.height));
+    this.attach(stream, resumeAt, wasPlaying);
+  }
+
+  /** The Quality row follows the player, including a pick it was rebuilt with. */
+  private paintQualityChoice(): void {
+    const el = this.qualitySelect;
+    if (!el) return;
+    el.value = (this.wantHd ?? this.options.quick?.hdDefault ?? true) ? "hd" : "sd";
+    el.disabled = this.local;
+    el.title = this.local ? "Playing the downloaded copy" : "";
   }
 
   /**
@@ -2234,9 +2348,12 @@ export class YtFreePlayer {
 
     this.setHd({ phase: "finding" });
     this.onStatus("Waiting for HD…");
-    const hd = await within(quality, HD_WAIT_MS);
+    // 360p picked in the pop-out meanwhile: stop waiting.
+    const picked = new Promise<null>((resolve) => (this.onPick = () => resolve(null)));
+    const hd = await within<ResolvedStream | null>(Promise.race([quality, picked]), HD_WAIT_MS);
+    this.onPick = null;
     if (this.destroyed) return;
-    if (hd && hd.isHls) {
+    if (hd && hd.isHls && this.wantHd) {
       this.upgraded = true;
       this.attach(hd, this.resumeSeconds(), false, true);
       this.onStatus(null);
@@ -2247,6 +2364,10 @@ export class YtFreePlayer {
     // Throws when 360p fails too, which is the failure the caller reports.
     const stream = await fast;
     this.attach(stream, this.resumeSeconds(), false);
+    if (!this.wantHd) {
+      this.setHd(this.sdState(stream.height));
+      return;
+    }
     if (hd) {
       // HD answered, but with nothing better than what plays now.
       this.setHd({ phase: "none", height: stream.height, reason: "no HD stream" });
@@ -2276,6 +2397,7 @@ export class YtFreePlayer {
     this.local = true;
     this.teardownHls();
     this.paintQuality();
+    this.paintQualityChoice();
     const fail = () => {
       if (!this.local) return;
       this.local = false;
@@ -2310,6 +2432,7 @@ export class YtFreePlayer {
     this.local = true;
     this.teardownHls();
     this.paintQuality();
+    this.paintQualityChoice();
     this.video.src = url;
     this.video.addEventListener(
       "loadedmetadata",
@@ -2328,16 +2451,18 @@ export class YtFreePlayer {
     return this.local;
   }
 
-  private async upgrade(pending?: Promise<ResolvedStream>): Promise<void> {
+  private async upgrade(pending?: Promise<ResolvedStream>, gen = this.qualityGen): Promise<void> {
     let stream: ResolvedStream;
     try {
       stream = await (pending ?? this.provider("quality", false));
     } catch (err) {
+      // A pick since this started has its own answer coming.
+      if (gen !== this.qualityGen) return;
       // 360p already plays; a failed upgrade is not worth interrupting for.
       this.setHd({ ...this.hdState, phase: "none", reason: hdReason(err) });
       return;
     }
-    if (this.destroyed || this.recovering || this.local) return;
+    if (this.destroyed || this.recovering || this.local || gen !== this.qualityGen || !this.wantHd) return;
     if (!stream.isHls) {
       // No quality gain, so don't disturb playback.
       this.setHd({ ...this.hdState, phase: "none", reason: "no HD stream" });
@@ -2363,6 +2488,7 @@ export class YtFreePlayer {
    */
   private attach(stream: ResolvedStream, resumeAt: number, autoplay: boolean, atTop = false): void {
     if (this.destroyed) return;
+    this.sourced = true;
     this.teardownHls();
     if (!stream.isHls) this.setHd({ ...this.hdState, height: stream.height });
 

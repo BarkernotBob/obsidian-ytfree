@@ -533,6 +533,8 @@ interface VideoSession {
   skipNonSpeech?: boolean;
   /** "Pause while typing", same terms. */
   pauseWhileTyping?: boolean;
+  /** The pop-out's Quality row: true for HD, false for 360p. */
+  hd?: boolean;
 }
 
 /**
@@ -4401,6 +4403,12 @@ export default class YtFreePlugin extends Plugin {
           onPauseWhileTyping: (value) => {
             session.pauseWhileTyping = value;
             if (entry) entry.pauseWhileTyping = value;
+          },
+          // HD or 360p for this video, over the setting the load is given.
+          hd: session.hd,
+          hdDefault: mobile ? this.settings.phoneHighQuality : this.settings.upgradeToHighQuality,
+          onQuality: (hd) => {
+            session.hd = hd;
           },
         },
         // Everything the reader set on this video that a rebuilt player would
