@@ -41,6 +41,10 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
    Press it again once the video plays: the phone's own fullscreen. Same in a note (#9).
 3. Isaiah: approve or change the #10/#11 scope, and answer its one question. Then build it.
 4. Backlog for HD is on GitHub (quality picker / ABR, InnerTube-first on desktop).
+5. Request volume (2026-11-04, after the home IP got bot-flagged): research in
+   [docs/RESEARCH-YOUTUBE-REQUESTS.md](docs/RESEARCH-YOUTUBE-REQUESTS.md), backlog #31–#39.
+   Suggested first: #31 (stop after a bot check) and #39 (smoke canary). No live probes from
+   Isaiah's network until then.
 
 ## How to ship and test
 
