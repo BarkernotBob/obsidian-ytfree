@@ -33,6 +33,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ### 2026-11-04 (measured; Claude's call, open to change)
 
+- **Phone HD (#25), part 1:** the phone asks IOS first and plays its HLS manifest with iOS's own
+  player, never hls.js (googlevideo sends no CORS header). Measured 2026-11-04: that manifest
+  exists on 1 of 5 videos and serves the whole video. PO token / BotGuard generation is out:
+  Claude's safety check blocks it as bot-check circumvention. Part 2 (HD through the Mac on the
+  home network) waits on Isaiah. Scope: `docs/V1-SCOPE-PHONE-HD.md`.
+
 - Desktop HD comes from yt-dlp's files when InnerTube's stop serving after about a minute
   (`ytDlpFormats` + `resolveHdFromYtDlp`), stitched and streamed the same way. InnerTube is
   still tried first. Phone HD on most videos is GitHub #25.
