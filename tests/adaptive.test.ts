@@ -201,6 +201,30 @@ test("resolveHd falls through clients, then to an HLS manifest, then throws", as
   );
 });
 
+test("resolveHd with hlsFirst takes a manifest before any byte request (#25)", async () => {
+  const asked: string[] = [];
+  let reads = 0;
+  const counting = async (u: string, s: number, e: number, ua?: string) => {
+    reads += 1;
+    return fakeFetch([])(u, s, e, ua);
+  };
+  const ask = async (c: string): Promise<ClientAnswer> => {
+    asked.push(c);
+    return { adaptiveFormats: formats, hlsManifestUrl: c === "ios" ? "https://m/x.m3u8" : null, ua: "UA" };
+  };
+  const stream = await resolveHd("abcdefghijk", ["ios", "android"], ask, counting, undefined, true);
+  assert.equal(stream.url, "https://m/x.m3u8");
+  assert.equal(stream.virtual, undefined);
+  assert.deepEqual(asked, ["ios"]);
+  assert.equal(reads, 0);
+
+  // No manifest from the first client: the pair path runs as before.
+  const noHls = async (c: string): Promise<ClientAnswer> => {
+    return { adaptiveFormats: formats, hlsManifestUrl: null, ua: c };
+  };
+  assert.ok((await resolveHd("abcdefghijk", ["ios", "android"], noHls, fakeFetch([]), undefined, true)).virtual);
+});
+
 test("segmentAt finds the segment at or past a time, else the last", () => {
   const segs = [0, 1, 2, 3].map((i) => ({ offset: i * 10, length: 10, duration: 40 }));
   assert.equal(segmentAt(segs, 90).offset, 30); // starts at 120 s

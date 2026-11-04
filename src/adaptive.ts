@@ -474,6 +474,7 @@ export async function resolveHd(
   ask: (client: string) => Promise<ClientAnswer | null>,
   fetchRange: FetchRange,
   maxHeight = DEFAULT_MAX_HEIGHT,
+  hlsFirst = false,
 ): Promise<ResolvedStream> {
   const reasons: string[] = [];
   let hls: string | null = null;
@@ -484,6 +485,9 @@ export async function resolveHd(
       continue;
     }
     hls ??= answer.hlsManifestUrl;
+    // The phone: YouTube's own manifest serves the whole video and iOS plays
+    // it natively, while the separate files mostly stop at a minute (#25).
+    if (hlsFirst && hls) break;
     const pair = pickPair(answer.adaptiveFormats, maxHeight);
     if (!pair) {
       reasons.push(`${client}: no HD pair`);

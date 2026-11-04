@@ -5184,8 +5184,8 @@ export default class YtFreePlugin extends Plugin {
 
       let stream: ResolvedStream;
       if (mode === "quality") {
-        const { resolveHdStream } = await import("./hd.ts");
-        stream = await resolveHdStream(videoId);
+        const { resolvePhoneHdStream } = await import("./hd.ts");
+        stream = await resolvePhoneHdStream(videoId);
       } else {
         const { resolveMobileStream } = await import("./mobile/innertube.ts");
         stream = await resolveMobileStream(videoId);
