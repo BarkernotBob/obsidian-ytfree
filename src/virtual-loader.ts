@@ -129,6 +129,20 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
   };
 }
 
+/**
+ * How hls.js retries a stitched stream's segments: briefly. A refusal has
+ * already had its re-link by the time hls.js hears of it (`relinkingFetch` in
+ * `adaptive.ts`), so only a dropped connection is worth another go, and the
+ * fall back to 360p should come in seconds rather than after the default's
+ * six tries up to 8 s apart.
+ */
+export const VIRTUAL_FRAG_POLICY = {
+  maxTimeToFirstByteMs: 10_000,
+  maxLoadTimeMs: 30_000,
+  timeoutRetry: { maxNumRetry: 1, retryDelayMs: 0, maxRetryDelayMs: 0 },
+  errorRetry: { maxNumRetry: 2, retryDelayMs: 500, maxRetryDelayMs: 1000 },
+};
+
 /** The slice of an Hls instance `dropOnJump` touches. */
 interface LevelSwitch {
   nextLoadLevel: number;

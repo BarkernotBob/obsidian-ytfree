@@ -47,6 +47,10 @@ export interface AdaptiveFormat {
 }
 
 export interface AdaptiveTrack {
+  /** Which file this is. A fresh answer names the same file by the same itag. */
+  itag: number;
+  /** The sound track's language id, when the video has more than one. */
+  audioTrackId?: string;
   url: string;
   codecs: string;
   bitrate: number;
@@ -96,6 +100,8 @@ function toTrack(f: AdaptiveFormat): AdaptiveTrack | null {
   const index = range(f.indexRange);
   if (!f.url || !f.mimeType || !init || !index) return null;
   return {
+    itag: f.itag ?? 0,
+    ...(f.audioTrack?.id ? { audioTrackId: f.audioTrack.id } : {}),
     url: f.url,
     codecs: codecsOf(f.mimeType),
     bitrate: f.bitrate ?? 0,
@@ -281,15 +287,143 @@ export function buildPlaylists(
 export type FetchRange = (url: string, start: number, end: number, ua?: string) => Promise<ArrayBuffer>;
 
 /**
+ * How far into a file the resolve looks before trusting it.
+ *
+ * YouTube can serve the opening of a file and refuse the rest: NewPipe saw
+ * 403s at 1:09 on stream URLs issued without an anti-bot token. Under a 30 s
+ * buffer that is a stall at about 55 s, then a fall back to 360p with
+ * different sound (Isaiah, 2026-10-22: "at right about 55 seconds, almost
+ * every video pauses"). A small read from past that point at resolve time
+ * finds out while 360p is still playing, and the next client gets a turn.
+ */
+export const DEEP_CHECK_SECONDS = 90;
+const DEEP_CHECK_BYTES = 1024;
+
+/** The segment that starts at or past `seconds`, or the last one. */
+export function segmentAt(segments: Segment[], seconds: number): Segment {
+  let clock = 0;
+  for (const s of segments) {
+    if (clock >= seconds) return s;
+    clock += s.duration;
+  }
+  return segments[segments.length - 1];
+}
+
+async function deepCheck(rung: Rung, fetchRange: FetchRange, ua?: string): Promise<void> {
+  const s = segmentAt(rung.segments, DEEP_CHECK_SECONDS);
+  try {
+    await fetchRange(rung.track.url, s.offset, s.offset + Math.min(s.length, DEEP_CHECK_BYTES) - 1, ua);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    throw new Error(`serves only the opening (${why})`);
+  }
+}
+
+/** Another client's answer, asked for when a link stops working mid-play. */
+export interface Reask {
+  clients: string[];
+  ask: (client: string) => Promise<ClientAnswer | null>;
+}
+
+/** A refusal, as opposed to a dropped connection: a fresh link may cure it. */
+function isRefusal(err: unknown): boolean {
+  const status = (err as { status?: number })?.status ?? 0;
+  if (status === 403 || status === 404 || status === 410) return true;
+  return /HTTP (403|404|410)\b/.test(err instanceof Error ? err.message : String(err));
+}
+
+/** The same files in a fresh answer, keyed by the URLs the playlists name. */
+function matchTracks(tracks: AdaptiveTrack[], formats: AdaptiveFormat[]): Map<string, string> | null {
+  const out = new Map<string, string>();
+  for (const t of tracks) {
+    const f = formats.find((x) => x.itag === t.itag && x.url && (x.audioTrack?.id ?? undefined) === t.audioTrackId);
+    if (!f?.url) return null;
+    out.set(t.url, f.url);
+  }
+  return out;
+}
+
+/**
+ * Byte ranges for the playlists' URLs, re-linked when YouTube stops honouring
+ * them.
+ *
+ * The playlists keep naming the URLs they were built with; this keeps a map
+ * from each to the link that currently works. On a refusal it asks the clients
+ * again for the same files (same itag, so every offset still holds), takes the
+ * first answer that serves the failed range, and re-links every track to it.
+ * hls.js sees one slow segment instead of an error, so there is no fall back
+ * to 360p and no retry ladder (which is also what made a jump slow). When no
+ * client serves it, the refusal goes through and the player falls back as
+ * before, and later refusals skip the asking.
+ */
+export function relinkingFetch(
+  tracks: AdaptiveTrack[],
+  fetchRange: FetchRange,
+  ua?: string,
+  reask?: Reask,
+): (url: string, start: number, end: number) => Promise<ArrayBuffer> {
+  const links = new Map<string, { url: string; ua?: string }>();
+  let relinking: Promise<boolean> | null = null;
+  let dead = false;
+
+  const current = (url: string) => links.get(url) ?? { url, ua };
+
+  const relink = async (url: string, start: number, end: number): Promise<ArrayBuffer | null> => {
+    for (const client of reask!.clients) {
+      const answer = await reask!.ask(client).catch(() => null);
+      const fresh = answer && matchTracks(tracks, answer.adaptiveFormats);
+      if (!answer || !fresh) continue;
+      try {
+        const bytes = await fetchRange(fresh.get(url) ?? url, start, end, answer.ua);
+        for (const [from, to] of fresh) links.set(from, { url: to, ua: answer.ua });
+        return bytes;
+      } catch {
+        // This client is refused at this point too; try the next one.
+      }
+    }
+    return null;
+  };
+
+  return async (url, start, end) => {
+    const link = current(url);
+    try {
+      return await fetchRange(link.url, start, end, link.ua);
+    } catch (err) {
+      if (!reask || dead || !isRefusal(err)) throw err;
+      // Video and sound tend to be refused together: one re-link serves both.
+      if (relinking) {
+        await relinking;
+        if (dead) throw err;
+        const again = current(url);
+        if (again.url === link.url) throw err;
+        return fetchRange(again.url, start, end, again.ua);
+      }
+      let bytes: ArrayBuffer | null = null;
+      relinking = relink(url, start, end).then((b) => ((bytes = b), b !== null));
+      const ok = await relinking;
+      relinking = null;
+      if (!ok) {
+        dead = true;
+        throw err;
+      }
+      return bytes!;
+    }
+  };
+}
+
+/**
  * Turn an adaptive pair into a playable stream: read both indexes (which is
- * also the proof that YouTube will serve these files), then build the
- * playlists. Throws when either file refuses or its index cannot be read.
+ * also the proof that YouTube will serve these files), check that the top rung
+ * and the sound still serve past the first minute, then build the playlists.
+ * Throws when either file refuses or its index cannot be read. `reask` lets the
+ * stream re-link itself if YouTube refuses its links later.
  */
 export async function streamFromPair(
   videoId: string,
   pair: AdaptivePair,
   fetchRange: FetchRange,
   ua?: string,
+  reask?: Reask,
 ): Promise<ResolvedStream> {
   const read = async (track: AdaptiveTrack): Promise<Rung> => ({
     track,
@@ -302,12 +436,13 @@ export async function streamFromPair(
     read(pair.audio),
     ...pair.ladder.slice(1).map((t) => read(t).catch(() => null)),
   ]);
+  await Promise.all([deepCheck(top, fetchRange, ua), deepCheck(audio, fetchRange, ua)]);
   const videos = [top, ...lower.filter((r): r is Rung => r !== null)];
   const { master, files } = buildPlaylists(videoId, videos, audio);
 
   const virtual: VirtualPlaylist = {
     files,
-    fetchRange: (url, start, end) => fetchRange(url, start, end, ua),
+    fetchRange: relinkingFetch([...videos.map((r) => r.track), audio.track], fetchRange, ua, reask),
   };
   const expiry = Math.min(parseExpiry(pair.video.url), parseExpiry(pair.audio.url));
   return {
@@ -355,7 +490,7 @@ export async function resolveHd(
       continue;
     }
     try {
-      return await streamFromPair(videoId, pair, fetchRange, answer.ua);
+      return await streamFromPair(videoId, pair, fetchRange, answer.ua, { clients, ask });
     } catch (err) {
       reasons.push(`${client}: ${err instanceof Error ? err.message : String(err)}`);
     }
