@@ -6,8 +6,8 @@
  */
 
 import { requestUrl } from "obsidian";
-import { DEFAULT_MAX_HEIGHT, resolveHd, withRange } from "./adaptive.ts";
-import type { AdaptiveFormat, ClientAnswer } from "./adaptive.ts";
+import { DEFAULT_MAX_HEIGHT, resolveHd, resolveHdFromYtDlp, withRange } from "./adaptive.ts";
+import type { AdaptiveFormat, ClientAnswer, YtDlpFormat } from "./adaptive.ts";
 import { callInnertube, CLIENTS, playerBody, PLAYER_URL } from "./innertube.ts";
 import type { ResolvedStream } from "./stream.ts";
 
@@ -47,4 +47,13 @@ export async function fetchRange(url: string, start: number, end: number, ua?: s
 
 export function resolveHdStream(videoId: string, maxHeight = DEFAULT_MAX_HEIGHT): Promise<ResolvedStream> {
   return resolveHd(videoId, HD_CLIENTS, (client) => ask(videoId, client), fetchRange, maxHeight);
+}
+
+/** Desktop: the same stitched stream from yt-dlp's files (see `YtDlpFormat`). */
+export function resolveHdFromYtDlpFormats(
+  videoId: string,
+  formats: YtDlpFormat[],
+  maxHeight = DEFAULT_MAX_HEIGHT,
+): Promise<ResolvedStream> {
+  return resolveHdFromYtDlp(videoId, formats, fetchRange, maxHeight);
 }

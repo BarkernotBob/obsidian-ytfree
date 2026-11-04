@@ -9,7 +9,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildPlaylists,
+  locateIndex,
   relinkingFetch,
+  resolveHdFromYtDlp,
+  ytDlpCandidates,
   segmentAt,
   parseSidx,
   pickPair,
@@ -18,7 +21,7 @@ import {
   virtualBase,
   withRange,
 } from "../src/adaptive.ts";
-import type { AdaptiveFormat, ClientAnswer } from "../src/adaptive.ts";
+import type { AdaptiveFormat, ClientAnswer, YtDlpFormat } from "../src/adaptive.ts";
 import { virtualLoader } from "../src/virtual-loader.ts";
 
 /** A version-0 sidx box: `refs` are [size, durationInTimescaleUnits]. */
@@ -380,4 +383,61 @@ test("pickPair keeps the original language over a higher-bitrate dub", () => {
   // No default flag at all: "original" still wins.
   const noDefault = dubbed.map((f) => (f.audioTrack ? { ...f, audioTrack: { ...f.audioTrack, audioIsDefault: false } } : f));
   assert.match(pickPair(noDefault)!.audio.url, /lang=en/);
+});
+
+/** An MP4 head: `ftyp`, `moov`, then a sidx of two 5 s segments. */
+function mp4Head(moovSize = 600): ArrayBuffer {
+  const index = new Uint8Array(sidx([[1000, 5000], [1000, 5000]]));
+  const buf = new Uint8Array(32 + moovSize + index.length);
+  const v = new DataView(buf.buffer);
+  v.setUint32(0, 32);
+  "ftyp".split("").forEach((c, i) => v.setUint8(4 + i, c.charCodeAt(0)));
+  v.setUint32(32, moovSize);
+  "moov".split("").forEach((c, i) => v.setUint8(36 + i, c.charCodeAt(0)));
+  buf.set(index, 32 + moovSize);
+  return buf.buffer;
+}
+
+test("locateIndex: init is everything before the sidx, index is the sidx box", () => {
+  assert.deepEqual(locateIndex(mp4Head()), { init: { start: 0, end: 631 }, index: { start: 632, end: 632 + 32 + 24 - 1 } });
+  // A head that ends inside moov has no answer.
+  assert.equal(locateIndex(mp4Head().slice(0, 100)), null);
+});
+
+const ytUrl = (id: string) => `https://rr5.googlevideo.com/videoplayback?itag=${id}&expire=${EXPIRE}`;
+const ytFormats: YtDlpFormat[] = [
+  { format_id: "18", url: ytUrl("18"), protocol: "https", ext: "mp4", vcodec: "avc1.42001E", acodec: "mp4a.40.2", height: 360 },
+  { format_id: "137", url: ytUrl("137"), protocol: "https", ext: "mp4", vcodec: "avc1.640028", acodec: "none", width: 1920, height: 1080, fps: 30, tbr: 4000 },
+  { format_id: "136", url: ytUrl("136"), protocol: "https", ext: "mp4", vcodec: "avc1.4d401f", acodec: "none", width: 1280, height: 720, fps: 30, tbr: 2000 },
+  { format_id: "248", url: ytUrl("248"), protocol: "https", ext: "webm", vcodec: "vp9", acodec: "none", height: 1080 },
+  { format_id: "96", url: ytUrl("96"), protocol: "m3u8_native", ext: "mp4", vcodec: "avc1.640028", acodec: "mp4a.40.2", height: 1080 },
+  { format_id: "140-drc", url: ytUrl("140"), protocol: "https", ext: "m4a", vcodec: "none", acodec: "mp4a.40.2", tbr: 130 },
+  { format_id: "140-1", url: ytUrl("140"), protocol: "https", ext: "m4a", vcodec: "none", acodec: "mp4a.40.2", tbr: 140, language: "de", language_preference: -10, format_note: "German (dubbed-auto)" },
+  { format_id: "140-0", url: ytUrl("140"), protocol: "https", ext: "m4a", vcodec: "none", acodec: "mp4a.40.2", tbr: 129, language: "en", language_preference: 10, format_note: "English (original)" },
+];
+
+test("ytDlpCandidates: H.264 MP4 per height over https, and the original-language AAC", () => {
+  const picked = ytDlpCandidates(ytFormats).map((f) => f.format_id);
+  assert.deepEqual(picked, ["137", "136", "140-0"]);
+});
+
+test("resolveHdFromYtDlp reads each head, then builds and checks the stitched stream", async () => {
+  const log: string[] = [];
+  const fetch = async (u: string, start: number, end: number): Promise<ArrayBuffer> => {
+    log.push(`${u.match(/itag=(\d+)/)?.[1]}:${start}-${end}`);
+    return start === 0 ? mp4Head() : sidx([[1000, 5000], [1000, 5000]]);
+  };
+  const stream = await resolveHdFromYtDlp("abcdefghijk", ytFormats, fetch);
+  assert.equal(stream.height, 1080);
+  assert.ok(stream.virtual);
+  // Heads of 1080p, 720p and the sound, then the indexes found in them.
+  assert.ok(log.includes("137:0-65535") && log.includes("136:0-65535") && log.includes("140:0-65535"));
+  assert.ok(log.includes("137:632-687") && log.includes("140:632-687"));
+});
+
+test("resolveHdFromYtDlp throws when no file has a readable head", async () => {
+  await assert.rejects(
+    resolveHdFromYtDlp("abcdefghijk", ytFormats, async () => { throw new Error("HTTP 403"); }),
+    /no HD pair/,
+  );
 });

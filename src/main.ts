@@ -5098,8 +5098,9 @@ export default class YtFreePlugin extends Plugin {
    * showing an install message — a computer without Homebrew is still a
    * computer that can play video.
    *
-   * "quality" tries the stitched HD stream first (a few seconds, most videos),
-   * then yt-dlp's HLS lookup (~30s, about one video in five signed out).
+   * "quality" tries the stitched HD stream from InnerTube first (a second or
+   * two, when its files serve past the first minute), then the same stitched
+   * stream from yt-dlp's files, then yt-dlp's HLS lookup.
    */
   private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
@@ -5150,14 +5151,22 @@ export default class YtFreePlugin extends Plugin {
   }
 
   private async desktopQuality(videoId: string): Promise<ResolvedStream> {
+    const { resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
     try {
-      const { resolveHdStream } = await import("./hd.ts");
       return await resolveHdStream(videoId);
     } catch (hdError) {
       if (this.ytDlpUnavailable) throw hdError;
-      const { findYtDlp, resolveStream } = await desktop();
+      const { findYtDlp, resolveStream, ytDlpFormats } = await desktop();
       if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-      return await resolveStream(videoId, this.ytDlpPath, "quality");
+      // InnerTube's files mostly stop serving at about a minute (2026-11-04);
+      // yt-dlp's serve the whole video, stitched the same way. Its HLS lookup
+      // stays last, for the odd video with a ladder and no MP4 pair.
+      try {
+        return await resolveHdFromYtDlpFormats(videoId, await ytDlpFormats(videoId, this.ytDlpPath));
+      } catch (err) {
+        console.warn("YT Free: HD via InnerTube and via yt-dlp both failed", hdError, err);
+        return await resolveStream(videoId, this.ytDlpPath, "quality");
+      }
     }
   }
 

@@ -506,6 +506,134 @@ export async function resolveHd(
   throw new Error(`no HD stream (${reasons.join("; ")})`);
 }
 
+/**
+ * One entry of yt-dlp's `-J` `formats[]`, as far as HD needs it.
+ *
+ * Measured 2026-11-04 on Isaiah's Mac: the ANDROID and IOS files stop serving
+ * at about a minute on most videos (403 from 90s on), while the files yt-dlp
+ * hands out serve the whole video. So on a desktop with yt-dlp, the same
+ * stitched stream is built from yt-dlp's files instead.
+ */
+export interface YtDlpFormat {
+  format_id?: string;
+  url?: string;
+  protocol?: string;
+  ext?: string;
+  vcodec?: string | null;
+  acodec?: string | null;
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
+  tbr?: number | null;
+  language?: string | null;
+  language_preference?: number | null;
+  format_note?: string | null;
+}
+
+/**
+ * Where the init segment and the `sidx` box are, from the opening bytes of an
+ * MP4 file. InnerTube states these ranges; yt-dlp does not, so they are read
+ * off the file: top-level boxes run `ftyp`, `moov`, `sidx`, and everything
+ * before the `sidx` is the init segment. Null when the head ends first.
+ */
+export function locateIndex(head: ArrayBuffer): { init: { start: number; end: number }; index: { start: number; end: number } } | null {
+  const view = new DataView(head);
+  let pos = 0;
+  while (pos + 8 <= view.byteLength) {
+    let size = view.getUint32(pos);
+    const type = String.fromCharCode(
+      view.getUint8(pos + 4), view.getUint8(pos + 5), view.getUint8(pos + 6), view.getUint8(pos + 7),
+    );
+    if (size === 1) {
+      if (pos + 16 > view.byteLength) return null;
+      size = Number(view.getBigUint64(pos + 8));
+    }
+    if (type === "sidx") {
+      if (pos === 0 || size < 8) return null;
+      return { init: { start: 0, end: pos - 1 }, index: { start: pos, end: pos + size - 1 } };
+    }
+    if (size < 8) return null;
+    pos += size;
+  }
+  return null;
+}
+
+const isAvcMp4 = (f: YtDlpFormat): boolean =>
+  f.ext === "mp4" && /^avc1/.test(f.vcodec ?? "") && (f.acodec ?? "none") === "none";
+const isAacM4a = (f: YtDlpFormat): boolean =>
+  f.ext === "m4a" && /^mp4a/.test(f.acodec ?? "") && (f.vcodec ?? "none") === "none";
+const isPlainHttps = (f: YtDlpFormat): boolean => !!f.url && (f.protocol ?? "https") === "https";
+
+/** The formats worth reading the head of: one per height, and the sound. */
+export function ytDlpCandidates(formats: YtDlpFormat[], maxHeight = DEFAULT_MAX_HEIGHT): YtDlpFormat[] {
+  const videos = formats
+    .filter((f) => isPlainHttps(f) && isAvcMp4(f) && (f.height ?? 0) >= MIN_LADDER_HEIGHT && (f.height ?? 0) <= maxHeight)
+    .sort((a, b) => (b.height ?? 0) - (a.height ?? 0) || (b.fps ?? 0) - (a.fps ?? 0) || (b.tbr ?? 0) - (a.tbr ?? 0));
+  const ladder: YtDlpFormat[] = [];
+  for (const f of videos) if (!ladder.some((x) => x.height === f.height)) ladder.push(f);
+  // Original language first (yt-dlp marks it with a high language_preference),
+  // then not a dub, then the plain track over a dynamic-range-compressed one.
+  const audioScore = (f: YtDlpFormat): number =>
+    ((f.language_preference ?? 0) >= 10 ? 4 : 0) +
+    (/dubbed/i.test(f.format_note ?? "") ? 0 : 2) +
+    (/drc/i.test(f.format_id ?? "") ? 0 : 1);
+  const audio = formats
+    .filter((f) => isPlainHttps(f) && isAacM4a(f))
+    .sort((a, b) => audioScore(b) - audioScore(a) || (b.tbr ?? 0) - (a.tbr ?? 0))[0];
+  return audio ? [...ladder, audio] : ladder;
+}
+
+/** Enough of a file's opening to hold `ftyp`, `moov` and the `sidx` header. */
+const HEAD_BYTES = 64 * 1024;
+
+/**
+ * yt-dlp's formats as InnerTube-shaped ones, with the init and index ranges
+ * read off each file, so `pickPair` and `streamFromPair` take them unchanged.
+ * A file whose head cannot be read or has no `sidx` is left out.
+ */
+export async function adaptiveFromYtDlp(
+  formats: YtDlpFormat[],
+  fetchRange: FetchRange,
+  maxHeight = DEFAULT_MAX_HEIGHT,
+): Promise<AdaptiveFormat[]> {
+  const read = async (f: YtDlpFormat): Promise<AdaptiveFormat | null> => {
+    const at = await fetchRange(f.url!, 0, HEAD_BYTES - 1).then(locateIndex, () => null);
+    if (!at) return null;
+    const video = isAvcMp4(f);
+    const original = (f.language_preference ?? 0) >= 10;
+    return {
+      itag: parseInt(f.format_id ?? "0", 10) || 0,
+      url: f.url,
+      mimeType: video ? `video/mp4; codecs="${f.vcodec}"` : `audio/mp4; codecs="${f.acodec}"`,
+      bitrate: Math.round((f.tbr ?? 0) * 1000),
+      width: f.width ?? 0,
+      height: f.height ?? 0,
+      fps: f.fps ?? 0,
+      initRange: { start: String(at.init.start), end: String(at.init.end) },
+      indexRange: { start: String(at.index.start), end: String(at.index.end) },
+      ...(video ? {} : { xtags: original ? "acont=original" : /dubbed/i.test(f.format_note ?? "") ? "acont=dubbed" : "" }),
+    };
+  };
+  const out = await Promise.all(ytDlpCandidates(formats, maxHeight).map(read));
+  return out.filter((f): f is AdaptiveFormat => f !== null);
+}
+
+/**
+ * HD from yt-dlp's files: the same stitched, streamed stream as `resolveHd`,
+ * including the check past the first minute. No re-link: asking yt-dlp again
+ * takes too long to hide inside one slow segment.
+ */
+export async function resolveHdFromYtDlp(
+  videoId: string,
+  formats: YtDlpFormat[],
+  fetchRange: FetchRange,
+  maxHeight = DEFAULT_MAX_HEIGHT,
+): Promise<ResolvedStream> {
+  const pair = pickPair(await adaptiveFromYtDlp(formats, fetchRange, maxHeight), maxHeight);
+  if (!pair) throw new Error("yt-dlp: no HD pair");
+  return streamFromPair(videoId, pair, fetchRange);
+}
+
 /** googlevideo takes a byte range as a query parameter as well as a header. */
 export function withRange(url: string, start: number, end: number): string {
   const clean = url.replace(/([?&])range=[^&]*&?/, "$1").replace(/[?&]$/, "");
