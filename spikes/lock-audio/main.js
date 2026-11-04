@@ -96,8 +96,23 @@ class LockSpikeModal extends Modal {
         "5. Unlock and read the log.",
     });
 
+    // YouTube can refuse a given video signed out (LOGIN_REQUIRED). Paste two
+    // links that already play in YT Free on this phone to rule that out.
+    this.inputs = TRACKS.map((t, i) => {
+      const input = contentEl.createEl("input", { type: "text", value: t.id });
+      input.placeholder = `Track ${i + 1}: YouTube link or video ID`;
+      input.style.width = "100%";
+      input.style.marginBottom = "6px";
+      return input;
+    });
+
     const startButton = contentEl.createEl("button", { text: "Start" });
     startButton.addEventListener("click", () => {
+      this.inputs.forEach((input, i) => {
+        const v = input.value.trim();
+        const m = v.match(/(?:v=|youtu\.be\/|shorts\/|live\/)([A-Za-z0-9_-]{11})/);
+        TRACKS[i].id = m ? m[1] : v;
+      });
       startButton.disabled = true;
       void this.run();
     });
@@ -153,13 +168,19 @@ class LockSpikeModal extends Modal {
 
   async run() {
     this.startedAt = Date.now();
-    this.log(`start, mode=${this.mode}`);
+    this.log(`start, mode=${this.mode}, tracks=${TRACKS.map((t) => t.id).join(",")}`);
 
     // Both resolved up front: a failure to start track two must mean the play()
     // was refused, not that a network call was asleep behind a locked screen.
     let urls;
     try {
-      urls = await Promise.all(TRACKS.map((t) => resolveAudio(t.id)));
+      urls = await Promise.all(
+        TRACKS.map((t, i) =>
+          resolveAudio(t.id).catch((err) => {
+            throw new Error(`track ${i + 1} (${t.id}): ${err?.message ?? err}`);
+          }),
+        ),
+      );
       this.log("resolved both tracks");
     } catch (err) {
       this.log("RESOLVE FAILED: " + (err?.message ?? String(err)));
