@@ -27,6 +27,13 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Decisions
 
+### 2026-11-04 (Isaiah)
+
+- **Keep playing on the phone**: leaving fullscreen, the collapse button, leaving Obsidian and
+  locking the phone do not pause the video. Reverses the old "collapse pauses" rule. Whether iOS
+  allows the background resume is unmeasured; see
+  [docs/V1-SCOPE-KEEP-PLAYING.md](docs/V1-SCOPE-KEEP-PLAYING.md).
+
 ### 2026-10-14 (Isaiah)
 
 - **Preview (GitHub #8)**: fullscreen on the phone, not a card. Decided while building: the

@@ -12,6 +12,7 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 // on mobile.
 import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
 import { fullscreenPress } from "./fullscreen.ts";
+import { shouldResumeSystemPause } from "./keep-playing.ts";
 import { dropOnJump, virtualLoader } from "./virtual-loader.ts";
 
 export type { StreamProvider };
@@ -287,6 +288,13 @@ export class YtFreePlayer {
    * native controls a second later is the reader's and is left alone.
    */
   private resumeGuardUntil = 0;
+  /** When the reader last asked for a pause — see `keepPlayingThroughSystemPauses`. */
+  private readerPauseAt = 0;
+  /** When the last `pause` event fired, and whether it has already been answered. */
+  private lastPauseAt = 0;
+  private lastPauseAnswered = true;
+  private fullscreenEndListener: (() => void) | null = null;
+  private onKeepPlayingVisibility: (() => void) | null = null;
   /** Has this player ever started? Stops an untouched note stamping 0:00. */
   private started = false;
   /**
@@ -439,6 +447,7 @@ export class YtFreePlayer {
     }
 
     this.trackBackgroundPause();
+    this.keepPlayingThroughSystemPauses();
     this.trackProgress();
     this.trackNowPlaying();
   }
@@ -653,7 +662,10 @@ export class YtFreePlayer {
       // still be unresolved, and a lock-screen Play is as good a reason to
       // resolve it as a tap on the player.
       ["play", () => void this.withMedia(() => this.play())],
-      ["pause", () => this.video.pause()],
+      ["pause", () => {
+        this.readerPauseAt = Date.now();
+        this.video.pause();
+      }],
       ["seekbackward", () => this.seekBy(-10)],
       ["seekforward", () => this.seekBy(10)],
       [
@@ -820,6 +832,7 @@ export class YtFreePlayer {
         return;
       }
       if (!this.video.paused) {
+        this.readerPauseAt = Date.now();
         this.video.pause();
         return;
       }
@@ -1570,6 +1583,95 @@ export class YtFreePlayer {
       this.resumeGuardUntil = Date.now() + 1500;
     };
     document.addEventListener("visibilitychange", this.onBackgroundVisibility);
+  }
+
+  /**
+   * Leaving fullscreen, leaving Obsidian and locking the phone do not stop the
+   * video (Isaiah, 2026-11-04).
+   *
+   * iOS pauses a playing `<video>` at each of those moments on its own. This
+   * notices a pause that lands within a second of one of them, either side,
+   * and presses Play again. A pause the reader asked for — our Play button, the
+   * player's own `pause()`, the lock screen's Pause — marks itself first and
+   * is left alone; see `shouldResumeSystemPause`.
+   *
+   * Whether WebKit lets a play through while Obsidian is in the background is
+   * the open question (`spikes/lock-audio`). If it refuses, the pause stands
+   * exactly as before and the background guard's flag is put back, so the
+   * reader is no worse off: the lock screen's Play still works.
+   */
+  private keepPlayingThroughSystemPauses(): void {
+    let hiddenAt = 0;
+    let fullscreenEndAt = 0;
+    const el = this.video as HTMLVideoElement & {
+      webkitDisplayingFullscreen?: boolean;
+      webkitPresentationMode?: string;
+    };
+    let wasFullscreen = false;
+
+    const consider = (cause: "background" | "fullscreen", causeAt: number): void => {
+      if (this.destroyed || this.lastPauseAnswered || !this.video.paused) return;
+      const resume = shouldResumeSystemPause({
+        pauseAt: this.lastPauseAt,
+        readerPauseAt: this.readerPauseAt,
+        pausedByTyping: this.pausedByTyping,
+        causeAt,
+        ended: this.video.ended,
+      });
+      if (!resume) return;
+      // One answer per pause, so the phone and this never take turns.
+      this.lastPauseAnswered = true;
+      const claimedByGuard = this.pausedWhileHidden;
+      this.pausedWhileHidden = false;
+      this.resumeGuardUntil = 0;
+      this.options.debug?.(`keep playing: resuming after a ${cause} pause`, {
+        hidden: document.hidden,
+        gap: this.lastPauseAt - causeAt,
+      });
+      this.video.play().then(
+        () => this.options.debug?.(`keep playing: ${cause} resume played`),
+        (err: unknown) => {
+          // Refused: leave things as the background guard would have had them.
+          this.pausedWhileHidden = claimedByGuard;
+          this.options.debug?.(`keep playing: ${cause} resume refused`, String(err));
+        },
+      );
+    };
+
+    this.video.addEventListener("pause", () => {
+      this.lastPauseAt = Date.now();
+      this.lastPauseAnswered = false;
+      if (document.hidden) consider("background", hiddenAt);
+      consider("fullscreen", fullscreenEndAt);
+    });
+
+    this.onKeepPlayingVisibility = () => {
+      if (!document.hidden) return;
+      hiddenAt = Date.now();
+      consider("background", hiddenAt);
+    };
+    document.addEventListener("visibilitychange", this.onKeepPlayingVisibility);
+
+    // Three spellings of "fullscreen ended": the iPhone's own player, Safari's
+    // presentation mode, and the standard API on iPad and desktop.
+    const ended = (): void => {
+      wasFullscreen = false;
+      fullscreenEndAt = Date.now();
+      consider("fullscreen", fullscreenEndAt);
+    };
+    this.video.addEventListener("webkitendfullscreen", ended);
+    this.video.addEventListener("webkitbeginfullscreen", () => (wasFullscreen = true));
+    this.video.addEventListener("webkitpresentationmodechanged", () => {
+      const now = el.webkitPresentationMode === "fullscreen";
+      if (wasFullscreen && !now) ended();
+      else if (now) wasFullscreen = true;
+    });
+    this.fullscreenEndListener = () => {
+      const now = document.fullscreenElement === this.video;
+      if (wasFullscreen && !now && !el.webkitDisplayingFullscreen) ended();
+      if (now) wasFullscreen = true;
+    };
+    document.addEventListener("fullscreenchange", this.fullscreenEndListener);
   }
 
   private startSmartLoop(): void {
@@ -2409,6 +2511,7 @@ export class YtFreePlayer {
   pause(): void {
     if (this.destroyed) return;
     this.pausedByTyping = false;
+    this.readerPauseAt = Date.now();
     // Including a Play that has not landed yet: "stop" means stop, whether the
     // video is playing or still on its way to playing.
     this.setPendingPlay(false);
@@ -2524,6 +2627,14 @@ export class YtFreePlayer {
     if (this.onBackgroundVisibility) {
       document.removeEventListener("visibilitychange", this.onBackgroundVisibility);
       this.onBackgroundVisibility = null;
+    }
+    if (this.onKeepPlayingVisibility) {
+      document.removeEventListener("visibilitychange", this.onKeepPlayingVisibility);
+      this.onKeepPlayingVisibility = null;
+    }
+    if (this.fullscreenEndListener) {
+      document.removeEventListener("fullscreenchange", this.fullscreenEndListener);
+      this.fullscreenEndListener = null;
     }
     if (this.onDocPointer) {
       document.removeEventListener("pointerdown", this.onDocPointer, true);

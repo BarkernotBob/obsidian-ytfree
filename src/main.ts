@@ -2785,7 +2785,7 @@ export default class YtFreePlugin extends Plugin {
   /**
    * Fold the video away, or bring it back — the section buttons' second tap.
    *
-   * Unlike the collapse control it does not pause: the reader asked for room to
+   * Like the collapse control it does not pause: the reader asked for room to
    * read in, not for the video to stop.
    */
   private toggleHeaderFor(videoId: string): void {
@@ -5386,16 +5386,12 @@ export default class YtFreePlugin extends Plugin {
    * lost the reader's place in the video every time. Now only the media box
    * loses its height: the element stays mounted, so the position, the buffer
    * and any audio are all exactly where they were, and coming back is instant.
-   * Collapsing by hand also pauses — you are putting the video away.
+   * Collapsing does not pause (Isaiah, 2026-11-04): it hides the picture and
+   * the sound carries on, the same as folding it away from a section button.
    */
   private toggleCollapse(entry: PlayerEntry | null): void {
     if (!entry) return;
-    if (entry.collapsed) {
-      this.setCollapsed(entry, null);
-      return;
-    }
-    entry.player.pause();
-    this.setCollapsed(entry, "manual");
+    this.setCollapsed(entry, entry.collapsed ? null : "manual");
   }
 
   private setCollapsed(entry: PlayerEntry, mode: CollapseMode): void {

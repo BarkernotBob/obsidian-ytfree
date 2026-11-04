@@ -33,6 +33,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
+0. Isaiah: test "keep playing" on the iPhone (branch `claude/project-thread-nz2sm6`, scope
+   [docs/V1-SCOPE-KEEP-PLAYING.md](docs/V1-SCOPE-KEEP-PLAYING.md)). Cases 3 and 4 (leave the app,
+   lock) answer the open WebKit question that `spikes/lock-audio` (#26) was waiting on.
 1. Isaiah: on the iPhone, open any Preview. The picture starts right under the status bar with
    the ✕ on its top-right corner; opening Description or Transcript widens it to full width and
    hides the other, shutting it puts both back side by side (#8, PR #12). Mac unchanged.
