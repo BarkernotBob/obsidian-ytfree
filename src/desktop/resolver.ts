@@ -20,6 +20,49 @@ import type { YtDlpFormat } from "../adaptive.ts";
 const pExecFile = promisify(execFile);
 
 /**
+ * YouTube's anti-bot wall: signed-out requests from this network are refused
+ * until it decides otherwise (Isaiah, 2026-11-04, after a day of probing from
+ * his Mac). A signed-in session gets past it, so a refusal like this is
+ * retried with the account's cookies when there are any.
+ */
+export function isBotCheck(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /confirm you.?re not a bot|LOGIN_REQUIRED/i.test(message);
+}
+
+/**
+ * Run yt-dlp signed out, and once more with `cookieFile` if YouTube answers
+ * with its bot check. Signed out first on purpose: playback should not spend
+ * the account's standing on every video.
+ */
+async function ytDlp(
+  ytDlpPath: string,
+  args: string[],
+  maxBuffer: number,
+  cookieFile?: string,
+): Promise<string> {
+  const run = async (extra: string[]): Promise<string> => {
+    try {
+      const result = await pExecFile(ytDlpPath, [...extra, ...args], {
+        timeout: 120_000,
+        maxBuffer,
+        env: ytDlpEnv(ytDlpPath),
+      });
+      return result.stdout;
+    } catch (err: unknown) {
+      const e = err as { stderr?: string; message?: string };
+      throw new ResolveError((e.stderr || e.message || "unknown error").trim());
+    }
+  };
+  try {
+    return await run([]);
+  } catch (err) {
+    if (!cookieFile || !isBotCheck(err)) throw err;
+    return run(["--cookies", cookieFile]);
+  }
+}
+
+/**
  * Obsidian's Electron process does not inherit a login shell's PATH, so a bare
  * "yt-dlp" lookup fails even when it works in Terminal. Probe the known install
  * locations directly.
@@ -166,6 +209,7 @@ export async function resolveStream(
   videoId: string,
   ytDlpPath: string,
   mode: ResolveMode,
+  cookieFile?: string,
 ): Promise<ResolvedStream> {
   const clients = mode === "quality" ? QUALITY_CLIENTS : FAST_CLIENTS;
   let fallback: ResolvedStream | null = null;
@@ -174,7 +218,7 @@ export async function resolveStream(
   for (const client of clients) {
     let stream: ResolvedStream;
     try {
-      stream = await resolveWith(videoId, ytDlpPath, mode, client);
+      stream = await resolveWith(videoId, ytDlpPath, mode, client, cookieFile);
     } catch (err) {
       lastError = err;
       continue; // a client that cannot answer is not a video that cannot play
@@ -199,33 +243,19 @@ async function resolveWith(
   ytDlpPath: string,
   mode: ResolveMode,
   client: string,
+  cookieFile?: string,
 ): Promise<ResolvedStream> {
   // The pinned clients only carry 360p, so ask for it directly rather than
   // waiting on an HLS lookup that will not exist.
   const selector = mode === "quality" ? "b[protocol^=m3u8]/18/b" : "18/b";
   const clientArgs = client ? ["--extractor-args", `youtube:player_client=${client}`] : [];
 
-  let stdout: string;
-  try {
-    const result = await pExecFile(
-      ytDlpPath,
-      [
-        "--no-warnings",
-        "--no-playlist",
-        ...clientArgs,
-        "-f",
-        selector,
-        "-g",
-        `https://www.youtube.com/watch?v=${videoId}`,
-      ],
-      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024, env: ytDlpEnv(ytDlpPath) },
-    );
-    stdout = result.stdout;
-  } catch (err: unknown) {
-    const e = err as { stderr?: string; message?: string };
-    const detail = (e.stderr || e.message || "unknown error").trim();
-    throw new ResolveError(detail);
-  }
+  const stdout = await ytDlp(
+    ytDlpPath,
+    ["--no-warnings", "--no-playlist", ...clientArgs, "-f", selector, "-g", `https://www.youtube.com/watch?v=${videoId}`],
+    4 * 1024 * 1024,
+    cookieFile,
+  );
 
   const url = stdout.trim().split("\n").filter(Boolean).pop();
   if (!url) throw new ResolveError("yt-dlp returned no stream URL");
@@ -246,19 +276,13 @@ async function resolveWith(
  * about a minute (measured 2026-11-04). `-J` lists them without choosing, so
  * the ladder and the sound are picked the same way as for InnerTube.
  */
-export async function ytDlpFormats(videoId: string, ytDlpPath: string): Promise<YtDlpFormat[]> {
-  let stdout: string;
-  try {
-    const result = await pExecFile(
-      ytDlpPath,
-      ["--no-warnings", "--no-playlist", "-J", `https://www.youtube.com/watch?v=${videoId}`],
-      { timeout: 120_000, maxBuffer: 64 * 1024 * 1024, env: ytDlpEnv(ytDlpPath) },
-    );
-    stdout = result.stdout;
-  } catch (err: unknown) {
-    const e = err as { stderr?: string; message?: string };
-    throw new ResolveError((e.stderr || e.message || "unknown error").trim());
-  }
+export async function ytDlpFormats(videoId: string, ytDlpPath: string, cookieFile?: string): Promise<YtDlpFormat[]> {
+  const stdout = await ytDlp(
+    ytDlpPath,
+    ["--no-warnings", "--no-playlist", "-J", `https://www.youtube.com/watch?v=${videoId}`],
+    64 * 1024 * 1024,
+    cookieFile,
+  );
   const info = JSON.parse(stdout) as { formats?: YtDlpFormat[] };
   return info.formats ?? [];
 }
