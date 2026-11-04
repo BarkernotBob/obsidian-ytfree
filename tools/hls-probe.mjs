@@ -23,83 +23,36 @@ const SAFARI_IPHONE =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_3_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1";
 const AVPLAYER = "AppleCoreMedia/1.0.0.22D82 (iPhone; U; CPU OS 18_3_2 like Mac OS X; en_us)";
 
-const IPAD_SAFARI =
-  "Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)";
-
-// Versions as in yt-dlp 2026.08.19's client table (read 2026-11-04).
-// `visitor: true` sends the visitorData a plain youtube.com page load hands out.
 const CLIENTS = {
-  IOS_OLD: {
+  IOS: {
     ctx: { clientName: "IOS", clientVersion: "20.10.4", deviceModel: "iPhone16,2", osName: "iPhone", osVersion: "18.3.2.22D82" },
     ua: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
     extra: { "X-YouTube-Client-Name": "5", "X-YouTube-Client-Version": "20.10.4" },
   },
-  IOS: {
-    ctx: { clientName: "IOS", clientVersion: "21.26.4", deviceMake: "Apple", deviceModel: "iPhone16,2", osName: "iPhone", osVersion: "18.3.2.22D82" },
-    ua: "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
-    extra: { "X-YouTube-Client-Name": "5", "X-YouTube-Client-Version": "21.26.4" },
-    visitor: true,
-  },
-  VISIONOS: {
-    ctx: { clientName: "VISIONOS", clientVersion: "1.02", deviceMake: "Apple", deviceModel: "RealityDevice17,1", osName: "visionOS", osVersion: "26.5.23O471" },
-    ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
-    extra: { "X-YouTube-Client-Name": "101", "X-YouTube-Client-Version": "1.02" },
-    visitor: true,
-  },
   WEB_SAFARI: {
-    ctx: { clientName: "WEB", clientVersion: "2.20260708.00.00" },
-    ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)",
-    extra: { "X-YouTube-Client-Name": "1", "X-YouTube-Client-Version": "2.20260708.00.00", Origin: "https://www.youtube.com" },
-    visitor: true,
+    ctx: { clientName: "WEB", clientVersion: "2.20250925.01.00" },
+    ua: SAFARI_MAC,
+    extra: { "X-YouTube-Client-Name": "1", "X-YouTube-Client-Version": "2.20250925.01.00", Origin: "https://www.youtube.com" },
   },
   MWEB: {
-    ctx: { clientName: "MWEB", clientVersion: "2.20260708.05.00" },
-    ua: IPAD_SAFARI,
-    extra: { "X-YouTube-Client-Name": "2", "X-YouTube-Client-Version": "2.20260708.05.00", Origin: "https://m.youtube.com" },
-    visitor: true,
+    ctx: { clientName: "MWEB", clientVersion: "2.20250925.01.00" },
+    ua: SAFARI_IPHONE,
+    extra: { "X-YouTube-Client-Name": "2", "X-YouTube-Client-Version": "2.20250925.01.00", Origin: "https://m.youtube.com" },
+  },
+  TVHTML5: {
+    ctx: { clientName: "TVHTML5", clientVersion: "7.20250923.13.00" },
+    ua: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
+    extra: { "X-YouTube-Client-Name": "7", "X-YouTube-Client-Version": "7.20250923.13.00" },
   },
   ANDROID_VR: {
     ctx: {
-      clientName: "ANDROID_VR", clientVersion: "1.65.10", deviceMake: "Oculus", deviceModel: "Quest 3",
+      clientName: "ANDROID_VR", clientVersion: "1.62.27", deviceMake: "Oculus", deviceModel: "Quest 3",
       androidSdkVersion: 32, osName: "Android", osVersion: "12L",
     },
-    ua: "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
-    extra: { "X-YouTube-Client-Name": "28", "X-YouTube-Client-Version": "1.65.10" },
-    visitor: true,
+    ua: "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+    extra: {},
   },
 };
-
-/** The visitorData a signed-out youtube.com page load hands any browser. */
-async function visitorData() {
-  try {
-    const res = await fetch("https://www.youtube.com/", { headers: { "User-Agent": SAFARI_MAC, "Accept-Language": "en-US" } });
-    const html = await res.text();
-    return /"VISITOR_DATA":"([^"]+)"/.exec(html)?.[1] ?? /"visitorData":"([^"]+)"/.exec(html)?.[1] ?? null;
-  } catch {
-    return null;
-  }
-}
-const VISITOR = await visitorData();
-console.log(`visitorData from youtube.com: ${VISITOR ? "yes" : "no"}`);
-
-/** 1 KB of an adaptive file at 90s, to tell whole-file links from opening-only ones. */
-async function deepAdaptive(json, ua) {
-  const dur = Number(json.videoDetails?.lengthSeconds ?? 0);
-  const v = (json.streamingData?.adaptiveFormats ?? [])
-    .filter((f) => /avc1/.test(f.mimeType ?? "") && (f.height ?? 0) <= 1080)
-    .sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0];
-  if (!v) return "no H.264 adaptive";
-  if (!v.url) return `${v.height}p ciphered`;
-  if (dur < 100) return `${v.height}p (too short)`;
-  const at = Math.floor((Number(v.contentLength) * 90) / dur);
-  const sep = v.url.includes("?") ? "&" : "?";
-  try {
-    const r = await fetch(`${v.url}${sep}range=${at}-${at + 1023}`, { headers: { "User-Agent": ua } });
-    return `${v.height}p file @90s: ${r.status}`;
-  } catch (err) {
-    return `${v.height}p file @90s: ERR`;
-  }
-}
 
 const AT = [0, 60, 90, 180];
 
@@ -151,23 +104,13 @@ async function get(url, ua, origin) {
 
 for (const id of ids) {
   console.log(`\n=== ${id}`);
-  for (const [name, { ctx, ua, extra, visitor }] of Object.entries(CLIENTS)) {
+  for (const [name, { ctx, ua, extra }] of Object.entries(CLIENTS)) {
     try {
       const t0 = Date.now();
       const res = await fetch(PLAYER_URL, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": ua,
-          ...extra,
-          ...(visitor && VISITOR ? { "X-Goog-Visitor-Id": VISITOR } : {}),
-        },
-        body: JSON.stringify({
-          videoId: id,
-          contentCheckOk: true,
-          racyCheckOk: true,
-          context: { client: { ...ctx, hl: "en", gl: "US", ...(visitor && VISITOR ? { visitorData: VISITOR } : {}) } },
-        }),
+        headers: { "Content-Type": "application/json", "User-Agent": ua, ...extra },
+        body: JSON.stringify({ videoId: id, contentCheckOk: true, racyCheckOk: true, context: { client: { ...ctx, hl: "en", gl: "US" } } }),
       });
       const json = await res.json();
       const status = json.playabilityStatus?.status;
@@ -178,9 +121,8 @@ for (const id of ids) {
       }
       const hls = json.streamingData?.hlsManifestUrl;
       const dur = Number(json.videoDetails?.lengthSeconds ?? 0);
-      const deep = await deepAdaptive(json, ua);
       if (!hls) {
-        console.log(`${name}: OK, no HLS manifest, ${deep} (${ms}ms)`);
+        console.log(`${name}: OK, no HLS manifest (${ms}ms)`);
         continue;
       }
       const master = await get(hls, AVPLAYER);
@@ -196,7 +138,7 @@ for (const id of ids) {
         .sort((a, b) => b.height - a.height || b.bw - a.bw)[0];
       console.log(
         `${name}: HLS ${heights} (${all.length} variants, separate audio: ${all.some((v) => v.audio) ? "yes" : "no"}) ` +
-          `${deep}, player ${ms}ms, CORS from capacitor: ${corsMaster.acao ?? "none"}`,
+          `player ${ms}ms, CORS from capacitor: ${corsMaster.acao ?? "none"}`,
       );
       if (!avc) {
         console.log(`  no H.264 variant ≤1080p; codecs: ${[...new Set(all.map((v) => v.codecs))].join(" | ")}`);
