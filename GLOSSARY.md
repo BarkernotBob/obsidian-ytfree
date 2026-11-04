@@ -31,6 +31,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Decisions
 
+### 2026-11-04 (measured; Claude's call, open to change)
+
+- Desktop HD comes from yt-dlp's files when InnerTube's stop serving after about a minute
+  (`ytDlpFormats` + `resolveHdFromYtDlp`), stitched and streamed the same way. InnerTube is
+  still tried first. Phone HD on most videos is GitHub #25.
+
 ### 2026-10-22 (Isaiah asked; defaults picked by Claude, open to change)
 
 - HD progress is shown as stages and the rung playing, not a percentage: the HD resolve is a

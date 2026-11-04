@@ -38,7 +38,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
-0. Isaiah: run the manual test in the HD progress scope (badge, band, "Start in HD"), then merge.
+0. Isaiah (2026-11-04): badge, stutter fix and seeking passed. Now test desktop HD from yt-dlp
+   (vault has main.js sha256 f66d54f7…). PR #21 carries #22 merged in. Phone HD: GitHub #25.
 0. Isaiah: manual test for the ~55 s HD stutter and slow jumps, in
    [docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md](docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md) (PR #22).
    `node tools/hd-probe.ts` on the Mac gives live per-client numbers if the theory needs checking.
