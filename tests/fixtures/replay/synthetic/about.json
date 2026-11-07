@@ -1,0 +1,10 @@
+{
+ "source": "tools/make-offline-hd.mjs (synthetic)",
+ "recordedAt": "2026-11-07",
+ "files": [
+  "9000 (1080p)",
+  "9001 (720p)",
+  "9002 (480p)",
+  "9900 (audio)"
+ ]
+}

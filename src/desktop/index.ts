@@ -24,3 +24,4 @@ export * from "./resolver.ts";
 export * from "./signin.ts";
 export * from "./silencedetect.ts";
 export * from "./transcript-fetch.ts";
+export * from "./offline-hd.ts";
