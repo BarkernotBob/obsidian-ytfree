@@ -13,6 +13,7 @@ import { fastStreamFromInfo, hlsStreamFromInfo } from "../ytdlp-info.ts";
 import type { YtDlpInfo } from "../ytdlp-info.ts";
 import { ytDlpEnv } from "./env.ts";
 import { botCheck, isBotCheck } from "../bot-check.ts";
+import { governor } from "../request-governor.ts";
 // `import type` and not a plain import: `node --test` strips types rather than
 // compiling them, so a type imported as a value makes the whole module fail to
 // load — which is what stopped `npm run smoke` running at all.
@@ -37,11 +38,14 @@ async function ytDlp(
   cookieFile?: string,
 ): Promise<string> {
   try {
-    const result = await pExecFile(ytDlpPath, [...(cookieFile ? ["--cookies", cookieFile] : []), ...args], {
-      timeout: 120_000,
-      maxBuffer,
-      env: ytDlpEnv(ytDlpPath),
-    });
+    // Paced with the other "who is this video" requests (GitHub #36).
+    const result = await governor.run("yt-dlp", () =>
+      pExecFile(ytDlpPath, [...(cookieFile ? ["--cookies", cookieFile] : []), ...args], {
+        timeout: 120_000,
+        maxBuffer,
+        env: ytDlpEnv(ytDlpPath),
+      }),
+    );
     return result.stdout;
   } catch (err: unknown) {
     const e = err as { stderr?: string; message?: string };

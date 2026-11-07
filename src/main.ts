@@ -105,9 +105,13 @@ import {
   TRANSCRIPT_REST_MARGIN_PX,
   upsertSection,
 } from "./transcript";
-import { fetchCaptionTrack, fetchHeatmap, fetchVideoDetails, forgetPlayer } from "./innertube";
+import { attachPlayerStore, fetchCaptionTrack, fetchHeatmap, fetchVideoDetails, forgetPlayer } from "./innertube";
 import { BotCheckPausedError, botCheck, isBotCheck } from "./bot-check.ts";
 import { InfoCache } from "./info-cache.ts";
+import type { AnswerStore } from "./info-cache.ts";
+import { trimYtDlpInfo } from "./answer-trim.ts";
+import { governor } from "./request-governor.ts";
+import { pollIsDue } from "./subscriptions.ts";
 import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
 import type { YtDlpInfo } from "./ytdlp-info.ts";
 import type { NotePosition, SectionName } from "./sections";
@@ -331,6 +335,17 @@ const SILENCE_REFRESH_DEBOUNCE_MS = 1200;
 const DELETE_CONFIRM_MS = 5_000;
 /** Device-local key for the bot-check pause (`bot-check.ts`). */
 const BOT_CHECK_KEY = "ytfree-bot-check-until";
+/** Kept answers, per device (GitHub #34). Never in the vault: links are IP-bound. */
+const YTDLP_ANSWERS_KEY = "ytfree-ytdlp-answers";
+const PLAYER_ANSWERS_KEY = "ytfree-player-answers";
+
+/** A `localStorage` key as an answer store; any failure is the cache's to swallow. */
+function localStore(key: string): AnswerStore {
+  return {
+    read: () => window.localStorage.getItem(key),
+    write: (value) => window.localStorage.setItem(key, value),
+  };
+}
 
 /** How long a link opened in Obsidian waits for its note's player before skipping the seek. */
 const HANDOFF_PLAYER_WAIT_MS = 8_000;
@@ -745,7 +760,7 @@ export default class YtFreePlugin extends Plugin {
   /** Videos the reader chose "Try signed in" for during a bot-check pause. */
   private signedInVideos = new Set<string>();
   /** One `yt-dlp -J` answer per video, until its links expire (GitHub #32). */
-  private ytInfo = new InfoCache<YtDlpInfo>();
+  private ytInfo = new InfoCache<YtDlpInfo>(() => Date.now(), 15);
   /** Running ffmpeg analyses, keyed by video, so a closing note can kill one. */
   private silenceJobs = new Map<string, { cancel: () => void }>();
   /** Jobs we stopped, so a partial map is stored as partial. See `cancelSilence`. */
@@ -768,6 +783,11 @@ export default class YtFreePlugin extends Plugin {
           : window.localStorage.setItem(BOT_CHECK_KEY, value),
     });
     this.register(botCheck.onChange(() => this.refreshHub()));
+    // Answers kept on this device survive a reload or a new build (GitHub #34):
+    // reopening a video sends nothing until its links expire.
+    const languages = [...new Set([this.transcriptLanguage(), "en"])];
+    this.ytInfo.attachStore(localStore(YTDLP_ANSWERS_KEY), (info) => trimYtDlpInfo(info, languages));
+    attachPlayerStore(localStore(PLAYER_ANSWERS_KEY));
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
     await this.progress.load();
     this.watchProgressFile();
@@ -1403,12 +1423,22 @@ export default class YtFreePlugin extends Plugin {
     // Polling on load is the only thing that narrows the real limitation here:
     // the feed is a 15-entry window with no backfill, so a channel that posts
     // 16 videos while Obsidian is closed loses the oldest permanently.
-    this.app.workspace.onLayoutReady(() => void this.maybePoll(5));
+    // Not a fixed five minutes any more (GitHub #37): a reload polls only when
+    // the last poll, from any device, is older than the poll period.
+    this.app.workspace.onLayoutReady(() => void this.maybePoll());
 
     // A fixed ticker asking "is it due yet", rather than an interval set to the
     // poll period: changing the period in settings takes effect immediately
     // instead of at the next restart.
     this.registerInterval(window.setInterval(() => void this.maybePoll(), 60_000));
+
+    // What this session has asked YouTube for (GitHub #36), so a flag can be
+    // traced to a number rather than a guess.
+    this.addCommand({
+      id: "show-youtube-requests",
+      name: "Show YouTube requests this session",
+      callback: () => new Notice(`YT Free: ${governor.summary()}.`, 10000),
+    });
 
     this.addCommand({
       id: "tidy-empty-notes",
@@ -1506,12 +1536,14 @@ export default class YtFreePlugin extends Plugin {
     }
   }
 
-  /** Poll if the last one is older than the configured gap (or `floor`). */
-  private async maybePoll(floorMinutes?: number): Promise<void> {
+  /**
+   * Poll if the last one, from any device, is older than the configured gap;
+   * on the phone, only when no desktop has polled in two hours (GitHub #37).
+   */
+  private async maybePoll(): Promise<void> {
     if (botCheck.isPaused()) return;
-    const minutes = floorMinutes ?? Math.max(5, this.settings.subscriptionsPollMinutes);
-    const last = Date.parse(this.subscriptions.state.lastPolledAt ?? "");
-    if (Number.isFinite(last) && Date.now() - last < minutes * 60_000) return;
+    const minutes = Math.max(5, this.settings.subscriptionsPollMinutes);
+    if (!pollIsDue(this.subscriptions.state, Date.now(), minutes * 60_000, Platform.isDesktopApp)) return;
     await this.subscriptions.poll();
     this.refreshHub();
   }
@@ -1717,6 +1749,7 @@ export default class YtFreePlugin extends Plugin {
       window.setInterval(() => {
         if (
           !botCheck.isPaused() &&
+          governor.backgroundRoom() &&
           syncIsDue(this.settings.accountSession, this.settings.accountSyncHours, new Date())
         ) {
           void this.syncAccount(false);
@@ -2906,8 +2939,9 @@ export default class YtFreePlugin extends Plugin {
     if (!this.settings.autoFetchTranscript) return;
     if (!this.createdThisSession.has(file.path)) return;
     if (this.autoFetchAttempted.has(file.path)) return;
-    // Not marked attempted: the note gets its transcript once the pause ends.
-    if (botCheck.isPaused()) return;
+    // Not marked attempted: the note gets its transcript once the pause ends,
+    // or once the hour's background requests have room again (GitHub #36).
+    if (botCheck.isPaused() || !governor.backgroundRoom()) return;
 
     const videoId = this.videoIdForNote(file.path);
     if (!videoId) return;
@@ -2954,7 +2988,7 @@ export default class YtFreePlugin extends Plugin {
   private queueHeatmapBackfill(file: TFile): void {
     if (!this.settings.autoFetchTranscript) return;
     if (this.backfillAttempted.has(file.path)) return;
-    if (botCheck.isPaused()) return;
+    if (botCheck.isPaused() || !governor.backgroundRoom()) return;
 
     const videoId = this.videoIdForNote(file.path);
     if (!videoId) return;
@@ -3143,6 +3177,7 @@ export default class YtFreePlugin extends Plugin {
    */
   private async fetchCues(track: CaptionTrack | null): Promise<Cue[]> {
     if (!track) return [];
+    governor.count("captions");
     const response = await requestUrl({ url: track.url, throw: true });
     return parseJson3(response.text);
   }
@@ -5106,6 +5141,7 @@ export default class YtFreePlugin extends Plugin {
   ): Promise<{ windows: SilenceWindow[]; words: number[]; wordTimed: boolean } | null> {
     const track = await fetchCaptionTrack(videoId, this.transcriptLanguage());
     if (!track) return null;
+    governor.count("captions");
     const response = await requestUrl({ url: track.url, throw: true });
     const cues = parseJson3Timed(response.text);
     if (cues.length === 0) return null;
@@ -5229,6 +5265,9 @@ export default class YtFreePlugin extends Plugin {
       duration > 0
         ? detectSilenceChunked({
             ...shared,
+            // Three ffmpeg connections to YouTube, not six (GitHub #37); a file
+            // on disk costs YouTube nothing and keeps all six.
+            workers: local ? 6 : 3,
             duration,
             playheadSeconds: player.video.currentTime,
             analyzedTo: frontier,

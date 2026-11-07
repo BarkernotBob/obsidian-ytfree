@@ -4,13 +4,23 @@
  * Concurrent asks share one request: "Start in HD" asks for 360p and HD at
  * once, and the auto transcript asks a moment later, and all three wait on
  * the same `yt-dlp -J`. A failure is not kept, so the next ask tries again.
- * In memory only; Part 3 (#34) keeps it across reloads.
+ * `attachStore` keeps it across reloads too (GitHub #34), on the device only:
+ * the links inside are tied to the network that asked, so they must never
+ * reach the synced vault.
  */
+
+/** Device-local storage for kept answers. `localStorage` in the app. */
+export interface AnswerStore {
+  read(): string | null;
+  write(value: string): void;
+}
 export class InfoCache<T> {
   private kept = new Map<string, { value: T; until: number }>();
   private pending = new Map<string, Promise<T>>();
   private readonly now: () => number;
   private readonly maxEntries: number;
+  private store: AnswerStore | null = null;
+  private trim: (value: T) => T = (v) => v;
 
   /** `maxEntries` bounds memory: the oldest answer goes first. */
   constructor(now: () => number = () => Date.now(), maxEntries = 50) {
@@ -37,6 +47,7 @@ export class InfoCache<T> {
             this.kept.set(key, { value, until: keepUntil });
             // Map order is insertion order: the first key is the oldest.
             while (this.kept.size > this.maxEntries) this.kept.delete(this.kept.keys().next().value!);
+            this.save();
           }
         }
         return value;
@@ -52,12 +63,51 @@ export class InfoCache<T> {
 
   /** Forget `key`, so the next ask goes out fresh (a stream that died). */
   invalidate(key: string): void {
-    this.kept.delete(key);
+    const had = this.kept.delete(key);
     this.pending.delete(key);
+    if (had) this.save();
   }
 
   clear(): void {
     this.kept.clear();
     this.pending.clear();
+    this.save();
+  }
+
+  /**
+   * Load what an earlier session kept, and keep what this one learns.
+   * `trim` drops what the plugin never reads, so the stored copy stays small.
+   */
+  attachStore(store: AnswerStore, trim: (value: T) => T = (v) => v): void {
+    this.store = store;
+    this.trim = trim;
+    let entries: Array<[string, { value: T; until: number }]> = [];
+    try {
+      const parsed = JSON.parse(store.read() ?? "[]") as unknown;
+      if (Array.isArray(parsed)) entries = parsed as typeof entries;
+    } catch {
+      // Unreadable: start empty.
+    }
+    const now = this.now();
+    for (const entry of entries) {
+      if (!Array.isArray(entry) || typeof entry[0] !== "string") continue;
+      const kept = entry[1];
+      if (!kept || typeof kept.until !== "number" || kept.until <= now) continue;
+      if (!this.kept.has(entry[0])) this.kept.set(entry[0], kept);
+    }
+    while (this.kept.size > this.maxEntries) this.kept.delete(this.kept.keys().next().value!);
+  }
+
+  private save(): void {
+    if (!this.store) return;
+    const now = this.now();
+    const entries = [...this.kept]
+      .filter(([, kept]) => kept.until > now)
+      .map(([key, kept]) => [key, { value: this.trim(kept.value), until: kept.until }]);
+    try {
+      this.store.write(JSON.stringify(entries));
+    } catch {
+      // Storage full or gone: the answers still hold in memory.
+    }
   }
 }

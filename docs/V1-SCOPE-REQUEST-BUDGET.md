@@ -4,7 +4,7 @@
 trigger this … make sure those calls are smart as well") and his answer of 2026-11-07 ("I agree
 with all the items you recommend"). Research: [RESEARCH-YOUTUBE-REQUESTS.md](RESEARCH-YOUTUBE-REQUESTS.md).
 
-**Status:** Approved by Isaiah 2026-11-07. Part 1 merged 2026-11-07 (PR #56). Part 2 built 2026-11-07, awaiting manual test. Covers GitHub #31–#39. Supersedes #16.
+**Status:** Approved by Isaiah 2026-11-07. Part 1 merged 2026-11-07 (PR #56). Part 2 merged 2026-11-07 (PR #57), awaiting manual test. Part 3 built 2026-11-07, awaiting manual test. Covers GitHub #31–#39. Supersedes #16.
 
 **Ground rule for all of it:** fewer and more consistent requests. No token generation, no
 identity cycling, no proxies or IP rotation. No live probes from Isaiah's network while building;
@@ -90,6 +90,20 @@ Decided while building Part 2 (2026-11-07, Claude; open to change):
     last 2 hours; otherwise the phone may. No poll on plugin load unless the last poll is older
     than the poll period. Duration backfill: 5 per poll, one at a time. Smart Speed: 3 ffmpeg
     connections instead of 6.
+
+Decided while building Part 3 (2026-11-07, Claude; open to change):
+- Kept answers live in `localStorage` (`ytfree-ytdlp-answers`, `ytfree-player-answers`), trimmed to
+  the fields the plugin reads (no storyboards, captions only json3 in the transcript language and
+  English), at most 15 yt-dlp answers and 20 player answers. A link that stops working (a new
+  network, say) is re-asked once by the player's own recovery, as before.
+- RSS feeds and byte reads are counted but not capped: feeds are the endpoint YouTube offers for
+  polling, and capping them would leave most channels unchecked; byte reads are the video itself.
+- The hourly cap counts every player call, InnerTube call, yt-dlp run, caption file and Shorts
+  check, Play's included, so a busy hour of watching also slows background work. Play itself is
+  never refused, only spaced.
+- The account sync's yt-dlp runs share the two in-flight slots, so one long sync can hold one slot;
+  opening a video uses the other.
+- Shorts checks run 2 at a time instead of 5.
 
 ## Part 4: tests without YouTube (#38)
 
