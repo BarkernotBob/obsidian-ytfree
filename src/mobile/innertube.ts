@@ -21,7 +21,7 @@
  * the app around it. This file is only the request.
  */
 
-import { callInnertube, CLIENTS, playerBody, PLAYER_URL } from "../innertube.ts";
+import { CLIENTS, fetchPlayer } from "../innertube.ts";
 import type { ResolvedStream } from "../stream.ts";
 import {
   hlsManifest,
@@ -44,7 +44,7 @@ export * from "./player-response.ts";
  */
 async function callPlayer(videoId: string, client: keyof typeof CLIENTS): Promise<PlayerResponse> {
   try {
-    return (await callInnertube(PLAYER_URL, client, playerBody(videoId))) as PlayerResponse;
+    return (await fetchPlayer(videoId, client)) as PlayerResponse;
   } catch (err) {
     throw new MobileResolveError("network", err instanceof Error ? err.message : String(err));
   }

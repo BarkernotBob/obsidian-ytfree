@@ -142,12 +142,21 @@ function fakeFetch(log: string[], refuse = false) {
   };
 }
 
-test("streamFromPair reads both indexes with the client's UA and expires with the URLs", async () => {
+test("streamFromPair reads three ranges with the client's UA and expires with the URLs (#35)", async () => {
   const log: string[] = [];
   const stream = await streamFromPair("abcdefghijk", pickPair(formats)!, fakeFetch(log), "UA");
-  // Both indexes, the 720p index, then a small read past the first minute of
-  // the top rung and the sound (the fake's two segments: the last one).
-  assert.deepEqual(log.sort(), ["136:741-800:UA", "137:1797-2796:UA", "137:741-800:UA", "140:1688-2687:UA", "140:632-700:UA"]);
+  // The top rung's and the sound's indexes, then one small read past the
+  // first minute of the top rung (the fake's two segments: the last one).
+  // The 720p index waits until hls.js asks for 720p.
+  assert.deepEqual(log.sort(), ["137:1797-2796:UA", "137:741-800:UA", "140:632-700:UA"]);
+  const master = stream.virtual!.files[stream.url];
+  assert.match(master, /RESOLUTION=1280x720/, "the lazy rung is still in the master");
+  const p720 = await stream.virtual!.lazyFiles![`${virtualBase("abcdefghijk")}video-720.m3u8`]();
+  assert.match(p720, /itag=136/);
+  assert.deepEqual(log.filter((l) => l.startsWith("136")), ["136:741-800:UA"]);
+  // Asked twice, read once.
+  await stream.virtual!.lazyFiles![`${virtualBase("abcdefghijk")}video-720.m3u8`]();
+  assert.equal(log.filter((l) => l.startsWith("136")).length, 1);
   assert.equal(stream.mode, "quality");
   assert.equal(stream.isHls, true);
   assert.equal(stream.height, 1080);
@@ -155,15 +164,17 @@ test("streamFromPair reads both indexes with the client's UA and expires with th
   assert.ok(stream.expiresAt < EXPIRE * 1000);
 });
 
-test("streamFromPair drops a lower rung that refuses, but not the top one", async () => {
+test("a lower rung that refuses plays the top rung's playlist; the top one must work", async () => {
   const pair = pickPair(formats)!;
   const only = (bad: string) => async (u: string, s: number, e: number) => {
     if (u.includes(`itag=${bad}`)) throw new Error("HTTP 403");
     return fakeFetch([])(u, s, e);
   };
   const stream = await streamFromPair("abcdefghijk", pair, only("136"));
-  assert.ok(stream.virtual!.files[`${virtualBase("abcdefghijk")}video-1080.m3u8`]);
+  const top = stream.virtual!.files[`${virtualBase("abcdefghijk")}video-1080.m3u8`];
+  assert.ok(top);
   assert.equal(stream.virtual!.files[`${virtualBase("abcdefghijk")}video-720.m3u8`], undefined);
+  assert.equal(await stream.virtual!.lazyFiles![`${virtualBase("abcdefghijk")}video-720.m3u8`](), top);
   await assert.rejects(streamFromPair("abcdefghijk", pair, only("137")), /403/);
 });
 
@@ -399,6 +410,22 @@ test("the loader answers playlists from memory and media as inclusive ranges", a
   assert.deepEqual(c.events, ["err:0"]);
 });
 
+test("the loader builds a lazy playlist on first request, without a byte fetch (#35)", async () => {
+  let built = 0;
+  const Loader = virtualLoader({
+    files: {},
+    lazyFiles: { "https://ytfree.invalid/x/video-720.m3u8": async () => (built++, "#EXTM3U") },
+    fetchRange: async () => {
+      throw new Error("no media fetch expected");
+    },
+  });
+  const a = callbacks();
+  new Loader({} as never).load({ url: "https://ytfree.invalid/x/video-720.m3u8", responseType: "text" }, loaderConfig, a.cb as never);
+  await a.done;
+  assert.deepEqual(a.events, ["ok:text"]);
+  assert.equal(built, 1);
+});
+
 test("the loader reports the HTTP status and stays quiet after abort", async () => {
   const Loader = virtualLoader({
     files: {},
@@ -562,7 +589,7 @@ test("ytDlpCandidates: H.264 MP4 per height over https, and the original-languag
   assert.deepEqual(picked, ["137", "136", "140-0"]);
 });
 
-test("resolveHdFromYtDlp reads each head, then builds and checks the stitched stream", async () => {
+test("resolveHdFromYtDlp reads the top rung's and the sound's heads, then builds and checks the stream", async () => {
   const log: string[] = [];
   const fetch = async (u: string, start: number, end: number): Promise<ArrayBuffer> => {
     log.push(`${u.match(/itag=(\d+)/)?.[1]}:${start}-${end}`);
@@ -571,9 +598,12 @@ test("resolveHdFromYtDlp reads each head, then builds and checks the stitched st
   const stream = await resolveHdFromYtDlp("abcdefghijk", ytFormats, fetch);
   assert.equal(stream.height, 1080);
   assert.ok(stream.virtual);
-  // Heads of 1080p, 720p and the sound, then the indexes found in them.
-  assert.ok(log.includes("137:0-65535") && log.includes("136:0-65535") && log.includes("140:0-65535"));
-  assert.ok(log.includes("137:632-687") && log.includes("140:632-687"));
+  // Heads of 1080p and the sound, their indexes, and one read past a minute.
+  assert.deepEqual(log.sort(), ["137:0-65535", "137:1688-2687", "137:632-687", "140:0-65535", "140:632-687"]);
+  // 720p is read only when played.
+  const p720 = await stream.virtual!.lazyFiles![`${virtualBase("abcdefghijk")}video-720.m3u8`]();
+  assert.match(p720, /itag=136/);
+  assert.ok(log.includes("136:0-65535") && log.includes("136:632-687"));
 });
 
 test("resolveHdFromYtDlp throws when no file has a readable head", async () => {

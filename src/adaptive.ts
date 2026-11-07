@@ -247,16 +247,35 @@ export interface Rung {
   segments: Segment[];
 }
 
-/** The master playlist and every media playlist, keyed by their URLs. */
+/** What the master playlist needs to name a rung, before its index is read. */
+export type RungMeta = Pick<AdaptiveTrack, "codecs" | "bitrate" | "width" | "height">;
+
+/** Where a rung's media playlist lives. */
+export function rungUrl(videoId: string, height: number): string {
+  return `${virtualBase(videoId)}video-${height}.m3u8`;
+}
+
+/**
+ * The master playlist and every media playlist, keyed by their URLs.
+ *
+ * `lazy` rungs are named in the master but get no media playlist here: their
+ * index is read only when hls.js first asks for that rung (GitHub #35), so a
+ * rung nobody watches costs no request.
+ */
 export function buildPlaylists(
   videoId: string,
   videos: Rung[],
   audio: Rung,
+  lazy: RungMeta[] = [],
 ): { master: string; files: Record<string, string> } {
   const base = virtualBase(videoId);
   const master = `${base}master.m3u8`;
   const audioUrl = `${base}audio.m3u8`;
   const files: Record<string, string> = { [audioUrl]: mediaPlaylist(audio.track, audio.segments) };
+  const all: Array<{ meta: RungMeta; segments: Segment[] | null; track: AdaptiveTrack | null }> = [
+    ...videos.map((r) => ({ meta: r.track, segments: r.segments, track: r.track })),
+    ...lazy.map((meta) => ({ meta, segments: null, track: null })),
+  ];
   const lines = [
     "#EXTM3U",
     "#EXT-X-VERSION:7",
@@ -265,15 +284,15 @@ export function buildPlaylists(
   ];
   // Lowest first: hls.js numbers levels in manifest order, and the player
   // drops to level 0 for a jump.
-  for (const { track, segments } of [...videos].sort((x, y) => x.track.height - y.track.height)) {
-    const url = `${base}video-${track.height}.m3u8`;
-    const codecs = [track.codecs, audio.track.codecs].filter(Boolean).join(",");
+  for (const { meta, segments, track } of all.sort((x, y) => x.meta.height - y.meta.height)) {
+    const url = rungUrl(videoId, meta.height);
+    const codecs = [meta.codecs, audio.track.codecs].filter(Boolean).join(",");
     lines.push(
-      `#EXT-X-STREAM-INF:BANDWIDTH=${track.bitrate + audio.track.bitrate},CODECS="${codecs}",` +
-        `RESOLUTION=${track.width}x${track.height},AUDIO="a"`,
+      `#EXT-X-STREAM-INF:BANDWIDTH=${meta.bitrate + audio.track.bitrate},CODECS="${codecs}",` +
+        `RESOLUTION=${meta.width}x${meta.height},AUDIO="a"`,
       url,
     );
-    files[url] = mediaPlaylist(track, segments);
+    if (track && segments) files[url] = mediaPlaylist(track, segments);
   }
   lines.push("");
   files[master] = lines.join("\n");
@@ -455,12 +474,74 @@ export function abortError(): Error {
   return err;
 }
 
+/** A rung whose index is read only when hls.js first asks for it. */
+export interface LazyRung {
+  meta: RungMeta;
+  load: () => Promise<Rung>;
+}
+
+async function readRung(track: AdaptiveTrack, fetchRange: FetchRange, ua?: string): Promise<Rung> {
+  return {
+    track,
+    segments: parseSidx(await fetchRange(track.url, track.index.start, track.index.end, ua), track.index.start),
+  };
+}
+
 /**
- * Turn an adaptive pair into a playable stream: read both indexes (which is
- * also the proof that YouTube will serve these files), check that the top rung
- * and the sound still serve past the first minute, then build the playlists.
- * Throws when either file refuses or its index cannot be read. `reask` lets the
- * stream re-link itself if YouTube refuses its links later.
+ * The stream around a top rung and the sound that are already read and
+ * checked. Lower rungs become playlists the first time hls.js asks; one that
+ * will not answer is served the top rung's playlist instead, so a refused
+ * low rung costs a sharper picture, never a stall.
+ */
+function assemble(
+  videoId: string,
+  top: Rung,
+  audio: Rung,
+  lower: LazyRung[],
+  relinkTracks: AdaptiveTrack[],
+  fetchRange: FetchRange,
+  ua?: string,
+  reask?: Reask,
+): ResolvedStream {
+  const { master, files } = buildPlaylists(videoId, [top], audio, lower.map((l) => l.meta));
+  const topPlaylist = files[rungUrl(videoId, top.track.height)];
+  const lazyFiles: Record<string, () => Promise<string>> = {};
+  for (const rung of lower) {
+    let pending: Promise<string> | null = null;
+    lazyFiles[rungUrl(videoId, rung.meta.height)] = () =>
+      (pending ??= rung.load().then(
+        (r) => buildPlaylists(videoId, [r], audio).files[rungUrl(videoId, r.track.height)],
+        (err: unknown) => {
+          console.warn(`YT Free: ${rung.meta.height}p would not load, using the top rung`, err);
+          return topPlaylist;
+        },
+      ));
+  }
+
+  const virtual: VirtualPlaylist = {
+    files,
+    lazyFiles,
+    fetchRange: relinkingFetch(relinkTracks, fetchRange, ua, reask),
+  };
+  const expiry = Math.min(parseExpiry(top.track.url), parseExpiry(audio.track.url));
+  return {
+    url: master,
+    isHls: true,
+    mode: "quality",
+    expiresAt: expiry - EXPIRY_SAFETY_MARGIN_MS,
+    virtual,
+    height: top.track.height,
+  };
+}
+
+/**
+ * Turn an adaptive pair into a playable stream: read the top rung's and the
+ * sound's indexes (which is also the proof that YouTube will serve them),
+ * check that the top rung still serves past the first minute, then build the
+ * playlists. Lower rungs are read when first played (GitHub #35): about three
+ * reads per resolve instead of eight. Throws when the top rung or the sound
+ * refuses or its index cannot be read. `reask` lets the stream re-link itself
+ * if YouTube refuses its links later.
  */
 export async function streamFromPair(
   videoId: string,
@@ -469,34 +550,13 @@ export async function streamFromPair(
   ua?: string,
   reask?: Reask,
 ): Promise<ResolvedStream> {
-  const read = async (track: AdaptiveTrack): Promise<Rung> => ({
-    track,
-    segments: parseSidx(await fetchRange(track.url, track.index.start, track.index.end, ua), track.index.start),
-  });
-  // The top rung and the sound must work: they are the point. A lower rung
-  // that will not answer is only left off the ladder.
-  const [top, audio, ...lower] = await Promise.all([
-    read(pair.video),
-    read(pair.audio),
-    ...pair.ladder.slice(1).map((t) => read(t).catch(() => null)),
+  const [top, audio] = await Promise.all([
+    readRung(pair.video, fetchRange, ua),
+    readRung(pair.audio, fetchRange, ua),
   ]);
-  await Promise.all([deepCheck(top, fetchRange, ua), deepCheck(audio, fetchRange, ua)]);
-  const videos = [top, ...lower.filter((r): r is Rung => r !== null)];
-  const { master, files } = buildPlaylists(videoId, videos, audio);
-
-  const virtual: VirtualPlaylist = {
-    files,
-    fetchRange: relinkingFetch([...videos.map((r) => r.track), audio.track], fetchRange, ua, reask),
-  };
-  const expiry = Math.min(parseExpiry(pair.video.url), parseExpiry(pair.audio.url));
-  return {
-    url: master,
-    isHls: true,
-    mode: "quality",
-    expiresAt: expiry - EXPIRY_SAFETY_MARGIN_MS,
-    virtual,
-    height: pair.video.height,
-  };
+  await deepCheck(top, fetchRange, ua);
+  const lower = pair.ladder.slice(1).map((track) => ({ meta: track, load: () => readRung(track, fetchRange, ua) }));
+  return assemble(videoId, top, audio, lower, [...pair.ladder, pair.audio], fetchRange, ua, reask);
 }
 
 /** What one InnerTube client answered, reduced to what HD needs. */
@@ -519,6 +579,8 @@ export async function resolveHd(
   fetchRange: FetchRange,
   maxHeight = DEFAULT_MAX_HEIGHT,
   hlsFirst = false,
+  /** For re-linking a refused link: must not hand back the refused answer. */
+  askFresh: (client: string) => Promise<ClientAnswer | null> = ask,
 ): Promise<ResolvedStream> {
   const reasons: string[] = [];
   let hls: string | null = null;
@@ -538,7 +600,7 @@ export async function resolveHd(
       continue;
     }
     try {
-      return await streamFromPair(videoId, pair, fetchRange, answer.ua, { clients, ask });
+      return await streamFromPair(videoId, pair, fetchRange, answer.ua, { clients, ask: askFresh });
     } catch (err) {
       reasons.push(`${client}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -635,41 +697,54 @@ export function ytDlpCandidates(formats: YtDlpFormat[], maxHeight = DEFAULT_MAX_
 const HEAD_BYTES = 64 * 1024;
 
 /**
- * yt-dlp's formats as InnerTube-shaped ones, with the init and index ranges
- * read off each file, so `pickPair` and `streamFromPair` take them unchanged.
- * A file whose head cannot be read or has no `sidx` is left out.
+ * One yt-dlp format as an InnerTube-shaped one, with the init and index ranges
+ * read off the file's head. Null when the head cannot be read or has no `sidx`.
+ */
+async function adaptiveFromHead(f: YtDlpFormat, fetchRange: FetchRange): Promise<AdaptiveFormat | null> {
+  const at = await fetchRange(f.url!, 0, HEAD_BYTES - 1).then(locateIndex, () => null);
+  if (!at) return null;
+  const video = isAvcMp4(f);
+  const original = (f.language_preference ?? 0) >= 10;
+  return {
+    itag: parseInt(f.format_id ?? "0", 10) || 0,
+    url: f.url,
+    mimeType: video ? `video/mp4; codecs="${f.vcodec}"` : `audio/mp4; codecs="${f.acodec}"`,
+    bitrate: Math.round((f.tbr ?? 0) * 1000),
+    width: f.width ?? 0,
+    height: f.height ?? 0,
+    fps: f.fps ?? 0,
+    initRange: { start: String(at.init.start), end: String(at.init.end) },
+    indexRange: { start: String(at.index.start), end: String(at.index.end) },
+    ...(video ? {} : { xtags: original ? "acont=original" : /dubbed/i.test(f.format_note ?? "") ? "acont=dubbed" : "" }),
+  };
+}
+
+/**
+ * yt-dlp's formats as InnerTube-shaped ones, every candidate's head read.
+ * Kept for tools and tests; the app reads heads only as it needs them.
  */
 export async function adaptiveFromYtDlp(
   formats: YtDlpFormat[],
   fetchRange: FetchRange,
   maxHeight = DEFAULT_MAX_HEIGHT,
 ): Promise<AdaptiveFormat[]> {
-  const read = async (f: YtDlpFormat): Promise<AdaptiveFormat | null> => {
-    const at = await fetchRange(f.url!, 0, HEAD_BYTES - 1).then(locateIndex, () => null);
-    if (!at) return null;
-    const video = isAvcMp4(f);
-    const original = (f.language_preference ?? 0) >= 10;
-    return {
-      itag: parseInt(f.format_id ?? "0", 10) || 0,
-      url: f.url,
-      mimeType: video ? `video/mp4; codecs="${f.vcodec}"` : `audio/mp4; codecs="${f.acodec}"`,
-      bitrate: Math.round((f.tbr ?? 0) * 1000),
-      width: f.width ?? 0,
-      height: f.height ?? 0,
-      fps: f.fps ?? 0,
-      initRange: { start: String(at.init.start), end: String(at.init.end) },
-      indexRange: { start: String(at.index.start), end: String(at.index.end) },
-      ...(video ? {} : { xtags: original ? "acont=original" : /dubbed/i.test(f.format_note ?? "") ? "acont=dubbed" : "" }),
-    };
-  };
-  const out = await Promise.all(ytDlpCandidates(formats, maxHeight).map(read));
+  const out = await Promise.all(ytDlpCandidates(formats, maxHeight).map((f) => adaptiveFromHead(f, fetchRange)));
   return out.filter((f): f is AdaptiveFormat => f !== null);
 }
 
+const ytDlpMeta = (f: YtDlpFormat): RungMeta => ({
+  codecs: f.vcodec ?? "",
+  bitrate: Math.round((f.tbr ?? 0) * 1000),
+  width: f.width ?? 0,
+  height: f.height ?? 0,
+});
+
 /**
  * HD from yt-dlp's files: the same stitched, streamed stream as `resolveHd`,
- * including the check past the first minute. No re-link: asking yt-dlp again
- * takes too long to hide inside one slow segment.
+ * including the check past the first minute. Reads the heads of the top rung
+ * and the sound only (a lower top is tried if the highest will not answer);
+ * the other rungs are read when first played (GitHub #35). No re-link: asking
+ * yt-dlp again takes too long to hide inside one slow segment.
  */
 export async function resolveHdFromYtDlp(
   videoId: string,
@@ -677,9 +752,33 @@ export async function resolveHdFromYtDlp(
   fetchRange: FetchRange,
   maxHeight = DEFAULT_MAX_HEIGHT,
 ): Promise<ResolvedStream> {
-  const pair = pickPair(await adaptiveFromYtDlp(formats, fetchRange, maxHeight), maxHeight);
-  if (!pair) throw new Error("yt-dlp: no HD pair");
-  return streamFromPair(videoId, pair, fetchRange);
+  const candidates = ytDlpCandidates(formats, maxHeight);
+  const audioFormat = candidates.find(isAacM4a);
+  const ladder = candidates.filter(isAvcMp4);
+  if (!audioFormat || !ladder.length || (ladder[0].height ?? 0) <= 360) throw new Error("yt-dlp: no HD pair");
+
+  const audioShape = await adaptiveFromHead(audioFormat, fetchRange);
+  const audioTrack = audioShape && toTrack(audioShape);
+  if (!audioTrack) throw new Error("yt-dlp: no HD pair");
+
+  for (let i = 0; i < ladder.length && (ladder[i].height ?? 0) > 360; i++) {
+    const shape = await adaptiveFromHead(ladder[i], fetchRange);
+    const video = shape && toTrack(shape);
+    if (!video) continue;
+    const [top, audio] = await Promise.all([readRung(video, fetchRange), readRung(audioTrack, fetchRange)]);
+    await deepCheck(top, fetchRange);
+    const lower: LazyRung[] = ladder.slice(i + 1).map((f) => ({
+      meta: ytDlpMeta(f),
+      load: async () => {
+        const below = await adaptiveFromHead(f, fetchRange);
+        const track = below && toTrack(below);
+        if (!track) throw new Error(`no readable index for ${f.height}p`);
+        return readRung(track, fetchRange);
+      },
+    }));
+    return assemble(videoId, top, audio, lower, [], fetchRange);
+  }
+  throw new Error("yt-dlp: no HD pair");
 }
 
 /** googlevideo takes a byte range as a query parameter as well as a header. */

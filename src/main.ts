@@ -105,7 +105,16 @@ import {
   TRANSCRIPT_REST_MARGIN_PX,
   upsertSection,
 } from "./transcript";
-import { fetchCaptionTrack, fetchHeatmap, fetchVideoDetails } from "./innertube";
+import { attachPlayerStore, fetchCaptionTrack, fetchHeatmap, fetchVideoDetails, forgetPlayer } from "./innertube";
+import { BotCheckPausedError, botCheck, isBotCheck } from "./bot-check.ts";
+import { InfoCache } from "./info-cache.ts";
+import type { AnswerStore } from "./info-cache.ts";
+import { trimYtDlpInfo } from "./answer-trim.ts";
+import { governor } from "./request-governor.ts";
+import { pollIsDue } from "./subscriptions.ts";
+import { offlineFormats } from "./offline-hd.ts";
+import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
+import type { YtDlpInfo } from "./ytdlp-info.ts";
 import type { NotePosition, SectionName } from "./sections";
 import {
   SECTION_HEADINGS,
@@ -148,6 +157,12 @@ function desktop(): Promise<DesktopApi> {
 
 interface YtFreeSettings {
   ytDlpPath: string;
+  /**
+   * Developer only, set by hand in `data.json`: a folder made by
+   * `tools/make-offline-hd.mjs`. Every video then plays from it, 360p and HD,
+   * with no request to YouTube (GitHub #38). Not in the settings tab.
+   */
+  devOfflineHd?: string;
   upgradeToHighQuality: boolean;
   /** Stitched HD on the phone. Off by default: iOS 17.1+, and more data. */
   phoneHighQuality: boolean;
@@ -325,6 +340,19 @@ const SILENCE_REFRESH_DEBOUNCE_MS = 1200;
  * loses the video. A real deletion is not urgent; nothing is watching for it.
  */
 const DELETE_CONFIRM_MS = 5_000;
+/** Device-local key for the bot-check pause (`bot-check.ts`). */
+const BOT_CHECK_KEY = "ytfree-bot-check-until";
+/** Kept answers, per device (GitHub #34). Never in the vault: links are IP-bound. */
+const YTDLP_ANSWERS_KEY = "ytfree-ytdlp-answers";
+const PLAYER_ANSWERS_KEY = "ytfree-player-answers";
+
+/** A `localStorage` key as an answer store; any failure is the cache's to swallow. */
+function localStore(key: string): AnswerStore {
+  return {
+    read: () => window.localStorage.getItem(key),
+    write: (value) => window.localStorage.setItem(key, value),
+  };
+}
 
 /** How long a link opened in Obsidian waits for its note's player before skipping the seek. */
 const HANDOFF_PLAYER_WAIT_MS = 8_000;
@@ -647,8 +675,13 @@ export default class YtFreePlugin extends Plugin {
    * off — see `syncPinRestore`.
    */
   private pinRestore = new Map<MarkdownView, HTMLElement>();
-  /** Last note whose properties we collapsed in a given view, so we do it once. */
-  private collapsed = new Map<MarkdownView, string>();
+  /**
+   * The note, and the properties table, we last collapsed in a given view, so
+   * we do it once per table. Obsidian rebuilds the table on its own (GitHub
+   * #51: properties showing again on the phone), and a rebuilt one comes back
+   * open, so a new table is collapsed again.
+   */
+  private collapsed = new Map<MarkdownView, { path: string; container: HTMLElement | null }>();
   /** Same, for the default section folds — see applyDefaultFolds. */
   private folded = new Map<MarkdownView, string>();
   /**
@@ -731,6 +764,10 @@ export default class YtFreePlugin extends Plugin {
   silence!: SilenceStore;
   /** Videos whose silence map has already been chased this session. */
   private silenceAttempted = new Set<string>();
+  /** Videos the reader chose "Try signed in" for during a bot-check pause. */
+  private signedInVideos = new Set<string>();
+  /** One `yt-dlp -J` answer per video, until its links expire (GitHub #32). */
+  private ytInfo = new InfoCache<YtDlpInfo>(() => Date.now(), 15);
   /** Running ffmpeg analyses, keyed by video, so a closing note can kill one. */
   private silenceJobs = new Map<string, { cancel: () => void }>();
   /** Jobs we stopped, so a partial map is stored as partial. See `cancelSilence`. */
@@ -743,6 +780,21 @@ export default class YtFreePlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    // A bot-check pause outlives a reload (GitHub #31): it is about this
+    // network, so it lives on this device, never in the synced vault.
+    botCheck.attach({
+      read: () => window.localStorage.getItem(BOT_CHECK_KEY),
+      write: (value) =>
+        value === null
+          ? window.localStorage.removeItem(BOT_CHECK_KEY)
+          : window.localStorage.setItem(BOT_CHECK_KEY, value),
+    });
+    this.register(botCheck.onChange(() => this.refreshHub()));
+    // Answers kept on this device survive a reload or a new build (GitHub #34):
+    // reopening a video sends nothing until its links expire.
+    const languages = [...new Set([this.transcriptLanguage(), "en"])];
+    this.ytInfo.attachStore(localStore(YTDLP_ANSWERS_KEY), (info) => trimYtDlpInfo(info, languages));
+    attachPlayerStore(localStore(PLAYER_ANSWERS_KEY));
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
     await this.progress.load();
     this.watchProgressFile();
@@ -1085,6 +1137,9 @@ export default class YtFreePlugin extends Plugin {
     this.registerEvent(
       this.app.metadataCache.on("changed", (file) => {
         this.syncPinnedPlayers();
+        // Obsidian redraws the properties table a moment after the cache
+        // changes, and the redrawn one is open again (#51): look once more.
+        window.setTimeout(() => this.syncPinnedPlayers(), 500);
         this.queueAutoFetch(file);
       }),
     );
@@ -1375,12 +1430,22 @@ export default class YtFreePlugin extends Plugin {
     // Polling on load is the only thing that narrows the real limitation here:
     // the feed is a 15-entry window with no backfill, so a channel that posts
     // 16 videos while Obsidian is closed loses the oldest permanently.
-    this.app.workspace.onLayoutReady(() => void this.maybePoll(5));
+    // Not a fixed five minutes any more (GitHub #37): a reload polls only when
+    // the last poll, from any device, is older than the poll period.
+    this.app.workspace.onLayoutReady(() => void this.maybePoll());
 
     // A fixed ticker asking "is it due yet", rather than an interval set to the
     // poll period: changing the period in settings takes effect immediately
     // instead of at the next restart.
     this.registerInterval(window.setInterval(() => void this.maybePoll(), 60_000));
+
+    // What this session has asked YouTube for (GitHub #36), so a flag can be
+    // traced to a number rather than a guess.
+    this.addCommand({
+      id: "show-youtube-requests",
+      name: "Show YouTube requests this session",
+      callback: () => new Notice(`YT Free: ${governor.summary()}.`, 10000),
+    });
 
     this.addCommand({
       id: "tidy-empty-notes",
@@ -1451,6 +1516,13 @@ export default class YtFreePlugin extends Plugin {
    * nagging someone who deliberately never signed in.
    */
   async syncNow(): Promise<void> {
+    // Hundreds of feeds and an account sync are exactly the burst the pause
+    // exists to stop, pressed button or not (GitHub #31).
+    const paused = botCheck.message();
+    if (paused) {
+      new Notice(`YT Free: ${paused}`, 8000);
+      return;
+    }
     // An expired session counts: `syncAccount` re-probes it once a period, and
     // "sync now" is exactly when you would want that probe spent. It declines
     // politely if one is not due yet.
@@ -1471,11 +1543,14 @@ export default class YtFreePlugin extends Plugin {
     }
   }
 
-  /** Poll if the last one is older than the configured gap (or `floor`). */
-  private async maybePoll(floorMinutes?: number): Promise<void> {
-    const minutes = floorMinutes ?? Math.max(5, this.settings.subscriptionsPollMinutes);
-    const last = Date.parse(this.subscriptions.state.lastPolledAt ?? "");
-    if (Number.isFinite(last) && Date.now() - last < minutes * 60_000) return;
+  /**
+   * Poll if the last one, from any device, is older than the configured gap;
+   * on the phone, only when no desktop has polled in two hours (GitHub #37).
+   */
+  private async maybePoll(): Promise<void> {
+    if (botCheck.isPaused()) return;
+    const minutes = Math.max(5, this.settings.subscriptionsPollMinutes);
+    if (!pollIsDue(this.subscriptions.state, Date.now(), minutes * 60_000, Platform.isDesktopApp)) return;
     await this.subscriptions.poll();
     this.refreshHub();
   }
@@ -1679,7 +1754,11 @@ export default class YtFreePlugin extends Plugin {
     // minute — so changing the period in settings takes effect immediately.
     this.registerInterval(
       window.setInterval(() => {
-        if (syncIsDue(this.settings.accountSession, this.settings.accountSyncHours, new Date())) {
+        if (
+          !botCheck.isPaused() &&
+          governor.backgroundRoom() &&
+          syncIsDue(this.settings.accountSession, this.settings.accountSyncHours, new Date())
+        ) {
           void this.syncAccount(false);
         }
       }, 60_000),
@@ -2366,7 +2445,7 @@ export default class YtFreePlugin extends Plugin {
         // `noteOpened`. A no-op after the first time, so this costs a lookup.
         this.subscriptions?.noteOpened(noteVideo, path);
       } else if (path) {
-        if (this.collapsed.get(view) !== path) this.collapsed.delete(view);
+        if (this.collapsed.get(view)?.path !== path) this.collapsed.delete(view);
         if (this.folded.get(view) !== path) this.folded.delete(view);
       }
 
@@ -2409,24 +2488,33 @@ export default class YtFreePlugin extends Plugin {
    *
    * Clicking Obsidian's own heading rather than setting `is-collapsed` directly
    * keeps its internal state and the arrow in agreement, so the first click to
-   * re-open works. Done once per file per view: if you expand the properties,
-   * they stay expanded until you open a different note.
+   * re-open works. Done once per table: if you expand the properties, they
+   * stay expanded until you open a different note or Obsidian rebuilds the
+   * table, which it does on its own and which brings it back open (#51).
    */
   private collapseProperties(view: MarkdownView, path: string): void {
     if (!this.settings.collapseProperties) return;
-    if (this.collapsed.get(view) === path) return;
+    const done = this.collapsed.get(view);
+    if (done?.path === path) {
+      // Already handled this table — or still waiting for it to be built.
+      if (!done.container) return;
+      if (done.container.isConnected && view.contentEl.contains(done.container)) return;
+    }
+    this.collapsed.set(view, { path, container: null });
 
     // The metadata table is built with the rest of the view, which may not have
     // happened yet when frontmatter is what told us to mount in the first place.
+    // A phone can take well over a second to build it, so wait up to three.
     let attempts = 0;
     const attempt = (): void => {
       if (view.file?.path !== path) return;
       const container = view.contentEl.querySelector<HTMLElement>(".metadata-container");
       if (!container) {
-        if (++attempts < 10) window.setTimeout(attempt, 100);
+        if (++attempts < 30) window.setTimeout(attempt, 100);
+        else this.collapsed.delete(view);
         return;
       }
-      this.collapsed.set(view, path);
+      this.collapsed.set(view, { path, container });
       if (container.hasClass("is-collapsed")) return;
       const heading = container.querySelector<HTMLElement>(".metadata-properties-heading");
       if (heading) heading.click();
@@ -2858,6 +2946,9 @@ export default class YtFreePlugin extends Plugin {
     if (!this.settings.autoFetchTranscript) return;
     if (!this.createdThisSession.has(file.path)) return;
     if (this.autoFetchAttempted.has(file.path)) return;
+    // Not marked attempted: the note gets its transcript once the pause ends,
+    // or once the hour's background requests have room again (GitHub #36).
+    if (botCheck.isPaused() || !governor.backgroundRoom()) return;
 
     const videoId = this.videoIdForNote(file.path);
     if (!videoId) return;
@@ -2904,6 +2995,7 @@ export default class YtFreePlugin extends Plugin {
   private queueHeatmapBackfill(file: TFile): void {
     if (!this.settings.autoFetchTranscript) return;
     if (this.backfillAttempted.has(file.path)) return;
+    if (botCheck.isPaused() || !governor.backgroundRoom()) return;
 
     const videoId = this.videoIdForNote(file.path);
     if (!videoId) return;
@@ -3054,18 +3146,14 @@ export default class YtFreePlugin extends Plugin {
    * and there is nothing to retry.
    */
   private async harvestWithYtDlp(videoId: string): Promise<CaptionHarvest | null> {
-    const { fetchVideoInfo, findYtDlp } = await desktop();
-
-    let ytDlpPath: string;
+    let info: YtDlpInfo;
     try {
-      ytDlpPath = this.ytDlpPath ?? (await findYtDlp(this.settings.ytDlpPath));
-      this.ytDlpPath = ytDlpPath;
-    } catch {
+      info = await this.ytDlpInfo(videoId);
+    } catch (err) {
+      if (!(err instanceof YtDlpMissingError)) throw err;
       new Notice("YT Free: yt-dlp not found. Install it, or set its path in settings.");
       return null;
     }
-
-    const info = await fetchVideoInfo(ytDlpPath, videoId);
     const track = pickCaptionTrack(info, this.transcriptLanguage());
     return { track, cues: await this.fetchCues(track), heatmap: info.heatmap };
   }
@@ -3096,6 +3184,7 @@ export default class YtFreePlugin extends Plugin {
    */
   private async fetchCues(track: CaptionTrack | null): Promise<Cue[]> {
     if (!track) return [];
+    governor.count("captions");
     const response = await requestUrl({ url: track.url, throw: true });
     return parseJson3(response.text);
   }
@@ -4527,8 +4616,15 @@ export default class YtFreePlugin extends Plugin {
     try {
       await player.load(this.settings.upgradeToHighQuality, this.settings.startInHd);
       this.announceResume(videoId, setStatus);
+      this.announcePause(setStatus);
       return entry;
     } catch (err) {
+      // The bot check, with a signed-in session to offer: keep the player and
+      // offer it for this one video, rather than retrying it automatically.
+      if (isBotCheck(err) && !this.signedInVideos.has(videoId) && (await this.botCookies())) {
+        this.offerSignedIn(wrapper, entry, setStatus);
+        return entry;
+      }
       player.destroy();
       if (this.preview === entry) this.preview = null;
       else if (this.players.get(videoId) === entry) this.players.delete(videoId);
@@ -4538,13 +4634,13 @@ export default class YtFreePlugin extends Plugin {
           "Could not play this video. yt-dlp is not installed here, and the phone's way of playing (without yt-dlp) did not work for this video either.",
           "brew install yt-dlp",
         );
-      } else if (/confirm you.?re not a bot|LOGIN_REQUIRED/i.test((err as Error).message)) {
+      } else if (isBotCheck(err) || err instanceof BotCheckPausedError) {
         // Not a broken yt-dlp: YouTube is refusing signed-out requests from
         // this network for now, and upgrading would change nothing.
         this.renderError(
           wrapper,
-          "YouTube is asking this network to prove it isn't a bot, so it won't play signed out right now. " +
-            "Run the “Sign in to YouTube” command and playback will use your session, or try again in a few hours.",
+          (botCheck.message() ?? "YouTube is asking this network to prove it isn't a bot.") +
+            " Run the “Sign in to YouTube” command to be able to try signed in, or reopen this note after that time.",
           (err as Error).message,
         );
       } else {
@@ -4674,6 +4770,49 @@ export default class YtFreePlugin extends Plugin {
    * scrubber back to the start to find out why. One line for six seconds in the
    * status row that is already reserved costs no layout and answers it.
    */
+  /** While paused, say so on the status line once the player is up (GitHub #31). */
+  private announcePause(setStatus: (message: string | null) => void): void {
+    const message = botCheck.message();
+    if (!message) return;
+    setStatus(message);
+    window.setTimeout(() => setStatus(null), 10_000);
+  }
+
+  /**
+   * The bot check refused a signed-out open, and there is a session: offer it
+   * for this video only. One click is one more yt-dlp run, signed in, and
+   * nothing more is retried on its behalf.
+   */
+  private offerSignedIn(
+    wrapper: HTMLElement,
+    entry: PlayerEntry,
+    setStatus: (message: string | null) => void,
+  ): void {
+    setStatus(null);
+    const box = createDiv({ cls: "ytfree-error ytfree-bot-check" });
+    wrapper.prepend(box);
+    box.createEl("strong", { text: "YT Free" });
+    box.createEl("p", { text: botCheck.message() ?? "YouTube is asking this network to prove it isn't a bot." });
+    const button = box.createEl("button", { text: "Try signed in", attr: { type: "button" } });
+    button.addEventListener("click", () => {
+      box.remove();
+      this.signedInVideos.add(entry.videoId);
+      setStatus("Resolving stream (signed in)…");
+      void entry.player.load(false, false).then(
+        () => setStatus(null),
+        (err: unknown) => {
+          entry.player.destroy();
+          if (this.players.get(entry.videoId) === entry) this.players.delete(entry.videoId);
+          this.renderError(
+            wrapper,
+            "Signed in, YouTube still would not play this video.",
+            err instanceof Error ? err.message : String(err),
+          );
+        },
+      );
+    });
+  }
+
   private announceResume(videoId: string, setStatus: (message: string | null) => void): void {
     const seconds = this.progress.resumeFor(videoId);
     if (seconds <= 0) {
@@ -4787,16 +4926,22 @@ export default class YtFreePlugin extends Plugin {
    * neither iOS nor macOS tells the app which door it was opened through, so
    * the tile cannot be told apart from the app switcher. Isaiah chose a button
    * over jumping on every return. It shows only while a video is playing (or
-   * was paused from the lock screen) and its note is not the one in front: on
-   * a phone as a pill over the note, on the desktop in the status bar.
+   * was paused from the lock screen) and its note is not the one in front, on
+   * the desktop in the status bar. The phone has only the command (#51).
    *
    * Driven by `play`/`pause` caught at the document — media events do not
    * bubble, but they do pass through the capture phase — and by tab changes.
    */
   private setupNowPlayingButton(): void {
-    const button = Platform.isMobile
-      ? document.body.createEl("button", { cls: "ytfree-now-playing" })
-      : this.addStatusBarItem().createEl("button", { cls: "ytfree-now-playing-status" });
+    this.addCommand({
+      id: "go-to-playing-video",
+      name: "Go to the playing video",
+      callback: () => void this.revealPlayingNote(),
+    });
+    // No pill on the phone (Isaiah, 2026-11-07, GitHub #51): it read as a
+    // stray "video is playing" label. The command above is the phone's way.
+    if (Platform.isMobile) return;
+    const button = this.addStatusBarItem().createEl("button", { cls: "ytfree-now-playing-status" });
     this.register(() => button.remove());
     button.hide();
     button.addEventListener("click", (event) => {
@@ -4821,11 +4966,6 @@ export default class YtFreePlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("active-leaf-change", refresh));
     this.registerEvent(this.app.workspace.on("layout-change", refresh));
     this.registerDomEvent(document, "visibilitychange", refresh);
-    this.addCommand({
-      id: "go-to-playing-video",
-      name: "Go to the playing video",
-      callback: () => void this.revealPlayingNote(),
-    });
   }
 
   /** The playing video's entry, if its note is open in a tab that is not in front. */
@@ -5008,6 +5148,7 @@ export default class YtFreePlugin extends Plugin {
   ): Promise<{ windows: SilenceWindow[]; words: number[]; wordTimed: boolean } | null> {
     const track = await fetchCaptionTrack(videoId, this.transcriptLanguage());
     if (!track) return null;
+    governor.count("captions");
     const response = await requestUrl({ url: track.url, throw: true });
     const cues = parseJson3Timed(response.text);
     if (cues.length === 0) return null;
@@ -5045,21 +5186,28 @@ export default class YtFreePlugin extends Plugin {
     // Already measured to the end, at a floor fine enough to answer.
     if (stored && !isStale(stored, minGap) && stored.analyzedTo === undefined) return;
 
-    const { calibrateThreshold, detectSilence, detectSilenceChunked, findFfmpeg, resolveAudioUrl, findYtDlp } =
-      await desktop();
+    const { calibrateThreshold, detectSilence, detectSilenceChunked, findFfmpeg } = await desktop();
     if (this.ffmpegPath === undefined) {
       this.ffmpegPath = await findFfmpeg(this.settings.ffmpegPath);
     }
     if (!this.ffmpegPath) return;
 
+    // The offline HD player analyses its own sound file, never YouTube's.
+    const offline = this.settings.devOfflineHd?.trim();
+    const local = offline
+      ? `${offline.replace(/\/+$/, "")}/${(await (await desktop()).loadOfflineManifest(offline)).audio.file}`
+      : await this.localFileFor(sourcePath, videoId);
+    if (!local && botCheck.isPaused()) {
+      // Asked again on the next play once the pause is over.
+      this.silenceAttempted.delete(videoId);
+      return;
+    }
     let input: string;
     try {
-      input =
-        (await this.localFileFor(sourcePath, videoId)) ??
-        (await resolveAudioUrl(
-          videoId,
-          (this.ytDlpPath ??= await findYtDlp(this.settings.ytDlpPath)),
-        ));
+      // The sound from the same `-J` as playback (GitHub #32), not a run of its own.
+      const audio = local ?? pickAudioUrl((await this.ytDlpInfo(videoId)).formats ?? []);
+      if (!audio) throw new Error("yt-dlp offered no audio-only format");
+      input = audio;
     } catch (err) {
       console.error("YT Free: no audio to analyse for Smart Speed.", err);
       return;
@@ -5128,6 +5276,9 @@ export default class YtFreePlugin extends Plugin {
       duration > 0
         ? detectSilenceChunked({
             ...shared,
+            // Three ffmpeg connections to YouTube, not six (GitHub #37); a file
+            // on disk costs YouTube nothing and keeps all six.
+            workers: local ? 6 : 3,
             duration,
             playheadSeconds: player.video.currentTime,
             analyzedTo: frontier,
@@ -5225,13 +5376,22 @@ export default class YtFreePlugin extends Plugin {
    * showing an install message — a computer without Homebrew is still a
    * computer that can play video.
    *
-   * "quality" tries the stitched HD stream from InnerTube first (a second or
-   * two, when its files serve past the first minute), then the same stitched
-   * stream from yt-dlp's files, then yt-dlp's HLS lookup.
+   * "quality" is the stitched HD stream built from the same `yt-dlp -J`
+   * answer, or an HLS variant from it. InnerTube is asked for HD only on a
+   * desktop without yt-dlp: its files mostly stop serving at about a minute.
    */
   private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
-      if (forceRefresh) this.cache.invalidate(videoId);
+      const offline = this.settings.devOfflineHd?.trim();
+      if (offline) return this.offlineStream(videoId, offline, mode);
+      // HD lookups and recovery retries are automatic: none while paused. The
+      // first 360p resolve is the reader opening a video, and still goes.
+      if (mode === "quality" || forceRefresh) botCheck.guard();
+      if (forceRefresh) {
+        this.cache.invalidate(videoId);
+        this.ytInfo.invalidate(videoId);
+        forgetPlayer(videoId);
+      }
       const cached = this.cache.get(videoId, mode);
       if (cached) return cached;
 
@@ -5243,14 +5403,30 @@ export default class YtFreePlugin extends Plugin {
     };
   }
 
+  /** The offline HD player (GitHub #38): local files, never YouTube. */
+  private async offlineStream(videoId: string, folder: string, mode: ResolveMode): Promise<ResolvedStream> {
+    const { loadOfflineManifest, localFileUrl, offlineFetchRange } = await desktop();
+    const manifest = await loadOfflineManifest(folder);
+    const forever = Date.now() + 365 * 86400_000;
+    if (mode === "fast") {
+      const url = localFileUrl(`${folder.replace(/\/+$/, "")}/${manifest.progressive}`);
+      return { url, isHls: false, mode, expiresAt: forever, height: 360 };
+    }
+    const { resolveHdFromYtDlpFormats } = await import("./hd.ts");
+    const stream = await resolveHdFromYtDlpFormats(
+      videoId, offlineFormats(manifest), undefined, offlineFetchRange(folder),
+    );
+    return { ...stream, expiresAt: forever };
+  }
+
   private async desktopFast(videoId: string): Promise<ResolvedStream> {
     let ytDlpError: unknown = null;
     if (!this.ytDlpUnavailable) {
       try {
-        const { findYtDlp, resolveStream } = await desktop();
-        if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-        return await resolveStream(videoId, this.ytDlpPath, "fast", await this.botCookies());
+        return fastStreamFromInfo(await this.ytDlpInfo(videoId));
       } catch (err) {
+        // Tried once. Asking InnerTube next is more of what flagged the network.
+        if (isBotCheck(err)) throw err;
         ytDlpError = err;
         // Probing four paths on every video is not worth it once it is known
         // to be absent. A resolve failure is per-video, so it is not cached.
@@ -5278,8 +5454,8 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * The signed-in session's cookie file, for yt-dlp to retry with when YouTube
-   * answers with its bot check. Undefined when nobody has signed in.
+   * The signed-in session's cookie file, for "Try signed in" after a bot check.
+   * Undefined when nobody has signed in.
    */
   private async botCookies(): Promise<string | undefined> {
     const { cookieFileExists, resolveCookieFile } = await desktop();
@@ -5287,30 +5463,38 @@ export default class YtFreePlugin extends Plugin {
     return cookieFileExists(file) ? file : undefined;
   }
 
+  /**
+   * The one `yt-dlp -J` for a video (GitHub #32), shared by 360p, HD, the
+   * transcript and Smart Speed, and kept until its links expire. Signed in
+   * only for a video the reader chose "Try signed in" for.
+   */
+  private async ytDlpInfo(videoId: string): Promise<YtDlpInfo> {
+    const { fetchYtDlpInfo, findYtDlp } = await desktop();
+    if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
+    const ytDlpPath = this.ytDlpPath;
+    const cookies = this.signedInVideos.has(videoId) ? await this.botCookies() : undefined;
+    return this.ytInfo.get(videoId, () => fetchYtDlpInfo(videoId, ytDlpPath, cookies), (info) => infoExpiresAt(info));
+  }
+
   private async desktopQuality(videoId: string): Promise<ResolvedStream> {
     const { fetchRange, resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
     // Streamed and cancellable on desktop (GitHub #23); `requestUrl` if the
-    // desktop code will not load. Used by both the InnerTube and yt-dlp pairs.
+    // desktop code will not load.
     const fetch = await desktop().then(
       (d) => d.streamingWithFallback(fetchRange),
       () => fetchRange,
     );
+    // No yt-dlp: InnerTube is the only source there is.
+    if (this.ytDlpUnavailable) return resolveHdStream(videoId, undefined, fetch);
+
+    const info = await this.ytDlpInfo(videoId);
     try {
-      return await resolveHdStream(videoId, undefined, fetch);
-    } catch (hdError) {
-      if (this.ytDlpUnavailable) throw hdError;
-      const { findYtDlp, resolveStream, ytDlpFormats } = await desktop();
-      if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-      // InnerTube's files mostly stop serving at about a minute (2026-11-04);
-      // yt-dlp's serve the whole video, stitched the same way. Its HLS lookup
-      // stays last, for the odd video with a ladder and no MP4 pair.
-      try {
-        const formats = await ytDlpFormats(videoId, this.ytDlpPath, await this.botCookies());
-        return await resolveHdFromYtDlpFormats(videoId, formats, undefined, fetch);
-      } catch (err) {
-        console.warn("YT Free: HD via InnerTube and via yt-dlp both failed", hdError, err);
-        return await resolveStream(videoId, this.ytDlpPath, "quality", await this.botCookies());
-      }
+      return await resolveHdFromYtDlpFormats(videoId, info.formats ?? [], undefined, fetch);
+    } catch (err) {
+      // The odd video with an HLS ladder and no MP4 pair. No new request.
+      const hls = hlsStreamFromInfo(info);
+      if (hls) return hls;
+      throw err;
     }
   }
 
@@ -5322,7 +5506,11 @@ export default class YtFreePlugin extends Plugin {
    */
   private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
-      if (forceRefresh) this.cache.invalidate(videoId);
+      if (mode === "quality" || forceRefresh) botCheck.guard();
+      if (forceRefresh) {
+        this.cache.invalidate(videoId);
+        forgetPlayer(videoId);
+      }
       const cached = this.cache.get(videoId, mode);
       if (cached) return cached;
 
@@ -5502,8 +5690,10 @@ export default class YtFreePlugin extends Plugin {
 
     const seconds = this.pendingSeek.get(entry.videoId) ?? 0;
     const kind = (err as { kind?: string })?.kind;
-    const detail =
-      kind === "login"
+    const paused = isBotCheck(err) || err instanceof BotCheckPausedError ? botCheck.message() : null;
+    const detail = paused
+      ? paused
+      : kind === "login"
         ? "This video needs a signed-in account — age-restricted or members-only."
         : kind === "network"
           ? "Could not reach YouTube. Check your connection and try again."

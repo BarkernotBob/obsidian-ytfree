@@ -59,6 +59,8 @@ export interface RangeIO {
 
 export interface VirtualPlaylist {
   files: Record<string, string>;
+  /** Playlists built on first request (a lower rung's index, GitHub #35). */
+  lazyFiles?: Record<string, () => Promise<string>>;
   /** Inclusive byte range `[start, end]` of a media URL. */
   fetchRange: (url: string, start: number, end: number, io?: RangeIO) => Promise<ArrayBuffer>;
 }

@@ -6,6 +6,8 @@
  * are tested there.
  */
 
+import { botCheck } from "./bot-check.ts";
+import { governor } from "./request-governor.ts";
 import {
   App,
   ButtonComponent,
@@ -230,7 +232,7 @@ const postWebhook: Post = async ({ url, body, contentType, headers }) => {
  * polls without anyone waiting for it. A card with no duration yet is a card
  * with an empty badge, which is a reserved box either way.
  */
-const DURATION_BACKFILL_PER_POLL = 40;
+const DURATION_BACKFILL_PER_POLL = 5;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -627,6 +629,9 @@ export class SubscriptionsStore {
 
   async poll(): Promise<void> {
     if (this.polling) return;
+    // Every channel's feed, durations and backfills: the burst a bot-check
+    // pause exists to stop (GitHub #31). The hub's status line says why.
+    if (botCheck.isPaused()) return;
     // Before anything: a poll ends in a save, and a save built on a stale copy
     // of the file is what used to undo the other device's decisions.
     await this.refreshFromDisk();
@@ -649,7 +654,7 @@ export class SubscriptionsStore {
         try {
           // Retried, because the endpoint fails at random — see FEED_ATTEMPTS.
           const response = await withRetries(
-            () => requestUrl({ url: feedUrl(channel.id), throw: true }),
+            () => governor.run("feed", () => requestUrl({ url: feedUrl(channel.id), throw: true })),
             FEED_ATTEMPTS,
             FEED_BACKOFF_MS,
             sleep,
@@ -689,6 +694,8 @@ export class SubscriptionsStore {
       // leaves the poll's own results alone, and is not retried: the feed has
       // been merged, so the next poll overlaps and sees no gap.
       for (const gap of gaps) {
+        // Background work: stops for the hour at the cap (GitHub #36).
+        if (!governor.backgroundRoom()) break;
         try {
           const filled = await this.backfillChannel(gap.channel, gap.knownBefore, horizon, now);
           added.push(...filled);
@@ -710,7 +717,9 @@ export class SubscriptionsStore {
       if (Platform.isDesktopApp) {
         const { probeIsShort } = await import("./desktop/shorts-probe.ts");
         const unprobed = this.state.items.filter((item) => item.isShort === null);
-        await mapLimit(unprobed, 5, async (item) => {
+        await mapLimit(unprobed, 2, async (item) => {
+          if (!governor.backgroundRoom()) return;
+          governor.count("probe");
           item.isShort = await probeIsShort(item.videoId);
         });
       }
@@ -718,6 +727,8 @@ export class SubscriptionsStore {
       await this.backfillDurations();
 
       this.state.lastPolledAt = now.toISOString();
+      // Which kind of device polled, so the phone can leave it to the desktop.
+      this.state.lastPolledBy = Platform.isDesktopApp ? "desktop" : "phone";
     } finally {
       this.polling = false;
       this.emit();
@@ -840,7 +851,9 @@ export class SubscriptionsStore {
       .slice(0, DURATION_BACKFILL_PER_POLL);
     if (pending.length === 0) return;
 
-    await mapLimit(pending, 4, async (item) => {
+    // One at a time (GitHub #37), and not past the hourly cap (#36).
+    await mapLimit(pending, 1, async (item) => {
+      if (!governor.backgroundRoom()) return;
       const details = await fetchVideoDetails(item.videoId);
       // Re-looked-up after the round trip: a click elsewhere can save — and so
       // merge — while these are in flight. See `live`.
@@ -2211,6 +2224,8 @@ export class HubView extends ItemView {
     const { channels, items, lastPolledAt } = this.store.state;
     const shown = this.currentItems().length;
     const parts: string[] = [];
+    const paused = botCheck.message();
+    if (paused) parts.push(paused);
     if (this.store.polling) parts.push("Checking channels…");
     else if (channels.length === 0) parts.push("No channels yet — import your subscriptions.");
     else if (this.itemQuery) {

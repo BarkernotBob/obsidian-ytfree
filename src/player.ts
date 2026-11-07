@@ -449,6 +449,8 @@ export class YtFreePlayer {
    * through to the modal underneath and close that too.
    */
   private panelScrim: HTMLElement | null = null;
+  /** Where the pop-out lives while shut; it is on `document.body` while open on a phone. */
+  private panelHome: HTMLElement | null = null;
   /**
    * Kept so an open anchored panel can be re-placed while the surface behind it
    * scrolls, and taken off again the moment it closes. See `placePanel`.
@@ -1560,16 +1562,55 @@ export class YtFreePlayer {
     this.panelOpen = open ?? !this.panelOpen;
 
     if (this.panelOpen) {
+      this.liftPanel(true);
       this.placePanel();
+      // Placing can close it (the button was off screen); that call already
+      // set every class and put the panel back.
+      if (!this.panelOpen) return;
       this.watchPanelAnchor(true);
     } else {
       this.watchPanelAnchor(false);
+      this.liftPanel(false);
     }
 
     this.panelScrim?.toggleClass("is-open", this.panelOpen);
     panel.toggleClass("is-open", this.panelOpen);
     this.panelBtn?.toggleClass("is-active", this.panelOpen);
     this.panelBtn?.setAttribute("aria-expanded", String(this.panelOpen));
+  }
+
+  /**
+   * On a phone, move the open pop-out (and its tap-catcher) to `document.body`,
+   * and put both back under the control bar when it closes.
+   *
+   * `position: fixed` alone does not escape a note on a phone (#52). Obsidian
+   * gives every pane `contain: strict` and every Live Preview embed
+   * `contain: paint`, and either one makes that box the containing block for
+   * fixed descendants *and* clips them to it — so the menu was placed against
+   * the player's own widget and cut at its edges. The floating nav's
+   * `mask-image` on the root and the view fades it too. Nothing on `body` has
+   * any of that. Moving it back on close means a player torn down while shut
+   * leaves nothing behind.
+   */
+  private liftPanel(up: boolean): void {
+    const panel = this.panel;
+    if (!panel || !this.options.panelAnchored) return;
+    if (up) {
+      if (panel.parentElement === document.body) return;
+      this.panelHome = panel.parentElement;
+      panel.addClass("is-lifted");
+      if (this.panelScrim) document.body.appendChild(this.panelScrim);
+      document.body.appendChild(panel);
+      return;
+    }
+    const home = this.panelHome;
+    this.panelHome = null;
+    panel.removeClass("is-lifted");
+    if (!home) return;
+    // Scrim before panel, the order they were built in: paint order is what
+    // keeps the panel above its own tap-catcher.
+    if (this.panelScrim) home.appendChild(this.panelScrim);
+    home.appendChild(panel);
   }
 
   /**
@@ -1616,9 +1657,14 @@ export class YtFreePlayer {
     const viewport = {
       width: visual?.width ?? window.innerWidth,
       height: visual?.height ?? window.innerHeight,
+      offsetTop: visual?.offsetTop ?? 0,
+      offsetLeft: visual?.offsetLeft ?? 0,
     };
+    // The status bar / notch and the home indicator. Obsidian publishes both as
+    // variables on the body; a menu row under the clock cannot be tapped.
+    const inset = safeAreaInsets();
 
-    if (!anchorVisible(anchor, viewport)) {
+    if (!button.isConnected || !anchorVisible(anchor, viewport, inset)) {
       // Scrolled past. Repositioning would park the menu over unrelated content
       // with nothing on screen to say where it came from.
       if (this.panelOpen) this.togglePanel(false);
@@ -1634,6 +1680,7 @@ export class YtFreePlayer {
       anchor,
       panel: { width: natural.width, height: natural.height },
       viewport,
+      inset,
     });
     if (placement.mode !== "anchored") return;
 
@@ -3108,6 +3155,9 @@ export class YtFreePlayer {
     // A player torn down with its pop-out open — closing the Preview sheet is
     // exactly that — would otherwise leave a scroll listener on the window
     // measuring a button that no longer exists.
+    // And on a phone the open panel is on `document.body`, which `container.empty()`
+    // below does not reach.
+    if (this.panelOpen) this.togglePanel(false);
     this.watchPanelAnchor(false);
     if (nowPlayingOwner === this) stopSilence();
     this.clearNowPlaying();
@@ -3116,4 +3166,14 @@ export class YtFreePlayer {
     this.video.load();
     this.container.empty();
   }
+}
+
+/** Obsidian's `--safe-area-inset-top/bottom`, in px; 0 where it sets none. */
+function safeAreaInsets(): { top: number; bottom: number } {
+  const style = getComputedStyle(document.body);
+  const read = (name: string) => {
+    const value = parseFloat(style.getPropertyValue(name));
+    return Number.isFinite(value) ? value : 0;
+  };
+  return { top: read("--safe-area-inset-top"), bottom: read("--safe-area-inset-bottom") };
 }

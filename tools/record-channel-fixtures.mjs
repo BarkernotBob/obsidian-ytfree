@@ -3,6 +3,10 @@
 //   node tools/record-channel-fixtures.mjs
 // Writes to tests/fixtures/raw-channel/ (not committed as-is; trimmed later).
 import { mkdirSync, writeFileSync } from "node:fs";
+import { liveGuard } from "./live-budget.mjs";
+
+// Once a day per machine, counted (GitHub #39). `--force` overrides.
+liveGuard("record-channel-fixtures");
 
 const OUT = new URL("../tests/fixtures/raw-channel/", import.meta.url);
 mkdirSync(OUT, { recursive: true });
