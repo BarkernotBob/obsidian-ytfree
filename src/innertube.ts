@@ -15,7 +15,10 @@
 
 import { requestUrl } from "obsidian";
 import { botCheck, isBotCheckPlayability } from "./bot-check.ts";
+import { trimPlayerAnswer } from "./answer-trim.ts";
 import { InfoCache } from "./info-cache.ts";
+import type { AnswerStore } from "./info-cache.ts";
+import { governor } from "./request-governor.ts";
 import { EXPIRY_SAFETY_MARGIN_MS } from "./stream.ts";
 import { BROWSE_URL, CLIENTS, NEXT_URL, PLAYER_URL, SEARCH_URL, playerBody } from "./innertube-context.ts";
 import {
@@ -57,15 +60,18 @@ export async function callInnertube(
   const { ctx, ua } = CLIENTS[client];
   let response;
   try {
-    response = await requestUrl({
-      url,
-      method: "POST",
-      headers: { "Content-Type": "application/json", "User-Agent": ua },
-      body: JSON.stringify({ ...body, context: { client: { ...ctx, hl: "en", gl: "US" } } }),
-      // Handled here, so a 4xx reads as a network failure rather than throwing
-      // an Obsidian error object at the caller.
-      throw: false,
-    });
+    // Paced with every other "who is this video" request (GitHub #36).
+    response = await governor.run(url === PLAYER_URL ? "player" : "innertube", () =>
+      requestUrl({
+        url,
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": ua },
+        body: JSON.stringify({ ...body, context: { client: { ...ctx, hl: "en", gl: "US" } } }),
+        // Handled here, so a 4xx reads as a network failure rather than throwing
+        // an Obsidian error object at the caller.
+        throw: false,
+      }),
+    );
   } catch (err) {
     throw new InnertubeError(err instanceof Error ? err.message : String(err));
   }
@@ -110,6 +116,14 @@ export function fetchPlayer(videoId: string, client: keyof typeof CLIENTS, fresh
   const key = `${client}:${videoId}`;
   if (fresh) players.invalidate(key);
   return players.get(key, () => callInnertube(PLAYER_URL, client, playerBody(videoId)), (r) => playerKeepUntil(r));
+}
+
+/**
+ * Keep player answers on this device across reloads (GitHub #34). Never the
+ * vault: the links inside are tied to the network that asked.
+ */
+export function attachPlayerStore(store: AnswerStore): void {
+  players.attachStore(store, trimPlayerAnswer);
 }
 
 /** Forget every kept answer for a video (a stream that died is re-resolved). */
@@ -257,6 +271,7 @@ export async function fetchCaptionTrack(
 export async function fetchTranscriptCues(videoId: string, language: string): Promise<Cue[]> {
   const track = await fetchCaptionTrack(videoId, language);
   if (!track) return [];
+  governor.count("captions");
   const response = await requestUrl({ url: track.url, throw: true });
   return parseJson3(response.text);
 }

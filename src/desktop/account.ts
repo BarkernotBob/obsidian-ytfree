@@ -17,6 +17,7 @@ import { parsePrintRows, PRINT_TEMPLATE, toNetscape } from "../account.ts";
 const pExecFile = promisify(execFile);
 
 import { ytDlpEnv } from "./env.ts";
+import { governor } from "../request-governor.ts";
 
 /**
  * Outside the vault, and not negotiable.
@@ -98,11 +99,13 @@ export async function listWithCookies(
   args.push(target);
 
   try {
-    const { stdout } = await pExecFile(ytDlpPath, args, {
-      timeout: options.timeoutMs ?? 180_000,
-      maxBuffer: 16 * 1024 * 1024,
-      env: ytDlpEnv(ytDlpPath),
-    });
+    const { stdout } = await governor.run("yt-dlp", () =>
+      pExecFile(ytDlpPath, args, {
+        timeout: options.timeoutMs ?? 180_000,
+        maxBuffer: 16 * 1024 * 1024,
+        env: ytDlpEnv(ytDlpPath),
+      }),
+    );
     return parsePrintRows(stdout);
   } catch (err: unknown) {
     const e = err as { stderr?: string; message?: string };

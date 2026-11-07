@@ -12,6 +12,7 @@ import { botCheck } from "./bot-check.ts";
 import { DEFAULT_MAX_HEIGHT, refusal, resolveHd, resolveHdFromYtDlp, withRange } from "./adaptive.ts";
 import type { AdaptiveFormat, ClientAnswer, FetchRange, YtDlpFormat } from "./adaptive.ts";
 import { CLIENTS, fetchPlayer } from "./innertube.ts";
+import { governor } from "./request-governor.ts";
 import type { ResolvedStream } from "./stream.ts";
 
 /** ANDROID first: it is the client the 360p path already depends on. */
@@ -44,6 +45,7 @@ async function ask(videoId: string, client: string, fresh = false): Promise<Clie
  * ignored here: a cancelled request runs to the end and its answer is dropped.
  */
 export const fetchRange: FetchRange = async (url, start, end, ua) => {
+  governor.count("range");
   const response = await requestUrl({
     url: withRange(url, start, end),
     headers: ua ? { "User-Agent": ua } : {},
