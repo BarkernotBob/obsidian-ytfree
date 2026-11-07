@@ -34,6 +34,13 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   allows the background resume is unmeasured; see
   [docs/V1-SCOPE-KEEP-PLAYING.md](docs/V1-SCOPE-KEEP-PLAYING.md).
 
+### 2026-11-07 (Isaiah)
+
+- **Background pause stays resumable**: a video paused from the lock screen or AirPods stays ready
+  to play for up to an hour (a silent loop keeps iOS from suspending Obsidian).
+- **Returning lands on the playing note**: coming back to Obsidian while a video plays brings its
+  note forward. Pending Isaiah's pick of the trigger (every return vs. a Now playing button).
+
 ### 2026-10-14 (Isaiah)
 
 - **Preview (GitHub #8)**: fullscreen on the phone, not a card. Decided while building: the

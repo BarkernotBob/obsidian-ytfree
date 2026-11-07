@@ -36,6 +36,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 0. Isaiah: test "keep playing" on the iPhone (branch `claude/project-thread-nz2sm6`, scope
    [docs/V1-SCOPE-KEEP-PLAYING.md](docs/V1-SCOPE-KEEP-PLAYING.md)). Cases 3 and 4 (leave the app,
    lock) answer the open WebKit question that `spikes/lock-audio` (#26) was waiting on.
+   Background play passed (2026-11-07). Part 2 on the same branch: a background pause stays
+   resumable, and returning to Obsidian lands on the playing note. Test via the integration build.
 1. Isaiah: on the iPhone, open any Preview. The picture starts right under the status bar with
    the ✕ on its top-right corner; opening Description or Transcript widens it to full width and
    hides the other, shutting it puts both back side by side (#8, PR #12). Mac unchanged.

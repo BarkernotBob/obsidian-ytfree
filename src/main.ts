@@ -730,6 +730,7 @@ export default class YtFreePlugin extends Plugin {
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
     await this.progress.load();
     this.watchProgressFile();
+    this.watchReturnToPlayer();
     this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
     await this.silence.load();
     await this.setupSubscriptions();
@@ -4721,6 +4722,40 @@ export default class YtFreePlugin extends Plugin {
       // disk now, so picking the Mac up finds the minute just watched.
       void this.progress.flush();
     });
+  }
+
+  /**
+   * Coming back to Obsidian lands on the note that is playing (Isaiah,
+   * 2026-11-07).
+   *
+   * The lock-screen tile, the Mac's Now Playing widget and the app switcher
+   * all look the same from in here — the app becomes visible or focused, and
+   * nothing says which door was used. So the rule is "every return while it
+   * is playing": if the playing video's note is open in a tab that is not the
+   * active one, that tab comes forward. A Preview needs nothing: it is a sheet
+   * over everything, so it is already what you see.
+   */
+  private watchReturnToPlayer(): void {
+    const onReturn = (): void => {
+      if (document.hidden) return;
+      void this.revealPlayingNote();
+    };
+    this.registerDomEvent(document, "visibilitychange", onReturn);
+    if (!Platform.isMobile) this.registerDomEvent(window, "focus", onReturn);
+  }
+
+  private async revealPlayingNote(): Promise<void> {
+    const entry = [...this.players.values()].find((e) => e.player.claimsReturn());
+    if (!entry || !entry.sourcePath || entry === this.preview) return;
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (active?.file?.path === entry.sourcePath) return;
+    const leaf = this.app.workspace
+      .getLeavesOfType("markdown")
+      .find((l) => l.view instanceof MarkdownView && l.view.file?.path === entry.sourcePath);
+    if (!leaf) return;
+    this.debug("return: bringing the playing note forward", entry.sourcePath);
+    this.app.workspace.setActiveLeaf(leaf, { focus: false });
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   /**

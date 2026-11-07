@@ -36,3 +36,33 @@ the app, or handing off to an audio-only element. Both depend on the same WebKit
 - Leaving Picture-in-Picture with its close button still stops playback (that is a stop, by design).
 - Edge: pausing with the iPhone's own fullscreen controls and then tapping ✕ within a second resumes.
   The native controls do not tell us who pressed them.
+
+## Part 2 (2026-11-07): a background pause stays resumable, and coming back lands on the video
+
+Isaiah's test: playing in the background works. Two follow-ups:
+
+### 5. Pausing in the background unloads the video after a few seconds
+
+Cause (inferred, not measured): iOS suspends Obsidian a few seconds after its audio stops, and
+WebKit lets go of the paused video with it, so an AirPods Play later finds nothing.
+
+v1: when the video is paused while Obsidian is in the background (lock screen, AirPods, Control
+Centre), a silent looping `<audio>` keeps the audio session open, so the app and the lock-screen
+tile stay alive. It stops when the video plays again, when Obsidian comes back to the front, or
+after an hour (`KEEPALIVE_MAX_MS`). Phone and tablet only. The silent element is unlocked on the
+reader's first Play tap, because iOS refuses its first `play()` without a gesture.
+
+Risks the test answers: iOS may still show a Pause button on the tile while the silence plays.
+If it sends Pause for an AirPods tap that means Play, the handler treats it as Play.
+Battery: an open audio session for up to an hour.
+
+### 6. The Now Playing tile returns to the note that is playing
+
+iOS and macOS do not tell the app which door was used to come back, so the tile cannot be told
+apart from the app switcher. Recommended rule (decision card posted to Isaiah): every return to
+Obsidian while a video is playing, or was paused from the lock screen since the last return,
+brings that video's note tab forward if another note is active. A Preview is a sheet over
+everything, so it needs nothing. On the Mac this also fires on window focus.
+
+Not in v1: reopening a note whose tab was closed (the player stops with its tab, so there is
+nothing playing to return to).

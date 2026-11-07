@@ -1,5 +1,5 @@
 import Hls from "hls.js";
-import { setIcon } from "obsidian";
+import { Platform, setIcon } from "obsidian";
 import { formatTimestamp } from "./format.ts";
 import { SHARE_ICON } from "./icon.ts";
 import { anchorVisible, panelPlacement } from "./panel.ts";
@@ -13,6 +13,7 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
 import { fullscreenPress } from "./fullscreen.ts";
 import { shouldResumeSystemPause } from "./keep-playing.ts";
+import { KEEPALIVE_MAX_MS, silentWav } from "./silent-audio.ts";
 import { dropOnJump, virtualLoader } from "./virtual-loader.ts";
 
 export type { StreamProvider };
@@ -255,6 +256,59 @@ const CONTROLS_HUSH_MS = 6000;
 let nowPlayingOwner: YtFreePlayer | null = null;
 
 /**
+ * One silent, looping `<audio>` per document, playing only while a video was
+ * paused in the background — see `holdBackgroundSession`. It is unlocked by a
+ * real tap (`primeSilence`) because iOS refuses a first `play()` from an
+ * element no gesture has touched, and the pause it is needed for arrives with
+ * the app already hidden.
+ */
+let silence: HTMLAudioElement | null = null;
+let silencePrimed = false;
+let silenceStopTimer: number | null = null;
+
+function silenceElement(): HTMLAudioElement {
+  if (silence) return silence;
+  const url = URL.createObjectURL(new Blob([silentWav()], { type: "audio/wav" }));
+  silence = new Audio(url);
+  silence.loop = true;
+  silence.preload = "auto";
+  return silence;
+}
+
+function primeSilence(): void {
+  if (silencePrimed || !Platform.isMobile) return;
+  silencePrimed = true;
+  const el = silenceElement();
+  // The call is what the gesture unlocks; the pause right behind it means
+  // nothing is ever heard or shown.
+  void el.play().catch(() => undefined);
+  el.pause();
+}
+
+function silencePlaying(): boolean {
+  return Boolean(silence && !silence.paused);
+}
+
+function startSilence(debug?: (message: string, extra?: unknown) => void): void {
+  if (!silencePrimed || !silence) return;
+  const el = silence;
+  void el.play().then(
+    () => debug?.("background hold: silence playing"),
+    (err: unknown) => debug?.("background hold: silence refused", String(err)),
+  );
+  if (silenceStopTimer !== null) window.clearTimeout(silenceStopTimer);
+  silenceStopTimer = window.setTimeout(stopSilence, KEEPALIVE_MAX_MS);
+}
+
+function stopSilence(): void {
+  if (silenceStopTimer !== null) {
+    window.clearTimeout(silenceStopTimer);
+    silenceStopTimer = null;
+  }
+  silence?.pause();
+}
+
+/**
  * Wraps a native <video> element and keeps it playing across stream-URL expiry.
  *
  * Resolved googlevideo URLs are both time-limited and IP-locked, so they die in
@@ -295,6 +349,8 @@ export class YtFreePlayer {
   private lastPauseAnswered = true;
   private fullscreenEndListener: (() => void) | null = null;
   private onKeepPlayingVisibility: (() => void) | null = null;
+  /** Paused from the lock screen or AirPods and not played since. */
+  private heldInBackground = false;
   /** Has this player ever started? Stops an untouched note stamping 0:00. */
   private started = false;
   /**
@@ -663,6 +719,12 @@ export class YtFreePlayer {
       // resolve it as a tap on the player.
       ["play", () => void this.withMedia(() => this.play())],
       ["pause", () => {
+        // While the background hold plays silence, iOS may think something is
+        // still playing and send Pause for an AirPods tap that means Play.
+        if (this.video.paused && silencePlaying()) {
+          void this.withMedia(() => this.play());
+          return;
+        }
         this.readerPauseAt = Date.now();
         this.video.pause();
       }],
@@ -1643,10 +1705,21 @@ export class YtFreePlayer {
       this.lastPauseAnswered = false;
       if (document.hidden) consider("background", hiddenAt);
       consider("fullscreen", fullscreenEndAt);
+      // Still paused after all that, and in the background: the reader paused
+      // from the lock screen or their AirPods. Keep the session for their Play.
+      if (document.hidden && !this.lastPauseAnswered && !this.video.ended) this.holdBackgroundSession();
+    });
+    this.video.addEventListener("play", () => {
+      this.heldInBackground = false;
+      if (silencePlaying()) stopSilence();
     });
 
     this.onKeepPlayingVisibility = () => {
-      if (!document.hidden) return;
+      if (!document.hidden) {
+        // Back in the app: it is awake on its own, so the hold has no job.
+        if (silencePlaying()) stopSilence();
+        return;
+      }
       hiddenAt = Date.now();
       consider("background", hiddenAt);
     };
@@ -1672,6 +1745,38 @@ export class YtFreePlayer {
       if (now) wasFullscreen = true;
     };
     document.addEventListener("fullscreenchange", this.fullscreenEndListener);
+  }
+
+  /**
+   * A video paused in the background stays ready to play (Isaiah, 2026-11-07).
+   *
+   * iOS suspends Obsidian a few seconds after its sound stops, and WebKit
+   * drops the paused video with it, so a Play from the AirPods a minute later
+   * found nothing. A silent loop keeps the audio session — and so the app and
+   * the lock-screen tile — alive until the reader plays again, comes back to
+   * the app, or an hour passes (`KEEPALIVE_MAX_MS`).
+   */
+  private holdBackgroundSession(): void {
+    if (!Platform.isMobile || nowPlayingOwner !== this) return;
+    this.heldInBackground = true;
+    this.options.debug?.("background hold: paused while hidden, holding the session");
+    startSilence(this.options.debug);
+    // The silent element may have taken the tile's state; say what is true.
+    if (navigator.mediaSession) navigator.mediaSession.playbackState = "paused";
+  }
+
+  /**
+   * Is this the video on the lock-screen tile, playing or held there by a
+   * background pause? Asked once on the way back into the app; a held pause
+   * answers yes only that once, so a later return to a video you paused long
+   * ago does not move you.
+   */
+  claimsReturn(): boolean {
+    if (this.destroyed || nowPlayingOwner !== this || this.video.ended) return false;
+    if (!this.video.paused) return true;
+    const held = this.heldInBackground;
+    this.heldInBackground = false;
+    return held;
   }
 
   private startSmartLoop(): void {
@@ -2490,6 +2595,9 @@ export class YtFreePlayer {
    */
   play(): void {
     if (this.destroyed) return;
+    // Every Play is a tap or a media key: the one moment the silent element can
+    // be unlocked for a background pause later on.
+    primeSilence();
     // Asked for, so the background guard has no claim on it — including the
     // lock-screen Play button, which arrives here while the document is hidden.
     this.pausedWhileHidden = false;
@@ -2648,6 +2756,7 @@ export class YtFreePlayer {
     // exactly that — would otherwise leave a scroll listener on the window
     // measuring a button that no longer exists.
     this.watchPanelAnchor(false);
+    if (nowPlayingOwner === this) stopSilence();
     this.clearNowPlaying();
     this.teardownHls();
     this.video.removeAttribute("src");
