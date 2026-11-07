@@ -7,16 +7,16 @@
  */
 
 import { execFile } from "child_process";
-import https from "https";
 import { promisify } from "util";
-import { EXPIRY_SAFETY_MARGIN_MS, parseExpiry, ResolveError, YtDlpMissingError } from "../stream.ts";
+import { ResolveError, YtDlpMissingError } from "../stream.ts";
+import { fastStreamFromInfo, hlsStreamFromInfo } from "../ytdlp-info.ts";
+import type { YtDlpInfo } from "../ytdlp-info.ts";
 import { ytDlpEnv } from "./env.ts";
 import { botCheck, isBotCheck } from "../bot-check.ts";
 // `import type` and not a plain import: `node --test` strips types rather than
 // compiling them, so a type imported as a value makes the whole module fail to
 // load — which is what stopped `npm run smoke` running at all.
 import type { ResolvedStream, ResolveMode } from "../stream.ts";
-import type { YtDlpFormat } from "../adaptive.ts";
 
 const pExecFile = promisify(execFile);
 
@@ -63,68 +63,6 @@ const CANDIDATE_PATHS = [
   "/opt/local/bin/yt-dlp",
 ];
 
-/**
- * The clients the fast path asks, in the order it asks them.
- *
- * A pinned client is what makes "fast" fast — the default set costs a lookup
- * per client — but a pinned client is also a single point of failure, and on
- * 2026-08-17 it failed: `android_vr` still *resolved*, and every URL it handed
- * back answered 403 to the first byte requested. Not a header mismatch, either;
- * yt-dlp's own downloader got the same 403. Nothing played, and resolution
- * looked healthy the whole time, which is why the list and the probe below both
- * exist now. `""` means yt-dlp's own default set: slower, but it is the thing
- * that keeps working when a pin dies.
- */
-const FAST_CLIENTS = ["tv_simply", "web_safari", ""];
-
-/** The quality path stays on the default set: HLS is what it is looking for. */
-const QUALITY_CLIENTS = [""];
-
-/**
- * Does this URL actually serve bytes?
- *
- * The 403 above is invisible to `-g`, which only asks YouTube where the stream
- * is. One range request for two bytes is the difference between finding out
- * here — where there is another client to try — and finding out in the
- * `<video>` element, where the only thing left to do is show an error.
- */
-export function servesBytes(url: string): Promise<boolean> {
-  // Node's own client and not `fetch`: from Obsidian's renderer a `fetch` at
-  // googlevideo is a cross-origin request, and a CORS refusal is
-  // indistinguishable here from the 403 this is looking for — the probe would
-  // have no opinion about any URL and would never reject anything. This module
-  // is desktop-only and already spawns processes, so there is a client to hand
-  // that no origin policy applies to.
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (answer: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolve(answer);
-    };
-
-    const request = https.request(url, { method: "GET", headers: { Range: "bytes=0-1" } }, (res) => {
-      // 206 for a byte range, 200 for an HLS manifest, which ignores the
-      // header, and 30x for a redirector — all three mean YouTube is willing.
-      const status = res.statusCode ?? 0;
-      done(status === 200 || status === 206 || (status >= 300 && status < 400));
-      res.destroy(); // the two bytes are not wanted, only the answer
-      request.destroy();
-    });
-
-    // A network error is not evidence against the URL — the probe is meant to
-    // catch a stream YouTube is refusing, not to fail the resolve when the wifi
-    // drops. Treated as "no opinion", which is `true` here: the caller has a
-    // playable-looking URL and the player has its own recovery for the rest.
-    request.on("error", () => done(true));
-    request.setTimeout(8000, () => {
-      done(true);
-      request.destroy();
-    });
-    request.end();
-  });
-}
-
 export async function findYtDlp(configuredPath: string): Promise<string> {
   const candidates = configuredPath
     ? [configuredPath, ...CANDIDATE_PATHS]
@@ -141,29 +79,6 @@ export async function findYtDlp(configuredPath: string): Promise<string> {
   throw new YtDlpMissingError();
 }
 
-/**
- * The audio-only stream for a video, as one URL.
- *
- * For Smart Speed's ffmpeg producer, which needs to hear the video but has no
- * use for the picture. An audio track is roughly 1 MB a minute against 30–60 for
- * the muxed stream, so analysing the audio alone is the difference between a
- * background job and a second download — and ffmpeg reads it far faster than
- * realtime, so a map for a 40-minute video lands within the first minute of it.
- *
- * `ba` rather than a specific container: any audio format ffmpeg can decode is
- * fine here, and pinning `m4a` would fail on the videos that do not offer one.
- */
-export async function resolveAudioUrl(videoId: string, ytDlpPath: string): Promise<string> {
-  const stdout = await ytDlp(
-    ytDlpPath,
-    ["--no-warnings", "--no-playlist", "-f", "ba/bestaudio", "-g", `https://www.youtube.com/watch?v=${videoId}`],
-    4 * 1024 * 1024,
-  );
-  const url = stdout.trim().split("\n").filter(Boolean).pop();
-  if (!url) throw new ResolveError("yt-dlp returned no audio URL");
-  return url;
-}
-
 export async function getVersion(ytDlpPath: string): Promise<string> {
   const { stdout } = await pExecFile(ytDlpPath, ["--version"], {
     timeout: 10_000,
@@ -173,11 +88,32 @@ export async function getVersion(ytDlpPath: string): Promise<string> {
 }
 
 /**
- * Resolve a video ID to a single playable stream URL.
- *
- * The format selector deliberately asks for a pre-muxed format ("b") so yt-dlp
- * returns exactly one URL. Asking for the best video+audio would return two
- * that need ffmpeg to merge, which we do not require.
+ * Everything yt-dlp knows about a video, in one run (GitHub #32): the 360p
+ * file, the HD files, the sound alone, captions and the replay heatmap. Its
+ * default client set, never a pinned one: one identity per open, and the set
+ * whose files serve the whole video (measured 2026-11-04). `cookieFile` only
+ * when the reader chose "Try signed in".
+ */
+export async function fetchYtDlpInfo(videoId: string, ytDlpPath: string, cookieFile?: string): Promise<YtDlpInfo> {
+  const stdout = await ytDlp(
+    ytDlpPath,
+    ["--no-warnings", "--no-playlist", "--skip-download", "-J", `https://www.youtube.com/watch?v=${videoId}`],
+    // Info JSON for a long video with 150+ caption languages runs to megabytes.
+    64 * 1024 * 1024,
+    cookieFile,
+  );
+  try {
+    return JSON.parse(stdout) as YtDlpInfo;
+  } catch {
+    throw new ResolveError("yt-dlp's answer was not JSON");
+  }
+}
+
+/**
+ * One playable stream from one `-J`: the single 360p file for "fast", an HLS
+ * variant (else that file) for "quality". The app builds HD from the same
+ * answer instead (`resolveHdFromYtDlp`); this is the canary's path, and the
+ * shape the live tests check.
  */
 export async function resolveStream(
   videoId: string,
@@ -185,81 +121,6 @@ export async function resolveStream(
   mode: ResolveMode,
   cookieFile?: string,
 ): Promise<ResolvedStream> {
-  const clients = mode === "quality" ? QUALITY_CLIENTS : FAST_CLIENTS;
-  let fallback: ResolvedStream | null = null;
-  let lastError: unknown = null;
-
-  for (const client of clients) {
-    let stream: ResolvedStream;
-    try {
-      stream = await resolveWith(videoId, ytDlpPath, mode, client, cookieFile);
-    } catch (err) {
-      // A bot check is about this network, not this client: asking the next
-      // one is more of what got the network flagged.
-      if (isBotCheck(err)) throw err;
-      lastError = err;
-      continue; // a client that cannot answer is not a video that cannot play
-    }
-    if (await servesBytes(stream.url)) return stream;
-    fallback ??= stream;
-  }
-
-  // Nothing served. On the fast path hand back the first URL anyway — the probe
-  // can be wrong and a player with a URL has a recovery path, while a player
-  // with an exception has an error message. On the quality path throw instead:
-  // `upgrade` catches it and keeps the 360p stream that is already playing,
-  // which is strictly better than swapping it for one that answers 403.
-  if (mode !== "quality" && fallback) return fallback;
-  if (lastError) throw lastError;
-  throw new ResolveError("no client returned a stream that plays");
-}
-
-/** One resolve, against one client — `""` for yt-dlp's own default set. */
-async function resolveWith(
-  videoId: string,
-  ytDlpPath: string,
-  mode: ResolveMode,
-  client: string,
-  cookieFile?: string,
-): Promise<ResolvedStream> {
-  // The pinned clients only carry 360p, so ask for it directly rather than
-  // waiting on an HLS lookup that will not exist.
-  const selector = mode === "quality" ? "b[protocol^=m3u8]/18/b" : "18/b";
-  const clientArgs = client ? ["--extractor-args", `youtube:player_client=${client}`] : [];
-
-  const stdout = await ytDlp(
-    ytDlpPath,
-    ["--no-warnings", "--no-playlist", ...clientArgs, "-f", selector, "-g", `https://www.youtube.com/watch?v=${videoId}`],
-    4 * 1024 * 1024,
-    cookieFile,
-  );
-
-  const url = stdout.trim().split("\n").filter(Boolean).pop();
-  if (!url) throw new ResolveError("yt-dlp returned no stream URL");
-
-  return {
-    url,
-    isHls: url.includes(".m3u8") || url.includes("/hls_playlist/"),
-    mode,
-    expiresAt: parseExpiry(url) - EXPIRY_SAFETY_MARGIN_MS,
-  };
-}
-
-/**
- * Every format yt-dlp knows for a video, from its default client set.
- *
- * For HD (`resolveHdFromYtDlp`): the separate picture and sound files yt-dlp
- * finds serve the whole video where InnerTube's ANDROID and IOS ones stop at
- * about a minute (measured 2026-11-04). `-J` lists them without choosing, so
- * the ladder and the sound are picked the same way as for InnerTube.
- */
-export async function ytDlpFormats(videoId: string, ytDlpPath: string, cookieFile?: string): Promise<YtDlpFormat[]> {
-  const stdout = await ytDlp(
-    ytDlpPath,
-    ["--no-warnings", "--no-playlist", "-J", `https://www.youtube.com/watch?v=${videoId}`],
-    64 * 1024 * 1024,
-    cookieFile,
-  );
-  const info = JSON.parse(stdout) as { formats?: YtDlpFormat[] };
-  return info.formats ?? [];
+  const info = await fetchYtDlpInfo(videoId, ytDlpPath, cookieFile);
+  return mode === "quality" ? (hlsStreamFromInfo(info) ?? fastStreamFromInfo(info)) : fastStreamFromInfo(info);
 }

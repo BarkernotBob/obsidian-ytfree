@@ -104,8 +104,9 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
       }
 
       const text = source.files[context.url];
+      const lazy = text === undefined ? source.lazyFiles?.[context.url] : undefined;
       const work: Promise<string | ArrayBuffer> =
-        text !== undefined ? Promise.resolve(text) : this.fetchBytes(context);
+        text !== undefined ? Promise.resolve(text) : lazy ? lazy() : this.fetchBytes(context);
 
       work.then(
         (data) => {

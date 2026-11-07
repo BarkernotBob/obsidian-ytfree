@@ -105,8 +105,11 @@ import {
   TRANSCRIPT_REST_MARGIN_PX,
   upsertSection,
 } from "./transcript";
-import { fetchCaptionTrack, fetchHeatmap, fetchVideoDetails } from "./innertube";
+import { fetchCaptionTrack, fetchHeatmap, fetchVideoDetails, forgetPlayer } from "./innertube";
 import { BotCheckPausedError, botCheck, isBotCheck } from "./bot-check.ts";
+import { InfoCache } from "./info-cache.ts";
+import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
+import type { YtDlpInfo } from "./ytdlp-info.ts";
 import type { NotePosition, SectionName } from "./sections";
 import {
   SECTION_HEADINGS,
@@ -741,6 +744,8 @@ export default class YtFreePlugin extends Plugin {
   private silenceAttempted = new Set<string>();
   /** Videos the reader chose "Try signed in" for during a bot-check pause. */
   private signedInVideos = new Set<string>();
+  /** One `yt-dlp -J` answer per video, until its links expire (GitHub #32). */
+  private ytInfo = new InfoCache<YtDlpInfo>();
   /** Running ffmpeg analyses, keyed by video, so a closing note can kill one. */
   private silenceJobs = new Map<string, { cancel: () => void }>();
   /** Jobs we stopped, so a partial map is stored as partial. See `cancelSilence`. */
@@ -3100,18 +3105,14 @@ export default class YtFreePlugin extends Plugin {
    * and there is nothing to retry.
    */
   private async harvestWithYtDlp(videoId: string): Promise<CaptionHarvest | null> {
-    const { fetchVideoInfo, findYtDlp } = await desktop();
-
-    let ytDlpPath: string;
+    let info: YtDlpInfo;
     try {
-      ytDlpPath = this.ytDlpPath ?? (await findYtDlp(this.settings.ytDlpPath));
-      this.ytDlpPath = ytDlpPath;
-    } catch {
+      info = await this.ytDlpInfo(videoId);
+    } catch (err) {
+      if (!(err instanceof YtDlpMissingError)) throw err;
       new Notice("YT Free: yt-dlp not found. Install it, or set its path in settings.");
       return null;
     }
-
-    const info = await fetchVideoInfo(ytDlpPath, videoId);
     const track = pickCaptionTrack(info, this.transcriptLanguage());
     return { track, cues: await this.fetchCues(track), heatmap: info.heatmap };
   }
@@ -5142,8 +5143,7 @@ export default class YtFreePlugin extends Plugin {
     // Already measured to the end, at a floor fine enough to answer.
     if (stored && !isStale(stored, minGap) && stored.analyzedTo === undefined) return;
 
-    const { calibrateThreshold, detectSilence, detectSilenceChunked, findFfmpeg, resolveAudioUrl, findYtDlp } =
-      await desktop();
+    const { calibrateThreshold, detectSilence, detectSilenceChunked, findFfmpeg } = await desktop();
     if (this.ffmpegPath === undefined) {
       this.ffmpegPath = await findFfmpeg(this.settings.ffmpegPath);
     }
@@ -5157,12 +5157,10 @@ export default class YtFreePlugin extends Plugin {
     }
     let input: string;
     try {
-      input =
-        local ??
-        (await resolveAudioUrl(
-          videoId,
-          (this.ytDlpPath ??= await findYtDlp(this.settings.ytDlpPath)),
-        ));
+      // The sound from the same `-J` as playback (GitHub #32), not a run of its own.
+      const audio = local ?? pickAudioUrl((await this.ytDlpInfo(videoId)).formats ?? []);
+      if (!audio) throw new Error("yt-dlp offered no audio-only format");
+      input = audio;
     } catch (err) {
       console.error("YT Free: no audio to analyse for Smart Speed.", err);
       return;
@@ -5328,16 +5326,20 @@ export default class YtFreePlugin extends Plugin {
    * showing an install message — a computer without Homebrew is still a
    * computer that can play video.
    *
-   * "quality" tries the stitched HD stream from InnerTube first (a second or
-   * two, when its files serve past the first minute), then the same stitched
-   * stream from yt-dlp's files, then yt-dlp's HLS lookup.
+   * "quality" is the stitched HD stream built from the same `yt-dlp -J`
+   * answer, or an HLS variant from it. InnerTube is asked for HD only on a
+   * desktop without yt-dlp: its files mostly stop serving at about a minute.
    */
   private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
       // HD lookups and recovery retries are automatic: none while paused. The
       // first 360p resolve is the reader opening a video, and still goes.
       if (mode === "quality" || forceRefresh) botCheck.guard();
-      if (forceRefresh) this.cache.invalidate(videoId);
+      if (forceRefresh) {
+        this.cache.invalidate(videoId);
+        this.ytInfo.invalidate(videoId);
+        forgetPlayer(videoId);
+      }
       const cached = this.cache.get(videoId, mode);
       if (cached) return cached;
 
@@ -5353,14 +5355,7 @@ export default class YtFreePlugin extends Plugin {
     let ytDlpError: unknown = null;
     if (!this.ytDlpUnavailable) {
       try {
-        const { findYtDlp, resolveStream } = await desktop();
-        if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-        return await resolveStream(
-          videoId,
-          this.ytDlpPath,
-          "fast",
-          this.signedInVideos.has(videoId) ? await this.botCookies() : undefined,
-        );
+        return fastStreamFromInfo(await this.ytDlpInfo(videoId));
       } catch (err) {
         // Tried once. Asking InnerTube next is more of what flagged the network.
         if (isBotCheck(err)) throw err;
@@ -5400,32 +5395,38 @@ export default class YtFreePlugin extends Plugin {
     return cookieFileExists(file) ? file : undefined;
   }
 
+  /**
+   * The one `yt-dlp -J` for a video (GitHub #32), shared by 360p, HD, the
+   * transcript and Smart Speed, and kept until its links expire. Signed in
+   * only for a video the reader chose "Try signed in" for.
+   */
+  private async ytDlpInfo(videoId: string): Promise<YtDlpInfo> {
+    const { fetchYtDlpInfo, findYtDlp } = await desktop();
+    if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
+    const ytDlpPath = this.ytDlpPath;
+    const cookies = this.signedInVideos.has(videoId) ? await this.botCookies() : undefined;
+    return this.ytInfo.get(videoId, () => fetchYtDlpInfo(videoId, ytDlpPath, cookies), (info) => infoExpiresAt(info));
+  }
+
   private async desktopQuality(videoId: string): Promise<ResolvedStream> {
     const { fetchRange, resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
     // Streamed and cancellable on desktop (GitHub #23); `requestUrl` if the
-    // desktop code will not load. Used by both the InnerTube and yt-dlp pairs.
+    // desktop code will not load.
     const fetch = await desktop().then(
       (d) => d.streamingWithFallback(fetchRange),
       () => fetchRange,
     );
+    // No yt-dlp: InnerTube is the only source there is.
+    if (this.ytDlpUnavailable) return resolveHdStream(videoId, undefined, fetch);
+
+    const info = await this.ytDlpInfo(videoId);
     try {
-      return await resolveHdStream(videoId, undefined, fetch);
-    } catch (hdError) {
-      if (this.ytDlpUnavailable) throw hdError;
-      botCheck.guard();
-      const { findYtDlp, resolveStream, ytDlpFormats } = await desktop();
-      if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-      // InnerTube's files mostly stop serving at about a minute (2026-11-04);
-      // yt-dlp's serve the whole video, stitched the same way. Its HLS lookup
-      // stays last, for the odd video with a ladder and no MP4 pair.
-      try {
-        const formats = await ytDlpFormats(videoId, this.ytDlpPath);
-        return await resolveHdFromYtDlpFormats(videoId, formats, undefined, fetch);
-      } catch (err) {
-        console.warn("YT Free: HD via InnerTube and via yt-dlp both failed", hdError, err);
-        botCheck.guard();
-        return await resolveStream(videoId, this.ytDlpPath, "quality");
-      }
+      return await resolveHdFromYtDlpFormats(videoId, info.formats ?? [], undefined, fetch);
+    } catch (err) {
+      // The odd video with an HLS ladder and no MP4 pair. No new request.
+      const hls = hlsStreamFromInfo(info);
+      if (hls) return hls;
+      throw err;
     }
   }
 
@@ -5438,7 +5439,10 @@ export default class YtFreePlugin extends Plugin {
   private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
       if (mode === "quality" || forceRefresh) botCheck.guard();
-      if (forceRefresh) this.cache.invalidate(videoId);
+      if (forceRefresh) {
+        this.cache.invalidate(videoId);
+        forgetPlayer(videoId);
+      }
       const cached = this.cache.get(videoId, mode);
       if (cached) return cached;
 
