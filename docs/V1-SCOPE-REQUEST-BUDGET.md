@@ -4,7 +4,7 @@
 trigger this … make sure those calls are smart as well") and his answer of 2026-11-07 ("I agree
 with all the items you recommend"). Research: [RESEARCH-YOUTUBE-REQUESTS.md](RESEARCH-YOUTUBE-REQUESTS.md).
 
-**Status:** Scoped, awaiting Isaiah's approval. Covers GitHub #31–#39. Supersedes #16.
+**Status:** Approved by Isaiah 2026-11-07. Part 1 built 2026-11-07, awaiting manual test. Covers GitHub #31–#39. Supersedes #16.
 
 **Ground rule for all of it:** fewer and more consistent requests. No token generation, no
 identity cycling, no proxies or IP rotation. No live probes from Isaiah's network while building;
@@ -29,6 +29,16 @@ Built in four parts, one PR each, in this order. Each part is useful alone.
 5. **Probes retired.** `tools/client-probe.mjs` and `tools/hls-probe.mjs` are deleted (their
    findings are in the scope docs). Other live tools in `tools/` get the same stamp guard and
    print their request count at the end.
+
+Decided while building Part 1 (2026-11-07, Claude; open to change):
+- `LOGIN_REQUIRED` pauses only when its reason is the bot check. Age-restricted and members-only
+  videos answer `LOGIN_REQUIRED` too, and must not pause the plugin.
+- On desktop, opening a video note is the "Play" that still tries once, because the desktop
+  loads on open (item 12). It tries one yt-dlp client and does not fall back to InnerTube.
+- The hub's Sync button and "Sync now" do nothing during the pause except say why: a poll is
+  the biggest burst there is, pressed or not.
+- The old full live suite is parked as `npm run smoke:full` (same daily limit) until Part 4.
+- The remaining probe tools default to one video instead of two or three.
 
 ## Part 2: one answer per video (#32, #33, #35)
 

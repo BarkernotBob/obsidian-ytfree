@@ -40,9 +40,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 3. #51 (phone): Now playing pill removed; properties re-collapse after Obsidian rebuilds them. The
    properties cause was not found in the 2026-11-07 merge diff (none of it touches collapsing), so the
    fix is a guess at a rebuild/slow-load race. Needs a phone test.
-4. Request volume (#31–#39): scope
-   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md) approved 2026-11-07; build Part 1 (#31 breaker,
-   #39 smoke canary) first. No live probes from Isaiah's network.
+4. Request volume (#31–#39), scope approved 2026-11-07:
+   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md). Part 1 (#31 bot-check pause, #39
+   smoke canary) is built; next is Part 2 (#32, #33, #35). No live probes from Isaiah's network.
 5. HD backlog on GitHub: rung picker / ABR (#15).
 
 ## How to ship and test
@@ -66,8 +66,10 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   obsidianmd/obsidian-releases) and render with `tools/preview-sheet-harness.mjs`.
 - Obsidian rewrites `community-plugins.json` from memory while it's running, so `setup.sh` only
   edits that file when Obsidian is closed.
-- The smoke test's quality lookup only prints `HLS: yes/no` (GitHub #17). `HLS: no` is normal
-  signed out (issue 043); it fails only if there's no https URL with an `expire` field.
+- `npm run smoke` is a once-a-day canary (`tools/smoke.mjs`, stamps in `~/.cache/ytfree/`).
+  Every live tool in `tools/` claims its own daily run through `tools/live-budget.mjs`.
+- A bot check pauses all automatic YouTube requests for 45 minutes (`src/bot-check.ts`, stored in
+  `localStorage` under `ytfree-bot-check-until`). Clear that key to end a pause early.
 - Desktop HD byte ranges go over Node `https`, not `requestUrl`; a request Node cannot make at
   all (no status, no byte) switches that stream to `requestUrl` for good. The loader does not
   enforce `maxTimeToFirstByteMs` (only `maxLoadTimeMs`): `requestUrl` reports no first byte.

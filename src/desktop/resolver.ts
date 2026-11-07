@@ -11,6 +11,7 @@ import https from "https";
 import { promisify } from "util";
 import { EXPIRY_SAFETY_MARGIN_MS, parseExpiry, ResolveError, YtDlpMissingError } from "../stream.ts";
 import { ytDlpEnv } from "./env.ts";
+import { botCheck, isBotCheck } from "../bot-check.ts";
 // `import type` and not a plain import: `node --test` strips types rather than
 // compiling them, so a type imported as a value makes the whole module fail to
 // load — which is what stopped `npm run smoke` running at all.
@@ -19,21 +20,15 @@ import type { YtDlpFormat } from "../adaptive.ts";
 
 const pExecFile = promisify(execFile);
 
-/**
- * YouTube's anti-bot wall: signed-out requests from this network are refused
- * until it decides otherwise (Isaiah, 2026-11-04, after a day of probing from
- * his Mac). A signed-in session gets past it, so a refusal like this is
- * retried with the account's cookies when there are any.
- */
-export function isBotCheck(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /confirm you.?re not a bot|LOGIN_REQUIRED/i.test(message);
-}
+/** Re-exported: callers of the resolver have always found it here. */
+export { isBotCheck };
 
 /**
- * Run yt-dlp signed out, and once more with `cookieFile` if YouTube answers
- * with its bot check. Signed out first on purpose: playback should not spend
- * the account's standing on every video.
+ * Run yt-dlp once. `cookieFile` signs the request in, and is only passed when
+ * the user asked for it ("Try signed in"): there is no automatic signed-in
+ * retry any more, because on a flagged network it doubled every request and
+ * put the account's standing behind each one (GitHub #31). A bot check pauses
+ * the plugin's automatic requests (`botCheck`) before the error goes on.
  */
 async function ytDlp(
   ytDlpPath: string,
@@ -41,24 +36,18 @@ async function ytDlp(
   maxBuffer: number,
   cookieFile?: string,
 ): Promise<string> {
-  const run = async (extra: string[]): Promise<string> => {
-    try {
-      const result = await pExecFile(ytDlpPath, [...extra, ...args], {
-        timeout: 120_000,
-        maxBuffer,
-        env: ytDlpEnv(ytDlpPath),
-      });
-      return result.stdout;
-    } catch (err: unknown) {
-      const e = err as { stderr?: string; message?: string };
-      throw new ResolveError((e.stderr || e.message || "unknown error").trim());
-    }
-  };
   try {
-    return await run([]);
-  } catch (err) {
-    if (!cookieFile || !isBotCheck(err)) throw err;
-    return run(["--cookies", cookieFile]);
+    const result = await pExecFile(ytDlpPath, [...(cookieFile ? ["--cookies", cookieFile] : []), ...args], {
+      timeout: 120_000,
+      maxBuffer,
+      env: ytDlpEnv(ytDlpPath),
+    });
+    return result.stdout;
+  } catch (err: unknown) {
+    const e = err as { stderr?: string; message?: string };
+    const error = new ResolveError((e.stderr || e.message || "unknown error").trim());
+    if (isBotCheck(error)) botCheck.trip();
+    throw error;
   }
 }
 
@@ -165,26 +154,11 @@ export async function findYtDlp(configuredPath: string): Promise<string> {
  * fine here, and pinning `m4a` would fail on the videos that do not offer one.
  */
 export async function resolveAudioUrl(videoId: string, ytDlpPath: string): Promise<string> {
-  let stdout: string;
-  try {
-    const result = await pExecFile(
-      ytDlpPath,
-      [
-        "--no-warnings",
-        "--no-playlist",
-        "-f",
-        "ba/bestaudio",
-        "-g",
-        `https://www.youtube.com/watch?v=${videoId}`,
-      ],
-      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024, env: ytDlpEnv(ytDlpPath) },
-    );
-    stdout = result.stdout;
-  } catch (err: unknown) {
-    const e = err as { stderr?: string; message?: string };
-    throw new ResolveError((e.stderr || e.message || "unknown error").trim());
-  }
-
+  const stdout = await ytDlp(
+    ytDlpPath,
+    ["--no-warnings", "--no-playlist", "-f", "ba/bestaudio", "-g", `https://www.youtube.com/watch?v=${videoId}`],
+    4 * 1024 * 1024,
+  );
   const url = stdout.trim().split("\n").filter(Boolean).pop();
   if (!url) throw new ResolveError("yt-dlp returned no audio URL");
   return url;
@@ -220,6 +194,9 @@ export async function resolveStream(
     try {
       stream = await resolveWith(videoId, ytDlpPath, mode, client, cookieFile);
     } catch (err) {
+      // A bot check is about this network, not this client: asking the next
+      // one is more of what got the network flagged.
+      if (isBotCheck(err)) throw err;
       lastError = err;
       continue; // a client that cannot answer is not a video that cannot play
     }

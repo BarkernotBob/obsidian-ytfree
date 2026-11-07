@@ -1,16 +1,20 @@
 /**
- * Live smoke test — hits YouTube for real.
+ * The full live suite — hits YouTube for real, about 17 tests and dozens of
+ * requests across several app identities.
  *
- * This is the canary for the project's biggest risk: YouTube changing
- * extraction so yt-dlp stops resolving streams. Unit tests cannot catch that.
- * Run before shipping any change, and whenever playback starts failing.
+ * Parked (GitHub #39): this is the kind of burst that got Isaiah's home IP
+ * bot-flagged on 2026-11-04. The everyday check is the canary
+ * (`npm run smoke`, `tests/canary.smoke.ts`, about 5 requests). These tests
+ * move to recorded fixtures in Part 4 of docs/V1-SCOPE-REQUEST-BUDGET.md.
+ * Until then, only when something specific needs it, and not from a network
+ * that has been flagged:
  *
- *   npm run smoke
+ *   npm run smoke:full
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findYtDlp, resolveStream } from "../src/desktop/resolver.ts";
-import { parseExpiry } from "../src/stream.ts";
+import { findYtDlp, resolveStream } from "../../src/desktop/resolver.ts";
+import { parseExpiry } from "../../src/stream.ts";
 
 // Stable, long-lived, non-age-restricted video.
 const VIDEO_ID = "dQw4w9WgXcQ";
@@ -116,7 +120,7 @@ test("an invalid video id fails loudly rather than silently", async () => {
  * would notice.
  */
 test("a channel feed still carries IDs, descriptions and 15 entries", async () => {
-  const { parseChannelFeed, feedUrl } = await import("../src/subscriptions.ts");
+  const { parseChannelFeed, feedUrl } = await import("../../src/subscriptions.ts");
   const response = await fetch(feedUrl("UC6107grRI4m0o2-emgoDnAA"));
   assert.equal(response.status, 200);
 
@@ -137,7 +141,7 @@ test("a channel feed still carries IDs, descriptions and 15 entries", async () =
 });
 
 test("the Shorts probe still answers 303 for a long-form video", async () => {
-  const { probeIsShort } = await import("../src/desktop/shorts-probe.ts");
+  const { probeIsShort } = await import("../../src/desktop/shorts-probe.ts");
   assert.equal(await probeIsShort("vS6HEes8daw"), false);
 });
 
@@ -151,8 +155,8 @@ test("the Shorts probe still answers 303 for a long-form video", async () => {
  * passing against a captured yesterday.
  */
 test("InnerTube search still answers unauthenticated, with parseable results", async () => {
-  const { parseSearchResponse } = await import("../src/search.ts");
-  const { CLIENTS, SEARCH_URL } = await import("../src/innertube-context.ts");
+  const { parseSearchResponse } = await import("../../src/search.ts");
+  const { CLIENTS, SEARCH_URL } = await import("../../src/innertube-context.ts");
 
   const response = await fetch(SEARCH_URL, {
     method: "POST",
@@ -178,7 +182,7 @@ test("InnerTube search still answers unauthenticated, with parseable results", a
 });
 
 test("the player still carries a description for a search-added item", async () => {
-  const { CLIENTS, PLAYER_URL, playerBody } = await import("../src/innertube-context.ts");
+  const { CLIENTS, PLAYER_URL, playerBody } = await import("../../src/innertube-context.ts");
   const response = await fetch(PLAYER_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", "User-Agent": CLIENTS.android.ua },
@@ -205,8 +209,8 @@ test("the player still carries a description for a search-added item", async () 
  * notices.
  */
 test("InnerTube still carries caption tracks that serve json3", async () => {
-  const { CLIENTS, PLAYER_URL, playerBody } = await import("../src/innertube-context.ts");
-  const { parseJson3, pickPlayerCaptionTrack } = await import("../src/transcript.ts");
+  const { CLIENTS, PLAYER_URL, playerBody } = await import("../../src/innertube-context.ts");
+  const { parseJson3, pickPlayerCaptionTrack } = await import("../../src/transcript.ts");
 
   const response = await fetch(PLAYER_URL, {
     method: "POST",
@@ -239,8 +243,8 @@ test("InnerTube still carries caption tracks that serve json3", async () => {
  * are undocumented, so this is the test that notices when either moves.
  */
 test("the WEB next endpoint still carries a replay heatmap", async () => {
-  const { CLIENTS, NEXT_URL } = await import("../src/innertube-context.ts");
-  const { parseHeatmapMarkers } = await import("../src/transcript.ts");
+  const { CLIENTS, NEXT_URL } = await import("../../src/innertube-context.ts");
+  const { parseHeatmapMarkers } = await import("../../src/transcript.ts");
 
   const response = await fetch(NEXT_URL, {
     method: "POST",
@@ -268,8 +272,8 @@ test("InnerTube still hands out an HD pair that serves bytes with a readable ind
   // the desktop's yt-dlp-free path both rest on this: an unauthenticated
   // ANDROID or IOS answer whose separate picture and sound files serve their
   // `sidx` index with no PO token. Same attempt order as `src/hd.ts`.
-  const { pickPair, resolveHd, withRange } = await import("../src/adaptive.ts");
-  const { CLIENTS, PLAYER_URL, playerBody } = await import("../src/innertube-context.ts");
+  const { pickPair, resolveHd, withRange } = await import("../../src/adaptive.ts");
+  const { CLIENTS, PLAYER_URL, playerBody } = await import("../../src/innertube-context.ts");
 
   const ask = async (client: string) => {
     const { ctx, ua } = CLIENTS[client as "android" | "ios"];

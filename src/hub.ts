@@ -6,6 +6,7 @@
  * are tested there.
  */
 
+import { botCheck } from "./bot-check.ts";
 import {
   App,
   ButtonComponent,
@@ -627,6 +628,9 @@ export class SubscriptionsStore {
 
   async poll(): Promise<void> {
     if (this.polling) return;
+    // Every channel's feed, durations and backfills: the burst a bot-check
+    // pause exists to stop (GitHub #31). The hub's status line says why.
+    if (botCheck.isPaused()) return;
     // Before anything: a poll ends in a save, and a save built on a stale copy
     // of the file is what used to undo the other device's decisions.
     await this.refreshFromDisk();
@@ -2211,6 +2215,8 @@ export class HubView extends ItemView {
     const { channels, items, lastPolledAt } = this.store.state;
     const shown = this.currentItems().length;
     const parts: string[] = [];
+    const paused = botCheck.message();
+    if (paused) parts.push(paused);
     if (this.store.polling) parts.push("Checking channels…");
     else if (channels.length === 0) parts.push("No channels yet — import your subscriptions.");
     else if (this.itemQuery) {

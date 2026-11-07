@@ -9,11 +9,14 @@
  * through, or a slow segment, shows up here without opening Obsidian.
  * Uses plain `fetch`, which is what the smoke test uses too.
  */
+import { liveGuard } from "./live-budget.mjs";
 import { resolveHd, withRange } from "../src/adaptive.ts";
 import { CLIENTS, PLAYER_URL, playerBody } from "../src/innertube-context.ts";
 
-const ids = process.argv.slice(2);
-if (!ids.length) ids.push("dQw4w9WgXcQ", "jNQXAC9IVRw", "aqz-KE-bpKQ");
+// Once a day per machine, counted (GitHub #39). `--force` overrides.
+liveGuard("hd-probe");
+const ids = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+if (!ids.length) ids.push("dQw4w9WgXcQ");
 
 async function player(videoId: string, client: "android" | "ios") {
   const { ctx, ua } = CLIENTS[client];
