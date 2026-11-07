@@ -102,6 +102,14 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   Decided while building: *Open YouTube URL from clipboard* still opens the note, and the new
   *Preview YouTube URL from clipboard* opens the Preview.
 
+### 2026-11-04 (Isaiah asked; recommendations by Claude, not yet approved)
+
+- Request volume to YouTube is a design constraint: one answer per video, one identity per
+  device, cached, and stop after a bot check. No token generation, identity cycling or IP
+  rotation. Research: docs/RESEARCH-YOUTUBE-REQUESTS.md, backlog #31–#39.
+- **Bot check** (term): YouTube's "Sign in to confirm you're not a bot" (yt-dlp) or
+  `LOGIN_REQUIRED` (InnerTube), refusing signed-out requests from a flagged IP.
+
 ### 2026-10-14 (Isaiah)
 
 - **Preview (GitHub #8)**: fullscreen on the phone, not a card. Decided while building: the
