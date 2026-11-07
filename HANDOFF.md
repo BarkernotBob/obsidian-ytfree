@@ -4,90 +4,40 @@ Current state only; keep it under 80 lines and replace, don't append. Full histo
 2026-09-22 is in [docs/archive/HANDOFF-history-2026-09.md](docs/archive/HANDOFF-history-2026-09.md).
 Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual test section).
 
-## Status (2026-10-22)
+## Status (2026-11-07)
 
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
-- 663 unit tests pass, `tsc` clean, build clean (2026-10-22, branch `claude/project-thread-sjrz45`).
+- 2026-11-07: every open PR was merged into main at Isaiah's request ("merge all those in"),
+  tested or not: #19, #20, #21, #22, #24, #27, #28, #29, #30, #40, #41. 701 unit tests pass,
+  `tsc` and build clean on the combined main. Untested on a device at merge time: #19 steps 3-6,
+  #20, #21's last two commits (bot-check retry, HD ready before Play), #24, #28, #30 part 2.
+- Isaiah's earlier answers are recorded in [GLOSSARY.md](GLOSSARY.md).
+- New follow-ups are filed as GitHub issues, not as files in `issues/`.
 
-- 653 unit tests pass, `tsc` clean, build clean (2026-10-16, main at PR #12).
-- Isaiah's answers of 2026-10-13 are recorded in [GLOSSARY.md](GLOSSARY.md): every ticket built
-  up to 046 passed its manual test, 018 is parked, 045's scope is approved, 049 is built
-  (blockquote), and collab videos (GitHub #2) come from the signed-in subscription feed.
-- New follow-ups are filed as GitHub issues from now on, not as files in `issues/`.
+## Shipped on main (scope doc = manual test)
 
-## Tickets
-
-- **Built 2026-11-04 on branch `claude/project-thread-mm476q` (stacked on #21, PR #27), manual
-  test passed 2026-11-07, ready to merge after #21:** per-video quality switch, HD or 360p from the ⋯ pop-out. Scope and manual
-  test: [docs/V1-SCOPE-QUALITY-SWITCH.md](docs/V1-SCOPE-QUALITY-SWITCH.md). Code:
-  `setQuality`/`downgrade` in `src/player.ts`, `VideoSession.hd` in `src/main.ts`.
-- **Built 2026-10-22 on branch `claude/project-thread-sjrz45`, awaiting manual test:** HD
-  progress (quality badge, buffered-ahead band) and the "Start in HD" setting. Scope and manual
-  test: [docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md). Code:
-  `src/hd-status.ts` (pure), `load`/`loadHdFirst`/`upgrade` in `src/player.ts`. The ~55s stutter
-  and slow seeking are a separate branch.
-
-- **Built 2026-10-21 on branch `claude/project-thread-jd0aku`, awaiting manual test:** hub deep
-  link `obsidian://ytfree?view=subscriptions` for an iPhone Shortcut. Scope and manual test:
-  [docs/V1-SCOPE-HUB-DEEP-LINK.md](docs/V1-SCOPE-HUB-DEEP-LINK.md). Build not yet verified.
-- **Built 2026-10-14 on branch `claude/project-thread-zamhn2`, awaiting manual test:**
-  GitHub #8 (Preview fullscreen on the phone) and #9 (Fullscreen waits for the stream).
-- **Scoped 2026-10-14, awaiting Isaiah's approval:** GitHub #10 (paste a URL, land in its
-  Preview) and #11 (every YouTube link lands in Preview), one scope:
-
-- **Merged 2026-10-17 (PR #12), manual test passed:** GitHub #8 (Preview fullscreen on the
-  phone) and #9 (Fullscreen waits for the stream).
-- **PR #19, in manual test:** GitHub #10 (paste a URL, land in its Preview) and #11 (a YouTube
-  link opens its note if one exists, else its Preview; never makes a note; never auto-plays;
-  changed 2026-10-19 from a setting). Paste steps 1-2 passed on the iPhone 2026-10-19. Scope and test:
-  [docs/V1-SCOPE-PASTE-TO-PREVIEW.md](docs/V1-SCOPE-PASTE-TO-PREVIEW.md).
-- **Built 2026-10-13 (PR #4, merged):** 045, GitHub #2, 048, 047, GitHub #3. Manual tests are in
-  each issue file or scope doc.
-- **Scoped, not built:** 005 (mobile full quality, unblocked), 043 (desktop full quality).
-- **Built 2026-10-15, manual test passed 2026-10-15, PR #14 (merged):** desktop plays without yt-dlp, and stitched HD
-  (043, plus 005 as an opt-in phone setting). Scope and manual test:
-  [docs/V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD.md](docs/V1-SCOPE-STREAM-WITHOUT-YTDLP-AND-HD.md).
-  Code: `src/adaptive.ts` (pure), `src/virtual-loader.ts`, `src/hd.ts`, providers in `main.ts`.
+- HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));
+  ~55 s stutter and jumps ([V1-SCOPE-HD-STUTTER-AND-SEEK](docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md), #23/#24);
+  desktop HD from yt-dlp's files; per-video quality switch ([V1-SCOPE-QUALITY-SWITCH](docs/V1-SCOPE-QUALITY-SWITCH.md)).
+- Phone HD (#25): native IOS HLS (~1 in 5 videos) and YouTube's own player from ⋯ → Quality
+  ([V1-SCOPE-PHONE-HD](docs/V1-SCOPE-PHONE-HD.md)). Part 2 needs GitHub Pages on, serving `/docs` from main.
+- Keep playing on the phone, resumable background pause, Now playing button
+  ([V1-SCOPE-KEEP-PLAYING](docs/V1-SCOPE-KEEP-PLAYING.md)).
+- Halfway-point thumbnails (#41), paste/click a link to land in Preview
+  ([V1-SCOPE-PASTE-TO-PREVIEW](docs/V1-SCOPE-PASTE-TO-PREVIEW.md)), hub deep link
+  ([V1-SCOPE-HUB-DEEP-LINK](docs/V1-SCOPE-HUB-DEEP-LINK.md)), lock spike pasteable videos (#29),
+  request-volume research ([RESEARCH-YOUTUBE-REQUESTS](docs/RESEARCH-YOUTUBE-REQUESTS.md)).
 - **Parked:** 018 (Watch Later). Do not re-ask.
 
 ## Next step
 
-0. Isaiah (2026-11-07): phone HD (#25, PR #28). Part 1 = native IOS HLS (~1 in 5 videos).
-   Part 2 = YouTube's own player from ⋯ → Quality → "YouTube player (HD)" on the phone, via the
-   hosted page `docs/player/index.html`. Needs GitHub Pages on (branch of PR #28, `/docs`). Test
-   steps: [docs/V1-SCOPE-PHONE-HD.md](docs/V1-SCOPE-PHONE-HD.md). Don't probe YouTube from the Mac.
-0. Isaiah (2026-11-04): badge, stutter fix and seeking passed. Now test desktop HD from yt-dlp
-   (vault has main.js sha256 f66d54f7…). PR #21 carries #22 merged in. Phone HD: GitHub #25.
-0. Isaiah: manual test for the ~55 s HD stutter and slow jumps, in
-   [docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md](docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md) (PR #22).
-   `node tools/hd-probe.ts` on the Mac gives live per-client numbers if the theory needs checking.
-0. Isaiah: test "keep playing" on the iPhone (branch `claude/project-thread-nz2sm6`, scope
-   [docs/V1-SCOPE-KEEP-PLAYING.md](docs/V1-SCOPE-KEEP-PLAYING.md)). Cases 3 and 4 (leave the app,
-   lock) answer the open WebKit question that `spikes/lock-audio` (#26) was waiting on.
-   Background play passed (2026-11-07). Part 2 on the same branch: a background pause stays
-   resumable, and a Now playing button goes to the playing note. Test via the integration build.
-0. Halfway-point thumbnails (PR #41): manual test passed 2026-11-07; ready to merge.
-
-   GitHub #23 (stacked on PR #22, nightly 2026-10-22): a jump now cancels the segment hls.js
-   gave up on, and desktop HD streams its byte ranges (`src/desktop/range-fetch.ts`) so hls.js
-   sees real first-byte time and bytes so far. Phone unchanged. Same manual test as #22.
-1. Isaiah: on the iPhone, open any Preview. The picture starts right under the status bar with
-   the ✕ on its top-right corner; opening Description or Transcript widens it to full width and
-   hides the other, shutting it puts both back side by side (#8, PR #12). Mac unchanged.
-2. Isaiah: on the iPhone, press Play then Fullscreen at once. The Fullscreen button is dimmed
-   and the status line says it will be ready once the video has loaded; nothing changes size.
-   Press it again once the video plays: the phone's own fullscreen. Same in a note (#9).
-3. Isaiah: approve or change the #10/#11 scope, and answer its one question. Then build it.
-4. Backlog for HD is on GitHub (quality picker / ABR, InnerTube-first on desktop).
-5. Request volume (2026-11-04, after the home IP got bot-flagged): research in
-   [docs/RESEARCH-YOUTUBE-REQUESTS.md](docs/RESEARCH-YOUTUBE-REQUESTS.md), backlog #31–#39.
-   Suggested first: #31 (stop after a bot check) and #39 (smoke canary). No live probes from
-   Isaiah's network until then.
-
-1. Isaiah: finish the #10/#11 manual test (steps 3-6) in the scope doc; then merge PR #19.
-2. Backlog for HD is on GitHub (quality picker / ABR, InnerTube-first on desktop).
+1. Isaiah: install main and run the untested scope-doc tests listed under Status.
+2. Phone HD part 2: switch GitHub Pages to main `/docs` (it pointed at PR #28's branch).
+3. Request volume: backlog #31–#39, first #31 (stop after a bot check) and #39 (smoke canary).
+   No live probes from Isaiah's network until then.
+4. HD backlog on GitHub: rung picker / ABR (#15).
 
 ## How to ship and test
 
