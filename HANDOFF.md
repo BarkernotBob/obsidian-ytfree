@@ -40,8 +40,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 3. Hub Save and In progress (#49, #50): scope drafted in
    [V1-SCOPE-HUB-SAVE-AND-IN-PROGRESS](docs/V1-SCOPE-HUB-SAVE-AND-IN-PROGRESS.md), waiting on
    Isaiah's four answers before building.
-4. Request volume: backlog #31–#39, first #31 (stop after a bot check) and #39 (smoke canary).
-   No live probes from Isaiah's network until then.
+4. Request volume (#31–#39): Isaiah approves
+   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md), then build Part 1 (#31 breaker,
+   #39 smoke canary) first. No live probes from Isaiah's network.
 4. HD backlog on GitHub: rung picker / ABR (#15).
 
 ## How to ship and test
