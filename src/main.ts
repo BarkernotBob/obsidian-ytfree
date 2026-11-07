@@ -5288,9 +5288,15 @@ export default class YtFreePlugin extends Plugin {
   }
 
   private async desktopQuality(videoId: string): Promise<ResolvedStream> {
-    const { resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
+    const { fetchRange, resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
+    // Streamed and cancellable on desktop (GitHub #23); `requestUrl` if the
+    // desktop code will not load. Used by both the InnerTube and yt-dlp pairs.
+    const fetch = await desktop().then(
+      (d) => d.streamingWithFallback(fetchRange),
+      () => fetchRange,
+    );
     try {
-      return await resolveHdStream(videoId);
+      return await resolveHdStream(videoId, undefined, fetch);
     } catch (hdError) {
       if (this.ytDlpUnavailable) throw hdError;
       const { findYtDlp, resolveStream, ytDlpFormats } = await desktop();
@@ -5300,7 +5306,7 @@ export default class YtFreePlugin extends Plugin {
       // stays last, for the odd video with a ladder and no MP4 pair.
       try {
         const formats = await ytDlpFormats(videoId, this.ytDlpPath, await this.botCookies());
-        return await resolveHdFromYtDlpFormats(videoId, formats);
+        return await resolveHdFromYtDlpFormats(videoId, formats, undefined, fetch);
       } catch (err) {
         console.warn("YT Free: HD via InnerTube and via yt-dlp both failed", hdError, err);
         return await resolveStream(videoId, this.ytDlpPath, "quality", await this.botCookies());
