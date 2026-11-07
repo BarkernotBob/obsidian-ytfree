@@ -37,10 +37,13 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 1. Isaiah: install main and run the untested scope-doc tests listed under Status.
 2. Phone HD part 2: switch GitHub Pages to main `/docs` (it pointed at PR #28's branch).
-3. Request volume (#31–#39): Isaiah approves
-   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md), then build Part 1 (#31 breaker,
+3. #51 (phone): Now playing pill removed; properties re-collapse after Obsidian rebuilds them. The
+   properties cause was not found in the 2026-11-07 merge diff (none of it touches collapsing), so the
+   fix is a guess at a rebuild/slow-load race. Needs a phone test.
+4. Request volume (#31–#39): scope
+   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md) approved 2026-11-07; build Part 1 (#31 breaker,
    #39 smoke canary) first. No live probes from Isaiah's network.
-4. HD backlog on GitHub: rung picker / ABR (#15).
+5. HD backlog on GitHub: rung picker / ABR (#15).
 
 ## How to ship and test
 

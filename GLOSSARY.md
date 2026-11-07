@@ -86,6 +86,9 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Now playing button, not auto-jump**: the lock-screen tile can't be told apart from the app
   switcher, so instead of jumping on return, a "▶ title" pill (phone) / status-bar item (desktop)
   takes you to the playing note. Isaiah's call.
+- **No Now playing pill on the phone** (2026-11-07, #51): Isaiah saw it as a stray "video is playing"
+  label and asked for it gone. The desktop status-bar item and the "Go to the playing video" command stay.
+- **Properties re-collapse when Obsidian rebuilds them** (#51): collapsed once per table, not once per note.
 
 ### 2026-10-19 (Isaiah)
 
