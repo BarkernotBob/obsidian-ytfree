@@ -17,6 +17,10 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Tickets
 
+- **Built 2026-11-04 on branch `claude/project-thread-mm476q` (stacked on #21, PR #27), manual
+  test passed 2026-11-07, ready to merge after #21:** per-video quality switch, HD or 360p from the ⋯ pop-out. Scope and manual
+  test: [docs/V1-SCOPE-QUALITY-SWITCH.md](docs/V1-SCOPE-QUALITY-SWITCH.md). Code:
+  `setQuality`/`downgrade` in `src/player.ts`, `VideoSession.hd` in `src/main.ts`.
 - **Built 2026-10-22 on branch `claude/project-thread-sjrz45`, awaiting manual test:** HD
   progress (quality badge, buffered-ahead band) and the "Start in HD" setting. Scope and manual
   test: [docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md). Code:
