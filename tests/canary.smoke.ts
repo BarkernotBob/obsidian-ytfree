@@ -23,7 +23,7 @@ const VIDEO_ID = "dQw4w9WgXcQ";
 test("yt-dlp resolves a stream that serves video bytes", async () => {
   // findYtDlp only runs `--version`: no request.
   const ytDlp = await findYtDlp("");
-  // One yt-dlp run on the pinned client, and its own two-byte check.
+  // One `yt-dlp -J`, as the plugin makes on every desktop open (GitHub #32).
   const stream = await resolveStream(VIDEO_ID, ytDlp, "fast");
   assert.ok(stream.url.includes("videoplayback"), "expected a direct videoplayback URL");
   assert.match(stream.url, /[?&]expire=\d+|\/expire\/\d+/, "no expire field: googlevideo changed its URL shape");

@@ -75,9 +75,7 @@ test("the resolved stream actually serves video bytes", async () => {
 });
 
 test("a second, older video serves bytes too", async () => {
-  // One video can be an exception — a client that has been cut off is not. This
-  // is also the case that exercises the fallback down `FAST_CLIENTS`: the
-  // client this one answers on is not the one the test above uses.
+  // One video can be an exception — a client that has been cut off is not.
   const ytDlp = await findYtDlp("");
   const stream = await resolveStream(OTHER_VIDEO_ID, ytDlp, "fast");
   const res = await fetch(stream.url, { headers: { Range: "bytes=0-4095" } });

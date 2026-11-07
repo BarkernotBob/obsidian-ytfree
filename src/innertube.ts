@@ -15,6 +15,8 @@
 
 import { requestUrl } from "obsidian";
 import { botCheck, isBotCheckPlayability } from "./bot-check.ts";
+import { InfoCache } from "./info-cache.ts";
+import { EXPIRY_SAFETY_MARGIN_MS } from "./stream.ts";
 import { BROWSE_URL, CLIENTS, NEXT_URL, PLAYER_URL, SEARCH_URL, playerBody } from "./innertube-context.ts";
 import {
   CHANNEL_SEARCH_PARAMS,
@@ -85,6 +87,36 @@ export async function callInnertube(
   return parsed;
 }
 
+/** Answers from the player, one per video and client (GitHub #33). */
+const players = new InfoCache<unknown>(() => Date.now(), 20);
+
+/** How long a player answer is worth keeping: its links' life, less a margin. */
+function playerKeepUntil(response: unknown, now = Date.now()): number {
+  const r = response as { playabilityStatus?: { status?: unknown }; streamingData?: { expiresInSeconds?: unknown } };
+  // A refusal or an error page is not an answer worth keeping.
+  if (r?.playabilityStatus?.status !== "OK") return now;
+  const seconds = Number(r.streamingData?.expiresInSeconds);
+  const life = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 3600_000;
+  return now + Math.max(0, life - EXPIRY_SAFETY_MARGIN_MS);
+}
+
+/**
+ * The player's answer for a video as `client`, asked once and reused until its
+ * links expire: 360p, captions, duration and HD all read the same ANDROID
+ * answer instead of asking again (GitHub #33). `fresh` skips the kept answer,
+ * for a link YouTube has just refused.
+ */
+export function fetchPlayer(videoId: string, client: keyof typeof CLIENTS, fresh = false): Promise<unknown> {
+  const key = `${client}:${videoId}`;
+  if (fresh) players.invalidate(key);
+  return players.get(key, () => callInnertube(PLAYER_URL, client, playerBody(videoId)), (r) => playerKeepUntil(r));
+}
+
+/** Forget every kept answer for a video (a stream that died is re-resolved). */
+export function forgetPlayer(videoId: string): void {
+  for (const client of Object.keys(CLIENTS)) players.invalidate(`${client}:${videoId}`);
+}
+
 /**
  * Search, or the next page of one.
  *
@@ -153,7 +185,7 @@ export interface VideoDetails {
  */
 export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> {
   try {
-    const response = await callInnertube(PLAYER_URL, "android", playerBody(videoId));
+    const response = await fetchPlayer(videoId, "android");
     const details = (response as {
       videoDetails?: {
         shortDescription?: unknown;
@@ -185,7 +217,7 @@ export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> 
  */
 export async function fetchPublishDate(videoId: string): Promise<string> {
   try {
-    return parsePlayerPublishDate(await callInnertube(PLAYER_URL, "web", playerBody(videoId)));
+    return parsePlayerPublishDate(await fetchPlayer(videoId, "web"));
   } catch {
     return "";
   }
@@ -210,7 +242,7 @@ export async function fetchCaptionTrack(
   videoId: string,
   language: string,
 ): Promise<CaptionTrack | null> {
-  const response = await callInnertube(PLAYER_URL, "android", playerBody(videoId));
+  const response = await fetchPlayer(videoId, "android");
   return pickPlayerCaptionTrack(response as CaptionedPlayerResponse, language);
 }
 

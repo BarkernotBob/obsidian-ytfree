@@ -4,7 +4,7 @@
 trigger this … make sure those calls are smart as well") and his answer of 2026-11-07 ("I agree
 with all the items you recommend"). Research: [RESEARCH-YOUTUBE-REQUESTS.md](RESEARCH-YOUTUBE-REQUESTS.md).
 
-**Status:** Approved by Isaiah 2026-11-07. Part 1 built 2026-11-07, awaiting manual test. Covers GitHub #31–#39. Supersedes #16.
+**Status:** Approved by Isaiah 2026-11-07. Part 1 merged 2026-11-07 (PR #56). Part 2 built 2026-11-07, awaiting manual test. Covers GitHub #31–#39. Supersedes #16.
 
 **Ground rule for all of it:** fewer and more consistent requests. No token generation, no
 identity cycling, no proxies or IP rotation. No live probes from Isaiah's network while building;
@@ -58,6 +58,17 @@ Decided while building Part 1 (2026-11-07, Claude; open to change):
 10. **Fewer range reads in HD (#35).** Index of the top rung and the sound up front; a lower
     rung's index only when hls.js first asks for that rung. One check at 90 s, on the top rung
     only. Target: about 5 reads per HD resolve, down from about 14.
+
+Decided while building Part 2 (2026-11-07, Claude; open to change):
+- The desktop no longer reads two bytes of the 360p file before playing it, and has no second
+  client to try: there is one answer, and the player's own recovery re-asks once if it dies.
+- If a `-J` has no single 360p file, the first frame plays an HLS variant from the same answer;
+  if it has neither, the desktop falls back to the phone's way (one InnerTube call), as before.
+- A lower HD rung that will not load is served the top rung's playlist: a sharper picture than
+  asked for, never a stall.
+- Feed-gap backfill keeps its WEB call for the publish date for now. It runs a few times a year;
+  revisit with recorded fixtures in Part 4.
+- Phone player answers are kept for at most 20 videos at once, to bound memory.
 
 ## Part 3: remember and wait (#34, #36, #37)
 

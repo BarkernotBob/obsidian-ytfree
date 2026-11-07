@@ -41,8 +41,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
    properties cause was not found in the 2026-11-07 merge diff (none of it touches collapsing), so the
    fix is a guess at a rebuild/slow-load race. Needs a phone test.
 4. Request volume (#31–#39), scope approved 2026-11-07:
-   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md). Part 1 (#31 bot-check pause, #39
-   smoke canary) is built; next is Part 2 (#32, #33, #35). No live probes from Isaiah's network.
+   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md). Part 1 merged (PR #56). Part 2
+   (#32 one `yt-dlp -J` per video, #33 one player call per video, #35 lazy HD rungs) built, awaiting
+   Isaiah's test. Next: Part 3 (#34, #36, #37). No live probes from Isaiah's network.
 5. HD backlog on GitHub: rung picker / ABR (#15).
 
 ## How to ship and test
