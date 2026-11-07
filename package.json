@@ -10,8 +10,9 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "test": "node --test \"tests/*.test.ts\"",
-    "smoke": "node --test \"tests/*.smoke.ts\"",
-    "check": "npm run test && npm run build"
+    "smoke": "node tools/smoke.mjs",
+    "check": "npm run test && npm run build",
+    "smoke:full": "node tools/smoke.mjs --full"
   },
   "keywords": [],
   "author": "",

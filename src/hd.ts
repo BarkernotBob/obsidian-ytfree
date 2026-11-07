@@ -8,6 +8,7 @@
  */
 
 import { requestUrl } from "obsidian";
+import { botCheck } from "./bot-check.ts";
 import { DEFAULT_MAX_HEIGHT, refusal, resolveHd, resolveHdFromYtDlp, withRange } from "./adaptive.ts";
 import type { AdaptiveFormat, ClientAnswer, FetchRange, YtDlpFormat } from "./adaptive.ts";
 import { callInnertube, CLIENTS, playerBody, PLAYER_URL } from "./innertube.ts";
@@ -22,6 +23,9 @@ interface HdPlayerResponse {
 }
 
 async function ask(videoId: string, client: string): Promise<ClientAnswer | null> {
+  // HD is automatic work: once one client meets the bot check, the next is
+  // not asked (GitHub #31).
+  botCheck.guard();
   const name = client as keyof typeof CLIENTS;
   const response = (await callInnertube(PLAYER_URL, name, playerBody(videoId))) as HdPlayerResponse;
   if (response.playabilityStatus?.status !== "OK") return null;

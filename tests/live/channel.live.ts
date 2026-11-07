@@ -7,13 +7,13 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BROWSE_URL, CLIENTS, PLAYER_URL, playerBody } from "../src/innertube-context.ts";
+import { BROWSE_URL, CLIENTS, PLAYER_URL, playerBody } from "../../src/innertube-context.ts";
 import {
   CHANNEL_SEARCH_PARAMS,
   CHANNEL_VIDEOS_PARAMS,
   parseChannelResponse,
   parsePlayerPublishDate,
-} from "../src/channel.ts";
+} from "../../src/channel.ts";
 
 const CHANNEL = { channelId: "UCKRmL7BMyCeLE4KUo73RDzw", channelTitle: "Ward on Words" };
 

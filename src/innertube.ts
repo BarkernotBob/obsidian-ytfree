@@ -14,6 +14,7 @@
  */
 
 import { requestUrl } from "obsidian";
+import { botCheck, isBotCheckPlayability } from "./bot-check.ts";
 import { BROWSE_URL, CLIENTS, NEXT_URL, PLAYER_URL, SEARCH_URL, playerBody } from "./innertube-context.ts";
 import {
   CHANNEL_SEARCH_PARAMS,
@@ -71,11 +72,17 @@ export async function callInnertube(
     throw new InnertubeError(`YouTube answered HTTP ${response.status}.`);
   }
 
+  let parsed: unknown;
   try {
-    return JSON.parse(response.text) as unknown;
+    parsed = JSON.parse(response.text) as unknown;
   } catch {
     throw new InnertubeError("YouTube's response was not JSON.");
   }
+  // The bot check arrives as an ordinary 200 with a refusal inside. Seen here,
+  // once, it pauses every automatic request (GitHub #31).
+  const status = (parsed as { playabilityStatus?: { status?: unknown; reason?: unknown } })?.playabilityStatus;
+  if (status && isBotCheckPlayability(status.status, status.reason)) botCheck.trip();
+  return parsed;
 }
 
 /**

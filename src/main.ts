@@ -106,6 +106,7 @@ import {
   upsertSection,
 } from "./transcript";
 import { fetchCaptionTrack, fetchHeatmap, fetchVideoDetails } from "./innertube";
+import { BotCheckPausedError, botCheck, isBotCheck } from "./bot-check.ts";
 import type { NotePosition, SectionName } from "./sections";
 import {
   SECTION_HEADINGS,
@@ -325,6 +326,8 @@ const SILENCE_REFRESH_DEBOUNCE_MS = 1200;
  * loses the video. A real deletion is not urgent; nothing is watching for it.
  */
 const DELETE_CONFIRM_MS = 5_000;
+/** Device-local key for the bot-check pause (`bot-check.ts`). */
+const BOT_CHECK_KEY = "ytfree-bot-check-until";
 
 /** How long a link opened in Obsidian waits for its note's player before skipping the seek. */
 const HANDOFF_PLAYER_WAIT_MS = 8_000;
@@ -731,6 +734,8 @@ export default class YtFreePlugin extends Plugin {
   silence!: SilenceStore;
   /** Videos whose silence map has already been chased this session. */
   private silenceAttempted = new Set<string>();
+  /** Videos the reader chose "Try signed in" for during a bot-check pause. */
+  private signedInVideos = new Set<string>();
   /** Running ffmpeg analyses, keyed by video, so a closing note can kill one. */
   private silenceJobs = new Map<string, { cancel: () => void }>();
   /** Jobs we stopped, so a partial map is stored as partial. See `cancelSilence`. */
@@ -743,6 +748,16 @@ export default class YtFreePlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    // A bot-check pause outlives a reload (GitHub #31): it is about this
+    // network, so it lives on this device, never in the synced vault.
+    botCheck.attach({
+      read: () => window.localStorage.getItem(BOT_CHECK_KEY),
+      write: (value) =>
+        value === null
+          ? window.localStorage.removeItem(BOT_CHECK_KEY)
+          : window.localStorage.setItem(BOT_CHECK_KEY, value),
+    });
+    this.register(botCheck.onChange(() => this.refreshHub()));
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
     await this.progress.load();
     this.watchProgressFile();
@@ -1451,6 +1466,13 @@ export default class YtFreePlugin extends Plugin {
    * nagging someone who deliberately never signed in.
    */
   async syncNow(): Promise<void> {
+    // Hundreds of feeds and an account sync are exactly the burst the pause
+    // exists to stop, pressed button or not (GitHub #31).
+    const paused = botCheck.message();
+    if (paused) {
+      new Notice(`YT Free: ${paused}`, 8000);
+      return;
+    }
     // An expired session counts: `syncAccount` re-probes it once a period, and
     // "sync now" is exactly when you would want that probe spent. It declines
     // politely if one is not due yet.
@@ -1473,6 +1495,7 @@ export default class YtFreePlugin extends Plugin {
 
   /** Poll if the last one is older than the configured gap (or `floor`). */
   private async maybePoll(floorMinutes?: number): Promise<void> {
+    if (botCheck.isPaused()) return;
     const minutes = floorMinutes ?? Math.max(5, this.settings.subscriptionsPollMinutes);
     const last = Date.parse(this.subscriptions.state.lastPolledAt ?? "");
     if (Number.isFinite(last) && Date.now() - last < minutes * 60_000) return;
@@ -1679,7 +1702,10 @@ export default class YtFreePlugin extends Plugin {
     // minute — so changing the period in settings takes effect immediately.
     this.registerInterval(
       window.setInterval(() => {
-        if (syncIsDue(this.settings.accountSession, this.settings.accountSyncHours, new Date())) {
+        if (
+          !botCheck.isPaused() &&
+          syncIsDue(this.settings.accountSession, this.settings.accountSyncHours, new Date())
+        ) {
           void this.syncAccount(false);
         }
       }, 60_000),
@@ -2858,6 +2884,8 @@ export default class YtFreePlugin extends Plugin {
     if (!this.settings.autoFetchTranscript) return;
     if (!this.createdThisSession.has(file.path)) return;
     if (this.autoFetchAttempted.has(file.path)) return;
+    // Not marked attempted: the note gets its transcript once the pause ends.
+    if (botCheck.isPaused()) return;
 
     const videoId = this.videoIdForNote(file.path);
     if (!videoId) return;
@@ -2904,6 +2932,7 @@ export default class YtFreePlugin extends Plugin {
   private queueHeatmapBackfill(file: TFile): void {
     if (!this.settings.autoFetchTranscript) return;
     if (this.backfillAttempted.has(file.path)) return;
+    if (botCheck.isPaused()) return;
 
     const videoId = this.videoIdForNote(file.path);
     if (!videoId) return;
@@ -4527,8 +4556,15 @@ export default class YtFreePlugin extends Plugin {
     try {
       await player.load(this.settings.upgradeToHighQuality, this.settings.startInHd);
       this.announceResume(videoId, setStatus);
+      this.announcePause(setStatus);
       return entry;
     } catch (err) {
+      // The bot check, with a signed-in session to offer: keep the player and
+      // offer it for this one video, rather than retrying it automatically.
+      if (isBotCheck(err) && !this.signedInVideos.has(videoId) && (await this.botCookies())) {
+        this.offerSignedIn(wrapper, entry, setStatus);
+        return entry;
+      }
       player.destroy();
       if (this.preview === entry) this.preview = null;
       else if (this.players.get(videoId) === entry) this.players.delete(videoId);
@@ -4538,13 +4574,13 @@ export default class YtFreePlugin extends Plugin {
           "Could not play this video. yt-dlp is not installed here, and the phone's way of playing (without yt-dlp) did not work for this video either.",
           "brew install yt-dlp",
         );
-      } else if (/confirm you.?re not a bot|LOGIN_REQUIRED/i.test((err as Error).message)) {
+      } else if (isBotCheck(err) || err instanceof BotCheckPausedError) {
         // Not a broken yt-dlp: YouTube is refusing signed-out requests from
         // this network for now, and upgrading would change nothing.
         this.renderError(
           wrapper,
-          "YouTube is asking this network to prove it isn't a bot, so it won't play signed out right now. " +
-            "Run the “Sign in to YouTube” command and playback will use your session, or try again in a few hours.",
+          (botCheck.message() ?? "YouTube is asking this network to prove it isn't a bot.") +
+            " Run the “Sign in to YouTube” command to be able to try signed in, or reopen this note after that time.",
           (err as Error).message,
         );
       } else {
@@ -4674,6 +4710,49 @@ export default class YtFreePlugin extends Plugin {
    * scrubber back to the start to find out why. One line for six seconds in the
    * status row that is already reserved costs no layout and answers it.
    */
+  /** While paused, say so on the status line once the player is up (GitHub #31). */
+  private announcePause(setStatus: (message: string | null) => void): void {
+    const message = botCheck.message();
+    if (!message) return;
+    setStatus(message);
+    window.setTimeout(() => setStatus(null), 10_000);
+  }
+
+  /**
+   * The bot check refused a signed-out open, and there is a session: offer it
+   * for this video only. One click is one more yt-dlp run, signed in, and
+   * nothing more is retried on its behalf.
+   */
+  private offerSignedIn(
+    wrapper: HTMLElement,
+    entry: PlayerEntry,
+    setStatus: (message: string | null) => void,
+  ): void {
+    setStatus(null);
+    const box = createDiv({ cls: "ytfree-error ytfree-bot-check" });
+    wrapper.prepend(box);
+    box.createEl("strong", { text: "YT Free" });
+    box.createEl("p", { text: botCheck.message() ?? "YouTube is asking this network to prove it isn't a bot." });
+    const button = box.createEl("button", { text: "Try signed in", attr: { type: "button" } });
+    button.addEventListener("click", () => {
+      box.remove();
+      this.signedInVideos.add(entry.videoId);
+      setStatus("Resolving stream (signed in)…");
+      void entry.player.load(false, false).then(
+        () => setStatus(null),
+        (err: unknown) => {
+          entry.player.destroy();
+          if (this.players.get(entry.videoId) === entry) this.players.delete(entry.videoId);
+          this.renderError(
+            wrapper,
+            "Signed in, YouTube still would not play this video.",
+            err instanceof Error ? err.message : String(err),
+          );
+        },
+      );
+    });
+  }
+
   private announceResume(videoId: string, setStatus: (message: string | null) => void): void {
     const seconds = this.progress.resumeFor(videoId);
     if (seconds <= 0) {
@@ -5052,10 +5131,16 @@ export default class YtFreePlugin extends Plugin {
     }
     if (!this.ffmpegPath) return;
 
+    const local = await this.localFileFor(sourcePath, videoId);
+    if (!local && botCheck.isPaused()) {
+      // Asked again on the next play once the pause is over.
+      this.silenceAttempted.delete(videoId);
+      return;
+    }
     let input: string;
     try {
       input =
-        (await this.localFileFor(sourcePath, videoId)) ??
+        local ??
         (await resolveAudioUrl(
           videoId,
           (this.ytDlpPath ??= await findYtDlp(this.settings.ytDlpPath)),
@@ -5231,6 +5316,9 @@ export default class YtFreePlugin extends Plugin {
    */
   private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
+      // HD lookups and recovery retries are automatic: none while paused. The
+      // first 360p resolve is the reader opening a video, and still goes.
+      if (mode === "quality" || forceRefresh) botCheck.guard();
       if (forceRefresh) this.cache.invalidate(videoId);
       const cached = this.cache.get(videoId, mode);
       if (cached) return cached;
@@ -5249,8 +5337,15 @@ export default class YtFreePlugin extends Plugin {
       try {
         const { findYtDlp, resolveStream } = await desktop();
         if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-        return await resolveStream(videoId, this.ytDlpPath, "fast", await this.botCookies());
+        return await resolveStream(
+          videoId,
+          this.ytDlpPath,
+          "fast",
+          this.signedInVideos.has(videoId) ? await this.botCookies() : undefined,
+        );
       } catch (err) {
+        // Tried once. Asking InnerTube next is more of what flagged the network.
+        if (isBotCheck(err)) throw err;
         ytDlpError = err;
         // Probing four paths on every video is not worth it once it is known
         // to be absent. A resolve failure is per-video, so it is not cached.
@@ -5278,8 +5373,8 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * The signed-in session's cookie file, for yt-dlp to retry with when YouTube
-   * answers with its bot check. Undefined when nobody has signed in.
+   * The signed-in session's cookie file, for "Try signed in" after a bot check.
+   * Undefined when nobody has signed in.
    */
   private async botCookies(): Promise<string | undefined> {
     const { cookieFileExists, resolveCookieFile } = await desktop();
@@ -5299,17 +5394,19 @@ export default class YtFreePlugin extends Plugin {
       return await resolveHdStream(videoId, undefined, fetch);
     } catch (hdError) {
       if (this.ytDlpUnavailable) throw hdError;
+      botCheck.guard();
       const { findYtDlp, resolveStream, ytDlpFormats } = await desktop();
       if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
       // InnerTube's files mostly stop serving at about a minute (2026-11-04);
       // yt-dlp's serve the whole video, stitched the same way. Its HLS lookup
       // stays last, for the odd video with a ladder and no MP4 pair.
       try {
-        const formats = await ytDlpFormats(videoId, this.ytDlpPath, await this.botCookies());
+        const formats = await ytDlpFormats(videoId, this.ytDlpPath);
         return await resolveHdFromYtDlpFormats(videoId, formats, undefined, fetch);
       } catch (err) {
         console.warn("YT Free: HD via InnerTube and via yt-dlp both failed", hdError, err);
-        return await resolveStream(videoId, this.ytDlpPath, "quality", await this.botCookies());
+        botCheck.guard();
+        return await resolveStream(videoId, this.ytDlpPath, "quality");
       }
     }
   }
@@ -5322,6 +5419,7 @@ export default class YtFreePlugin extends Plugin {
    */
   private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
+      if (mode === "quality" || forceRefresh) botCheck.guard();
       if (forceRefresh) this.cache.invalidate(videoId);
       const cached = this.cache.get(videoId, mode);
       if (cached) return cached;
@@ -5502,8 +5600,10 @@ export default class YtFreePlugin extends Plugin {
 
     const seconds = this.pendingSeek.get(entry.videoId) ?? 0;
     const kind = (err as { kind?: string })?.kind;
-    const detail =
-      kind === "login"
+    const paused = isBotCheck(err) || err instanceof BotCheckPausedError ? botCheck.message() : null;
+    const detail = paused
+      ? paused
+      : kind === "login"
         ? "This video needs a signed-in account — age-restricted or members-only."
         : kind === "network"
           ? "Could not reach YouTube. Check your connection and try again."

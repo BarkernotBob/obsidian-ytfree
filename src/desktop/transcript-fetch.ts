@@ -4,6 +4,7 @@
  * renders what this returns stays in `../transcript.ts`, with its tests.
  */
 
+import { botCheck, isBotCheck, isBotCheckText } from "../bot-check.ts";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import type { VideoInfo } from "../transcript.ts";
@@ -17,17 +18,24 @@ const pExecFile = promisify(execFile);
  * about three seconds. Doing it twice would be three seconds wasted.
  */
 export async function fetchVideoInfo(ytDlpPath: string, videoId: string): Promise<VideoInfo> {
-  const { stdout } = await pExecFile(
-    ytDlpPath,
-    [
-      "--no-warnings",
-      "--no-playlist",
-      "--skip-download",
-      "-J",
-      `https://www.youtube.com/watch?v=${videoId}`,
-    ],
-    // Info JSON for a long video with 150+ caption languages runs to megabytes.
-    { timeout: 120_000, maxBuffer: 64 * 1024 * 1024, env: ytDlpEnv(ytDlpPath) },
-  );
+  let stdout: string;
+  try {
+    ({ stdout } = await pExecFile(
+      ytDlpPath,
+      [
+        "--no-warnings",
+        "--no-playlist",
+        "--skip-download",
+        "-J",
+        `https://www.youtube.com/watch?v=${videoId}`,
+      ],
+      // Info JSON for a long video with 150+ caption languages runs to megabytes.
+      { timeout: 120_000, maxBuffer: 64 * 1024 * 1024, env: ytDlpEnv(ytDlpPath) },
+    ));
+  } catch (err) {
+    const e = err as { stderr?: string };
+    if (isBotCheck(err) || isBotCheckText(e.stderr ?? "")) botCheck.trip();
+    throw err;
+  }
   return JSON.parse(stdout) as VideoInfo;
 }

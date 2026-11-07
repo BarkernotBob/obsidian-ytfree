@@ -114,8 +114,11 @@ Unit tests — URL parsing, expiry parsing, cache expiry. Fast, no network.
 npm run smoke
 ```
 
-Live tests against YouTube. **Run this when playback breaks** — it tells you whether
-YouTube changed extraction. The usual fix is `brew upgrade yt-dlp`.
+A live canary against YouTube: one yt-dlp resolve and one byte read, about 5 requests.
+**Run this when playback breaks**: it tells you whether YouTube changed extraction. The usual
+fix is `brew upgrade yt-dlp`. It runs at most once per 24 hours per machine
+(`npm run smoke -- --force` overrides), because bursts of live requests got a home network
+bot-flagged once. The old full live suite is parked as `npm run smoke:full`.
 
 ## Known limitations
 
