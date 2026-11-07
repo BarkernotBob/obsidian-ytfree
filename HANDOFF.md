@@ -72,8 +72,7 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   Every live tool in `tools/` claims its own daily run through `tools/live-budget.mjs`.
 - A bot check pauses all automatic YouTube requests for 45 minutes (`src/bot-check.ts`, stored in
   `localStorage` under `ytfree-bot-check-until`). Clear that key to end a pause early.
-- Kept video answers live in `localStorage` (`ytfree-ytdlp-answers`, `ytfree-player-answers`); clear
-  them to force fresh lookups. Every YouTube request goes through `src/request-governor.ts`.
+- Kept answers: `localStorage` `ytfree-ytdlp-answers` / `ytfree-player-answers`. Requests: `src/request-governor.ts`.
 - Desktop HD byte ranges go over Node `https`, not `requestUrl`; a request Node cannot make at
   all (no status, no byte) switches that stream to `requestUrl` for good. The loader does not
   enforce `maxTimeToFirstByteMs` (only `maxLoadTimeMs`): `requestUrl` reports no first byte.
