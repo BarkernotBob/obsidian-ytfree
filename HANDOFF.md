@@ -35,8 +35,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 1. Isaiah: install main and run the untested scope-doc tests listed under Status.
 2. Phone HD part 2: switch GitHub Pages to main `/docs` (it pointed at PR #28's branch).
-3. Request volume: backlog #31–#39, first #31 (stop after a bot check) and #39 (smoke canary).
-   No live probes from Isaiah's network until then.
+3. Request volume (#31–#39): Isaiah approves
+   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md), then build Part 1 (#31 breaker,
+   #39 smoke canary) first. No live probes from Isaiah's network.
 4. HD backlog on GitHub: rung picker / ABR (#15).
 
 ## How to ship and test
