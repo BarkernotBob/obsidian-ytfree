@@ -26,10 +26,20 @@ same as today.
 5. Stored data is unchanged: the halfway URL is built at draw time from the video ID, so
    turning this off later is a one-line change.
 
+## Sharper on large pictures (GitHub #42)
+
+`maxres2.jpg` (1280×720) is the same halfway still, sharper, but only HD videos have one.
+Every picture still loads `hq2.jpg` first. Once it is showing, a large picture — at least
+320 CSS px wide and wider than 720 screen pixels (CSS width × pixel ratio, 1.5× what `hq2`
+holds) — fetches `maxres2.jpg` off-screen and swaps it in only if a real frame came back. So:
+no broken image ever, and a small card (the 160 px desktop row at any zoom, the phone's
+two-up cards) never spends a request on it. Today that means the phone's Preview poster, wide
+tablet cards and a phone turned sideways; desktop hub cards stay on `hq2`. A picture that
+grows later (rotation, a wider pane) is re-checked. Shorts and stored fallbacks are never
+upgraded.
+
 ## Not in v1
 
-- `maxres2.jpg` (sharper on a big desktop card). It exists only for HD videos, so trying it
-  first would cost a failed request on every non-HD card. GitHub issue filed.
 - An on/off setting.
 - The desktop note player shows no poster today, so there is nothing to change there.
 
@@ -44,4 +54,5 @@ and `deferMobileLoad` in `src/main.ts`. Tests: `tests/thumbnail.test.ts`.
    faces or text overlays, no black bars above or below.
 2. Search for anything. Results show stills too.
 3. Find a Short in the hub. It keeps its usual picture.
-4. On the iPhone, open a video note. The poster before you tap play is the same middle still.
+4. On the iPhone, open a video note. The poster before you tap play is the same middle still,
+   and for an HD video it sharpens a moment after it appears (#42).

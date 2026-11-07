@@ -13,6 +13,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   tested or not: #19, #20, #21, #22, #24, #27, #28, #29, #30, #40, #41. 701 unit tests pass,
   `tsc` and build clean on the combined main. Untested on a device at merge time: #19 steps 3-6,
   #20, #21's last two commits (bot-check retry, HD ready before Play), #24, #28, #30 part 2.
+- 2026-11-07 nightly: #42 large thumbnails (phone poster) upgrade to `maxres2.jpg` after `hq2`
+  shows; small cards never ask for it. See the midframe scope doc.
 - Isaiah's earlier answers are recorded in [GLOSSARY.md](GLOSSARY.md).
 - New follow-ups are filed as GitHub issues, not as files in `issues/`.
 
