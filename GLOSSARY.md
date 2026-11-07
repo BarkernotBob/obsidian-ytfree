@@ -37,7 +37,19 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   setting for that video only. It never writes the setting and is kept until Obsidian quits,
   like the pop-out's other controls. Picking a rung (720p, 480p) stays with GitHub #15.
 
+### 2026-11-06 (Isaiah)
+
+- **Phone HD, part 2:** test YouTube's own embedded player (hosted page on GitHub Pages, opened
+  from the Quality row on the phone) rather than HD through the Mac. Ads and YouTube's controls
+  are the known costs; to be judged on the iPhone.
+
 ### 2026-11-04 (measured; Claude's call, open to change)
+
+- **Phone HD (#25), part 1:** the phone asks IOS first and plays its HLS manifest with iOS's own
+  player, never hls.js (googlevideo sends no CORS header). Measured 2026-11-04: that manifest
+  exists on 1 of 5 videos and serves the whole video. PO token / BotGuard generation is out:
+  Claude's safety check blocks it as bot-check circumvention. Part 2 (HD through the Mac on the
+  home network) waits on Isaiah. Scope: `docs/V1-SCOPE-PHONE-HD.md`.
 
 - Desktop HD comes from yt-dlp's files when InnerTube's stop serving after about a minute
   (`ytDlpFormats` + `resolveHdFromYtDlp`), stitched and streamed the same way. InnerTube is

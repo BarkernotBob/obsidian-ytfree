@@ -42,6 +42,10 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
+0. Isaiah (2026-11-07): phone HD (#25, PR #28). Part 1 = native IOS HLS (~1 in 5 videos).
+   Part 2 = YouTube's own player from ⋯ → Quality → "YouTube player (HD)" on the phone, via the
+   hosted page `docs/player/index.html`. Needs GitHub Pages on (branch of PR #28, `/docs`). Test
+   steps: [docs/V1-SCOPE-PHONE-HD.md](docs/V1-SCOPE-PHONE-HD.md). Don't probe YouTube from the Mac.
 0. Isaiah (2026-11-04): badge, stutter fix and seeking passed. Now test desktop HD from yt-dlp
    (vault has main.js sha256 f66d54f7…). PR #21 carries #22 merged in. Phone HD: GitHub #25.
 0. Isaiah: manual test for the ~55 s HD stutter and slow jumps, in

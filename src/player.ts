@@ -1,5 +1,5 @@
 import Hls from "hls.js";
-import { setIcon } from "obsidian";
+import { Platform, setIcon } from "obsidian";
 import { formatTimestamp } from "./format.ts";
 import { SHARE_ICON } from "./icon.ts";
 import { anchorVisible, panelPlacement } from "./panel.ts";
@@ -21,6 +21,8 @@ export type { StreamProvider };
 const MAX_CONSECUTIVE_RECOVERIES = 3;
 /** How long a settled quality badge stays before it fades. */
 const QUALITY_SETTLED_MS = 4000;
+/** What the badge counts as full quality for a natively played manifest. */
+const NATIVE_HLS_TOP = 1080;
 const RECOVERY_COOLDOWN_MS = 2000;
 
 export interface PlayerOptions {
@@ -194,6 +196,11 @@ export interface QuickPanelOptions {
   onQuality?: (hd: boolean) => void;
   /** What the setting will say, so the row reads right before `load` runs. */
   hdDefault?: boolean;
+  /**
+   * Phone only (#25): YouTube's own player, full-screen, from the second given
+   * at the speed given. Resolves with where the reader left off.
+   */
+  youtubePlayer?: (at: number, rate: number) => Promise<number | null>;
 }
 
 /** The lock screen's three fields. */
@@ -289,6 +296,12 @@ export class YtFreePlayer {
   private destroyed = false;
   private lastRecoveryAt = 0;
   private upgraded = false;
+  /**
+   * The source is an HLS manifest that iOS's own player is playing (#25):
+   * googlevideo sends no CORS header, so hls.js's XHR is refused from
+   * `capacitor://localhost`, and the native player needs none.
+   */
+  private nativeHls = false;
   /** Survives source swaps; the <video> element resets these on every load. */
   private playbackRate = 1;
   /** True only while playback is paused *by us* because the user is typing. */
@@ -461,7 +474,25 @@ export class YtFreePlayer {
 
     // Native error path (direct mp4, and some HLS failures).
     this.video.addEventListener("error", () => {
-      if (this.video.error) void this.recover("playback error");
+      if (!this.video.error) return;
+      if (this.nativeHls && this.upgraded) {
+        // Same rule as stitched HD: a failed HD stream goes back to 360p where
+        // the reader is, rather than retrying HD into "failed repeatedly".
+        console.warn("YT Free: native HD stream failed", this.video.error.code, this.video.error.message);
+        this.upgraded = false;
+        this.setHd({ phase: "none", height: 360, reason: "HD stream failed" });
+        void this.recover("HD unavailable, back to 360p");
+        return;
+      }
+      void this.recover("playback error");
+    });
+
+    // iOS picks the HLS height itself; the picture's size is the only report.
+    this.video.addEventListener("resize", () => {
+      const height = this.video.videoHeight;
+      if (!this.nativeHls || !this.upgraded || !height) return;
+      const top = Math.max(height, NATIVE_HLS_TOP);
+      this.setHd({ phase: rungPhase(height, top), height, top });
     });
 
     // Any play the user starts themselves ends our ownership of the pause, so a
@@ -1297,7 +1328,11 @@ export class YtFreePlayer {
       });
       el.createEl("option", { text: "HD", value: "hd" });
       el.createEl("option", { text: "360p", value: "sd" });
-      el.addEventListener("change", () => this.setQuality(el.value === "hd"));
+      if (quick.youtubePlayer) el.createEl("option", { text: "YouTube player (HD)", value: "yt" });
+      el.addEventListener("change", () => {
+        if (el.value === "yt") void this.openYouTubePlayer(quick.youtubePlayer!);
+        else this.setQuality(el.value === "hd");
+      });
       this.qualitySelect = el;
       this.paintQualityChoice();
     }
@@ -2321,6 +2356,18 @@ export class YtFreePlayer {
     this.attach(stream, resumeAt, wasPlaying);
   }
 
+  /**
+   * Hand the video to YouTube's own player and take it back where the reader
+   * left off. Not a quality pick: the row goes back to what it said.
+   */
+  private async openYouTubePlayer(open: (at: number, rate: number) => Promise<number | null>): Promise<void> {
+    this.paintQualityChoice();
+    this.video.pause();
+    const at = await open(this.video.currentTime, this.playbackRate);
+    if (this.destroyed || at === null) return;
+    this.video.currentTime = at;
+  }
+
   /** The Quality row follows the player, including a pick it was rebuilt with. */
   private paintQualityChoice(): void {
     const el = this.qualitySelect;
@@ -2514,7 +2561,15 @@ export class YtFreePlayer {
       if (autoplay || this.pendingPlay) this.play();
     };
 
-    if (stream.isHls && Hls.isSupported()) {
+    // A stitched stream exists only for hls.js. Any other HLS on a phone that
+    // can play it natively goes to the <video> itself (see `nativeHls`).
+    this.nativeHls =
+      stream.isHls &&
+      !stream.virtual &&
+      Platform.isMobile &&
+      this.video.canPlayType("application/vnd.apple.mpegurl") !== "";
+
+    if (stream.isHls && Hls.isSupported() && !this.nativeHls) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
@@ -2789,6 +2844,7 @@ export class YtFreePlayer {
   }
 
   private teardownHls(): void {
+    this.nativeHls = false;
     this.unhookJump?.();
     this.unhookJump = null;
     if (this.hls) {

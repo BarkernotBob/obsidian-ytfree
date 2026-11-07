@@ -49,6 +49,15 @@ export function resolveHdStream(videoId: string, maxHeight = DEFAULT_MAX_HEIGHT)
   return resolveHd(videoId, HD_CLIENTS, (client) => ask(videoId, client), fetchRange, maxHeight);
 }
 
+/**
+ * The phone (#25): IOS first, and its HLS manifest the moment it has one. That
+ * manifest serves the whole video and iOS plays it natively; the separate
+ * files stop at about a minute on most videos, so they are only the fallback.
+ */
+export function resolvePhoneHdStream(videoId: string, maxHeight = DEFAULT_MAX_HEIGHT): Promise<ResolvedStream> {
+  return resolveHd(videoId, ["ios", "android"], (client) => ask(videoId, client), fetchRange, maxHeight, true);
+}
+
 /** Desktop: the same stitched stream from yt-dlp's files (see `YtDlpFormat`). */
 export function resolveHdFromYtDlpFormats(
   videoId: string,

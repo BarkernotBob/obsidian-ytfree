@@ -4410,6 +4410,13 @@ export default class YtFreePlugin extends Plugin {
           onQuality: (hd) => {
             session.hd = hd;
           },
+          // Phone only (#25): YouTube's own player, for HD on any video.
+          youtubePlayer: mobile
+            ? async (at, rate) => {
+                const { openYouTubePlayer } = await import("./mobile/youtube-player-modal.ts");
+                return openYouTubePlayer(this.app, videoId, at, rate);
+              }
+            : undefined,
         },
         // Everything the reader set on this video that a rebuilt player would
         // otherwise throw away — see `VideoSession`.
@@ -5212,8 +5219,8 @@ export default class YtFreePlugin extends Plugin {
 
       let stream: ResolvedStream;
       if (mode === "quality") {
-        const { resolveHdStream } = await import("./hd.ts");
-        stream = await resolveHdStream(videoId);
+        const { resolvePhoneHdStream } = await import("./hd.ts");
+        stream = await resolvePhoneHdStream(videoId);
       } else {
         const { resolveMobileStream } = await import("./mobile/innertube.ts");
         stream = await resolveMobileStream(videoId);
