@@ -144,6 +144,11 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   setting); video links only, so a channel link still goes to the browser.
 - **Handoff** (term): `obsidian://ytfree?url=…`, the door every outside router uses.
 
+- **Halfway thumbnails** (2026-11-07): cards and the phone poster show YouTube's own halfway
+  still (`hq2.jpg`), as HackerTube does, falling back to the uploaded thumbnail when it is
+  missing. Shorts keep the uploaded picture. No setting. Scope:
+  `docs/V1-SCOPE-MIDFRAME-THUMBNAILS.md`.
+
 ### Earlier
 
 - `PROGRESS_TTL_DAYS` stays 365 (2026-09-02).

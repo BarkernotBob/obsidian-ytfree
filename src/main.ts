@@ -119,6 +119,7 @@ import { DEFAULT_TIDY_DAYS, notesToTidy, sweepNote } from "./tidy";
 import type { SweepHub, TidyCandidate } from "./tidy";
 import { YtFreePlayer } from "./player";
 import type { NowPlaying } from "./player";
+import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 import {
   extractVideoId,
   ResolveMode,
@@ -5324,7 +5325,12 @@ export default class YtFreePlugin extends Plugin {
     // cannot affect the layout of anything.
     const poster = media.createEl("button", { cls: "ytfree-poster", attr: { type: "button" } });
     const thumb = poster.createEl("img", { cls: "ytfree-poster-image", attr: { alt: "" } });
-    thumb.src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+    // The halfway frame, as on the hub's cards; the uploader's picture if
+    // YouTube has no still for this one.
+    showThumbnail(
+      thumb,
+      thumbnailCandidates(videoId, `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`),
+    );
     poster.createDiv({ cls: "ytfree-poster-play", text: "▶" });
 
     // The phone never shows the desktop's status line before you tap, so the
