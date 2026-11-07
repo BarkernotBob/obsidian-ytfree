@@ -71,6 +71,149 @@ async function resolveAudio(videoId) {
   return audio.url;
 }
 
+const IOS = {
+  clientName: "IOS",
+  clientVersion: "20.10.4",
+  deviceModel: "iPhone16,2",
+  osName: "iPhone",
+  osVersion: "18.3.2.22D82",
+  hl: "en",
+  gl: "US",
+};
+const IOS_UA =
+  "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)";
+
+/** The same player request the plugin sends, for either client it already uses. */
+async function playerResponse(videoId, ctx, ua) {
+  const response = await requestUrl({
+    url: "https://www.youtube.com/youtubei/v1/player",
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": ua },
+    body: JSON.stringify({ videoId, contentCheckOk: true, racyCheckOk: true, context: { client: ctx } }),
+    throw: false,
+  });
+  return response.json;
+}
+
+/**
+ * Why did itag 140 fail when itag 18 from the same response plays? Measures,
+ * on the phone, what googlevideo answers for each URL, and whether the iOS
+ * client's HLS manifest offers an audio-only stream. Read-only: nothing plays
+ * longer than a few seconds and nothing is stored but the log.
+ */
+class DiagnoseModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this.lines = [];
+  }
+
+  log(msg) {
+    const line = `[diag ${new Date().toISOString()}] ${msg}`;
+    this.lines.push(line);
+    if (this.logEl) this.logEl.setText(this.lines.join("\n"));
+    void this.plugin.appendLog(line);
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Lock spike — diagnose audio" });
+    const input = contentEl.createEl("input", { type: "text", value: TRACKS[0].id });
+    input.style.width = "100%";
+    const go = contentEl.createEl("button", { text: "Run" });
+    go.addEventListener("click", () => {
+      go.disabled = true;
+      const v = input.value.trim();
+      const m = v.match(/(?:v=|youtu\.be\/|shorts\/|live\/)([A-Za-z0-9_-]{11})/);
+      void this.run(m ? m[1] : v);
+    });
+    this.logEl = contentEl.createEl("pre", { text: "" });
+    this.logEl.style.maxHeight = "50vh";
+    this.logEl.style.overflow = "auto";
+    this.logEl.style.fontSize = "11px";
+    this.logEl.style.whiteSpace = "pre-wrap";
+    const copy = contentEl.createEl("button", { text: "Copy log" });
+    copy.addEventListener("click", () => {
+      void navigator.clipboard.writeText(this.lines.join("\n"));
+      new Notice("Log copied.");
+    });
+  }
+
+  /** What googlevideo says to the first KB, outside the media element. */
+  async probe(label, url) {
+    const params = new URL(url).searchParams;
+    this.log(`${label}: c=${params.get("c")} mime=${params.get("mime")} clen=${params.get("clen")} pot=${params.has("pot")}`);
+    for (const [how, u, headers] of [
+      ["Range header", url, { Range: "bytes=0-1023" }],
+      ["&range=", url + "&range=0-1023", {}],
+      // The whole file, for audio only: a muxed video file is tens of MB.
+      ...(label.startsWith("itag 140") ? [["no range", url, {}]] : []),
+    ]) {
+      try {
+        const r = await requestUrl({ url: u, method: "GET", headers, throw: false });
+        const len = r.arrayBuffer ? r.arrayBuffer.byteLength : -1;
+        this.log(`${label} [${how}]: HTTP ${r.status} type=${r.headers["content-type"] ?? r.headers["Content-Type"]} bytes=${len}`);
+      } catch (err) {
+        this.log(`${label} [${how}]: THREW ${err?.message ?? err}`);
+      }
+    }
+  }
+
+  /** Whether WebKit's own media loader gets anywhere with it, for 6 seconds. */
+  tryElement(label, src) {
+    return new Promise((resolve) => {
+      const el = document.createElement("audio");
+      el.setAttribute("playsinline", "");
+      el.style.display = "none";
+      document.body.appendChild(el);
+      const done = (msg) => {
+        this.log(`${label} <audio>: ${msg} t=${el.currentTime.toFixed(1)}`);
+        el.pause();
+        el.remove();
+        resolve();
+      };
+      el.addEventListener("error", () => done(`error code=${el.error?.code} ${el.error?.message ?? ""}`), { once: true });
+      setTimeout(() => done(el.currentTime > 0.5 ? "PLAYING" : `stuck readyState=${el.readyState}`), 6000);
+      el.src = src;
+      el.volume = 0.2;
+      el.play().catch((err) => this.log(`${label} play(): ${err?.name}`));
+    });
+  }
+
+  async run(videoId) {
+    this.log(`video ${videoId}`);
+    const android = await playerResponse(videoId, ANDROID, ANDROID_UA);
+    this.log(`ANDROID status=${android?.playabilityStatus?.status}`);
+    const all = [
+      ...(android?.streamingData?.formats ?? []),
+      ...(android?.streamingData?.adaptiveFormats ?? []),
+    ];
+    const audio = all.filter((f) => (f.mimeType ?? "").startsWith("audio/"));
+    this.log("ANDROID audio formats: " + audio.map((f) => `${f.itag}${f.url ? "" : "(cipher)"} ${f.mimeType}`).join(" | "));
+    for (const itag of [18, 140]) {
+      const f = all.find((x) => x.itag === itag && x.url);
+      if (!f) { this.log(`itag ${itag}: none with a plain url`); continue; }
+      await this.probe(`itag ${itag}`, f.url);
+      await this.tryElement(`itag ${itag}`, f.url);
+    }
+
+    const ios = await playerResponse(videoId, IOS, IOS_UA);
+    this.log(`IOS status=${ios?.playabilityStatus?.status}`);
+    const hls = ios?.streamingData?.hlsManifestUrl;
+    if (!hls) {
+      this.log("IOS: no HLS manifest for this video");
+    } else {
+      const r = await requestUrl({ url: hls, throw: false });
+      const text = r.text ?? "";
+      const audioLines = text.split("\n").filter((l) => /TYPE=AUDIO|audio only|CODECS="mp4a[^,"]*"/i.test(l));
+      this.log(`IOS HLS: HTTP ${r.status}, ${text.length} chars, audio-only lines: ${audioLines.length}`);
+      for (const l of audioLines.slice(0, 4)) this.log("  " + l.slice(0, 200));
+      await this.tryElement("IOS HLS master", hls);
+    }
+    this.log("done");
+  }
+}
+
 class LockSpikeModal extends Modal {
   /** `mode` is "same" (reuse one element) or "new" (build a second one). */
   constructor(app, plugin, mode) {
@@ -277,6 +420,11 @@ module.exports = class LockSpikePlugin extends Plugin {
         callback: () => new LockSpikeModal(this.app, this, mode).open(),
       });
     }
+    this.addCommand({
+      id: "lock-spike-diagnose",
+      name: "Lock spike: diagnose audio",
+      callback: () => new DiagnoseModal(this.app, this).open(),
+    });
   }
 
   /** Append, never rewrite: the point is that the file outlives the webview. */
