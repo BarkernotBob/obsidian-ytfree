@@ -10,6 +10,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   `app.css`, the owner's first name and the vault name are gone from every commit).
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
 - 663 unit tests pass, `tsc` clean, build clean (2026-10-22, branch `claude/project-thread-sjrz45`).
+
+- 653 unit tests pass, `tsc` clean, build clean (2026-10-16, main at PR #12).
 - Isaiah's answers of 2026-10-13 are recorded in [GLOSSARY.md](GLOSSARY.md): every ticket built
   up to 046 passed its manual test, 018 is parked, 045's scope is approved, 049 is built
   (blockquote), and collab videos (GitHub #2) come from the signed-in subscription feed.
@@ -30,6 +32,12 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   GitHub #8 (Preview fullscreen on the phone) and #9 (Fullscreen waits for the stream).
 - **Scoped 2026-10-14, awaiting Isaiah's approval:** GitHub #10 (paste a URL, land in its
   Preview) and #11 (every YouTube link lands in Preview), one scope:
+
+- **Merged 2026-10-17 (PR #12), manual test passed:** GitHub #8 (Preview fullscreen on the
+  phone) and #9 (Fullscreen waits for the stream).
+- **PR #19, in manual test:** GitHub #10 (paste a URL, land in its Preview) and #11 (a YouTube
+  link opens its note if one exists, else its Preview; never makes a note; never auto-plays;
+  changed 2026-10-19 from a setting). Paste steps 1-2 passed on the iPhone 2026-10-19. Scope and test:
   [docs/V1-SCOPE-PASTE-TO-PREVIEW.md](docs/V1-SCOPE-PASTE-TO-PREVIEW.md).
 - **Built 2026-10-13 (PR #4, merged):** 045, GitHub #2, 048, 047, GitHub #3. Manual tests are in
   each issue file or scope doc.
@@ -66,6 +74,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
    Press it again once the video plays: the phone's own fullscreen. Same in a note (#9).
 3. Isaiah: approve or change the #10/#11 scope, and answer its one question. Then build it.
 4. Backlog for HD is on GitHub (quality picker / ABR, InnerTube-first on desktop).
+
+1. Isaiah: finish the #10/#11 manual test (steps 3-6) in the scope doc; then merge PR #19.
+2. Backlog for HD is on GitHub (quality picker / ABR, InnerTube-first on desktop).
 
 ## How to ship and test
 
