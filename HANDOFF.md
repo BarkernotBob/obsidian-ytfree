@@ -4,12 +4,12 @@ Current state only; keep it under 80 lines and replace, don't append. Full histo
 2026-09-22 is in [docs/archive/HANDOFF-history-2026-09.md](docs/archive/HANDOFF-history-2026-09.md).
 Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual test section).
 
-## Status (2026-10-16)
+## Status (2026-10-22)
 
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
-- 653 unit tests pass, `tsc` clean, build clean (2026-10-16, PR #12 merged with main).
+- 663 unit tests pass, `tsc` clean, build clean (2026-10-22, branch `claude/project-thread-sjrz45`).
 - Isaiah's answers of 2026-10-13 are recorded in [GLOSSARY.md](GLOSSARY.md): every ticket built
   up to 046 passed its manual test, 018 is parked, 045's scope is approved, 049 is built
   (blockquote), and collab videos (GitHub #2) come from the signed-in subscription feed.
@@ -17,6 +17,15 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Tickets
 
+- **Built 2026-11-04 on branch `claude/project-thread-mm476q` (stacked on #21, PR #27), manual
+  test passed 2026-11-07, ready to merge after #21:** per-video quality switch, HD or 360p from the ⋯ pop-out. Scope and manual
+  test: [docs/V1-SCOPE-QUALITY-SWITCH.md](docs/V1-SCOPE-QUALITY-SWITCH.md). Code:
+  `setQuality`/`downgrade` in `src/player.ts`, `VideoSession.hd` in `src/main.ts`.
+- **Built 2026-10-22 on branch `claude/project-thread-sjrz45`, awaiting manual test:** HD
+  progress (quality badge, buffered-ahead band) and the "Start in HD" setting. Scope and manual
+  test: [docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md). Code:
+  `src/hd-status.ts` (pure), `load`/`loadHdFirst`/`upgrade` in `src/player.ts`. The ~55s stutter
+  and slow seeking are a separate branch.
 - **Built 2026-10-14 on branch `claude/project-thread-zamhn2`, awaiting manual test:**
   GitHub #8 (Preview fullscreen on the phone) and #9 (Fullscreen waits for the stream).
 - **Scoped 2026-10-14, awaiting Isaiah's approval:** GitHub #10 (paste a URL, land in its
@@ -33,6 +42,11 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
+0. Isaiah (2026-11-04): badge, stutter fix and seeking passed. Now test desktop HD from yt-dlp
+   (vault has main.js sha256 f66d54f7…). PR #21 carries #22 merged in. Phone HD: GitHub #25.
+0. Isaiah: manual test for the ~55 s HD stutter and slow jumps, in
+   [docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md](docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md) (PR #22).
+   `node tools/hd-probe.ts` on the Mac gives live per-client numbers if the theory needs checking.
 1. Isaiah: on the iPhone, open any Preview. The picture starts right under the status bar with
    the ✕ on its top-right corner; opening Description or Transcript widens it to full width and
    hides the other, shutting it puts both back side by side (#8, PR #12). Mac unchanged.

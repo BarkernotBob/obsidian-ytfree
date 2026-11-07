@@ -147,6 +147,8 @@ interface YtFreeSettings {
   upgradeToHighQuality: boolean;
   /** Stitched HD on the phone. Off by default: iOS 17.1+, and more data. */
   phoneHighQuality: boolean;
+  /** Hold playback until HD is ready, and start it on the top rung. */
+  startInHd: boolean;
   timestampFormat: string;
   autoStampNewLine: boolean;
   lookbackSeconds: number;
@@ -366,6 +368,7 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   ytDlpPath: "",
   upgradeToHighQuality: true,
   phoneHighQuality: false,
+  startInHd: false,
   timestampFormat: "[{ts}]({link}) ",
   autoStampNewLine: true,
   lookbackSeconds: 5,
@@ -530,6 +533,8 @@ interface VideoSession {
   skipNonSpeech?: boolean;
   /** "Pause while typing", same terms. */
   pauseWhileTyping?: boolean;
+  /** The pop-out's Quality row: true for HD, false for 360p. */
+  hd?: boolean;
 }
 
 /**
@@ -4399,6 +4404,12 @@ export default class YtFreePlugin extends Plugin {
             session.pauseWhileTyping = value;
             if (entry) entry.pauseWhileTyping = value;
           },
+          // HD or 360p for this video, over the setting the load is given.
+          hd: session.hd,
+          hdDefault: mobile ? this.settings.phoneHighQuality : this.settings.upgradeToHighQuality,
+          onQuality: (hd) => {
+            session.hd = hd;
+          },
         },
         // Everything the reader set on this video that a rebuilt player would
         // otherwise throw away — see `VideoSession`.
@@ -4468,7 +4479,7 @@ export default class YtFreePlugin extends Plugin {
         // fall back to the network rather than showing a dead player.
         setStatus("Local copy could not be played — streaming instead.");
         window.setTimeout(() => setStatus(null), 6000);
-        void player.load(this.settings.upgradeToHighQuality).catch(() => undefined);
+        void player.load(this.settings.upgradeToHighQuality, this.settings.startInHd).catch(() => undefined);
       });
       this.announceResume(videoId, setStatus);
       return entry;
@@ -4481,7 +4492,7 @@ export default class YtFreePlugin extends Plugin {
 
     setStatus("Resolving stream…");
     try {
-      await player.load(this.settings.upgradeToHighQuality);
+      await player.load(this.settings.upgradeToHighQuality, this.settings.startInHd);
       this.announceResume(videoId, setStatus);
       return entry;
     } catch (err) {
@@ -5095,8 +5106,9 @@ export default class YtFreePlugin extends Plugin {
    * showing an install message — a computer without Homebrew is still a
    * computer that can play video.
    *
-   * "quality" tries the stitched HD stream first (a few seconds, most videos),
-   * then yt-dlp's HLS lookup (~30s, about one video in five signed out).
+   * "quality" tries the stitched HD stream from InnerTube first (a second or
+   * two, when its files serve past the first minute), then the same stitched
+   * stream from yt-dlp's files, then yt-dlp's HLS lookup.
    */
   private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
@@ -5147,14 +5159,22 @@ export default class YtFreePlugin extends Plugin {
   }
 
   private async desktopQuality(videoId: string): Promise<ResolvedStream> {
+    const { resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
     try {
-      const { resolveHdStream } = await import("./hd.ts");
       return await resolveHdStream(videoId);
     } catch (hdError) {
       if (this.ytDlpUnavailable) throw hdError;
-      const { findYtDlp, resolveStream } = await desktop();
+      const { findYtDlp, resolveStream, ytDlpFormats } = await desktop();
       if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-      return await resolveStream(videoId, this.ytDlpPath, "quality");
+      // InnerTube's files mostly stop serving at about a minute (2026-11-04);
+      // yt-dlp's serve the whole video, stitched the same way. Its HLS lookup
+      // stays last, for the odd video with a ladder and no MP4 pair.
+      try {
+        return await resolveHdFromYtDlpFormats(videoId, await ytDlpFormats(videoId, this.ytDlpPath));
+      } catch (err) {
+        console.warn("YT Free: HD via InnerTube and via yt-dlp both failed", hdError, err);
+        return await resolveStream(videoId, this.ytDlpPath, "quality");
+      }
     }
   }
 
@@ -5246,7 +5266,7 @@ export default class YtFreePlugin extends Plugin {
      * waits on the resolve already in flight rather than starting a second one.
      */
     let resolved: Promise<void> | null = null;
-    const resolve = (): Promise<void> => (resolved ??= player.load(this.settings.phoneHighQuality));
+    const resolve = (): Promise<void> => (resolved ??= player.load(this.settings.phoneHighQuality, this.settings.startInHd));
 
     // Metadata now, so the first press of Fullscreen is the phone's own
     // fullscreen rather than our substitute. Failures are swallowed: nothing
@@ -5749,6 +5769,22 @@ class YtFreeSettingTab extends PluginSettingTab {
     this.notifyStatusEl?.setText(text || " ");
   }
 
+  /** Under whichever HD switch this device has; one setting for both. */
+  private addStartInHd(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName("Start in HD")
+      .setDesc(
+        "Wait for HD before the video starts, and start it at full quality instead of sharpening a few seconds in. " +
+          "If HD isn't ready within 15 seconds it starts at 360p and sharpens later. Only applies while HD is on.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.startInHd).onChange(async (value) => {
+          this.plugin.settings.startInHd = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+  }
+
   display(): void {
     const { containerEl } = this;
     const desktopApp = Platform.isDesktopApp;
@@ -5780,6 +5816,8 @@ class YtFreeSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
         );
+
+      this.addStartInHd(containerEl);
     } else {
       // Saying this once, plainly, beats a mobile user wondering why the
       // picture is soft and where the download button went.
@@ -5802,6 +5840,8 @@ class YtFreeSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
         );
+
+      this.addStartInHd(containerEl);
     }
 
     new Setting(containerEl)

@@ -24,8 +24,41 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   download (`src/adaptive.ts`).
 - **Desktop fallback**: when yt-dlp is missing or fails, the desktop resolves the way the phone
   does (InnerTube `ANDROID`, 360p).
+- **Quality badge**: the chip on the picture's top-left corner that says where HD has got to
+  (`360p · finding HD…`, `480p · HD loading`, `1080p`). Fades once settled (`src/hd-status.ts`).
+- **Start in HD**: the setting that holds playback until HD is ready and starts it on the top
+  rung, with a 15s fallback to 360p.
 
 ## Decisions
+
+### 2026-11-04 (Isaiah asked; defaults picked by Claude, open to change)
+
+- Per-video quality: a Quality row (HD / 360p) in the player's ⋯ pop-out overrides the HD
+  setting for that video only. It never writes the setting and is kept until Obsidian quits,
+  like the pop-out's other controls. Picking a rung (720p, 480p) stays with GitHub #15.
+
+### 2026-11-04 (measured; Claude's call, open to change)
+
+- Desktop HD comes from yt-dlp's files when InnerTube's stop serving after about a minute
+  (`ytDlpFormats` + `resolveHdFromYtDlp`), stitched and streamed the same way. InnerTube is
+  still tried first. Phone HD on most videos is GitHub #25.
+
+### 2026-10-22 (Isaiah asked; defaults picked by Claude, open to change)
+
+- HD progress is shown as stages and the rung playing, not a percentage: the HD resolve is a
+  few network calls with no meaningful percentage. Plus a buffered-ahead band on the progress line.
+- "Start in HD" is a setting, off by default, under the HD switch on each device. It waits at
+  most 15s (`HD_WAIT_MS`), then plays 360p and sharpens later as before.
+- With "Start in HD" on, a jump still drops to the lowest rung for its first chunk (Isaiah's
+  rule of 2026-10-15 stands).
+### 2026-10-22 (Isaiah reported; fix picked by Claude, open to change)
+
+- **HD stutter at ~55 s and slow jumps**: treated as YouTube refusing a stream URL past its
+  opening. The resolve now reads 1 KB past 90 s before trusting a pair, a refused segment
+  mid-play is re-linked from a fresh client answer instead of failing to 360p, and stitched
+  streams retry briefly. Scope: `docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md`.
+- **Re-link** (term): swapping a stitched stream's googlevideo links for fresh ones for the same
+  files (same itag), keeping every byte offset (`relinkingFetch` in `src/adaptive.ts`).
 
 ### 2026-10-14 (Isaiah)
 

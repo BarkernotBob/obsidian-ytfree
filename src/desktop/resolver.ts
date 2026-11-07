@@ -15,6 +15,7 @@ import { ytDlpEnv } from "./env.ts";
 // compiling them, so a type imported as a value makes the whole module fail to
 // load — which is what stopped `npm run smoke` running at all.
 import type { ResolvedStream, ResolveMode } from "../stream.ts";
+import type { YtDlpFormat } from "../adaptive.ts";
 
 const pExecFile = promisify(execFile);
 
@@ -235,4 +236,29 @@ async function resolveWith(
     mode,
     expiresAt: parseExpiry(url) - EXPIRY_SAFETY_MARGIN_MS,
   };
+}
+
+/**
+ * Every format yt-dlp knows for a video, from its default client set.
+ *
+ * For HD (`resolveHdFromYtDlp`): the separate picture and sound files yt-dlp
+ * finds serve the whole video where InnerTube's ANDROID and IOS ones stop at
+ * about a minute (measured 2026-11-04). `-J` lists them without choosing, so
+ * the ladder and the sound are picked the same way as for InnerTube.
+ */
+export async function ytDlpFormats(videoId: string, ytDlpPath: string): Promise<YtDlpFormat[]> {
+  let stdout: string;
+  try {
+    const result = await pExecFile(
+      ytDlpPath,
+      ["--no-warnings", "--no-playlist", "-J", `https://www.youtube.com/watch?v=${videoId}`],
+      { timeout: 120_000, maxBuffer: 64 * 1024 * 1024, env: ytDlpEnv(ytDlpPath) },
+    );
+    stdout = result.stdout;
+  } catch (err: unknown) {
+    const e = err as { stderr?: string; message?: string };
+    throw new ResolveError((e.stderr || e.message || "unknown error").trim());
+  }
+  const info = JSON.parse(stdout) as { formats?: YtDlpFormat[] };
+  return info.formats ?? [];
 }
