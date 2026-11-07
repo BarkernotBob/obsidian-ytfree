@@ -1766,17 +1766,13 @@ export class YtFreePlayer {
   }
 
   /**
-   * Is this the video on the lock-screen tile, playing or held there by a
-   * background pause? Asked once on the way back into the app; a held pause
-   * answers yes only that once, so a later return to a video you paused long
-   * ago does not move you.
+   * Is this the video on the lock-screen tile: playing, or paused from the
+   * lock screen or AirPods and not played since? The Now playing button shows
+   * for exactly this.
    */
-  claimsReturn(): boolean {
+  isNowPlaying(): boolean {
     if (this.destroyed || nowPlayingOwner !== this || this.video.ended) return false;
-    if (!this.video.paused) return true;
-    const held = this.heldInBackground;
-    this.heldInBackground = false;
-    return held;
+    return !this.video.paused || this.heldInBackground;
   }
 
   private startSmartLoop(): void {

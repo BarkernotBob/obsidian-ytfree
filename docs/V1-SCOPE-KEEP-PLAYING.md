@@ -56,13 +56,15 @@ Risks the test answers: iOS may still show a Pause button on the tile while the 
 If it sends Pause for an AirPods tap that means Play, the handler treats it as Play.
 Battery: an open audio session for up to an hour.
 
-### 6. The Now Playing tile returns to the note that is playing
+### 6. A Now playing button back to the playing note
 
-iOS and macOS do not tell the app which door was used to come back, so the tile cannot be told
-apart from the app switcher. Recommended rule (decision card posted to Isaiah): every return to
-Obsidian while a video is playing, or was paused from the lock screen since the last return,
-brings that video's note tab forward if another note is active. A Preview is a sheet over
-everything, so it needs nothing. On the Mac this also fires on window focus.
+Asked: tapping the lock-screen tile returns to the note that is playing. Not possible: iOS and macOS
+do not tell the app which door it was opened through, so the tile and the app switcher look the
+same. Isaiah chose a button over jumping on every return (2026-11-07).
 
-Not in v1: reopening a note whose tab was closed (the player stops with its tab, so there is
-nothing playing to return to).
+v1: while a video is playing (or was paused from the lock screen/AirPods) and its note is open in
+a tab that is not in front, a "▶ <title>" pill shows above the phone's bottom toolbar (desktop: in
+the status bar). Tapping it brings that tab forward. Also a command, "Go to the playing video".
+Hidden under an open Preview, which is already in front.
+
+Not in v1: reopening a note whose tab was closed (the player stops with its tab).

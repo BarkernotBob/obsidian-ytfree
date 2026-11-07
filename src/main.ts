@@ -16,6 +16,7 @@ import {
   setIcon,
   Setting,
   TFile,
+  type WorkspaceLeaf,
 } from "obsidian";
 import {
   AccountSession,
@@ -730,7 +731,7 @@ export default class YtFreePlugin extends Plugin {
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
     await this.progress.load();
     this.watchProgressFile();
-    this.watchReturnToPlayer();
+    this.setupNowPlayingButton();
     this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
     await this.silence.load();
     await this.setupSubscriptions();
@@ -4725,36 +4726,76 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * Coming back to Obsidian lands on the note that is playing (Isaiah,
-   * 2026-11-07).
+   * The Now playing button: one tap back to the note whose video is playing
+   * (Isaiah, 2026-11-07).
    *
-   * The lock-screen tile, the Mac's Now Playing widget and the app switcher
-   * all look the same from in here — the app becomes visible or focused, and
-   * nothing says which door was used. So the rule is "every return while it
-   * is playing": if the playing video's note is open in a tab that is not the
-   * active one, that tab comes forward. A Preview needs nothing: it is a sheet
-   * over everything, so it is already what you see.
+   * Asked for as "tapping the lock-screen tile returns me to the video", but
+   * neither iOS nor macOS tells the app which door it was opened through, so
+   * the tile cannot be told apart from the app switcher. Isaiah chose a button
+   * over jumping on every return. It shows only while a video is playing (or
+   * was paused from the lock screen) and its note is not the one in front: on
+   * a phone as a pill over the note, on the desktop in the status bar.
+   *
+   * Driven by `play`/`pause` caught at the document — media events do not
+   * bubble, but they do pass through the capture phase — and by tab changes.
    */
-  private watchReturnToPlayer(): void {
-    const onReturn = (): void => {
-      if (document.hidden) return;
+  private setupNowPlayingButton(): void {
+    const button = Platform.isMobile
+      ? document.body.createEl("button", { cls: "ytfree-now-playing" })
+      : this.addStatusBarItem().createEl("button", { cls: "ytfree-now-playing-status" });
+    this.register(() => button.remove());
+    button.hide();
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
       void this.revealPlayingNote();
+    });
+
+    const refresh = (): void => {
+      const target = this.playingNoteEntry();
+      if (!target) {
+        button.hide();
+        return;
+      }
+      const title = this.nowPlayingFor(target.videoId, target.sourcePath)?.title ?? "video";
+      button.setText(`▶ ${title}`);
+      button.setAttr("aria-label", `Go to the playing video: ${title}`);
+      button.show();
     };
-    this.registerDomEvent(document, "visibilitychange", onReturn);
-    if (!Platform.isMobile) this.registerDomEvent(window, "focus", onReturn);
+    for (const event of ["play", "pause", "ended", "emptied"]) {
+      this.registerDomEvent(document, event as keyof DocumentEventMap, refresh, { capture: true });
+    }
+    this.registerEvent(this.app.workspace.on("active-leaf-change", refresh));
+    this.registerEvent(this.app.workspace.on("layout-change", refresh));
+    this.registerDomEvent(document, "visibilitychange", refresh);
+    this.addCommand({
+      id: "go-to-playing-video",
+      name: "Go to the playing video",
+      callback: () => void this.revealPlayingNote(),
+    });
+  }
+
+  /** The playing video's entry, if its note is open in a tab that is not in front. */
+  private playingNoteEntry(): PlayerEntry | null {
+    const entry = [...this.players.values()].find((e) => e.player.isNowPlaying());
+    if (!entry || !entry.sourcePath || entry === this.preview) return null;
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (active?.file?.path === entry.sourcePath) return null;
+    return this.leafFor(entry.sourcePath) ? entry : null;
+  }
+
+  private leafFor(path: string): WorkspaceLeaf | null {
+    return (
+      this.app.workspace
+        .getLeavesOfType("markdown")
+        .find((l) => l.view instanceof MarkdownView && l.view.file?.path === path) ?? null
+    );
   }
 
   private async revealPlayingNote(): Promise<void> {
-    const entry = [...this.players.values()].find((e) => e.player.claimsReturn());
-    if (!entry || !entry.sourcePath || entry === this.preview) return;
-    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (active?.file?.path === entry.sourcePath) return;
-    const leaf = this.app.workspace
-      .getLeavesOfType("markdown")
-      .find((l) => l.view instanceof MarkdownView && l.view.file?.path === entry.sourcePath);
+    const entry = this.playingNoteEntry();
+    const leaf = entry ? this.leafFor(entry.sourcePath) : null;
     if (!leaf) return;
-    this.debug("return: bringing the playing note forward", entry.sourcePath);
-    this.app.workspace.setActiveLeaf(leaf, { focus: false });
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
     await this.app.workspace.revealLeaf(leaf);
   }
 

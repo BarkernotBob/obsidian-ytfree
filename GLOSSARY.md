@@ -38,8 +38,9 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - **Background pause stays resumable**: a video paused from the lock screen or AirPods stays ready
   to play for up to an hour (a silent loop keeps iOS from suspending Obsidian).
-- **Returning lands on the playing note**: coming back to Obsidian while a video plays brings its
-  note forward. Pending Isaiah's pick of the trigger (every return vs. a Now playing button).
+- **Now playing button, not auto-jump**: the lock-screen tile can't be told apart from the app
+  switcher, so instead of jumping on return, a "▶ title" pill (phone) / status-bar item (desktop)
+  takes you to the playing note. Isaiah's call.
 
 ### 2026-10-14 (Isaiah)
 
