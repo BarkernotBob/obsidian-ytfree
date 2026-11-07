@@ -164,6 +164,8 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   missing. Shorts keep the uploaded picture. No setting. Scope:
   `docs/V1-SCOPE-MIDFRAME-THUMBNAILS.md`.
 
+- `obsidian://ytfree?view=subscriptions|search` opens the hub; bare `obsidian://ytfree` opens the hub; `url=` wins over `view=` (2026-10-21).
+
 ### Earlier
 
 - `PROGRESS_TTL_DAYS` stays 365 (2026-09-02).

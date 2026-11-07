@@ -28,6 +28,10 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   test: [docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md). Code:
   `src/hd-status.ts` (pure), `load`/`loadHdFirst`/`upgrade` in `src/player.ts`. The ~55s stutter
   and slow seeking are a separate branch.
+
+- **Built 2026-10-21 on branch `claude/project-thread-jd0aku`, awaiting manual test:** hub deep
+  link `obsidian://ytfree?view=subscriptions` for an iPhone Shortcut. Scope and manual test:
+  [docs/V1-SCOPE-HUB-DEEP-LINK.md](docs/V1-SCOPE-HUB-DEEP-LINK.md). Build not yet verified.
 - **Built 2026-10-14 on branch `claude/project-thread-zamhn2`, awaiting manual test:**
   GitHub #8 (Preview fullscreen on the phone) and #9 (Fullscreen waits for the stream).
 - **Scoped 2026-10-14, awaiting Isaiah's approval:** GitHub #10 (paste a URL, land in its
