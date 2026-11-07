@@ -55,8 +55,12 @@ Built in four parts, one PR each, in this order. Each part is useful alone.
     device (plugin data outside the vault, or `localStorage`), keyed by video ID, dropped at
     expiry. Reinstalling a build and reopening the same video sends nothing. Never in the vault:
     URLs are tied to the IP that asked.
-12. **Desktop resolves on Play (#34)**, like the phone. Opening a note shows the poster and the
-    resume point; nothing is fetched until Play, a timestamp tap, or "Start in HD"'s Play.
+12. **Desktop: one lookup on note open, nothing more (#34).** Isaiah asked on 2026-11-07 that HD
+    be loaded and ready before he presses Play, so the desktop keeps resolving on open (a Play
+    -only rule was dropped). The open spends exactly the one `yt-dlp -J` from Part 2 plus the
+    ~5 HD range reads, and buffers HD. No second lookup, no client cycling, no extra probing.
+    Trade-off: skimming ten new notes costs ten lookups; reopening any of them costs nothing
+    (item 11). The phone keeps resolving on tap, as today.
 13. **Request governor (#36).** Every YouTube request goes through one module: at most 2 in
     flight, 500 ms between player calls, background work capped at 60 requests an hour (Play is
     never capped, only queued). Command **"YT Free: Show YouTube requests this session"** lists
@@ -98,7 +102,8 @@ Part 2:
 4. On the iPhone, open a video and tap Play. It plays at 360p as before.
 
 Part 3:
-5. Open a video note on the Mac. Nothing loads until you press Play. Press Play: it starts.
+5. Open a video note on the Mac and don't press Play. Within a few seconds the badge shows HD
+   ready. Press Play: it starts sharp.
 6. Reload the plugin (or install a new build), reopen the same note and press Play. It starts
    at once.
 7. Run **YT Free: Show YouTube requests this session**. Opening and playing one video shows
