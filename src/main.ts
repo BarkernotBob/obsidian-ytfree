@@ -650,8 +650,13 @@ export default class YtFreePlugin extends Plugin {
    * off — see `syncPinRestore`.
    */
   private pinRestore = new Map<MarkdownView, HTMLElement>();
-  /** Last note whose properties we collapsed in a given view, so we do it once. */
-  private collapsed = new Map<MarkdownView, string>();
+  /**
+   * The note, and the properties table, we last collapsed in a given view, so
+   * we do it once per table. Obsidian rebuilds the table on its own (GitHub
+   * #51: properties showing again on the phone), and a rebuilt one comes back
+   * open, so a new table is collapsed again.
+   */
+  private collapsed = new Map<MarkdownView, { path: string; container: HTMLElement | null }>();
   /** Same, for the default section folds — see applyDefaultFolds. */
   private folded = new Map<MarkdownView, string>();
   /**
@@ -1100,6 +1105,9 @@ export default class YtFreePlugin extends Plugin {
     this.registerEvent(
       this.app.metadataCache.on("changed", (file) => {
         this.syncPinnedPlayers();
+        // Obsidian redraws the properties table a moment after the cache
+        // changes, and the redrawn one is open again (#51): look once more.
+        window.setTimeout(() => this.syncPinnedPlayers(), 500);
         this.queueAutoFetch(file);
       }),
     );
@@ -2392,7 +2400,7 @@ export default class YtFreePlugin extends Plugin {
         // `noteOpened`. A no-op after the first time, so this costs a lookup.
         this.subscriptions?.noteOpened(noteVideo, path);
       } else if (path) {
-        if (this.collapsed.get(view) !== path) this.collapsed.delete(view);
+        if (this.collapsed.get(view)?.path !== path) this.collapsed.delete(view);
         if (this.folded.get(view) !== path) this.folded.delete(view);
       }
 
@@ -2435,24 +2443,33 @@ export default class YtFreePlugin extends Plugin {
    *
    * Clicking Obsidian's own heading rather than setting `is-collapsed` directly
    * keeps its internal state and the arrow in agreement, so the first click to
-   * re-open works. Done once per file per view: if you expand the properties,
-   * they stay expanded until you open a different note.
+   * re-open works. Done once per table: if you expand the properties, they
+   * stay expanded until you open a different note or Obsidian rebuilds the
+   * table, which it does on its own and which brings it back open (#51).
    */
   private collapseProperties(view: MarkdownView, path: string): void {
     if (!this.settings.collapseProperties) return;
-    if (this.collapsed.get(view) === path) return;
+    const done = this.collapsed.get(view);
+    if (done?.path === path) {
+      // Already handled this table — or still waiting for it to be built.
+      if (!done.container) return;
+      if (done.container.isConnected && view.contentEl.contains(done.container)) return;
+    }
+    this.collapsed.set(view, { path, container: null });
 
     // The metadata table is built with the rest of the view, which may not have
     // happened yet when frontmatter is what told us to mount in the first place.
+    // A phone can take well over a second to build it, so wait up to three.
     let attempts = 0;
     const attempt = (): void => {
       if (view.file?.path !== path) return;
       const container = view.contentEl.querySelector<HTMLElement>(".metadata-container");
       if (!container) {
-        if (++attempts < 10) window.setTimeout(attempt, 100);
+        if (++attempts < 30) window.setTimeout(attempt, 100);
+        else this.collapsed.delete(view);
         return;
       }
-      this.collapsed.set(view, path);
+      this.collapsed.set(view, { path, container });
       if (container.hasClass("is-collapsed")) return;
       const heading = container.querySelector<HTMLElement>(".metadata-properties-heading");
       if (heading) heading.click();
@@ -4866,16 +4883,22 @@ export default class YtFreePlugin extends Plugin {
    * neither iOS nor macOS tells the app which door it was opened through, so
    * the tile cannot be told apart from the app switcher. Isaiah chose a button
    * over jumping on every return. It shows only while a video is playing (or
-   * was paused from the lock screen) and its note is not the one in front: on
-   * a phone as a pill over the note, on the desktop in the status bar.
+   * was paused from the lock screen) and its note is not the one in front, on
+   * the desktop in the status bar. The phone has only the command (#51).
    *
    * Driven by `play`/`pause` caught at the document — media events do not
    * bubble, but they do pass through the capture phase — and by tab changes.
    */
   private setupNowPlayingButton(): void {
-    const button = Platform.isMobile
-      ? document.body.createEl("button", { cls: "ytfree-now-playing" })
-      : this.addStatusBarItem().createEl("button", { cls: "ytfree-now-playing-status" });
+    this.addCommand({
+      id: "go-to-playing-video",
+      name: "Go to the playing video",
+      callback: () => void this.revealPlayingNote(),
+    });
+    // No pill on the phone (Isaiah, 2026-11-07, GitHub #51): it read as a
+    // stray "video is playing" label. The command above is the phone's way.
+    if (Platform.isMobile) return;
+    const button = this.addStatusBarItem().createEl("button", { cls: "ytfree-now-playing-status" });
     this.register(() => button.remove());
     button.hide();
     button.addEventListener("click", (event) => {
@@ -4900,11 +4923,6 @@ export default class YtFreePlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("active-leaf-change", refresh));
     this.registerEvent(this.app.workspace.on("layout-change", refresh));
     this.registerDomEvent(document, "visibilitychange", refresh);
-    this.addCommand({
-      id: "go-to-playing-video",
-      name: "Go to the playing video",
-      callback: () => void this.revealPlayingNote(),
-    });
   }
 
   /** The playing video's entry, if its note is open in a tab that is not in front. */
