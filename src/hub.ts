@@ -119,6 +119,7 @@ import {
 import type { SearchFilters } from "./search-params";
 import { channelScreen, searchScreen } from "./search-screen";
 import type { SearchScreenCopy, SearchScreenKind } from "./search-screen";
+import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
 
@@ -1211,6 +1212,8 @@ interface CardSpec {
   videoId: string;
   title: string;
   thumbnail: string;
+  /** Keeps the stored thumbnail: a Short's halfway still is a pillarboxed portrait. */
+  isShort?: boolean;
   /** Already formatted — "12:04", "Short", or "" for a video with no length. */
   duration: string;
   /** The desktop's one line of facts. */
@@ -2960,6 +2963,7 @@ export class HubView extends ItemView {
       videoId: item.videoId,
       title: item.title,
       thumbnail: item.thumbnail,
+      isShort: item.isShort === true,
       duration: length || (item.isShort ? "Short" : ""),
       deskSubText: deskSub(item, now),
       phoneSub: { channel, trailing },
@@ -3024,11 +3028,14 @@ export class HubView extends ItemView {
     if (spec.extraClass) card.addClass(spec.extraClass);
 
     const thumb = card.createDiv({ cls: "ytfree-hub-thumb" });
-    if (spec.thumbnail) {
+    // The halfway frame rather than the uploader's picture, falling back to the
+    // stored thumbnail — see `src/thumbnail.ts`.
+    const pictures = thumbnailCandidates(spec.videoId, spec.thumbnail, spec.isShort);
+    if (pictures.length > 0) {
       const img = thumb.createEl("img");
-      img.src = spec.thumbnail;
       img.loading = "lazy";
       img.alt = "";
+      showThumbnail(img, pictures);
     }
     // Bottom-right of the picture, where a YouTube reader already looks. Empty
     // is hidden rather than absent, so a video with no stated length leaves the

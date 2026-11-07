@@ -33,6 +33,10 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
+0. Isaiah: halfway-point thumbnails (branch `claude/project-thread-y51fkq`). Open the hub; card
+   pictures are mid-video stills, Shorts unchanged. Steps in
+   [docs/V1-SCOPE-MIDFRAME-THUMBNAILS.md](docs/V1-SCOPE-MIDFRAME-THUMBNAILS.md).
+
 1. Isaiah: on the iPhone, open any Preview. The picture starts right under the status bar with
    the ✕ on its top-right corner; opening Description or Transcript widens it to full width and
    hides the other, shutting it puts both back side by side (#8, PR #12). Mac unchanged.
