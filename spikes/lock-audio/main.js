@@ -37,8 +37,14 @@ const ANDROID = {
 const ANDROID_UA =
   "com.google.android.youtube/20.10.38 (Linux; U; Android 14; en_US) gzip";
 
-/** The audio-only format. What the real music build will use on every device. */
-const AUDIO_ITAG = 140;
+/**
+ * itag 18, the 360p muxed file YT Free's phone player already plays. The
+ * audio-only itag 140 resolved but WebKit refused it outright (2026-11-07:
+ * NotSupportedError, media error code 4), so it can't answer the lock
+ * question. An <audio> element plays a muxed file's sound and ignores the
+ * picture, which is all this test needs.
+ */
+const AUDIO_ITAG = 18;
 
 async function resolveAudio(videoId) {
   const response = await requestUrl({
@@ -56,10 +62,156 @@ async function resolveAudio(videoId) {
   const data = response.json;
   const status = data?.playabilityStatus?.status;
   if (status !== "OK") throw new Error("playabilityStatus: " + status);
-  const formats = data?.streamingData?.adaptiveFormats ?? [];
+  const formats = [
+    ...(data?.streamingData?.formats ?? []),
+    ...(data?.streamingData?.adaptiveFormats ?? []),
+  ];
   const audio = formats.find((f) => f.itag === AUDIO_ITAG && f.url);
   if (!audio) throw new Error("no itag " + AUDIO_ITAG + " with a plain url");
   return audio.url;
+}
+
+const IOS = {
+  clientName: "IOS",
+  clientVersion: "20.10.4",
+  deviceModel: "iPhone16,2",
+  osName: "iPhone",
+  osVersion: "18.3.2.22D82",
+  hl: "en",
+  gl: "US",
+};
+const IOS_UA =
+  "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)";
+
+/** The same player request the plugin sends, for either client it already uses. */
+async function playerResponse(videoId, ctx, ua) {
+  const response = await requestUrl({
+    url: "https://www.youtube.com/youtubei/v1/player",
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": ua },
+    body: JSON.stringify({ videoId, contentCheckOk: true, racyCheckOk: true, context: { client: ctx } }),
+    throw: false,
+  });
+  return response.json;
+}
+
+/**
+ * Why did itag 140 fail when itag 18 from the same response plays? Measures,
+ * on the phone, what googlevideo answers for each URL, and whether the iOS
+ * client's HLS manifest offers an audio-only stream. Read-only: nothing plays
+ * longer than a few seconds and nothing is stored but the log.
+ */
+class DiagnoseModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this.lines = [];
+  }
+
+  log(msg) {
+    const line = `[diag ${new Date().toISOString()}] ${msg}`;
+    this.lines.push(line);
+    if (this.logEl) this.logEl.setText(this.lines.join("\n"));
+    void this.plugin.appendLog(line);
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Lock spike — diagnose audio" });
+    const input = contentEl.createEl("input", { type: "text", value: TRACKS[0].id });
+    input.style.width = "100%";
+    const go = contentEl.createEl("button", { text: "Run" });
+    go.addEventListener("click", () => {
+      go.disabled = true;
+      const v = input.value.trim();
+      const m = v.match(/(?:v=|youtu\.be\/|shorts\/|live\/)([A-Za-z0-9_-]{11})/);
+      void this.run(m ? m[1] : v);
+    });
+    this.logEl = contentEl.createEl("pre", { text: "" });
+    this.logEl.style.maxHeight = "50vh";
+    this.logEl.style.overflow = "auto";
+    this.logEl.style.fontSize = "11px";
+    this.logEl.style.whiteSpace = "pre-wrap";
+    const copy = contentEl.createEl("button", { text: "Copy log" });
+    copy.addEventListener("click", () => {
+      void navigator.clipboard.writeText(this.lines.join("\n"));
+      new Notice("Log copied.");
+    });
+  }
+
+  /** What googlevideo says to the first KB, outside the media element. */
+  async probe(label, url) {
+    const params = new URL(url).searchParams;
+    this.log(`${label}: c=${params.get("c")} mime=${params.get("mime")} clen=${params.get("clen")} pot=${params.has("pot")}`);
+    for (const [how, u, headers] of [
+      ["Range header", url, { Range: "bytes=0-1023" }],
+      ["&range=", url + "&range=0-1023", {}],
+      // The whole file, for audio only: a muxed video file is tens of MB.
+      ...(label.startsWith("itag 140") ? [["no range", url, {}]] : []),
+    ]) {
+      try {
+        const r = await requestUrl({ url: u, method: "GET", headers, throw: false });
+        const len = r.arrayBuffer ? r.arrayBuffer.byteLength : -1;
+        this.log(`${label} [${how}]: HTTP ${r.status} type=${r.headers["content-type"] ?? r.headers["Content-Type"]} bytes=${len}`);
+      } catch (err) {
+        this.log(`${label} [${how}]: THREW ${err?.message ?? err}`);
+      }
+    }
+  }
+
+  /** Whether WebKit's own media loader gets anywhere with it, for 6 seconds. */
+  tryElement(label, src) {
+    return new Promise((resolve) => {
+      const el = document.createElement("audio");
+      el.setAttribute("playsinline", "");
+      el.style.display = "none";
+      document.body.appendChild(el);
+      const done = (msg) => {
+        this.log(`${label} <audio>: ${msg} t=${el.currentTime.toFixed(1)}`);
+        el.pause();
+        el.remove();
+        resolve();
+      };
+      el.addEventListener("error", () => done(`error code=${el.error?.code} ${el.error?.message ?? ""}`), { once: true });
+      setTimeout(() => done(el.currentTime > 0.5 ? "PLAYING" : `stuck readyState=${el.readyState}`), 6000);
+      el.src = src;
+      el.volume = 0.2;
+      el.play().catch((err) => this.log(`${label} play(): ${err?.name}`));
+    });
+  }
+
+  async run(videoId) {
+    this.log(`video ${videoId}`);
+    const android = await playerResponse(videoId, ANDROID, ANDROID_UA);
+    this.log(`ANDROID status=${android?.playabilityStatus?.status}`);
+    const all = [
+      ...(android?.streamingData?.formats ?? []),
+      ...(android?.streamingData?.adaptiveFormats ?? []),
+    ];
+    const audio = all.filter((f) => (f.mimeType ?? "").startsWith("audio/"));
+    this.log("ANDROID audio formats: " + audio.map((f) => `${f.itag}${f.url ? "" : "(cipher)"} ${f.mimeType}`).join(" | "));
+    for (const itag of [18, 140]) {
+      const f = all.find((x) => x.itag === itag && x.url);
+      if (!f) { this.log(`itag ${itag}: none with a plain url`); continue; }
+      await this.probe(`itag ${itag}`, f.url);
+      await this.tryElement(`itag ${itag}`, f.url);
+    }
+
+    const ios = await playerResponse(videoId, IOS, IOS_UA);
+    this.log(`IOS status=${ios?.playabilityStatus?.status}`);
+    const hls = ios?.streamingData?.hlsManifestUrl;
+    if (!hls) {
+      this.log("IOS: no HLS manifest for this video");
+    } else {
+      const r = await requestUrl({ url: hls, throw: false });
+      const text = r.text ?? "";
+      const audioLines = text.split("\n").filter((l) => /TYPE=AUDIO|audio only|CODECS="mp4a[^,"]*"/i.test(l));
+      this.log(`IOS HLS: HTTP ${r.status}, ${text.length} chars, audio-only lines: ${audioLines.length}`);
+      for (const l of audioLines.slice(0, 4)) this.log("  " + l.slice(0, 200));
+      await this.tryElement("IOS HLS master", hls);
+    }
+    this.log("done");
+  }
 }
 
 class LockSpikeModal extends Modal {
@@ -96,8 +248,23 @@ class LockSpikeModal extends Modal {
         "5. Unlock and read the log.",
     });
 
+    // YouTube can refuse a given video signed out (LOGIN_REQUIRED). Paste two
+    // links that already play in YT Free on this phone to rule that out.
+    this.inputs = TRACKS.map((t, i) => {
+      const input = contentEl.createEl("input", { type: "text", value: t.id });
+      input.placeholder = `Track ${i + 1}: YouTube link or video ID`;
+      input.style.width = "100%";
+      input.style.marginBottom = "6px";
+      return input;
+    });
+
     const startButton = contentEl.createEl("button", { text: "Start" });
     startButton.addEventListener("click", () => {
+      this.inputs.forEach((input, i) => {
+        const v = input.value.trim();
+        const m = v.match(/(?:v=|youtu\.be\/|shorts\/|live\/)([A-Za-z0-9_-]{11})/);
+        TRACKS[i].id = m ? m[1] : v;
+      });
       startButton.disabled = true;
       void this.run();
     });
@@ -153,13 +320,19 @@ class LockSpikeModal extends Modal {
 
   async run() {
     this.startedAt = Date.now();
-    this.log(`start, mode=${this.mode}`);
+    this.log(`start, mode=${this.mode}, tracks=${TRACKS.map((t) => t.id).join(",")}`);
 
     // Both resolved up front: a failure to start track two must mean the play()
     // was refused, not that a network call was asleep behind a locked screen.
     let urls;
     try {
-      urls = await Promise.all(TRACKS.map((t) => resolveAudio(t.id)));
+      urls = await Promise.all(
+        TRACKS.map((t, i) =>
+          resolveAudio(t.id).catch((err) => {
+            throw new Error(`track ${i + 1} (${t.id}): ${err?.message ?? err}`);
+          }),
+        ),
+      );
       this.log("resolved both tracks");
     } catch (err) {
       this.log("RESOLVE FAILED: " + (err?.message ?? String(err)));
@@ -247,6 +420,11 @@ module.exports = class LockSpikePlugin extends Plugin {
         callback: () => new LockSpikeModal(this.app, this, mode).open(),
       });
     }
+    this.addCommand({
+      id: "lock-spike-diagnose",
+      name: "Lock spike: diagnose audio",
+      callback: () => new DiagnoseModal(this.app, this).open(),
+    });
   }
 
   /** Append, never rewrite: the point is that the file outlives the webview. */

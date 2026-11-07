@@ -16,6 +16,7 @@ import {
   setIcon,
   Setting,
   TFile,
+  type WorkspaceLeaf,
 } from "obsidian";
 import {
   AccountSession,
@@ -47,6 +48,8 @@ import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
 import {
   HANDOFF_ACTION,
   HANDOFF_BOOKMARKLET,
+  HANDOFF_VIEWS,
+  handoffTarget,
   isYouTubeUrl,
   parseYouTubeLink,
   youTubeLinkAt,
@@ -118,6 +121,7 @@ import { DEFAULT_TIDY_DAYS, notesToTidy, sweepNote } from "./tidy";
 import type { SweepHub, TidyCandidate } from "./tidy";
 import { YtFreePlayer } from "./player";
 import type { NowPlaying } from "./player";
+import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 import {
   extractVideoId,
   ResolveMode,
@@ -689,8 +693,15 @@ export default class YtFreePlugin extends Plugin {
   private armedSeekLink: SeekTarget | null = null;
   /** A YouTube link under a Live Preview mousedown, fired by the matching click (GitHub #3). */
   private armedEditorYouTube: string | null = null;
-  /** A YouTube link under a touchstart, reading view or Live Preview, fired on touchend. */
+  /**
+   * A YouTube link under a touchstart, fired on touchend: one for Reading view
+   * anchors, one for Live Preview text. Separate for the same reason as the
+   * touch origins below: the document's capture handler runs first on every
+   * touch, and while they shared a field it cleared the editor's tap before
+   * the editor handler read it, so a Live Preview tap fell through to YouTube.
+   */
   private armedYouTubeTap: { href: string; x: number; y: number } | null = null;
+  private armedEditorYouTubeTap: { href: string; x: number; y: number } | null = null;
   /**
    * Where a touch started, so a scroll can be told from a tap.
    *
@@ -735,6 +746,7 @@ export default class YtFreePlugin extends Plugin {
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
     await this.progress.load();
     this.watchProgressFile();
+    this.setupNowPlayingButton();
     this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
     await this.silence.load();
     await this.setupSubscriptions();
@@ -830,12 +842,12 @@ export default class YtFreePlugin extends Plugin {
           touchstart: (evt, view) => {
             const touch = evt.touches[0];
             const url = touch ? this.editorYouTubeLinkAt(touch, view, true) : null;
-            this.armedYouTubeTap = url && touch ? { href: url, x: touch.clientX, y: touch.clientY } : null;
+            this.armedEditorYouTubeTap = url && touch ? { href: url, x: touch.clientX, y: touch.clientY } : null;
             return false;
           },
           touchend: (evt, view) => {
-            const armed = this.armedYouTubeTap;
-            this.armedYouTubeTap = null;
+            const armed = this.armedEditorYouTubeTap;
+            this.armedEditorYouTubeTap = null;
             if (!armed) return false;
             const touch = evt.changedTouches[0];
             if (!touch || !withinTapSlop(armed, touch)) return false;
@@ -954,8 +966,18 @@ export default class YtFreePlugin extends Plugin {
 
     // GitHub #3: YouTube links open in YT Free. The door every outside router
     // (Finicky, the bookmarklet, the iPhone Shortcut) knocks on.
+    // `view=` opens the hub itself, for a home-screen Shortcut.
     this.registerObsidianProtocolHandler(HANDOFF_ACTION, (params) => {
-      void this.openYouTubeUrl(params.url ?? "");
+      const target = handoffTarget(params);
+      if (target.kind === "video") {
+        void this.openYouTubeUrl(target.url);
+      } else if (target.kind === "hub") {
+        this.app.workspace.onLayoutReady(() => void this.openHub(target.screen));
+      } else {
+        new Notice(
+          `YT Free: no screen called "${target.view}". Try view=${Object.keys(HANDOFF_VIEWS).join(" or view=")}.`,
+        );
+      }
     });
 
     // …and links clicked inside a note. Capture phase, for the same reason as
@@ -2077,18 +2099,21 @@ export default class YtFreePlugin extends Plugin {
       new Notice("YT Free: that is not a link to a YouTube video.");
       return;
     }
+    // Isaiah, 2026-10-19: the video's note if it has one, else its Preview.
+    // Never a new note: that waits for Watch or Keep in the Preview.
     const existing = this.noteForVideo(link.videoId);
     if (existing) {
       await this.app.workspace.getLeaf(false).openFile(existing);
-    } else {
-      const item = await this.subscriptions.addLinkedVideo(link.videoId);
-      if (!item) {
-        new Notice("YT Free: YouTube would not say what that video is. It may be private or removed.");
-        return;
-      }
-      await this.subscriptions.openItem(item);
+      if (link.seconds > 0) await this.cueWhenMounted(link.videoId, link.seconds);
+      return;
     }
-    if (link.seconds > 0) await this.seekWhenMounted(link.videoId, link.seconds);
+    await this.openHub();
+    const leaf = this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)[0];
+    if (leaf?.view instanceof HubView) {
+      await leaf.view.previewVideo(link.videoId, link.seconds);
+    } else {
+      new Notice("YT Free: could not open the hub to preview that video.");
+    }
   }
 
   /** The note for this video, if there is one: the hub's first, then any frontmatter match. */
@@ -2104,15 +2129,16 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * Start the note's player at a second, once the note has mounted it. The
-   * player appears a moment after the note opens; give up quietly after a few
-   * seconds (the pinned player may be off), and say so.
+   * Put the note's player at a second, paused, once the note has mounted it.
+   * A followed link is not a Play press (Isaiah, 2026-10-19). The player
+   * appears a moment after the note opens; give up after a few seconds (the
+   * pinned player may be off), and say so.
    */
-  private async seekWhenMounted(videoId: string, seconds: number): Promise<void> {
+  private async cueWhenMounted(videoId: string, seconds: number): Promise<void> {
     for (let waited = 0; waited < HANDOFF_PLAYER_WAIT_MS; waited += 250) {
       const entry = this.players.get(videoId);
       if (entry) {
-        await this.seekEntry(entry, seconds);
+        this.cueEntry(entry, seconds);
         return;
       }
       await new Promise((resolve) => window.setTimeout(resolve, 250));
@@ -2790,7 +2816,7 @@ export default class YtFreePlugin extends Plugin {
   /**
    * Fold the video away, or bring it back — the section buttons' second tap.
    *
-   * Unlike the collapse control it does not pause: the reader asked for room to
+   * Like the collapse control it does not pause: the reader asked for room to
    * read in, not for the video to stop.
    */
   private toggleHeaderFor(videoId: string): void {
@@ -4410,6 +4436,13 @@ export default class YtFreePlugin extends Plugin {
           onQuality: (hd) => {
             session.hd = hd;
           },
+          // Phone only (#25): YouTube's own player, for HD on any video.
+          youtubePlayer: mobile
+            ? async (at, rate) => {
+                const { openYouTubePlayer } = await import("./mobile/youtube-player-modal.ts");
+                return openYouTubePlayer(this.app, videoId, at, rate);
+              }
+            : undefined,
         },
         // Everything the reader set on this video that a rebuilt player would
         // otherwise throw away — see `VideoSession`.
@@ -4505,6 +4538,15 @@ export default class YtFreePlugin extends Plugin {
           "Could not play this video. yt-dlp is not installed here, and the phone's way of playing (without yt-dlp) did not work for this video either.",
           "brew install yt-dlp",
         );
+      } else if (/confirm you.?re not a bot|LOGIN_REQUIRED/i.test((err as Error).message)) {
+        // Not a broken yt-dlp: YouTube is refusing signed-out requests from
+        // this network for now, and upgrading would change nothing.
+        this.renderError(
+          wrapper,
+          "YouTube is asking this network to prove it isn't a bot, so it won't play signed out right now. " +
+            "Run the “Sign in to YouTube” command and playback will use your session, or try again in a few hours.",
+          (err as Error).message,
+        );
       } else {
         this.renderError(
           wrapper,
@@ -4556,6 +4598,9 @@ export default class YtFreePlugin extends Plugin {
         if (!entry) return;
         entry.player.primeForGesture();
         void this.seekEntry(entry, seconds);
+      },
+      cue: (seconds) => {
+        if (entry) this.cueEntry(entry, seconds);
       },
       currentTime: () => entry?.player.currentTime ?? 0,
     };
@@ -4732,6 +4777,80 @@ export default class YtFreePlugin extends Plugin {
       // disk now, so picking the Mac up finds the minute just watched.
       void this.progress.flush();
     });
+  }
+
+  /**
+   * The Now playing button: one tap back to the note whose video is playing
+   * (Isaiah, 2026-11-07).
+   *
+   * Asked for as "tapping the lock-screen tile returns me to the video", but
+   * neither iOS nor macOS tells the app which door it was opened through, so
+   * the tile cannot be told apart from the app switcher. Isaiah chose a button
+   * over jumping on every return. It shows only while a video is playing (or
+   * was paused from the lock screen) and its note is not the one in front: on
+   * a phone as a pill over the note, on the desktop in the status bar.
+   *
+   * Driven by `play`/`pause` caught at the document — media events do not
+   * bubble, but they do pass through the capture phase — and by tab changes.
+   */
+  private setupNowPlayingButton(): void {
+    const button = Platform.isMobile
+      ? document.body.createEl("button", { cls: "ytfree-now-playing" })
+      : this.addStatusBarItem().createEl("button", { cls: "ytfree-now-playing-status" });
+    this.register(() => button.remove());
+    button.hide();
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      void this.revealPlayingNote();
+    });
+
+    const refresh = (): void => {
+      const target = this.playingNoteEntry();
+      if (!target) {
+        button.hide();
+        return;
+      }
+      const title = this.nowPlayingFor(target.videoId, target.sourcePath)?.title ?? "video";
+      button.setText(`▶ ${title}`);
+      button.setAttr("aria-label", `Go to the playing video: ${title}`);
+      button.show();
+    };
+    for (const event of ["play", "pause", "ended", "emptied"]) {
+      this.registerDomEvent(document, event as keyof DocumentEventMap, refresh, { capture: true });
+    }
+    this.registerEvent(this.app.workspace.on("active-leaf-change", refresh));
+    this.registerEvent(this.app.workspace.on("layout-change", refresh));
+    this.registerDomEvent(document, "visibilitychange", refresh);
+    this.addCommand({
+      id: "go-to-playing-video",
+      name: "Go to the playing video",
+      callback: () => void this.revealPlayingNote(),
+    });
+  }
+
+  /** The playing video's entry, if its note is open in a tab that is not in front. */
+  private playingNoteEntry(): PlayerEntry | null {
+    const entry = [...this.players.values()].find((e) => e.player.isNowPlaying());
+    if (!entry || !entry.sourcePath || entry === this.preview) return null;
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (active?.file?.path === entry.sourcePath) return null;
+    return this.leafFor(entry.sourcePath) ? entry : null;
+  }
+
+  private leafFor(path: string): WorkspaceLeaf | null {
+    return (
+      this.app.workspace
+        .getLeavesOfType("markdown")
+        .find((l) => l.view instanceof MarkdownView && l.view.file?.path === path) ?? null
+    );
+  }
+
+  private async revealPlayingNote(): Promise<void> {
+    const entry = this.playingNoteEntry();
+    const leaf = entry ? this.leafFor(entry.sourcePath) : null;
+    if (!leaf) return;
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   /**
@@ -5130,7 +5249,7 @@ export default class YtFreePlugin extends Plugin {
       try {
         const { findYtDlp, resolveStream } = await desktop();
         if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-        return await resolveStream(videoId, this.ytDlpPath, "fast");
+        return await resolveStream(videoId, this.ytDlpPath, "fast", await this.botCookies());
       } catch (err) {
         ytDlpError = err;
         // Probing four paths on every video is not worth it once it is known
@@ -5158,10 +5277,26 @@ export default class YtFreePlugin extends Plugin {
     }
   }
 
+  /**
+   * The signed-in session's cookie file, for yt-dlp to retry with when YouTube
+   * answers with its bot check. Undefined when nobody has signed in.
+   */
+  private async botCookies(): Promise<string | undefined> {
+    const { cookieFileExists, resolveCookieFile } = await desktop();
+    const file = resolveCookieFile(this.settings.accountCookieFile);
+    return cookieFileExists(file) ? file : undefined;
+  }
+
   private async desktopQuality(videoId: string): Promise<ResolvedStream> {
-    const { resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
+    const { fetchRange, resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
+    // Streamed and cancellable on desktop (GitHub #23); `requestUrl` if the
+    // desktop code will not load. Used by both the InnerTube and yt-dlp pairs.
+    const fetch = await desktop().then(
+      (d) => d.streamingWithFallback(fetchRange),
+      () => fetchRange,
+    );
     try {
-      return await resolveHdStream(videoId);
+      return await resolveHdStream(videoId, undefined, fetch);
     } catch (hdError) {
       if (this.ytDlpUnavailable) throw hdError;
       const { findYtDlp, resolveStream, ytDlpFormats } = await desktop();
@@ -5170,10 +5305,11 @@ export default class YtFreePlugin extends Plugin {
       // yt-dlp's serve the whole video, stitched the same way. Its HLS lookup
       // stays last, for the odd video with a ladder and no MP4 pair.
       try {
-        return await resolveHdFromYtDlpFormats(videoId, await ytDlpFormats(videoId, this.ytDlpPath));
+        const formats = await ytDlpFormats(videoId, this.ytDlpPath, await this.botCookies());
+        return await resolveHdFromYtDlpFormats(videoId, formats, undefined, fetch);
       } catch (err) {
         console.warn("YT Free: HD via InnerTube and via yt-dlp both failed", hdError, err);
-        return await resolveStream(videoId, this.ytDlpPath, "quality");
+        return await resolveStream(videoId, this.ytDlpPath, "quality", await this.botCookies());
       }
     }
   }
@@ -5192,8 +5328,8 @@ export default class YtFreePlugin extends Plugin {
 
       let stream: ResolvedStream;
       if (mode === "quality") {
-        const { resolveHdStream } = await import("./hd.ts");
-        stream = await resolveHdStream(videoId);
+        const { resolvePhoneHdStream } = await import("./hd.ts");
+        stream = await resolvePhoneHdStream(videoId);
       } else {
         const { resolveMobileStream } = await import("./mobile/innertube.ts");
         stream = await resolveMobileStream(videoId);
@@ -5221,7 +5357,12 @@ export default class YtFreePlugin extends Plugin {
     // cannot affect the layout of anything.
     const poster = media.createEl("button", { cls: "ytfree-poster", attr: { type: "button" } });
     const thumb = poster.createEl("img", { cls: "ytfree-poster-image", attr: { alt: "" } });
-    thumb.src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+    // The halfway frame, as on the hub's cards; the uploader's picture if
+    // YouTube has no still for this one.
+    showThumbnail(
+      thumb,
+      thumbnailCandidates(videoId, `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`),
+    );
     poster.createDiv({ cls: "ytfree-poster-play", text: "▶" });
 
     // The phone never shows the desktop's status line before you tap, so the
@@ -5326,6 +5467,16 @@ export default class YtFreePlugin extends Plugin {
    *
    * On desktop `activate` is null and this is the plain seek it always was.
    */
+  /**
+   * Seek without playing: the media is left paused at `seconds`, and on the
+   * phone the poster stays up, so Play is still the reader's tap. The phone's
+   * player resolves only when asked, so the seek waits for its metadata.
+   */
+  private cueEntry(entry: PlayerEntry, seconds: number): void {
+    this.pendingSeek.set(entry.videoId, seconds);
+    entry.player.cueWhenReady(seconds);
+  }
+
   private async seekEntry(entry: PlayerEntry, seconds: number): Promise<void> {
     if (entry.activate) {
       this.pendingSeek.set(entry.videoId, seconds);
@@ -5406,16 +5557,12 @@ export default class YtFreePlugin extends Plugin {
    * lost the reader's place in the video every time. Now only the media box
    * loses its height: the element stays mounted, so the position, the buffer
    * and any audio are all exactly where they were, and coming back is instant.
-   * Collapsing by hand also pauses — you are putting the video away.
+   * Collapsing does not pause (Isaiah, 2026-11-04): it hides the picture and
+   * the sound carries on, the same as folding it away from a section button.
    */
   private toggleCollapse(entry: PlayerEntry | null): void {
     if (!entry) return;
-    if (entry.collapsed) {
-      this.setCollapsed(entry, null);
-      return;
-    }
-    entry.player.pause();
-    this.setCollapsed(entry, "manual");
+    this.setCollapsed(entry, entry.collapsed ? null : "manual");
   }
 
   private setCollapsed(entry: PlayerEntry, mode: CollapseMode): void {
@@ -5987,7 +6134,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Open YouTube links here")
       .setDesc(
-        "A YouTube link clicked in a note opens that video's note in YT Free, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
+        "A YouTube link clicked in a note opens in YT Free, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.openYouTubeLinksHere).onChange(async (value) => {

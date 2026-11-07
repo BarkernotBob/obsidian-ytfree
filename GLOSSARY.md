@@ -37,7 +37,19 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   setting for that video only. It never writes the setting and is kept until Obsidian quits,
   like the pop-out's other controls. Picking a rung (720p, 480p) stays with GitHub #15.
 
+### 2026-11-06 (Isaiah)
+
+- **Phone HD, part 2:** test YouTube's own embedded player (hosted page on GitHub Pages, opened
+  from the Quality row on the phone) rather than HD through the Mac. Ads and YouTube's controls
+  are the known costs; to be judged on the iPhone.
+
 ### 2026-11-04 (measured; Claude's call, open to change)
+
+- **Phone HD (#25), part 1:** the phone asks IOS first and plays its HLS manifest with iOS's own
+  player, never hls.js (googlevideo sends no CORS header). Measured 2026-11-04: that manifest
+  exists on 1 of 5 videos and serves the whole video. PO token / BotGuard generation is out:
+  Claude's safety check blocks it as bot-check circumvention. Part 2 (HD through the Mac on the
+  home network) waits on Isaiah. Scope: `docs/V1-SCOPE-PHONE-HD.md`.
 
 - Desktop HD comes from yt-dlp's files when InnerTube's stop serving after about a minute
   (`ytDlpFormats` + `resolveHdFromYtDlp`), stitched and streamed the same way. InnerTube is
@@ -59,6 +71,44 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   streams retry briefly. Scope: `docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md`.
 - **Re-link** (term): swapping a stitched stream's googlevideo links for fresh ones for the same
   files (same itag), keeping every byte offset (`relinkingFetch` in `src/adaptive.ts`).
+
+### 2026-11-04 (Isaiah)
+
+- **Keep playing on the phone**: leaving fullscreen, the collapse button, leaving Obsidian and
+  locking the phone do not pause the video. Reverses the old "collapse pauses" rule. Whether iOS
+  allows the background resume is unmeasured; see
+  [docs/V1-SCOPE-KEEP-PLAYING.md](docs/V1-SCOPE-KEEP-PLAYING.md).
+
+### 2026-11-07 (Isaiah)
+
+- **Background pause stays resumable**: a video paused from the lock screen or AirPods stays ready
+  to play for up to an hour (a silent loop keeps iOS from suspending Obsidian).
+- **Now playing button, not auto-jump**: the lock-screen tile can't be told apart from the app
+  switcher, so instead of jumping on return, a "▶ title" pill (phone) / status-bar item (desktop)
+  takes you to the playing note. Isaiah's call.
+
+### 2026-10-19 (Isaiah)
+
+- **Where a YouTube link lands**: the video's note if one exists, else its Preview. No setting,
+  no `open=`, and a link never makes a note. Replaces the 2026-10-17 setting below and the
+  separate *Preview YouTube URL from clipboard* command.
+- **A followed link never auto-plays**: its timestamp is cued paused, in the note or the Preview.
+
+### 2026-10-17 (Isaiah)
+
+- **Paste to Preview (GitHub #10, #11)**: scope approved by answering its question. Links
+  clicked inside a note open in Preview too: one setting, *YouTube links open in*, Preview by
+  default, covers every route. `obsidian://ytfree?url=…&open=note|preview` overrides it per link.
+  Decided while building: *Open YouTube URL from clipboard* still opens the note, and the new
+  *Preview YouTube URL from clipboard* opens the Preview.
+
+### 2026-11-04 (Isaiah asked; recommendations by Claude, not yet approved)
+
+- Request volume to YouTube is a design constraint: one answer per video, one identity per
+  device, cached, and stop after a bot check. No token generation, identity cycling or IP
+  rotation. Research: docs/RESEARCH-YOUTUBE-REQUESTS.md, backlog #31–#39.
+- **Bot check** (term): YouTube's "Sign in to confirm you're not a bot" (yt-dlp) or
+  `LOGIN_REQUIRED` (InnerTube), refusing signed-out requests from a flagged IP.
 
 ### 2026-10-14 (Isaiah)
 
@@ -116,6 +166,13 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   by its `url` / `media_link` frontmatter; links in notes are intercepted by default (one
   setting); video links only, so a channel link still goes to the browser.
 - **Handoff** (term): `obsidian://ytfree?url=…`, the door every outside router uses.
+
+- **Halfway thumbnails** (2026-11-07): cards and the phone poster show YouTube's own halfway
+  still (`hq2.jpg`), as HackerTube does, falling back to the uploaded thumbnail when it is
+  missing. Shorts keep the uploaded picture. No setting. Scope:
+  `docs/V1-SCOPE-MIDFRAME-THUMBNAILS.md`.
+
+- `obsidian://ytfree?view=subscriptions|search` opens the hub; bare `obsidian://ytfree` opens the hub; `url=` wins over `view=` (2026-10-21).
 
 ### Earlier
 

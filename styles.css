@@ -4083,3 +4083,72 @@ body.ytfree-immersive-open .ytfree-preview-close {
 .ytfree-preview-channel:hover {
   text-decoration-color: currentColor;
 }
+
+/* YouTube's own player on the phone (#25, part 2): the whole screen, black. */
+.modal.ytfree-ytplayer-modal {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  background: #000;
+}
+.modal.ytfree-ytplayer-modal .modal-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.modal.ytfree-ytplayer-modal .modal-close-button {
+  top: calc(env(safe-area-inset-top) + 2px);
+  color: #fff;
+}
+.ytfree-ytplayer-line {
+  color: #bbb;
+  font-size: var(--font-ui-smaller);
+  padding: 8px 48px 8px 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ytfree-ytplayer-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #000;
+}
+
+/*
+ * The Now playing button (see `setupNowPlayingButton`). On a phone, a pill
+ * above the bottom toolbar, only while a video plays in a tab that is not in
+ * front. Under modals, so an open Preview covers it.
+ */
+.ytfree-now-playing {
+  position: fixed;
+  right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
+  z-index: 20;
+  max-width: min(70vw, 320px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-small);
+  box-shadow: var(--shadow-s);
+}
+
+.ytfree-now-playing-status {
+  max-width: 240px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+  height: auto;
+  font-size: var(--font-ui-smaller);
+  background: none;
+  box-shadow: none;
+}
