@@ -2353,7 +2353,12 @@ export class YtFreePlayer {
     const resumeAt = this.video.currentTime;
     const wasPlaying = !this.video.paused && !this.video.ended;
     this.upgraded = true;
-    this.attach(stream, resumeAt, wasPlaying);
+    // Paused (a note opened and not played yet): nobody is watching the climb,
+    // and hls.js only climbs while it plays, so the low first rung it picked
+    // would sit there as "HD loading" until Play. Start on the top rung
+    // instead, so the buffer ahead fills in full HD and Play opens sharp.
+    // Playing, the climb stays: a top-rung start would stall the picture.
+    this.attach(stream, resumeAt, wasPlaying, !wasPlaying);
   }
 
   /**
