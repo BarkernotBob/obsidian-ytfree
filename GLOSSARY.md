@@ -174,6 +174,8 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - `obsidian://ytfree?view=subscriptions|search` opens the hub; bare `obsidian://ytfree` opens the hub; `url=` wins over `view=` (2026-10-21).
 
+- Phone ⋯ menu (#52): moves to `document.body` while open, sits at Obsidian's menu layer, avoids safe areas, scrolls when taller than the room (2026-11-07).
+
 ### Earlier
 
 - `PROGRESS_TTL_DAYS` stays 365 (2026-09-02).

@@ -53,6 +53,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 - The phone harnesses read Obsidian's `app.css` from `/tmp/ytfree-harness/app.css`. Extract it with
   the `asar` command in `tools/phone-hub-harness.mjs`. `/app.css` is gitignored; never commit it.
+- `position: fixed` does not mean the viewport inside a note on a phone: `.workspace-leaf` has
+  `contain: strict` and Live Preview embeds have `contain: paint`, which clip fixed children.
+  Anything that must float over a note goes on `document.body` (see #52, `liftPanel`).
 - Obsidian 1.10+ draws a phone modal as an inset card, not a full-width sheet. Anything laid
   out for the old sheet must size its own modal (see `.is-phone .modal.ytfree-preview-modal`).
   To compare, extract `app.css` from two releases' `obsidian-X.asar.gz` (GitHub releases of
