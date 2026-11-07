@@ -196,6 +196,11 @@ export interface QuickPanelOptions {
   onQuality?: (hd: boolean) => void;
   /** What the setting will say, so the row reads right before `load` runs. */
   hdDefault?: boolean;
+  /**
+   * Phone only (#25): YouTube's own player, full-screen, from the second given
+   * at the speed given. Resolves with where the reader left off.
+   */
+  youtubePlayer?: (at: number, rate: number) => Promise<number | null>;
 }
 
 /** The lock screen's three fields. */
@@ -1323,7 +1328,11 @@ export class YtFreePlayer {
       });
       el.createEl("option", { text: "HD", value: "hd" });
       el.createEl("option", { text: "360p", value: "sd" });
-      el.addEventListener("change", () => this.setQuality(el.value === "hd"));
+      if (quick.youtubePlayer) el.createEl("option", { text: "YouTube player (HD)", value: "yt" });
+      el.addEventListener("change", () => {
+        if (el.value === "yt") void this.openYouTubePlayer(quick.youtubePlayer!);
+        else this.setQuality(el.value === "hd");
+      });
       this.qualitySelect = el;
       this.paintQualityChoice();
     }
@@ -2345,6 +2354,18 @@ export class YtFreePlayer {
     this.upgraded = false;
     this.setHd(this.sdState(stream.height));
     this.attach(stream, resumeAt, wasPlaying);
+  }
+
+  /**
+   * Hand the video to YouTube's own player and take it back where the reader
+   * left off. Not a quality pick: the row goes back to what it said.
+   */
+  private async openYouTubePlayer(open: (at: number, rate: number) => Promise<number | null>): Promise<void> {
+    this.paintQualityChoice();
+    this.video.pause();
+    const at = await open(this.video.currentTime, this.playbackRate);
+    if (this.destroyed || at === null) return;
+    this.video.currentTime = at;
   }
 
   /** The Quality row follows the player, including a pick it was rebuilt with. */

@@ -3,7 +3,8 @@
 **Written:** 2026-11-04, from Isaiah's ask: "Let's continue on with figuring out a way to get HD on
 phone now, as everything else seems to be working correctly."
 
-**Status:** Part 1 built 2026-11-04, awaiting manual test. Part 2 awaiting Isaiah's decision.
+**Status:** Part 1 built 2026-11-04, awaiting manual test. Part 2 (YouTube's own player) picked by
+Isaiah 2026-11-06 as a test; built 2026-11-07, awaiting manual test.
 
 ## What was measured (2026-11-04, Isaiah's Mac, signed out, `tools/hls-probe.mjs`)
 
@@ -41,26 +42,41 @@ phone now, as everything else seems to be working correctly."
 Expected effect: HD on the phone for the videos that have an IOS manifest (roughly 1 in 5); the
 rest stay at 360p, as now.
 
-## Part 2 — option, needs Isaiah's call: HD through the Mac at home
+## Part 2 — test: YouTube's own player, on the phone (picked 2026-11-06)
 
-The Mac already gets whole-video HD links from yt-dlp. Those links are locked to the network's
-public address, so a phone on the same home Wi-Fi can use them.
+Isaiah: "There's gotta be a way to get on phone HD that doesn't require the whole mac connection
+setup." Every route to YouTube's files without the Mac now meets the bot check (and Claude won't
+build a way past it). YouTube's own embedded player doesn't: it is YouTube playing its own video.
+It failed in July (issue 004) with error 153 only because Obsidian iOS runs at
+`capacitor://localhost`, which gives the embed no usable referrer. A page on a real https origin
+fixes that.
 
-- The desktop plugin runs a small HD lookup service on the home network while Obsidian is open on
-  the Mac (off by default, a setting turns it on, a shared code in settings pairs the phone).
-- The phone, with HD on, asks the Mac for a video's yt-dlp links, then streams the bytes from
-  YouTube itself, stitched exactly as the desktop does now.
-- Needs: the Mac awake with Obsidian open, both on the same network. Away from home the phone
-  falls back to Part 1 / 360p. iOS will ask once for Local Network permission.
-- Not measured yet: whether Obsidian iOS's `requestUrl` can reach a plain `http://` address on the
-  LAN. That is the first thing to check if this is picked.
+1. **Hosted player page**, `docs/player/index.html`, served by GitHub Pages at
+   `https://barkernotbob.github.io/obsidian-ytfree/player/`. It loads YouTube's IFrame API
+   player full-screen (`playsinline`, start time, speed from the URL) and talks to the plugin by
+   `postMessage`: it reports time, duration, state, speed, quality and errors once a second and
+   takes play, pause, seek and speed. Nothing else, no storage, no analytics of its own.
+2. **Phone only: Quality → "YouTube player (HD)"** in the player's ⋯ pop-out. Picking it pauses
+   our player and opens YouTube's player full-screen at the same second and speed. A line at the
+   top shows what YouTube reports (quality, time). Closing it puts our player at the second you
+   left off, paused, and the Quality row back to what it was.
+3. The pure parts (the page URL, reading its messages) are tested; the page itself is not run here.
+
+What it costs (to be checked on the iPhone): YouTube may show its ads on monetized videos. Smart
+Speed, silence skip and our controls don't apply inside YouTube's player. YouTube picks the
+quality by the player's size and the connection; the API can't force 1080p.
+
+Setup, once: GitHub → repo Settings → Pages → "Deploy from a branch" → this PR's branch, folder
+`/docs`. After merge, switch it to `main`.
+
+Not built (dropped from the options): HD through the Mac on the home network.
 
 ## Out of scope
 
 - PO token / BotGuard (see above).
 - A per-video quality switch in the player (#15, separate thread).
 
-## Manual test (Part 1, for Isaiah)
+## Manual test (Part 1)
 
 1. Install the build (Claude installs it into the vault). On the iPhone, wait for iCloud to sync,
    then Settings → Community plugins → turn YT Free off and on.
@@ -69,3 +85,13 @@ public address, so a phone on the same home Wi-Fi can use them.
    few seconds the badge on the picture should read 720p or 1080p, and the picture sharpens.
 4. Let it play past 1:30, then drag to near the end. It keeps playing in HD, no fall back to 360p.
 5. Open any other video, e.g. `aqz-KE-bpKQ`. It plays at 360p and the badge says no HD, as before.
+
+## Manual test (Part 2)
+
+1. GitHub Pages is on (see Setup above), and
+   `https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ` opens in Safari and plays.
+2. Install the build; on the iPhone turn YT Free off and on.
+3. Open a long video (e.g. `aqz-KE-bpKQ`), play to about 0:30, open ⋯ → Quality → "YouTube player (HD)".
+4. YouTube's player opens at about 0:30. Note: does an ad play? Does the top line reach `hd720` or
+   `hd1080` within ~10 s? Is the picture sharp in fullscreen?
+5. Jump to about 5:00 in YouTube's player, then close it. Our player sits at about 5:00, paused.
