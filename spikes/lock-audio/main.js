@@ -37,8 +37,14 @@ const ANDROID = {
 const ANDROID_UA =
   "com.google.android.youtube/20.10.38 (Linux; U; Android 14; en_US) gzip";
 
-/** The audio-only format. What the real music build will use on every device. */
-const AUDIO_ITAG = 140;
+/**
+ * itag 18, the 360p muxed file YT Free's phone player already plays. The
+ * audio-only itag 140 resolved but WebKit refused it outright (2026-11-07:
+ * NotSupportedError, media error code 4), so it can't answer the lock
+ * question. An <audio> element plays a muxed file's sound and ignores the
+ * picture, which is all this test needs.
+ */
+const AUDIO_ITAG = 18;
 
 async function resolveAudio(videoId) {
   const response = await requestUrl({
@@ -56,7 +62,10 @@ async function resolveAudio(videoId) {
   const data = response.json;
   const status = data?.playabilityStatus?.status;
   if (status !== "OK") throw new Error("playabilityStatus: " + status);
-  const formats = data?.streamingData?.adaptiveFormats ?? [];
+  const formats = [
+    ...(data?.streamingData?.formats ?? []),
+    ...(data?.streamingData?.adaptiveFormats ?? []),
+  ];
   const audio = formats.find((f) => f.itag === AUDIO_ITAG && f.url);
   if (!audio) throw new Error("no itag " + AUDIO_ITAG + " with a plain url");
   return audio.url;
