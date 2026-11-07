@@ -1088,6 +1088,13 @@ export function visibleItems(
      * are. Absent means the In progress list is empty, not that it is unfiltered.
      */
     inProgress?: ReadonlyMap<string, string>;
+    /**
+     * A note for this video is in the vault now. In progress keeps a removed
+     * video while its note exists (GitHub #50): removing it from the hub said
+     * "not in my lists", not "I am not watching this", and the note is what
+     * says you meant to. Absent, a removed video never shows there.
+     */
+    hasNote?: (item: HubItem) => boolean;
   },
 ): HubItem[] {
   const matching = items.filter((item) => {
@@ -1097,8 +1104,9 @@ export function visibleItems(
     if (options.filter === "hidden") return item.state === "dismissed";
     if (options.filter === "progress") {
       // A video you turned down is not a video you are part-way through, even
-      // if you watched five minutes of it before deciding that.
-      if (item.state === "dismissed") return false;
+      // if you watched five minutes of it before deciding that — unless it
+      // still has a note, which is the one sign you are keeping it.
+      if (item.state === "dismissed" && !(options.hasNote?.(item) ?? false)) return false;
       return options.inProgress?.has(item.videoId) ?? false;
     }
     if (options.filter === "new") {
@@ -1225,6 +1233,39 @@ export function buildWatchLaterNote(item: HubItem, now: Date): string {
     "",
   ];
   return lines.join("\n");
+}
+
+/** A video note in the vault, read from its frontmatter. */
+export interface VideoNote {
+  videoId: string;
+  path: string;
+  title: string;
+  channelTitle: string;
+}
+
+/**
+ * A stand-in hub item for a video note the hub has no row for: a note older
+ * than the hub, one from the Web Clipper, or one whose row aged out.
+ *
+ * Drawn in In progress only, never stored. Dismissed because that is the
+ * state that means "not in any of the hub's own lists", so the card offers
+ * Delete rather than Remove — the note is all there is to remove (GitHub #50).
+ */
+export function noteOnlyItem(note: VideoNote): HubItem {
+  return {
+    videoId: note.videoId,
+    channelId: "",
+    channelTitle: note.channelTitle,
+    title: note.title,
+    published: "",
+    thumbnail: thumbnailUrl(note.videoId),
+    description: "",
+    views: null,
+    isShort: null,
+    state: "dismissed",
+    seenAt: "",
+    notePath: note.path,
+  };
 }
 
 /** "3 hours ago" / "2 days ago" — the only date format a feed list needs. */

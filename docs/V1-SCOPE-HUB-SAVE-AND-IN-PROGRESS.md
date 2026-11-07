@@ -1,6 +1,11 @@
 # V1 scope — hub Save and In progress (GitHub #49, #50)
 
-**Status (2026-11-07):** draft, waiting on Isaiah's answers below. Nothing built yet.
+**Status (2026-11-07):** approved and built. Isaiah's answers: 1 didn't follow the question,
+2 yes, 3 yes, 4 include older notes.
+
+**Question 1, answered from the code:** the hub opens on **Everything** (Isaiah's 2026-09-01
+choice), and Everything is "inbox + saved", so a video saved there stays on screen by design.
+Save on the **Inbox** list takes it out at once. No code change for #49 beyond the Saved rename.
 
 ## What Isaiah asked
 
@@ -41,8 +46,10 @@ about that.
    stays in In progress and its button turns into Delete. It does not clear your position.
 4. **Hidden cards in In progress** get their picture back from the video ID (the hide dropped
    the stored one).
-5. **Save** (#49): whatever menu question 1 names gets the same "leave the Inbox now" behaviour
-   as the card.
+5. **Save** (#49): no change; see question 1 above.
+7. **Notes the hub never had** with a saved position show in In progress too, drawn from the
+   note's frontmatter (title, author), with Delete. Watch opens the note; nothing is added to
+   the hub. Read from Obsidian's metadata cache when the In progress list is drawn.
 6. Same on phone and desktop. Positions and hub state already sync, so a note deleted on one
    device clears In progress on both.
 
@@ -69,9 +76,11 @@ about that.
 
 Desktop and phone:
 
-1. Inbox: Save a video. It leaves the Inbox at once and is in Saved.
+1. Inbox: Save a video. It leaves the Inbox at once and is in Saved (chip renamed from Kept).
 2. Play that video 2 minutes, close. It is in In progress.
 3. In In progress, press Remove on it. It stays in In progress; the button now says Delete.
    It is gone from Inbox, Saved and Everything, and is in Hidden.
 4. Press Delete, confirm. The note is in Obsidian's trash; the card leaves In progress.
 5. Hide a video with no note after previewing 2 minutes. It is not in In progress.
+6. Open an older video note the hub never had, play 2 minutes. It shows in In progress with
+   Delete; Watch opens the note.

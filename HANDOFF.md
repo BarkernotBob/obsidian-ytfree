@@ -37,7 +37,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 1. Isaiah: install main and run the untested scope-doc tests listed under Status.
 2. Phone HD part 2: switch GitHub Pages to main `/docs` (it pointed at PR #28's branch).
-3. Hub Save and In progress (#49, #50): being built 2026-11-07 (Isaiah answered the scope).
+3. Hub Save and In progress (#49, #50): built in PR #53; needs Isaiah's test (steps in
+   [V1-SCOPE-HUB-SAVE-AND-IN-PROGRESS](docs/V1-SCOPE-HUB-SAVE-AND-IN-PROGRESS.md)).
 4. #51 (phone): Now playing pill removed; properties re-collapse after Obsidian rebuilds them. The
    properties cause was not found in the 2026-11-07 merge diff (none of it touches collapsing), so the
    fix is a guess at a rebuild/slow-load race. Needs a phone test.

@@ -27,7 +27,7 @@ import {
 import { SEARCH_YT_ICON, SHARE_ICON, YT_ICON } from "./icon";
 import type { AccountLine, AccountSession } from "./account";
 import { accountStatusLine } from "./account";
-import type { Channel, HubFilter, HubItem, SubscriptionsState } from "./subscriptions";
+import type { Channel, HubFilter, HubItem, SubscriptionsState, VideoNote } from "./subscriptions";
 import {
   applyUnsubscribes,
   buildWatchLaterNote,
@@ -37,6 +37,7 @@ import {
   forgetVideo,
   hideItem,
   keepItem,
+  noteOnlyItem,
   parseChannelInput,
   parseSubscriptionsCsv,
   expireItems,
@@ -1272,7 +1273,7 @@ interface CardButton {
 const FILTER_LABELS: ReadonlyArray<readonly [HubFilter, string]> = [
   ["new", "Inbox"],
   ["progress", "In progress"],
-  ["kept", "Kept"],
+  ["kept", "Saved"],
   ["hidden", "Hidden"],
   ["all", "Everything"],
 ];
@@ -1287,9 +1288,9 @@ const FILTER_LABELS: ReadonlyArray<readonly [HubFilter, string]> = [
 const FILTER_RULES: Record<HubFilter, string> = {
   new: "not opened, not hidden",
   progress: "started and not finished — most recently watched first",
-  kept: "opened — a note exists",
+  kept: "saved — a note exists",
   hidden: "you removed these",
-  all: "inbox + kept, including already-watched",
+  all: "inbox + saved, including already-watched",
 };
 
 /**
@@ -1347,6 +1348,11 @@ export class HubView extends ItemView {
    * left it.
    */
   private filter: HubFilter = "all";
+  /**
+   * In progress cards for video notes the hub has no row for, by video ID.
+   * Rebuilt with every In progress list; never stored (GitHub #50).
+   */
+  private noteOnly = new Map<string, HubItem>();
   private channelFilter: string | null = null;
   /** The hub's own box: free text over the list you are looking at. */
   private itemQuery = "";
@@ -1456,6 +1462,11 @@ export class HubView extends ItemView {
      * Null — no plugin behind this view — and the In progress list is empty.
      */
     private inProgress: (() => ReadonlyMap<string, string>) | null = null,
+    /**
+     * Every video note in the vault, read from frontmatter. In progress uses it
+     * for notes the hub has no row for (GitHub #50). Null in tests.
+     */
+    private videoNotes: (() => VideoNote[]) | null = null,
   ) {
     super(leaf);
   }
@@ -2355,7 +2366,19 @@ export class HubView extends ItemView {
   }
 
   private currentItems(): HubItem[] {
-    return visibleItems(this.store.state.items, {
+    const inProgress = this.filter === "progress" ? this.inProgress?.() : undefined;
+    this.noteOnly = new Map();
+    if (inProgress && this.videoNotes) {
+      for (const note of this.videoNotes()) {
+        if (!inProgress.has(note.videoId) || this.store.hasItem(note.videoId)) continue;
+        if (this.noteOnly.has(note.videoId)) continue;
+        this.noteOnly.set(note.videoId, noteOnlyItem(note));
+      }
+    }
+    const items = this.noteOnly.size
+      ? [...this.store.state.items, ...this.noteOnly.values()]
+      : this.store.state.items;
+    return visibleItems(items, {
       filter: this.filter,
       channelId: this.channelFilter,
       includeShorts: this.settings().includeShorts,
@@ -2364,8 +2387,49 @@ export class HubView extends ItemView {
       // Read on every call rather than cached: a position written by the player
       // a second ago, or merged in from the phone, has to be in this list the
       // next time it is drawn. Only computed for the list that uses it.
-      inProgress: this.filter === "progress" ? this.inProgress?.() : undefined,
+      inProgress,
+      hasNote: (item) => this.noteFile(item) !== null,
     });
+  }
+
+  /** The note this item points at, if it is still in the vault. */
+  private noteFile(item: HubItem): TFile | null {
+    const file = item.notePath ? this.app.vault.getAbstractFileByPath(item.notePath) : null;
+    return file instanceof TFile ? file : null;
+  }
+
+  /**
+   * The video is out of the hub's own lists and only its note keeps it in In
+   * progress, so its Remove says Delete (GitHub #50). Read live: Remove on a
+   * Saved card in In progress turns it into one of these without a redraw.
+   */
+  private isNoteOnly(videoId: string): boolean {
+    const item = this.store.itemFor(videoId) ?? this.noteOnly.get(videoId);
+    return Boolean(item && item.state === "dismissed" && this.noteFile(item));
+  }
+
+  /**
+   * Delete on an In progress card: ask once, then trash the note.
+   *
+   * `trashFile` follows Obsidian's "Deleted files" setting, so the note is
+   * recoverable. The plugin's delete listener then forgets the hub row, which
+   * is what takes the video out of In progress for good — here the card just
+   * goes now rather than a few seconds later.
+   */
+  private async deleteNote(item: HubItem): Promise<void> {
+    const file = this.noteFile(item);
+    if (!file) return;
+    const confirmed = await new Promise<boolean>((resolve) =>
+      new ConfirmDeleteModal(this.app, file.basename, resolve).open(),
+    );
+    if (!confirmed) return;
+    await this.app.fileManager.trashFile(file);
+    this.noteOnly.delete(item.videoId);
+    const card = this.cards.get(item.videoId);
+    card?.remove();
+    this.cards.delete(item.videoId);
+    if (this.cards.size === 0) this.renderList();
+    this.renderStatus();
   }
 
   // --------------------------------------------------------------- search
@@ -2988,7 +3052,8 @@ export class HubView extends ItemView {
 
     const facts = (): CardFacts => ({
       inHub: true,
-      noteExists: this.store.hasNote(item.videoId),
+      noteExists: this.store.hasNote(item.videoId) || this.noteFile(item) !== null,
+      noteOnly: this.isNoteOnly(item.videoId),
     });
 
     // "Short" only where there is no length to state — a 45-second video says
@@ -3024,8 +3089,19 @@ export class HubView extends ItemView {
       this.openPreview(item.videoId, repaint);
       return;
     }
+    if (key === "remove" && this.isNoteOnly(item.videoId)) {
+      await this.deleteNote(item);
+      return;
+    }
     if (key === "remove") {
       this.store.hide(item);
+      // In progress keeps a removed video while its note exists, and its
+      // button now says Delete; everywhere else the card goes.
+      if (this.currentItems().some((entry) => entry.videoId === item.videoId)) {
+        repaint();
+        this.renderStatus();
+        return;
+      }
       const card = this.cards.get(item.videoId);
       card?.remove();
       this.cards.delete(item.videoId);
@@ -3033,6 +3109,14 @@ export class HubView extends ItemView {
       // rather than left blank.
       if (this.cards.size === 0) this.renderList();
       this.renderStatus();
+      return;
+    }
+    if (this.isNoteOnly(item.videoId)) {
+      // Out of the hub's lists, kept only by its note: Watch opens that note
+      // and Save has nothing left to do. Neither puts it back in the hub —
+      // removing it was the more recent decision.
+      const file = this.noteFile(item);
+      if (key === "watch" && file) await this.app.workspace.getLeaf(false).openFile(file);
       return;
     }
     if (key === "save") {
@@ -3284,7 +3368,7 @@ export class HubView extends ItemView {
    * Watch worth pressing.
    */
   private openPreview(videoId: string, repaintCard: () => void, startAt = 0): void {
-    const item = this.store.itemFor(videoId);
+    const item = this.store.itemFor(videoId) ?? this.noteOnly.get(videoId);
     const result =
       this.searchResults.find((entry) => entry.videoId === videoId) ??
       this.channel?.results.find((entry) => entry.videoId === videoId) ??
@@ -3313,7 +3397,8 @@ export class HubView extends ItemView {
 
     const facts = (): CardFacts => ({
       inHub: this.store.hasItem(videoId),
-      noteExists: this.store.hasNote(videoId),
+      noteExists: this.store.hasNote(videoId) || (item ? this.noteFile(item) !== null : false),
+      noteOnly: this.isNoteOnly(videoId),
     });
 
     new PreviewModal(this.app, {
@@ -3353,7 +3438,7 @@ export class HubView extends ItemView {
       run: async (key, repaint) => {
         // Re-looked-up: the modal outlives the card that opened it, and a poll
         // can replace the item object while it is open.
-        const live = this.store.itemFor(videoId);
+        const live = this.store.itemFor(videoId) ?? this.noteOnly.get(videoId);
         if (live) await this.runItemAction(key, live, repaint);
         else if (fallback) await this.runResultAction(key, fallback, repaint);
         repaintCard();
@@ -4106,5 +4191,47 @@ export class SearchBlocklistModal extends Modal {
   onClose(): void {
     this.contentEl.empty();
     this.onDone();
+  }
+}
+
+/**
+ * "Delete this note?" — the one question Delete asks (GitHub #50). A note can
+ * hold your own writing, so this is never a single tap.
+ */
+class ConfirmDeleteModal extends Modal {
+  private answered = false;
+
+  constructor(
+    app: App,
+    private noteName: string,
+    private answer: (confirmed: boolean) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: "Delete note?" });
+    contentEl.createEl("p", {
+      text: `“${this.noteName}” goes to your trash, and the video leaves In progress.`,
+    });
+    const row = contentEl.createDiv({ cls: "modal-button-container" });
+    new ButtonComponent(row).setButtonText("Cancel").onClick(() => this.finish(false));
+    new ButtonComponent(row)
+      .setButtonText("Delete")
+      .setWarning()
+      .onClick(() => this.finish(true));
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    if (!this.answered) this.answer(false);
+  }
+
+  private finish(confirmed: boolean): void {
+    this.answered = true;
+    this.answer(confirmed);
+    this.close();
   }
 }
