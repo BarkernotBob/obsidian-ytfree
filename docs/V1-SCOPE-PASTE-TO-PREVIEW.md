@@ -7,7 +7,9 @@
 > 4. Stretch goal of the above, reroute all youtube URL's straight to obsidian when clicked, no
 >    pasting into a special area needed.
 
-**Status:** scope only, awaiting Isaiah's approval. Not built.
+**Status:** approved 2026-10-17 (Isaiah: links in notes open in Preview too). **Built
+2026-10-17**, awaiting manual test, below. `HubView.previewVideo` in `src/hub.ts`, `handoffTarget`
+in `src/handoff.ts`, routing in `openYouTubeUrl` in `main.ts`.
 
 ## The one sentence
 
@@ -42,16 +44,18 @@ Every one of them lands in the video's **note**. That is the gap: none of them l
 1. **Paste in the hub's search box.** A YouTube video URL typed or pasted into the search box
    opens that video's Preview instead of searching. Any URL shape `parseYouTubeLink` accepts.
    A non-video YouTube URL (channel, playlist) searches as it does today.
-2. **Command:** *Preview YouTube URL from clipboard*. Opens the hub if needed, then the Preview.
+2. **Command:** *Open YouTube URL from clipboard* follows item 5's rule. (A separate *Preview*
+   command was built and dropped on 2026-10-19 when the setting went.)
 3. **Preview for any video.** Today Preview needs a hub item or a search result for its title,
    channel and length. A pasted video has neither, so the sheet fetches them with
    `fetchVideoDetails` (the same call that already fetches a search result's description) and
    offers the search-result buttons: Watch, Keep, Share.
 4. **The timestamp.** `t=` in the link seeks the Preview's player once it has media.
-5. **One setting for item 4:** *YouTube links open in* Preview (default) or Note. The handler
-   reads `obsidian://ytfree?url=…&open=preview|note`; without `open` it follows the setting. So
-   in-note clicks, Finicky, the bookmarklet and the Shortcut all land in Preview with no change
-   to their setup.
+5. **No setting for item 4** (changed 2026-10-19, Isaiah): every routed link, from a note,
+   Finicky, the bookmarklet, the Shortcut or *Open YouTube URL from clipboard*, opens the
+   video's note if one exists and its Preview if not. A link never makes a note.
+6. **A followed link never plays by itself** (2026-10-19): the timestamp is cued, paused, in
+   the note's player or the Preview's, and Play is still the reader's tap.
 
 ## Out of scope for v1
 
@@ -63,13 +67,24 @@ Every one of them lands in the video's **note**. That is the gap: none of them l
 
 - Pasting `https://youtu.be/-X4ZD3fisSs?t=90` into the hub's search box, on the iPhone and the
   Mac, opens that video's Preview fullscreen, starting at 1:30, with no note made.
-- *Preview YouTube URL from clipboard* does the same.
-- `obsidian://ytfree?url=…` with the setting on Preview opens the Preview; on Note, the note,
-  as GitHub #3 shipped.
+- *Open YouTube URL from clipboard* does the same for a video with no note.
+- `obsidian://ytfree?url=…` opens the note when there is one, else the Preview, and never
+  opens the browser or makes a note.
 - A pasted channel URL searches; a pasted non-YouTube URL searches.
-- Unit tests cover the search box's "is this a video link" decision and the `open=` parsing.
+- Unit tests cover the search box's "is this a video link" decision.
 
-## Question for Isaiah
+## Answered
 
-Should a link clicked **inside a note** also open the Preview, or keep opening the video's note?
-Recommended: follow the same setting, so there is one answer everywhere.
+Links clicked inside a note follow the same rule (Isaiah, 2026-10-17). The setting was replaced
+by "note if one exists, else Preview" (Isaiah, 2026-10-19).
+
+## Manual test (for Isaiah)
+
+1. iPhone: paste `https://youtu.be/-X4ZD3fisSs?t=90` into the hub's search box. Its Preview
+   opens at 1:30, paused. No note is made. (Passed 2026-10-19, before the pause change.)
+2. Paste `https://www.youtube.com/@wardonwords`: it searches. (Passed 2026-10-19.)
+3. In a note, tap a link to a video that has no note: the Preview opens, paused at the
+   link's time. No note is made, and YouTube does not open.
+4. Tap a link to a video that has a note: the note opens, its player paused at the link's time.
+5. Copy a link to a video with no note, run *Open YouTube URL from clipboard*: the Preview opens.
+6. In a Preview opened from a link, press Keep: the video lands in the hub's Kept list.

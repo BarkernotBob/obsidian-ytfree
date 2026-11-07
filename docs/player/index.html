@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- The embed needs a real https referrer; Obsidian iOS (capacitor://localhost) gives it none. -->
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>YT Free player</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #player { position: fixed; inset: 0; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+/*
+ * YT Free (GitHub #25): YouTube's own IFrame player, hosted on an https page so
+ * Obsidian on the iPhone can frame it. It reports to the plugin that framed it
+ * and takes play, pause, seek and speed from it. Nothing is stored or sent
+ * anywhere else.
+ *
+ *   ?v=<videoId>&t=<seconds>&rate=<speed>
+ */
+(function () {
+  "use strict";
+  var params = new URLSearchParams(location.search);
+  var id = params.get("v") || "";
+  var start = Math.max(0, Math.floor(Number(params.get("t")) || 0));
+  var rate = Number(params.get("rate")) || 1;
+  var SOURCE = "ytfree-player";
+  var player = null;
+
+  function send(type, data) {
+    if (window.parent === window) return;
+    var msg = { source: SOURCE, type: type };
+    for (var k in data) msg[k] = data[k];
+    window.parent.postMessage(msg, "*");
+  }
+
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) {
+    send("error", { code: "bad-id" });
+    document.body.textContent = "No video.";
+    return;
+  }
+
+  function status() {
+    if (!player || !player.getCurrentTime) return;
+    send("status", {
+      time: player.getCurrentTime() || 0,
+      duration: player.getDuration() || 0,
+      state: player.getPlayerState(),
+      rate: player.getPlaybackRate ? player.getPlaybackRate() : 1,
+      quality: player.getPlaybackQuality ? player.getPlaybackQuality() : "",
+    });
+  }
+
+  window.onYouTubeIframeAPIReady = function () {
+    player = new YT.Player("player", {
+      videoId: id,
+      width: "100%",
+      height: "100%",
+      playerVars: { playsinline: 1, start: start, rel: 0, autoplay: 1 },
+      events: {
+        onReady: function () {
+          if (rate !== 1) player.setPlaybackRate(rate);
+          send("ready", {});
+          status();
+          setInterval(status, 1000);
+        },
+        onStateChange: status,
+        onPlaybackQualityChange: status,
+        onPlaybackRateChange: status,
+        onError: function (e) { send("error", { code: e.data }); },
+      },
+    });
+  };
+
+  window.addEventListener("message", function (e) {
+    if (e.source !== window.parent || !player || !player.seekTo) return;
+    var d = e.data;
+    if (!d || d.source !== "ytfree") return;
+    if (d.cmd === "play") player.playVideo();
+    else if (d.cmd === "pause") player.pauseVideo();
+    else if (d.cmd === "seek" && typeof d.time === "number") player.seekTo(d.time, true);
+    else if (d.cmd === "rate" && typeof d.rate === "number") player.setPlaybackRate(d.rate);
+    else if (d.cmd === "status") status();
+  });
+
+  var tag = document.createElement("script");
+  tag.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(tag);
+})();
+</script>
+</body>
+</html>

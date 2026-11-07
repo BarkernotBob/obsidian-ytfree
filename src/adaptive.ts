@@ -18,7 +18,7 @@
  */
 
 import { EXPIRY_SAFETY_MARGIN_MS, parseExpiry } from "./stream.ts";
-import type { ResolvedStream, VirtualPlaylist } from "./stream.ts";
+import type { RangeIO, ResolvedStream, VirtualPlaylist } from "./stream.ts";
 
 /** H.264 tops out here on YouTube, and it is plenty for a window or a phone. */
 export const DEFAULT_MAX_HEIGHT = 1080;
@@ -47,6 +47,10 @@ export interface AdaptiveFormat {
 }
 
 export interface AdaptiveTrack {
+  /** Which file this is. A fresh answer names the same file by the same itag. */
+  itag: number;
+  /** The sound track's language id, when the video has more than one. */
+  audioTrackId?: string;
   url: string;
   codecs: string;
   bitrate: number;
@@ -96,6 +100,8 @@ function toTrack(f: AdaptiveFormat): AdaptiveTrack | null {
   const index = range(f.indexRange);
   if (!f.url || !f.mimeType || !init || !index) return null;
   return {
+    itag: f.itag ?? 0,
+    ...(f.audioTrack?.id ? { audioTrackId: f.audioTrack.id } : {}),
     url: f.url,
     codecs: codecsOf(f.mimeType),
     bitrate: f.bitrate ?? 0,
@@ -276,20 +282,192 @@ export function buildPlaylists(
 
 /**
  * Fetch inclusive byte range `[start, end]` of a googlevideo URL. In the app
- * this is `requestUrl`; `ua` is the client identity the URL was issued to.
+ * this is `requestUrl` (or a streaming Node request on desktop); `ua` is the
+ * client identity the URL was issued to, and `io` lets the player cancel it and
+ * watch its bytes arrive.
  */
-export type FetchRange = (url: string, start: number, end: number, ua?: string) => Promise<ArrayBuffer>;
+export type FetchRange = (url: string, start: number, end: number, ua?: string, io?: RangeIO) => Promise<ArrayBuffer>;
+
+/** A request the player cancelled: never a refusal, never worth a re-link. */
+export function isAbort(err: unknown): boolean {
+  return (err as { name?: string })?.name === "AbortError";
+}
+
+/**
+ * How far into a file the resolve looks before trusting it.
+ *
+ * YouTube can serve the opening of a file and refuse the rest: NewPipe saw
+ * 403s at 1:09 on stream URLs issued without an anti-bot token. Under a 30 s
+ * buffer that is a stall at about 55 s, then a fall back to 360p with
+ * different sound (Isaiah, 2026-10-22: "at right about 55 seconds, almost
+ * every video pauses"). A small read from past that point at resolve time
+ * finds out while 360p is still playing, and the next client gets a turn.
+ */
+export const DEEP_CHECK_SECONDS = 90;
+const DEEP_CHECK_BYTES = 1024;
+
+/** The segment that starts at or past `seconds`, or the last one. */
+export function segmentAt(segments: Segment[], seconds: number): Segment {
+  let clock = 0;
+  for (const s of segments) {
+    if (clock >= seconds) return s;
+    clock += s.duration;
+  }
+  return segments[segments.length - 1];
+}
+
+async function deepCheck(rung: Rung, fetchRange: FetchRange, ua?: string): Promise<void> {
+  const s = segmentAt(rung.segments, DEEP_CHECK_SECONDS);
+  try {
+    await fetchRange(rung.track.url, s.offset, s.offset + Math.min(s.length, DEEP_CHECK_BYTES) - 1, ua);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    throw new Error(`serves only the opening (${why})`);
+  }
+}
+
+/** Another client's answer, asked for when a link stops working mid-play. */
+export interface Reask {
+  clients: string[];
+  ask: (client: string) => Promise<ClientAnswer | null>;
+}
+
+/** A refusal, as opposed to a dropped connection: a fresh link may cure it. */
+function isRefusal(err: unknown): boolean {
+  const status = (err as { status?: number })?.status ?? 0;
+  if (status === 403 || status === 404 || status === 410) return true;
+  return /HTTP (403|404|410)\b/.test(err instanceof Error ? err.message : String(err));
+}
+
+/** The same files in a fresh answer, keyed by the URLs the playlists name. */
+function matchTracks(tracks: AdaptiveTrack[], formats: AdaptiveFormat[]): Map<string, string> | null {
+  const out = new Map<string, string>();
+  for (const t of tracks) {
+    const f = formats.find((x) => x.itag === t.itag && x.url && (x.audioTrack?.id ?? undefined) === t.audioTrackId);
+    if (!f?.url) return null;
+    out.set(t.url, f.url);
+  }
+  return out;
+}
+
+/**
+ * Byte ranges for the playlists' URLs, re-linked when YouTube stops honouring
+ * them.
+ *
+ * The playlists keep naming the URLs they were built with; this keeps a map
+ * from each to the link that currently works. On a refusal it asks the clients
+ * again for the same files (same itag, so every offset still holds), takes the
+ * first answer that serves the failed range, and re-links every track to it.
+ * hls.js sees one slow segment instead of an error, so there is no fall back
+ * to 360p and no retry ladder (which is also what made a jump slow). When no
+ * client serves it, the refusal goes through and the player falls back as
+ * before, and later refusals skip the asking.
+ */
+export function relinkingFetch(
+  tracks: AdaptiveTrack[],
+  fetchRange: FetchRange,
+  ua?: string,
+  reask?: Reask,
+): (url: string, start: number, end: number, io?: RangeIO) => Promise<ArrayBuffer> {
+  const links = new Map<string, { url: string; ua?: string }>();
+  let relinking: Promise<boolean> | null = null;
+  let dead = false;
+
+  const current = (url: string) => links.get(url) ?? { url, ua };
+
+  // `null` when no client serves the range; "cancelled" when the player gave
+  // up on the request that started the re-link, which says nothing about the
+  // links. The asking ignores that cancel, because other requests may be
+  // waiting on the same re-link; only the check read is cancelled, and then
+  // the fresh links are taken unchecked (a refusal on them re-links again).
+  const relink = async (
+    url: string,
+    start: number,
+    end: number,
+    io?: RangeIO,
+  ): Promise<ArrayBuffer | null | "cancelled"> => {
+    for (const client of reask!.clients) {
+      const answer = await reask!.ask(client).catch(() => null);
+      const fresh = answer && matchTracks(tracks, answer.adaptiveFormats);
+      if (!answer || !fresh) continue;
+      const adopt = () => {
+        for (const [from, to] of fresh) links.set(from, { url: to, ua: answer.ua });
+      };
+      if (io?.signal?.aborted) {
+        adopt();
+        return "cancelled";
+      }
+      try {
+        const bytes = await fetchRange(fresh.get(url) ?? url, start, end, answer.ua, io);
+        adopt();
+        return bytes;
+      } catch (err) {
+        if (isAbort(err) || io?.signal?.aborted) {
+          adopt();
+          return "cancelled";
+        }
+        // This client is refused at this point too; try the next one.
+      }
+    }
+    return null;
+  };
+
+  return async (url, start, end, io) => {
+    const link = current(url);
+    try {
+      return await fetchRange(link.url, start, end, link.ua, io);
+    } catch (err) {
+      if (!reask || dead || io?.signal?.aborted || isAbort(err) || !isRefusal(err)) throw err;
+      // Video and sound tend to be refused together: one re-link serves both.
+      if (relinking) {
+        await relinking;
+        if (dead) throw err;
+        const again = current(url);
+        if (again.url === link.url || io?.signal?.aborted) throw err;
+        return fetchRange(again.url, start, end, again.ua, io);
+      }
+      let result: ArrayBuffer | null | "cancelled" = null;
+      relinking = relink(url, start, end, io).then((r) => ((result = r), r !== null && r !== "cancelled"));
+      await relinking;
+      relinking = null;
+      const settled = result as ArrayBuffer | null | "cancelled";
+      if (settled === "cancelled") throw abortError();
+      if (settled === null) {
+        dead = true;
+        throw err;
+      }
+      return settled;
+    }
+  };
+}
+
+/** A refusal from googlevideo, carrying its status (what `isRefusal` reads). */
+export function refusal(status: number): Error & { status: number } {
+  const err = new Error(`googlevideo answered HTTP ${status}`) as Error & { status: number };
+  err.status = status;
+  return err;
+}
+
+/** The rejection a cancelled request gives, the shape `fetch` uses. */
+export function abortError(): Error {
+  const err = new Error("the request was cancelled");
+  err.name = "AbortError";
+  return err;
+}
 
 /**
  * Turn an adaptive pair into a playable stream: read both indexes (which is
- * also the proof that YouTube will serve these files), then build the
- * playlists. Throws when either file refuses or its index cannot be read.
+ * also the proof that YouTube will serve these files), check that the top rung
+ * and the sound still serve past the first minute, then build the playlists.
+ * Throws when either file refuses or its index cannot be read. `reask` lets the
+ * stream re-link itself if YouTube refuses its links later.
  */
 export async function streamFromPair(
   videoId: string,
   pair: AdaptivePair,
   fetchRange: FetchRange,
   ua?: string,
+  reask?: Reask,
 ): Promise<ResolvedStream> {
   const read = async (track: AdaptiveTrack): Promise<Rung> => ({
     track,
@@ -302,12 +480,13 @@ export async function streamFromPair(
     read(pair.audio),
     ...pair.ladder.slice(1).map((t) => read(t).catch(() => null)),
   ]);
+  await Promise.all([deepCheck(top, fetchRange, ua), deepCheck(audio, fetchRange, ua)]);
   const videos = [top, ...lower.filter((r): r is Rung => r !== null)];
   const { master, files } = buildPlaylists(videoId, videos, audio);
 
   const virtual: VirtualPlaylist = {
     files,
-    fetchRange: (url, start, end) => fetchRange(url, start, end, ua),
+    fetchRange: relinkingFetch([...videos.map((r) => r.track), audio.track], fetchRange, ua, reask),
   };
   const expiry = Math.min(parseExpiry(pair.video.url), parseExpiry(pair.audio.url));
   return {
@@ -339,6 +518,7 @@ export async function resolveHd(
   ask: (client: string) => Promise<ClientAnswer | null>,
   fetchRange: FetchRange,
   maxHeight = DEFAULT_MAX_HEIGHT,
+  hlsFirst = false,
 ): Promise<ResolvedStream> {
   const reasons: string[] = [];
   let hls: string | null = null;
@@ -349,13 +529,16 @@ export async function resolveHd(
       continue;
     }
     hls ??= answer.hlsManifestUrl;
+    // The phone: YouTube's own manifest serves the whole video and iOS plays
+    // it natively, while the separate files mostly stop at a minute (#25).
+    if (hlsFirst && hls) break;
     const pair = pickPair(answer.adaptiveFormats, maxHeight);
     if (!pair) {
       reasons.push(`${client}: no HD pair`);
       continue;
     }
     try {
-      return await streamFromPair(videoId, pair, fetchRange, answer.ua);
+      return await streamFromPair(videoId, pair, fetchRange, answer.ua, { clients, ask });
     } catch (err) {
       reasons.push(`${client}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -369,6 +552,134 @@ export async function resolveHd(
     };
   }
   throw new Error(`no HD stream (${reasons.join("; ")})`);
+}
+
+/**
+ * One entry of yt-dlp's `-J` `formats[]`, as far as HD needs it.
+ *
+ * Measured 2026-11-04 on Isaiah's Mac: the ANDROID and IOS files stop serving
+ * at about a minute on most videos (403 from 90s on), while the files yt-dlp
+ * hands out serve the whole video. So on a desktop with yt-dlp, the same
+ * stitched stream is built from yt-dlp's files instead.
+ */
+export interface YtDlpFormat {
+  format_id?: string;
+  url?: string;
+  protocol?: string;
+  ext?: string;
+  vcodec?: string | null;
+  acodec?: string | null;
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
+  tbr?: number | null;
+  language?: string | null;
+  language_preference?: number | null;
+  format_note?: string | null;
+}
+
+/**
+ * Where the init segment and the `sidx` box are, from the opening bytes of an
+ * MP4 file. InnerTube states these ranges; yt-dlp does not, so they are read
+ * off the file: top-level boxes run `ftyp`, `moov`, `sidx`, and everything
+ * before the `sidx` is the init segment. Null when the head ends first.
+ */
+export function locateIndex(head: ArrayBuffer): { init: { start: number; end: number }; index: { start: number; end: number } } | null {
+  const view = new DataView(head);
+  let pos = 0;
+  while (pos + 8 <= view.byteLength) {
+    let size = view.getUint32(pos);
+    const type = String.fromCharCode(
+      view.getUint8(pos + 4), view.getUint8(pos + 5), view.getUint8(pos + 6), view.getUint8(pos + 7),
+    );
+    if (size === 1) {
+      if (pos + 16 > view.byteLength) return null;
+      size = Number(view.getBigUint64(pos + 8));
+    }
+    if (type === "sidx") {
+      if (pos === 0 || size < 8) return null;
+      return { init: { start: 0, end: pos - 1 }, index: { start: pos, end: pos + size - 1 } };
+    }
+    if (size < 8) return null;
+    pos += size;
+  }
+  return null;
+}
+
+const isAvcMp4 = (f: YtDlpFormat): boolean =>
+  f.ext === "mp4" && /^avc1/.test(f.vcodec ?? "") && (f.acodec ?? "none") === "none";
+const isAacM4a = (f: YtDlpFormat): boolean =>
+  f.ext === "m4a" && /^mp4a/.test(f.acodec ?? "") && (f.vcodec ?? "none") === "none";
+const isPlainHttps = (f: YtDlpFormat): boolean => !!f.url && (f.protocol ?? "https") === "https";
+
+/** The formats worth reading the head of: one per height, and the sound. */
+export function ytDlpCandidates(formats: YtDlpFormat[], maxHeight = DEFAULT_MAX_HEIGHT): YtDlpFormat[] {
+  const videos = formats
+    .filter((f) => isPlainHttps(f) && isAvcMp4(f) && (f.height ?? 0) >= MIN_LADDER_HEIGHT && (f.height ?? 0) <= maxHeight)
+    .sort((a, b) => (b.height ?? 0) - (a.height ?? 0) || (b.fps ?? 0) - (a.fps ?? 0) || (b.tbr ?? 0) - (a.tbr ?? 0));
+  const ladder: YtDlpFormat[] = [];
+  for (const f of videos) if (!ladder.some((x) => x.height === f.height)) ladder.push(f);
+  // Original language first (yt-dlp marks it with a high language_preference),
+  // then not a dub, then the plain track over a dynamic-range-compressed one.
+  const audioScore = (f: YtDlpFormat): number =>
+    ((f.language_preference ?? 0) >= 10 ? 4 : 0) +
+    (/dubbed/i.test(f.format_note ?? "") ? 0 : 2) +
+    (/drc/i.test(f.format_id ?? "") ? 0 : 1);
+  const audio = formats
+    .filter((f) => isPlainHttps(f) && isAacM4a(f))
+    .sort((a, b) => audioScore(b) - audioScore(a) || (b.tbr ?? 0) - (a.tbr ?? 0))[0];
+  return audio ? [...ladder, audio] : ladder;
+}
+
+/** Enough of a file's opening to hold `ftyp`, `moov` and the `sidx` header. */
+const HEAD_BYTES = 64 * 1024;
+
+/**
+ * yt-dlp's formats as InnerTube-shaped ones, with the init and index ranges
+ * read off each file, so `pickPair` and `streamFromPair` take them unchanged.
+ * A file whose head cannot be read or has no `sidx` is left out.
+ */
+export async function adaptiveFromYtDlp(
+  formats: YtDlpFormat[],
+  fetchRange: FetchRange,
+  maxHeight = DEFAULT_MAX_HEIGHT,
+): Promise<AdaptiveFormat[]> {
+  const read = async (f: YtDlpFormat): Promise<AdaptiveFormat | null> => {
+    const at = await fetchRange(f.url!, 0, HEAD_BYTES - 1).then(locateIndex, () => null);
+    if (!at) return null;
+    const video = isAvcMp4(f);
+    const original = (f.language_preference ?? 0) >= 10;
+    return {
+      itag: parseInt(f.format_id ?? "0", 10) || 0,
+      url: f.url,
+      mimeType: video ? `video/mp4; codecs="${f.vcodec}"` : `audio/mp4; codecs="${f.acodec}"`,
+      bitrate: Math.round((f.tbr ?? 0) * 1000),
+      width: f.width ?? 0,
+      height: f.height ?? 0,
+      fps: f.fps ?? 0,
+      initRange: { start: String(at.init.start), end: String(at.init.end) },
+      indexRange: { start: String(at.index.start), end: String(at.index.end) },
+      ...(video ? {} : { xtags: original ? "acont=original" : /dubbed/i.test(f.format_note ?? "") ? "acont=dubbed" : "" }),
+    };
+  };
+  const out = await Promise.all(ytDlpCandidates(formats, maxHeight).map(read));
+  return out.filter((f): f is AdaptiveFormat => f !== null);
+}
+
+/**
+ * HD from yt-dlp's files: the same stitched, streamed stream as `resolveHd`,
+ * including the check past the first minute. No re-link: asking yt-dlp again
+ * takes too long to hide inside one slow segment.
+ */
+export async function resolveHdFromYtDlp(
+  videoId: string,
+  formats: YtDlpFormat[],
+  fetchRange: FetchRange,
+  maxHeight = DEFAULT_MAX_HEIGHT,
+): Promise<ResolvedStream> {
+  const pair = pickPair(await adaptiveFromYtDlp(formats, fetchRange, maxHeight), maxHeight);
+  if (!pair) throw new Error("yt-dlp: no HD pair");
+  return streamFromPair(videoId, pair, fetchRange);
 }
 
 /** googlevideo takes a byte range as a query parameter as well as a header. */

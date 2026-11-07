@@ -1,5 +1,5 @@
 import Hls from "hls.js";
-import { setIcon } from "obsidian";
+import { Platform, setIcon } from "obsidian";
 import { formatTimestamp } from "./format.ts";
 import { SHARE_ICON } from "./icon.ts";
 import { anchorVisible, panelPlacement } from "./panel.ts";
@@ -12,11 +12,19 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 // on mobile.
 import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
 import { fullscreenPress } from "./fullscreen.ts";
-import { dropOnJump, virtualLoader } from "./virtual-loader.ts";
+import { dropOnJump, VIRTUAL_FRAG_POLICY, virtualLoader } from "./virtual-loader.ts";
+import { badgeText, bufferedAhead, HD_WAIT_MS, rungPhase, within } from "./hd-status.ts";
+import type { HdState } from "./hd-status.ts";
+import { shouldResumeSystemPause } from "./keep-playing.ts";
+import { KEEPALIVE_MAX_MS, silentWav } from "./silent-audio.ts";
 
 export type { StreamProvider };
 
 const MAX_CONSECUTIVE_RECOVERIES = 3;
+/** How long a settled quality badge stays before it fades. */
+const QUALITY_SETTLED_MS = 4000;
+/** What the badge counts as full quality for a natively played manifest. */
+const NATIVE_HLS_TOP = 1080;
 const RECOVERY_COOLDOWN_MS = 2000;
 
 export interface PlayerOptions {
@@ -181,6 +189,20 @@ export interface QuickPanelOptions {
    */
   pauseWhileTyping?: boolean;
   onPauseWhileTyping?: (value: boolean) => void;
+  /**
+   * HD or 360p for this video, when the reader already picked one here.
+   * Absent, `load`'s argument (the setting) decides. `onQuality` hears every
+   * pick so a rebuilt player opens on it.
+   */
+  hd?: boolean;
+  onQuality?: (hd: boolean) => void;
+  /** What the setting will say, so the row reads right before `load` runs. */
+  hdDefault?: boolean;
+  /**
+   * Phone only (#25): YouTube's own player, full-screen, from the second given
+   * at the speed given. Resolves with where the reader left off.
+   */
+  youtubePlayer?: (at: number, rate: number) => Promise<number | null>;
 }
 
 /** The lock screen's three fields. */
@@ -247,11 +269,70 @@ const MAX_FRAME_SECONDS = 0.5;
  */
 const CONTROLS_HUSH_MS = 6000;
 
+/** A failed HD resolve, in the few words the badge's hover text has room for. */
+function hdReason(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.length > 80 ? `${message.slice(0, 77)}…` : message;
+}
+
 /**
  * Which player currently owns `navigator.mediaSession` — there is one of those
  * per document, and a vault can have several players open at once.
  */
 let nowPlayingOwner: YtFreePlayer | null = null;
+
+/**
+ * One silent, looping `<audio>` per document, playing only while a video was
+ * paused in the background — see `holdBackgroundSession`. It is unlocked by a
+ * real tap (`primeSilence`) because iOS refuses a first `play()` from an
+ * element no gesture has touched, and the pause it is needed for arrives with
+ * the app already hidden.
+ */
+let silence: HTMLAudioElement | null = null;
+let silencePrimed = false;
+let silenceStopTimer: number | null = null;
+
+function silenceElement(): HTMLAudioElement {
+  if (silence) return silence;
+  const url = URL.createObjectURL(new Blob([silentWav()], { type: "audio/wav" }));
+  silence = new Audio(url);
+  silence.loop = true;
+  silence.preload = "auto";
+  return silence;
+}
+
+function primeSilence(): void {
+  if (silencePrimed || !Platform.isMobile) return;
+  silencePrimed = true;
+  const el = silenceElement();
+  // The call is what the gesture unlocks; the pause right behind it means
+  // nothing is ever heard or shown.
+  void el.play().catch(() => undefined);
+  el.pause();
+}
+
+function silencePlaying(): boolean {
+  return Boolean(silence && !silence.paused);
+}
+
+function startSilence(debug?: (message: string, extra?: unknown) => void): void {
+  if (!silencePrimed || !silence) return;
+  const el = silence;
+  void el.play().then(
+    () => debug?.("background hold: silence playing"),
+    (err: unknown) => debug?.("background hold: silence refused", String(err)),
+  );
+  if (silenceStopTimer !== null) window.clearTimeout(silenceStopTimer);
+  silenceStopTimer = window.setTimeout(stopSilence, KEEPALIVE_MAX_MS);
+}
+
+function stopSilence(): void {
+  if (silenceStopTimer !== null) {
+    window.clearTimeout(silenceStopTimer);
+    silenceStopTimer = null;
+  }
+  silence?.pause();
+}
 
 /**
  * Wraps a native <video> element and keeps it playing across stream-URL expiry.
@@ -270,6 +351,12 @@ export class YtFreePlayer {
   private destroyed = false;
   private lastRecoveryAt = 0;
   private upgraded = false;
+  /**
+   * The source is an HLS manifest that iOS's own player is playing (#25):
+   * googlevideo sends no CORS header, so hls.js's XHR is refused from
+   * `capacitor://localhost`, and the native player needs none.
+   */
+  private nativeHls = false;
   /** Survives source swaps; the <video> element resets these on every load. */
   private playbackRate = 1;
   /** True only while playback is paused *by us* because the user is typing. */
@@ -287,6 +374,15 @@ export class YtFreePlayer {
    * native controls a second later is the reader's and is left alone.
    */
   private resumeGuardUntil = 0;
+  /** When the reader last asked for a pause — see `keepPlayingThroughSystemPauses`. */
+  private readerPauseAt = 0;
+  /** When the last `pause` event fired, and whether it has already been answered. */
+  private lastPauseAt = 0;
+  private lastPauseAnswered = true;
+  private fullscreenEndListener: (() => void) | null = null;
+  private onKeepPlayingVisibility: (() => void) | null = null;
+  /** Paused from the lock screen or AirPods and not played since. */
+  private heldInBackground = false;
   /** Has this player ever started? Stops an untouched note stamping 0:00. */
   private started = false;
   /**
@@ -300,6 +396,27 @@ export class YtFreePlayer {
   /** The purple line along the bottom of the picture, and the part that fills. */
   private progressBar: HTMLElement | null = null;
   private progressFill: HTMLElement | null = null;
+  /** The lighter band under the fill: how far ahead the stream has loaded. */
+  private progressBuffered: HTMLElement | null = null;
+  /** The quality chip on the picture's top-left corner — see `paintQuality`. */
+  private qualityBadge: HTMLElement | null = null;
+  private hdState: HdState = { phase: "off" };
+  /**
+   * HD or 360p for this player: the reader's pick in the pop-out, else the
+   * setting `load` was given. Null until one of those has spoken.
+   */
+  private wantHd: boolean | null = null;
+  /** The pick came from the pop-out, not from the setting. */
+  private qualityPicked = false;
+  /** Bumped on every pick, so an HD resolve started before it is ignored. */
+  private qualityGen = 0;
+  /** A source has been attached: before that, a pick is only remembered. */
+  private sourced = false;
+  /** Ends "Start in HD"'s wait early when 360p is picked during it. */
+  private onPick: (() => void) | null = null;
+  private qualitySelect: HTMLSelectElement | null = null;
+  /** Fades a settled badge; cleared by any change that unsettles it. */
+  private qualityTimer: number | null = null;
   /** The Play/Pause button, repainted from one place — see `paintPlay`. */
   private playBtn: HTMLButtonElement | null = null;
   /**
@@ -421,7 +538,25 @@ export class YtFreePlayer {
 
     // Native error path (direct mp4, and some HLS failures).
     this.video.addEventListener("error", () => {
-      if (this.video.error) void this.recover("playback error");
+      if (!this.video.error) return;
+      if (this.nativeHls && this.upgraded) {
+        // Same rule as stitched HD: a failed HD stream goes back to 360p where
+        // the reader is, rather than retrying HD into "failed repeatedly".
+        console.warn("YT Free: native HD stream failed", this.video.error.code, this.video.error.message);
+        this.upgraded = false;
+        this.setHd({ phase: "none", height: 360, reason: "HD stream failed" });
+        void this.recover("HD unavailable, back to 360p");
+        return;
+      }
+      void this.recover("playback error");
+    });
+
+    // iOS picks the HLS height itself; the picture's size is the only report.
+    this.video.addEventListener("resize", () => {
+      const height = this.video.videoHeight;
+      if (!this.nativeHls || !this.upgraded || !height) return;
+      const top = Math.max(height, NATIVE_HLS_TOP);
+      this.setHd({ phase: rungPhase(height, top), height, top });
     });
 
     // Any play the user starts themselves ends our ownership of the pause, so a
@@ -439,6 +574,7 @@ export class YtFreePlayer {
     }
 
     this.trackBackgroundPause();
+    this.keepPlayingThroughSystemPauses();
     this.trackProgress();
     this.trackNowPlaying();
   }
@@ -459,14 +595,22 @@ export class YtFreePlayer {
    */
   private buildProgressBar(stage: HTMLElement): void {
     const bar = stage.createDiv({ cls: "ytfree-progress" });
+    // Before the fill, so the fill paints over it: the band only shows from
+    // the playhead on, which is the part that answers "how far has it loaded".
+    this.progressBuffered = bar.createDiv({ cls: "ytfree-progress-buffered" });
     this.progressFill = bar.createDiv({ cls: "ytfree-progress-fill" });
     this.progressBar = bar;
+
+    // Built here because it sits on the picture, like the line. Hidden until
+    // there is something to say; never in the flow, so it moves nothing.
+    this.qualityBadge = stage.createDiv({ cls: "ytfree-quality" });
 
     const paint = (): void => this.paintProgress();
     // `seeked` matters as much as `timeupdate` here: a Smart Speed jump moves
     // the position without playing through it, and a line that only advanced
-    // with playback would lag by the length of every skip.
-    for (const event of ["timeupdate", "seeked", "loadedmetadata", "durationchange", "emptied"]) {
+    // with playback would lag by the length of every skip. `progress` is the
+    // one that moves the buffered band while playback is paused.
+    for (const event of ["timeupdate", "seeked", "loadedmetadata", "durationchange", "emptied", "progress"]) {
       this.video.addEventListener(event, paint);
     }
     paint();
@@ -487,6 +631,54 @@ export class YtFreePlayer {
     const at = this.drag?.live ? this.drag.to : this.video.currentTime;
     const fraction = live ? Math.min(1, Math.max(0, at / duration)) : 0;
     fill.style.transform = `scaleX(${fraction.toFixed(5)})`;
+    if (this.progressBuffered) {
+      const ahead = live && !this.local ? bufferedAhead(this.video.buffered, this.video.currentTime) : 0;
+      const loaded = live ? Math.min(1, Math.max(0, ahead / duration)) : 0;
+      this.progressBuffered.style.transform = `scaleX(${loaded.toFixed(5)})`;
+    }
+  }
+
+  /**
+   * Say where HD has got to (GitHub issue: HD progress). Shown while anything
+   * is still happening; once settled it stays a few seconds and then fades,
+   * coming back on hover — a permanent "1080p" over the picture is noise.
+   */
+  private setHd(next: HdState): void {
+    if (this.destroyed) return;
+    this.hdState = next;
+    this.paintQuality();
+  }
+
+  private paintQuality(): void {
+    const badge = this.qualityBadge;
+    if (!badge) return;
+    if (this.qualityTimer !== null) window.clearTimeout(this.qualityTimer);
+    this.qualityTimer = null;
+    if (this.local) {
+      badge.removeClass("is-visible", "has-text");
+      return;
+    }
+    const { text, title, settled } = badgeText(this.hdState);
+    badge.setText(text);
+    badge.setAttr("title", title);
+    badge.setAttr("aria-label", title);
+    badge.addClass("has-text", "is-visible");
+    badge.toggleClass("is-settled", settled);
+    if (settled) {
+      this.qualityTimer = window.setTimeout(() => {
+        this.qualityTimer = null;
+        badge.removeClass("is-visible");
+      }, QUALITY_SETTLED_MS);
+    }
+  }
+
+  /** The HD state to show, read off hls.js's levels for the rung now playing. */
+  private hdFromLevel(hls: Hls, level: number): void {
+    const heights = hls.levels.map((l) => l.height).filter((h) => h > 0);
+    const height = hls.levels[level]?.height;
+    if (!height || !heights.length) return;
+    const top = Math.max(...heights);
+    this.setHd({ phase: rungPhase(height, top), height, top });
   }
 
   /**
@@ -653,7 +845,16 @@ export class YtFreePlayer {
       // still be unresolved, and a lock-screen Play is as good a reason to
       // resolve it as a tap on the player.
       ["play", () => void this.withMedia(() => this.play())],
-      ["pause", () => this.video.pause()],
+      ["pause", () => {
+        // While the background hold plays silence, iOS may think something is
+        // still playing and send Pause for an AirPods tap that means Play.
+        if (this.video.paused && silencePlaying()) {
+          void this.withMedia(() => this.play());
+          return;
+        }
+        this.readerPauseAt = Date.now();
+        this.video.pause();
+      }],
       ["seekbackward", () => this.seekBy(-10)],
       ["seekforward", () => this.seekBy(10)],
       [
@@ -820,6 +1021,7 @@ export class YtFreePlayer {
         return;
       }
       if (!this.video.paused) {
+        this.readerPauseAt = Date.now();
         this.video.pause();
         return;
       }
@@ -1187,6 +1389,28 @@ export class YtFreePlayer {
       el.addEventListener("change", () => onChange(Number(el.value)));
       return el;
     };
+
+    {
+      // First, because it is the one that changes what you see. A select, not
+      // a switch: "HD" and "360p" are two answers, not a feature on and off.
+      if (quick.hd !== undefined) {
+        this.wantHd = quick.hd;
+        this.qualityPicked = true;
+      }
+      const el = row("Quality").createEl("select", {
+        cls: "ytfree-panel-select ytfree-panel-quality",
+        attr: { "aria-label": "Quality for this video" },
+      });
+      el.createEl("option", { text: "HD", value: "hd" });
+      el.createEl("option", { text: "360p", value: "sd" });
+      if (quick.youtubePlayer) el.createEl("option", { text: "YouTube player (HD)", value: "yt" });
+      el.addEventListener("change", () => {
+        if (el.value === "yt") void this.openYouTubePlayer(quick.youtubePlayer!);
+        else this.setQuality(el.value === "hd");
+      });
+      this.qualitySelect = el;
+      this.paintQualityChoice();
+    }
 
     if (this.options.smartSpeed) {
       // Smart Speed's only control now, and the pop-out button on the bar is
@@ -1570,6 +1794,134 @@ export class YtFreePlayer {
       this.resumeGuardUntil = Date.now() + 1500;
     };
     document.addEventListener("visibilitychange", this.onBackgroundVisibility);
+  }
+
+  /**
+   * Leaving fullscreen, leaving Obsidian and locking the phone do not stop the
+   * video (Isaiah, 2026-11-04).
+   *
+   * iOS pauses a playing `<video>` at each of those moments on its own. This
+   * notices a pause that lands within a second of one of them, either side,
+   * and presses Play again. A pause the reader asked for — our Play button, the
+   * player's own `pause()`, the lock screen's Pause — marks itself first and
+   * is left alone; see `shouldResumeSystemPause`.
+   *
+   * Whether WebKit lets a play through while Obsidian is in the background is
+   * the open question (`spikes/lock-audio`). If it refuses, the pause stands
+   * exactly as before and the background guard's flag is put back, so the
+   * reader is no worse off: the lock screen's Play still works.
+   */
+  private keepPlayingThroughSystemPauses(): void {
+    let hiddenAt = 0;
+    let fullscreenEndAt = 0;
+    const el = this.video as HTMLVideoElement & {
+      webkitDisplayingFullscreen?: boolean;
+      webkitPresentationMode?: string;
+    };
+    let wasFullscreen = false;
+
+    const consider = (cause: "background" | "fullscreen", causeAt: number): void => {
+      if (this.destroyed || this.lastPauseAnswered || !this.video.paused) return;
+      const resume = shouldResumeSystemPause({
+        pauseAt: this.lastPauseAt,
+        readerPauseAt: this.readerPauseAt,
+        pausedByTyping: this.pausedByTyping,
+        causeAt,
+        ended: this.video.ended,
+      });
+      if (!resume) return;
+      // One answer per pause, so the phone and this never take turns.
+      this.lastPauseAnswered = true;
+      const claimedByGuard = this.pausedWhileHidden;
+      this.pausedWhileHidden = false;
+      this.resumeGuardUntil = 0;
+      this.options.debug?.(`keep playing: resuming after a ${cause} pause`, {
+        hidden: document.hidden,
+        gap: this.lastPauseAt - causeAt,
+      });
+      this.video.play().then(
+        () => this.options.debug?.(`keep playing: ${cause} resume played`),
+        (err: unknown) => {
+          // Refused: leave things as the background guard would have had them.
+          this.pausedWhileHidden = claimedByGuard;
+          this.options.debug?.(`keep playing: ${cause} resume refused`, String(err));
+        },
+      );
+    };
+
+    this.video.addEventListener("pause", () => {
+      this.lastPauseAt = Date.now();
+      this.lastPauseAnswered = false;
+      if (document.hidden) consider("background", hiddenAt);
+      consider("fullscreen", fullscreenEndAt);
+      // Still paused after all that, and in the background: the reader paused
+      // from the lock screen or their AirPods. Keep the session for their Play.
+      if (document.hidden && !this.lastPauseAnswered && !this.video.ended) this.holdBackgroundSession();
+    });
+    this.video.addEventListener("play", () => {
+      this.heldInBackground = false;
+      if (silencePlaying()) stopSilence();
+    });
+
+    this.onKeepPlayingVisibility = () => {
+      if (!document.hidden) {
+        // Back in the app: it is awake on its own, so the hold has no job.
+        if (silencePlaying()) stopSilence();
+        return;
+      }
+      hiddenAt = Date.now();
+      consider("background", hiddenAt);
+    };
+    document.addEventListener("visibilitychange", this.onKeepPlayingVisibility);
+
+    // Three spellings of "fullscreen ended": the iPhone's own player, Safari's
+    // presentation mode, and the standard API on iPad and desktop.
+    const ended = (): void => {
+      wasFullscreen = false;
+      fullscreenEndAt = Date.now();
+      consider("fullscreen", fullscreenEndAt);
+    };
+    this.video.addEventListener("webkitendfullscreen", ended);
+    this.video.addEventListener("webkitbeginfullscreen", () => (wasFullscreen = true));
+    this.video.addEventListener("webkitpresentationmodechanged", () => {
+      const now = el.webkitPresentationMode === "fullscreen";
+      if (wasFullscreen && !now) ended();
+      else if (now) wasFullscreen = true;
+    });
+    this.fullscreenEndListener = () => {
+      const now = document.fullscreenElement === this.video;
+      if (wasFullscreen && !now && !el.webkitDisplayingFullscreen) ended();
+      if (now) wasFullscreen = true;
+    };
+    document.addEventListener("fullscreenchange", this.fullscreenEndListener);
+  }
+
+  /**
+   * A video paused in the background stays ready to play (Isaiah, 2026-11-07).
+   *
+   * iOS suspends Obsidian a few seconds after its sound stops, and WebKit
+   * drops the paused video with it, so a Play from the AirPods a minute later
+   * found nothing. A silent loop keeps the audio session — and so the app and
+   * the lock-screen tile — alive until the reader plays again, comes back to
+   * the app, or an hour passes (`KEEPALIVE_MAX_MS`).
+   */
+  private holdBackgroundSession(): void {
+    if (!Platform.isMobile || nowPlayingOwner !== this) return;
+    this.heldInBackground = true;
+    this.options.debug?.("background hold: paused while hidden, holding the session");
+    startSilence(this.options.debug);
+    // The silent element may have taken the tile's state; say what is true.
+    if (navigator.mediaSession) navigator.mediaSession.playbackState = "paused";
+  }
+
+  /**
+   * Is this the video on the lock-screen tile: playing, or paused from the
+   * lock screen or AirPods and not played since? The Now playing button shows
+   * for exactly this.
+   */
+  isNowPlaying(): boolean {
+    if (this.destroyed || nowPlayingOwner !== this || this.video.ended) return false;
+    return !this.video.paused || this.heldInBackground;
   }
 
   private startSmartLoop(): void {
@@ -2127,14 +2479,154 @@ export class YtFreePlayer {
    * failure. Stage 2 fetches the 1080p HLS manifest in the background and swaps
    * it in at the same playback position — deliberately not awaited.
    */
-  async load(upgradeToHighQuality: boolean): Promise<void> {
+  async load(upgradeToHighQuality: boolean, waitForHd = false): Promise<void> {
+    // A pick in the pop-out (this time or a rebuilt player's) beats the setting.
+    if (this.wantHd === null) this.wantHd = upgradeToHighQuality;
+    this.paintQualityChoice();
+    if (this.wantHd && waitForHd && Hls.isSupported()) return this.loadHdFirst();
     const stream = await this.provider("fast", false);
     // Where this video was left, if it was left anywhere. `attach` seeks once
     // the media reports metadata, so this costs nothing when it is 0 and does
     // not race a timestamp link tapped a moment later — that seek is registered
     // afterwards and therefore lands last.
     this.attach(stream, this.resumeSeconds(), false);
-    if (upgradeToHighQuality) void this.upgrade();
+    // Read after the await: a pick made while 360p resolved counts.
+    if (this.wantHd) {
+      this.setHd({ phase: "finding", height: stream.height });
+      void this.upgrade();
+    } else {
+      this.setHd(this.sdState(stream.height));
+    }
+  }
+
+  /** The badge for 360p by choice: the setting's, or this video's pick. */
+  private sdState(height?: number): HdState {
+    return this.qualityPicked
+      ? { phase: "off", height, reason: "360p, chosen for this video. Change it in the ⋯ pop-out." }
+      : { phase: "off", height };
+  }
+
+  /**
+   * HD or 360p for this video only (the pop-out's Quality row). Never writes
+   * a setting. Before anything is attached the pick is only remembered: the
+   * load in flight reads it once its first resolve is back.
+   */
+  setQuality(hd: boolean): void {
+    if (this.destroyed || this.local || hd === this.wantHd) return;
+    this.qualityPicked = true;
+    this.wantHd = hd;
+    const gen = ++this.qualityGen;
+    this.paintQualityChoice();
+    this.options.quick?.onQuality?.(hd);
+    // "Start in HD" is waiting: 360p ends the wait now.
+    if (!hd) this.onPick?.();
+    if (!this.sourced) return;
+    if (hd) {
+      if (this.upgraded) return;
+      this.setHd({ phase: "finding", height: this.hdState.height });
+      void this.upgrade(undefined, gen);
+    } else {
+      void this.downgrade(gen);
+    }
+  }
+
+  /** 360p in place of HD, at the same second and play state. */
+  private async downgrade(gen: number): Promise<void> {
+    if (!this.upgraded) {
+      // 360p already plays; only an HD lookup may be in flight, and `gen`
+      // has already told it to stand down.
+      this.setHd(this.sdState(this.hdState.height));
+      return;
+    }
+    this.onStatus("Switching to 360p…");
+    let stream: ResolvedStream;
+    try {
+      stream = await this.provider("fast", false);
+    } catch (err) {
+      if (gen !== this.qualityGen || this.destroyed) return;
+      this.onStatus(`Could not switch to 360p: ${hdReason(err)}`);
+      window.setTimeout(() => {
+        if (!this.destroyed) this.onStatus(null);
+      }, 6000);
+      return;
+    }
+    if (gen !== this.qualityGen || this.destroyed || this.local || this.recovering) return;
+    this.onStatus(null);
+    const resumeAt = this.video.currentTime;
+    const wasPlaying = !this.video.paused && !this.video.ended;
+    this.upgraded = false;
+    this.setHd(this.sdState(stream.height));
+    this.attach(stream, resumeAt, wasPlaying);
+  }
+
+  /**
+   * Hand the video to YouTube's own player and take it back where the reader
+   * left off. Not a quality pick: the row goes back to what it said.
+   */
+  private async openYouTubePlayer(open: (at: number, rate: number) => Promise<number | null>): Promise<void> {
+    this.paintQualityChoice();
+    this.video.pause();
+    const at = await open(this.video.currentTime, this.playbackRate);
+    if (this.destroyed || at === null) return;
+    this.video.currentTime = at;
+  }
+
+  /** The Quality row follows the player, including a pick it was rebuilt with. */
+  private paintQualityChoice(): void {
+    const el = this.qualitySelect;
+    if (!el) return;
+    el.value = (this.wantHd ?? this.options.quick?.hdDefault ?? true) ? "hd" : "sd";
+    el.disabled = this.local;
+    el.title = this.local ? "Playing the downloaded copy" : "";
+  }
+
+  /**
+   * "Start in HD": nothing plays until HD is here, and HD starts on its top
+   * rung rather than climbing to it.
+   *
+   * Both resolves start at once, so falling back costs no extra wait: if HD
+   * fails, or has not answered within `HD_WAIT_MS`, the 360p stream that was
+   * resolving alongside it plays, and an HD that turns up late is swapped in
+   * the ordinary way. A Play pressed meanwhile is held by `pendingPlay`.
+   */
+  private async loadHdFirst(): Promise<void> {
+    const fast = this.provider("fast", false);
+    // Possibly never awaited (HD won), and its rejection must not surface.
+    fast.catch(() => undefined);
+    const quality = this.provider("quality", false);
+    quality.catch(() => undefined);
+
+    this.setHd({ phase: "finding" });
+    this.onStatus("Waiting for HD…");
+    // 360p picked in the pop-out meanwhile: stop waiting.
+    const picked = new Promise<null>((resolve) => (this.onPick = () => resolve(null)));
+    const hd = await within<ResolvedStream | null>(Promise.race([quality, picked]), HD_WAIT_MS);
+    this.onPick = null;
+    if (this.destroyed) return;
+    if (hd && hd.isHls && this.wantHd) {
+      this.upgraded = true;
+      this.attach(hd, this.resumeSeconds(), false, true);
+      this.onStatus(null);
+      return;
+    }
+
+    this.onStatus(null);
+    // Throws when 360p fails too, which is the failure the caller reports.
+    const stream = await fast;
+    this.attach(stream, this.resumeSeconds(), false);
+    if (!this.wantHd) {
+      this.setHd(this.sdState(stream.height));
+      return;
+    }
+    if (hd) {
+      // HD answered, but with nothing better than what plays now.
+      this.setHd({ phase: "none", height: stream.height, reason: "no HD stream" });
+      return;
+    }
+    // Timed out or failed. A late HD still gets its normal swap; a failed one
+    // settles into "no HD" inside `upgrade`.
+    this.setHd({ phase: "finding", height: stream.height });
+    void this.upgrade(quality);
   }
 
   /** The remembered position, guarded against a stored value that is not one. */
@@ -2154,6 +2646,8 @@ export class YtFreePlayer {
   loadLocal(url: string, onFail: () => void): void {
     this.local = true;
     this.teardownHls();
+    this.paintQuality();
+    this.paintQualityChoice();
     const fail = () => {
       if (!this.local) return;
       this.local = false;
@@ -2187,6 +2681,8 @@ export class YtFreePlayer {
 
     this.local = true;
     this.teardownHls();
+    this.paintQuality();
+    this.paintQualityChoice();
     this.video.src = url;
     this.video.addEventListener(
       "loadedmetadata",
@@ -2205,28 +2701,51 @@ export class YtFreePlayer {
     return this.local;
   }
 
-  private async upgrade(): Promise<void> {
+  private async upgrade(pending?: Promise<ResolvedStream>, gen = this.qualityGen): Promise<void> {
     let stream: ResolvedStream;
     try {
-      stream = await this.provider("quality", false);
-    } catch {
-      return; // 360p already plays; a failed upgrade is not worth interrupting for.
+      stream = await (pending ?? this.provider("quality", false));
+    } catch (err) {
+      // A pick since this started has its own answer coming.
+      if (gen !== this.qualityGen) return;
+      // 360p already plays; a failed upgrade is not worth interrupting for.
+      this.setHd({ ...this.hdState, phase: "none", reason: hdReason(err) });
+      return;
     }
-    if (this.destroyed || this.recovering || this.local) return;
-    if (!stream.isHls) return; // no quality gain, so don't disturb playback
+    if (this.destroyed || this.recovering || this.local || gen !== this.qualityGen || !this.wantHd) return;
+    if (!stream.isHls) {
+      // No quality gain, so don't disturb playback.
+      this.setHd({ ...this.hdState, phase: "none", reason: "no HD stream" });
+      return;
+    }
     // A stitched stream only exists for hls.js; with no MSE there is nothing
     // that could play it, and 360p is already playing.
-    if (stream.virtual && !Hls.isSupported()) return;
+    if (stream.virtual && !Hls.isSupported()) {
+      this.setHd({ ...this.hdState, phase: "none", reason: "this device can't play it" });
+      return;
+    }
 
     const resumeAt = this.video.currentTime;
     const wasPlaying = !this.video.paused && !this.video.ended;
     this.upgraded = true;
-    this.attach(stream, resumeAt, wasPlaying);
+    // Paused (a note opened and not played yet): nobody is watching the climb,
+    // and hls.js only climbs while it plays, so the low first rung it picked
+    // would sit there as "HD loading" until Play. Start on the top rung
+    // instead, so the buffer ahead fills in full HD and Play opens sharp.
+    // Playing, the climb stays: a top-rung start would stall the picture.
+    this.attach(stream, resumeAt, wasPlaying, !wasPlaying);
   }
 
-  private attach(stream: ResolvedStream, resumeAt: number, autoplay: boolean): void {
+  /**
+   * `atTop` starts an HLS stream on its top rung instead of letting hls.js
+   * test the bandwidth on the lowest one first — "Start in HD" waited for this
+   * stream precisely so it would not open soft.
+   */
+  private attach(stream: ResolvedStream, resumeAt: number, autoplay: boolean, atTop = false): void {
     if (this.destroyed) return;
+    this.sourced = true;
     this.teardownHls();
+    if (!stream.isHls) this.setHd({ ...this.hdState, height: stream.height });
 
     const volume = this.video.volume;
     const muted = this.video.muted;
@@ -2245,7 +2764,15 @@ export class YtFreePlayer {
       if (autoplay || this.pendingPlay) this.play();
     };
 
-    if (stream.isHls && Hls.isSupported()) {
+    // A stitched stream exists only for hls.js. Any other HLS on a phone that
+    // can play it natively goes to the <video> itself (see `nativeHls`).
+    this.nativeHls =
+      stream.isHls &&
+      !stream.virtual &&
+      Platform.isMobile &&
+      this.video.canPlayType("application/vnd.apple.mpegurl") !== "";
+
+    if (stream.isHls && Hls.isSupported() && !this.nativeHls) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
@@ -2253,15 +2780,35 @@ export class YtFreePlayer {
         // come through `requestUrl`; see `virtual-loader.ts`.
         // A minute ahead at most: this is a stream, and every byte past what
         // the reader will watch is a byte of download by another name.
+        // A refused link is re-linked inside the loader, so an error that
+        // still reaches hls.js is one more retries will not cure. The default
+        // ladder (six tries, up to 8 s apart, two minutes per load) held a
+        // jump for most of a minute before the fall back to 360p.
         ...(stream.virtual
-          ? { loader: virtualLoader(stream.virtual), maxBufferLength: 30, maxMaxBufferLength: 60 }
+          ? {
+              loader: virtualLoader(stream.virtual),
+              maxBufferLength: 30,
+              maxMaxBufferLength: 60,
+              fragLoadPolicy: { default: VIRTUAL_FRAG_POLICY },
+            }
           : {}),
       });
       this.hls = hls;
+      if (atTop) {
+        // Before `loadSource`, so it runs ahead of the first fragment request:
+        // hls.js starts loading on media attach, after the manifest is parsed.
+        // Levels are sorted by bitrate, so the last one is the top rung.
+        hls.once(Hls.Events.MANIFEST_PARSED, (_evt, data) => {
+          if (data.levels.length > 1) hls.startLevel = data.levels.length - 1;
+        });
+      }
       hls.loadSource(stream.url);
       hls.attachMedia(this.video);
       if (stream.virtual) this.unhookJump = dropOnJump(hls, this.video);
       hls.on(Hls.Events.MANIFEST_PARSED, resume);
+      // The badge follows the rung actually on screen, not the one being
+      // fetched: a jump's low-res first chunk shows as the dip it is.
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_evt, data) => this.hdFromLevel(hls, data.level));
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (!data.fatal) return;
         if (stream.virtual) {
@@ -2273,6 +2820,7 @@ export class YtFreePlayer {
           // that will not seek.
           if (Date.now() < stream.expiresAt) {
             this.upgraded = false;
+            this.setHd({ phase: "none", height: 360, reason: "HD stream failed" });
             void this.recover("HD unavailable, back to 360p");
             return;
           }
@@ -2347,6 +2895,16 @@ export class YtFreePlayer {
    * media to seek. Setting `currentTime` on an element with no duration is
    * silently dropped, which would look exactly like a broken link.
    */
+  /** `seekWhenReady` without the play: the media waits at `seconds`, paused. */
+  cueWhenReady(seconds: number): void {
+    if (this.destroyed) return;
+    if (this.video.readyState >= 1) {
+      this.video.currentTime = seconds;
+      return;
+    }
+    this.video.addEventListener("loadedmetadata", () => (this.video.currentTime = seconds), { once: true });
+  }
+
   seekWhenReady(seconds: number): void {
     if (this.destroyed) return;
     if (this.video.readyState >= 1) {
@@ -2388,6 +2946,9 @@ export class YtFreePlayer {
    */
   play(): void {
     if (this.destroyed) return;
+    // Every Play is a tap or a media key: the one moment the silent element can
+    // be unlocked for a background pause later on.
+    primeSilence();
     // Asked for, so the background guard has no claim on it — including the
     // lock-screen Play button, which arrives here while the document is hidden.
     this.pausedWhileHidden = false;
@@ -2409,6 +2970,7 @@ export class YtFreePlayer {
   pause(): void {
     if (this.destroyed) return;
     this.pausedByTyping = false;
+    this.readerPauseAt = Date.now();
     // Including a Play that has not landed yet: "stop" means stop, whether the
     // video is playing or still on its way to playing.
     this.setPendingPlay(false);
@@ -2499,6 +3061,7 @@ export class YtFreePlayer {
   }
 
   private teardownHls(): void {
+    this.nativeHls = false;
     this.unhookJump?.();
     this.unhookJump = null;
     if (this.hls) {
@@ -2515,6 +3078,7 @@ export class YtFreePlayer {
     // this player — and every note in the vault keeps its scrolling locked.
     this.setImmersive(false);
     this.destroyed = true;
+    if (this.qualityTimer !== null) window.clearTimeout(this.qualityTimer);
     this.unhushNativeControls();
     this.stopSmartLoop();
     if (this.onVisibility) {
@@ -2524,6 +3088,14 @@ export class YtFreePlayer {
     if (this.onBackgroundVisibility) {
       document.removeEventListener("visibilitychange", this.onBackgroundVisibility);
       this.onBackgroundVisibility = null;
+    }
+    if (this.onKeepPlayingVisibility) {
+      document.removeEventListener("visibilitychange", this.onKeepPlayingVisibility);
+      this.onKeepPlayingVisibility = null;
+    }
+    if (this.fullscreenEndListener) {
+      document.removeEventListener("fullscreenchange", this.fullscreenEndListener);
+      this.fullscreenEndListener = null;
     }
     if (this.onDocPointer) {
       document.removeEventListener("pointerdown", this.onDocPointer, true);
@@ -2537,6 +3109,7 @@ export class YtFreePlayer {
     // exactly that — would otherwise leave a scroll listener on the window
     // measuring a button that no longer exists.
     this.watchPanelAnchor(false);
+    if (nowPlayingOwner === this) stopSilence();
     this.clearNowPlaying();
     this.teardownHls();
     this.video.removeAttribute("src");

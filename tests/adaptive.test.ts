@@ -9,6 +9,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildPlaylists,
+  locateIndex,
+  relinkingFetch,
+  resolveHdFromYtDlp,
+  ytDlpCandidates,
+  segmentAt,
   parseSidx,
   pickPair,
   resolveHd,
@@ -16,7 +21,7 @@ import {
   virtualBase,
   withRange,
 } from "../src/adaptive.ts";
-import type { AdaptiveFormat, ClientAnswer } from "../src/adaptive.ts";
+import type { AdaptiveFormat, ClientAnswer, YtDlpFormat } from "../src/adaptive.ts";
 import { virtualLoader } from "../src/virtual-loader.ts";
 
 /** A version-0 sidx box: `refs` are [size, durationInTimescaleUnits]. */
@@ -140,7 +145,9 @@ function fakeFetch(log: string[], refuse = false) {
 test("streamFromPair reads both indexes with the client's UA and expires with the URLs", async () => {
   const log: string[] = [];
   const stream = await streamFromPair("abcdefghijk", pickPair(formats)!, fakeFetch(log), "UA");
-  assert.deepEqual(log.sort(), ["136:741-800:UA", "137:741-800:UA", "140:632-700:UA"]);
+  // Both indexes, the 720p index, then a small read past the first minute of
+  // the top rung and the sound (the fake's two segments: the last one).
+  assert.deepEqual(log.sort(), ["136:741-800:UA", "137:1797-2796:UA", "137:741-800:UA", "140:1688-2687:UA", "140:632-700:UA"]);
   assert.equal(stream.mode, "quality");
   assert.equal(stream.isHls, true);
   assert.equal(stream.height, 1080);
@@ -192,6 +199,140 @@ test("resolveHd falls through clients, then to an HLS manifest, then throws", as
     resolveHd("abcdefghijk", ["android"], async () => answer(), fakeFetch([], true)),
     /no HD stream \(android: HTTP 403\)/,
   );
+});
+
+test("resolveHd with hlsFirst takes a manifest before any byte request (#25)", async () => {
+  const asked: string[] = [];
+  let reads = 0;
+  const counting = async (u: string, s: number, e: number, ua?: string) => {
+    reads += 1;
+    return fakeFetch([])(u, s, e, ua);
+  };
+  const ask = async (c: string): Promise<ClientAnswer> => {
+    asked.push(c);
+    return { adaptiveFormats: formats, hlsManifestUrl: c === "ios" ? "https://m/x.m3u8" : null, ua: "UA" };
+  };
+  const stream = await resolveHd("abcdefghijk", ["ios", "android"], ask, counting, undefined, true);
+  assert.equal(stream.url, "https://m/x.m3u8");
+  assert.equal(stream.virtual, undefined);
+  assert.deepEqual(asked, ["ios"]);
+  assert.equal(reads, 0);
+
+  // No manifest from the first client: the pair path runs as before.
+  const noHls = async (c: string): Promise<ClientAnswer> => {
+    return { adaptiveFormats: formats, hlsManifestUrl: null, ua: c };
+  };
+  assert.ok((await resolveHd("abcdefghijk", ["ios", "android"], noHls, fakeFetch([]), undefined, true)).virtual);
+});
+
+test("segmentAt finds the segment at or past a time, else the last", () => {
+  const segs = [0, 1, 2, 3].map((i) => ({ offset: i * 10, length: 10, duration: 40 }));
+  assert.equal(segmentAt(segs, 90).offset, 30); // starts at 120 s
+  assert.equal(segmentAt(segs, 0).offset, 0);
+  assert.equal(segmentAt(segs, 999).offset, 30);
+});
+
+test("a pair that serves only its opening is refused at resolve, and the next client plays", async () => {
+  // The first client's files answer the index and the opening, then 403 —
+  // the stall near 55 s. The second client's serve throughout.
+  const openingOnly = async (u: string, s: number, e: number, ua?: string) => {
+    if (ua === "A" && s > 1000) throw Object.assign(new Error("HTTP 403"), { status: 403 });
+    return fakeFetch([])(u, s, e, ua);
+  };
+  await assert.rejects(streamFromPair("abcdefghijk", pickPair(formats)!, openingOnly, "A"), /serves only the opening \(HTTP 403\)/);
+  const stream = await resolveHd(
+    "abcdefghijk",
+    ["android", "ios"],
+    async (c) => ({ adaptiveFormats: formats, hlsManifestUrl: null, ua: c === "android" ? "A" : "B" }),
+    openingOnly,
+  );
+  assert.ok(stream.virtual);
+});
+
+/** Tracks for `relinkingFetch`, and a fresh answer naming the same itags. */
+const tracks = () => {
+  const pair = pickPair(formats)!;
+  return [...pair.ladder, pair.audio];
+};
+const freshFormats = formats.map((f) => ({ ...f, url: f.url?.replace("rr1", "rr9") }));
+
+test("a refused link is re-linked to the same file from a fresh answer, once for every track", async () => {
+  const log: string[] = [];
+  let asks = 0;
+  const fetch = async (u: string, s: number, e: number, ua?: string) => {
+    log.push(`${u.includes("rr9") ? "new" : "old"}:${u.match(/itag=(\d+)/)?.[1]}:${ua}`);
+    if (u.includes("rr1")) throw Object.assign(new Error("HTTP 403"), { status: 403 });
+    return new ArrayBuffer(e - s + 1);
+  };
+  const ranged = relinkingFetch(tracks(), fetch, "A", {
+    clients: ["android"],
+    ask: async () => ((asks += 1), { adaptiveFormats: freshFormats, hlsManifestUrl: null, ua: "B" }),
+  });
+  // Video and sound refused at once: one ask, both re-linked.
+  const [v, a] = await Promise.all([ranged(url(137), 5000, 5999), ranged(url(140), 5000, 5999)]);
+  assert.equal(v.byteLength, 1000);
+  assert.equal(a.byteLength, 1000);
+  assert.equal(asks, 1);
+  // Later reads go straight to the new link with the new client's UA.
+  log.length = 0;
+  await ranged(url(136), 0, 9);
+  assert.deepEqual(log, ["new:136:B"]);
+});
+
+test("re-linking tries the next client, and gives up for good when none serves", async () => {
+  const served = (bad: string[]) => async (u: string, s: number, e: number, ua?: string) => {
+    if (bad.includes(ua ?? "")) throw Object.assign(new Error("HTTP 403"), { status: 403 });
+    return new ArrayBuffer(e - s + 1);
+  };
+  let asks = 0;
+  const reask = (bad: string[]) => ({
+    clients: ["android", "ios"],
+    ask: async (c: string) => ((asks += 1), { adaptiveFormats: freshFormats, hlsManifestUrl: null, ua: c === "android" ? "A" : "I" }),
+  });
+  // The same client is refused again; the other serves.
+  const ok = relinkingFetch(tracks(), served(["A"]), "A", reask(["A"]));
+  assert.equal((await ok(url(137), 0, 9)).byteLength, 10);
+
+  // Nobody serves: the refusal goes through, and the next one does not ask.
+  asks = 0;
+  const no = relinkingFetch(tracks(), served(["A", "I"]), "A", reask(["A", "I"]));
+  await assert.rejects(no(url(137), 0, 9), /403/);
+  assert.equal(asks, 2);
+  await assert.rejects(no(url(137), 0, 9), /403/);
+  assert.equal(asks, 2);
+});
+
+test("a dropped connection is not re-linked: hls.js retries it", async () => {
+  let asks = 0;
+  const ranged = relinkingFetch(tracks(), async () => { throw new Error("net::ERR_CONNECTION_RESET"); }, "A", {
+    clients: ["android"],
+    ask: async () => ((asks += 1), null),
+  });
+  await assert.rejects(ranged(url(137), 0, 9), /RESET/);
+  assert.equal(asks, 0);
+});
+
+test("a cancel during a re-link is not a dead link, and keeps the fresh answer", async () => {
+  let asks = 0;
+  const controller = new AbortController();
+  const fetch = async (u: string, s: number, e: number, _ua?: string, io?: { signal?: AbortSignal }) => {
+    if (io?.signal?.aborted) throw Object.assign(new Error("cancelled"), { name: "AbortError" });
+    if (u.includes("rr1")) throw Object.assign(new Error("HTTP 403"), { status: 403 });
+    return new ArrayBuffer(e - s + 1);
+  };
+  const ranged = relinkingFetch(tracks(), fetch, "A", {
+    clients: ["android", "ios"],
+    ask: async () => {
+      asks += 1;
+      controller.abort(); // the player jumps away while the clients are asked
+      return { adaptiveFormats: freshFormats, hlsManifestUrl: null, ua: "B" };
+    },
+  });
+  await assert.rejects(ranged(url(137), 0, 9, { signal: controller.signal }), { name: "AbortError" });
+  assert.equal(asks, 1);
+  // Not marked dead, and the fresh answer was kept: the next read goes to it.
+  assert.equal((await ranged(url(137), 0, 9)).byteLength, 10);
+  assert.equal(asks, 1);
 });
 
 test("withRange adds or replaces the range parameter", () => {
@@ -278,6 +419,100 @@ test("the loader reports the HTTP status and stays quiet after abort", async () 
   assert.deepEqual(b.events, []);
 });
 
+test("an aborted load cancels its download and tells hls.js it was aborted (GitHub #23)", async () => {
+  let signal: AbortSignal | undefined;
+  const Loader = virtualLoader({
+    files: {},
+    fetchRange: (_u, _s, _e, io) =>
+      new Promise((_resolve, reject) => {
+        signal = io?.signal;
+        io?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("cancelled"), { name: "AbortError" })));
+      }),
+  });
+  const a = callbacks();
+  const events = a.events;
+  const loader = new Loader({} as never);
+  loader.load(
+    { url: "https://g/v", responseType: "arraybuffer", rangeStart: 0, rangeEnd: 10 },
+    loaderConfig,
+    { ...a.cb, onAbort: () => events.push("abort") } as never,
+  );
+  assert.equal(signal?.aborted, false);
+  loader.abort();
+  assert.equal(signal?.aborted, true, "the download is cancelled");
+  assert.equal(loader.stats.aborted, true);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(events, ["abort"], "one onAbort, and the cancel's rejection is not an error");
+
+  // destroy() cancels too, silently, as hls.js's own loader does.
+  const b = callbacks();
+  const quiet = new Loader({} as never);
+  quiet.load(
+    { url: "https://g/v", responseType: "arraybuffer", rangeStart: 0, rangeEnd: 10 },
+    loaderConfig,
+    { ...b.cb, onAbort: () => b.events.push("abort") } as never,
+  );
+  quiet.destroy();
+  assert.equal(signal?.aborted, true);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(b.events, []);
+});
+
+test("the loader reports first byte and bytes so far while a segment downloads (GitHub #23)", async () => {
+  let progress!: (n: number) => void;
+  let finish!: () => void;
+  const Loader = virtualLoader({
+    files: {},
+    fetchRange: (_u, s, e, io) =>
+      new Promise((resolve) => {
+        progress = (n) => io?.onProgress?.(n);
+        finish = () => resolve(new ArrayBuffer(e - s + 1));
+      }),
+  });
+  const a = callbacks();
+  const loader = new Loader({} as never);
+  loader.load({ url: "https://g/v", responseType: "arraybuffer", rangeStart: 0, rangeEnd: 1000 }, loaderConfig, a.cb as never);
+  const { stats } = loader;
+  // The size is known up front, nothing loaded, no first byte yet.
+  assert.equal(stats.total, 1000);
+  assert.equal(stats.loaded, 0);
+  assert.equal(stats.loading.first, 0);
+  await new Promise((r) => setTimeout(r, 5));
+  progress(400);
+  const first = stats.loading.first;
+  assert.ok(first > stats.loading.start, "first byte is after the start, not the start");
+  assert.equal(stats.loaded, 400);
+  assert.notEqual(stats.loaded, stats.total, "hls.js reads loaded === total as finished");
+  progress(700);
+  assert.equal(stats.loading.first, first, "the first byte is stamped once");
+  assert.equal(stats.loaded, 700);
+  finish();
+  await a.done;
+  assert.deepEqual(a.events, ["ok:1000"]);
+  assert.equal(stats.loading.first, first);
+  assert.equal(stats.loaded, 1000);
+});
+
+test("a late answer to a superseded load never reaches the next load", async () => {
+  const pending: ((b: ArrayBuffer) => void)[] = [];
+  const Loader = virtualLoader({
+    files: {},
+    fetchRange: () => new Promise((resolve) => pending.push(resolve)),
+  });
+  const loader = new Loader({} as never);
+  const a = callbacks();
+  loader.load({ url: "https://g/v", responseType: "arraybuffer", rangeStart: 0, rangeEnd: 10 }, loaderConfig, a.cb as never);
+  const b = callbacks();
+  loader.load({ url: "https://g/v", responseType: "arraybuffer", rangeStart: 20, rangeEnd: 40 }, loaderConfig, b.cb as never);
+  pending[0](new ArrayBuffer(10));
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(a.events, []);
+  assert.deepEqual(b.events, []);
+  pending[1](new ArrayBuffer(20));
+  await b.done;
+  assert.deepEqual(b.events, ["ok:20"]);
+});
+
 test("pickPair keeps the original language over a higher-bitrate dub", () => {
   const dubbed: AdaptiveFormat[] = [
     formats[1],
@@ -289,4 +524,61 @@ test("pickPair keeps the original language over a higher-bitrate dub", () => {
   // No default flag at all: "original" still wins.
   const noDefault = dubbed.map((f) => (f.audioTrack ? { ...f, audioTrack: { ...f.audioTrack, audioIsDefault: false } } : f));
   assert.match(pickPair(noDefault)!.audio.url, /lang=en/);
+});
+
+/** An MP4 head: `ftyp`, `moov`, then a sidx of two 5 s segments. */
+function mp4Head(moovSize = 600): ArrayBuffer {
+  const index = new Uint8Array(sidx([[1000, 5000], [1000, 5000]]));
+  const buf = new Uint8Array(32 + moovSize + index.length);
+  const v = new DataView(buf.buffer);
+  v.setUint32(0, 32);
+  "ftyp".split("").forEach((c, i) => v.setUint8(4 + i, c.charCodeAt(0)));
+  v.setUint32(32, moovSize);
+  "moov".split("").forEach((c, i) => v.setUint8(36 + i, c.charCodeAt(0)));
+  buf.set(index, 32 + moovSize);
+  return buf.buffer;
+}
+
+test("locateIndex: init is everything before the sidx, index is the sidx box", () => {
+  assert.deepEqual(locateIndex(mp4Head()), { init: { start: 0, end: 631 }, index: { start: 632, end: 632 + 32 + 24 - 1 } });
+  // A head that ends inside moov has no answer.
+  assert.equal(locateIndex(mp4Head().slice(0, 100)), null);
+});
+
+const ytUrl = (id: string) => `https://rr5.googlevideo.com/videoplayback?itag=${id}&expire=${EXPIRE}`;
+const ytFormats: YtDlpFormat[] = [
+  { format_id: "18", url: ytUrl("18"), protocol: "https", ext: "mp4", vcodec: "avc1.42001E", acodec: "mp4a.40.2", height: 360 },
+  { format_id: "137", url: ytUrl("137"), protocol: "https", ext: "mp4", vcodec: "avc1.640028", acodec: "none", width: 1920, height: 1080, fps: 30, tbr: 4000 },
+  { format_id: "136", url: ytUrl("136"), protocol: "https", ext: "mp4", vcodec: "avc1.4d401f", acodec: "none", width: 1280, height: 720, fps: 30, tbr: 2000 },
+  { format_id: "248", url: ytUrl("248"), protocol: "https", ext: "webm", vcodec: "vp9", acodec: "none", height: 1080 },
+  { format_id: "96", url: ytUrl("96"), protocol: "m3u8_native", ext: "mp4", vcodec: "avc1.640028", acodec: "mp4a.40.2", height: 1080 },
+  { format_id: "140-drc", url: ytUrl("140"), protocol: "https", ext: "m4a", vcodec: "none", acodec: "mp4a.40.2", tbr: 130 },
+  { format_id: "140-1", url: ytUrl("140"), protocol: "https", ext: "m4a", vcodec: "none", acodec: "mp4a.40.2", tbr: 140, language: "de", language_preference: -10, format_note: "German (dubbed-auto)" },
+  { format_id: "140-0", url: ytUrl("140"), protocol: "https", ext: "m4a", vcodec: "none", acodec: "mp4a.40.2", tbr: 129, language: "en", language_preference: 10, format_note: "English (original)" },
+];
+
+test("ytDlpCandidates: H.264 MP4 per height over https, and the original-language AAC", () => {
+  const picked = ytDlpCandidates(ytFormats).map((f) => f.format_id);
+  assert.deepEqual(picked, ["137", "136", "140-0"]);
+});
+
+test("resolveHdFromYtDlp reads each head, then builds and checks the stitched stream", async () => {
+  const log: string[] = [];
+  const fetch = async (u: string, start: number, end: number): Promise<ArrayBuffer> => {
+    log.push(`${u.match(/itag=(\d+)/)?.[1]}:${start}-${end}`);
+    return start === 0 ? mp4Head() : sidx([[1000, 5000], [1000, 5000]]);
+  };
+  const stream = await resolveHdFromYtDlp("abcdefghijk", ytFormats, fetch);
+  assert.equal(stream.height, 1080);
+  assert.ok(stream.virtual);
+  // Heads of 1080p, 720p and the sound, then the indexes found in them.
+  assert.ok(log.includes("137:0-65535") && log.includes("136:0-65535") && log.includes("140:0-65535"));
+  assert.ok(log.includes("137:632-687") && log.includes("140:632-687"));
+});
+
+test("resolveHdFromYtDlp throws when no file has a readable head", async () => {
+  await assert.rejects(
+    resolveHdFromYtDlp("abcdefghijk", ytFormats, async () => { throw new Error("HTTP 403"); }),
+    /no HD pair/,
+  );
 });

@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  handoffTarget,
   handoffUri,
   isYouTubeUrl,
   parseStartTime,
@@ -98,4 +99,17 @@ test("youTubeLinkAt ignores embeds and other sites", () => {
 test("the bookmarklet points at the handler", async () => {
   const { HANDOFF_BOOKMARKLET } = await import("../src/handoff.ts");
   assert.match(HANDOFF_BOOKMARKLET, /^javascript:location\.href='obsidian:\/\/ytfree\?url='\+encodeURIComponent\(location\.href\)$/);
+});
+
+test("obsidian://ytfree picks a video, a hub screen, or says the view is unknown", () => {
+  const url = `https://youtu.be/${ID}`;
+  assert.deepEqual(handoffTarget({ action: "ytfree", url }), { kind: "video", url });
+  assert.deepEqual(handoffTarget({ url, view: "search" }), { kind: "video", url });
+  assert.deepEqual(handoffTarget({ action: "ytfree" }), { kind: "hub", screen: "hub" });
+  assert.deepEqual(handoffTarget({ url: "  " }), { kind: "hub", screen: "hub" });
+  assert.deepEqual(handoffTarget({ view: "subscriptions" }), { kind: "hub", screen: "hub" });
+  assert.deepEqual(handoffTarget({ view: "Subscriptions" }), { kind: "hub", screen: "hub" });
+  assert.deepEqual(handoffTarget({ view: "search" }), { kind: "hub", screen: "search" });
+  assert.deepEqual(handoffTarget({ view: "constructor" }), { kind: "unknown-view", view: "constructor" });
+  assert.deepEqual(handoffTarget({ view: "nope" }), { kind: "unknown-view", view: "nope" });
 });

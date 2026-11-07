@@ -1,0 +1,35 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { parsePlayerMessage, playerErrorText, playerPageUrl, qualityLabel } from "../src/youtube-player.ts";
+
+test("playerPageUrl carries the video, a whole-second start and a non-1 speed", () => {
+  assert.equal(
+    playerPageUrl("aqz-KE-bpKQ", 31.9, 1.5),
+    "https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ&t=31&rate=1.5",
+  );
+  assert.equal(playerPageUrl("aqz-KE-bpKQ", 0, 1), "https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ");
+  assert.equal(playerPageUrl("aqz-KE-bpKQ", -4, 1), "https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ");
+});
+
+test("parsePlayerMessage reads the page's messages and nothing else", () => {
+  assert.equal(parsePlayerMessage(null), null);
+  assert.equal(parsePlayerMessage("x"), null);
+  assert.equal(parsePlayerMessage({ source: "other", type: "ready" }), null);
+  assert.equal(parsePlayerMessage({ source: "ytfree-player", type: "nope" }), null);
+  assert.deepEqual(parsePlayerMessage({ source: "ytfree-player", type: "ready" }), { type: "ready" });
+  assert.deepEqual(parsePlayerMessage({ source: "ytfree-player", type: "error", code: 153 }), { type: "error", code: 153 });
+  assert.deepEqual(
+    parsePlayerMessage({ source: "ytfree-player", type: "status", time: 12.5, duration: "x", state: 1, quality: "hd1080" }),
+    { type: "status", time: 12.5, duration: 0, state: 1, rate: 1, quality: "hd1080" },
+  );
+});
+
+test("quality and error text", () => {
+  assert.equal(qualityLabel("hd1080"), "1080p");
+  assert.equal(qualityLabel("medium"), "360p");
+  assert.equal(qualityLabel(""), "…");
+  assert.equal(qualityLabel("weird"), "weird");
+  assert.match(playerErrorText(150), /doesn't allow/);
+  assert.match(playerErrorText(153), /153/);
+  assert.match(playerErrorText("x"), /\(x\)/);
+});
