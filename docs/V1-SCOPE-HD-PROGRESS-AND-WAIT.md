@@ -41,6 +41,11 @@ sharp".
    - A remembered position or a tapped timestamp still lands where it should.
 4. **Jumps are unchanged**: a jump into unloaded video still starts its first chunk at the lowest
    rung and climbs back (Isaiah's rule of 2026-10-15). The badge shows that dip.
+5. **HD is ready before Play** (Isaiah, 2026-11-07: "If I open a video preview/note and don't hit
+   play, it will just stay HD loading forever"). hls.js only climbs the ladder while playing, so
+   HD that arrived while paused sat on its low first rung. HD that arrives while the video is
+   paused now starts on the top rung and fills the buffer ahead in full HD; the badge reads the
+   top rung (e.g. `1080p`) before Play. HD that arrives mid-play still climbs as before.
 
 ## Out of scope (backlog)
 
@@ -62,3 +67,6 @@ sharp".
 4. **Phone (only with HD on this phone on).** Repeat 2 with "Start in HD" on: one tap on the
    poster starts it once HD is ready, no second tap.
 5. **Settings off for HD entirely.** The badge reads `360p`, nothing waits.
+6. **Setting off, don't press Play.** Open a video note and leave it. Within about 10-30 seconds
+   the badge goes from `360p · finding HD…` to `1080p` (not `HD loading`) while still paused.
+   Press Play: it opens sharp.

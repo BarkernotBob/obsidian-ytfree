@@ -4505,6 +4505,15 @@ export default class YtFreePlugin extends Plugin {
           "Could not play this video. yt-dlp is not installed here, and the phone's way of playing (without yt-dlp) did not work for this video either.",
           "brew install yt-dlp",
         );
+      } else if (/confirm you.?re not a bot|LOGIN_REQUIRED/i.test((err as Error).message)) {
+        // Not a broken yt-dlp: YouTube is refusing signed-out requests from
+        // this network for now, and upgrading would change nothing.
+        this.renderError(
+          wrapper,
+          "YouTube is asking this network to prove it isn't a bot, so it won't play signed out right now. " +
+            "Run the “Sign in to YouTube” command and playback will use your session, or try again in a few hours.",
+          (err as Error).message,
+        );
       } else {
         this.renderError(
           wrapper,
@@ -5130,7 +5139,7 @@ export default class YtFreePlugin extends Plugin {
       try {
         const { findYtDlp, resolveStream } = await desktop();
         if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-        return await resolveStream(videoId, this.ytDlpPath, "fast");
+        return await resolveStream(videoId, this.ytDlpPath, "fast", await this.botCookies());
       } catch (err) {
         ytDlpError = err;
         // Probing four paths on every video is not worth it once it is known
@@ -5158,6 +5167,16 @@ export default class YtFreePlugin extends Plugin {
     }
   }
 
+  /**
+   * The signed-in session's cookie file, for yt-dlp to retry with when YouTube
+   * answers with its bot check. Undefined when nobody has signed in.
+   */
+  private async botCookies(): Promise<string | undefined> {
+    const { cookieFileExists, resolveCookieFile } = await desktop();
+    const file = resolveCookieFile(this.settings.accountCookieFile);
+    return cookieFileExists(file) ? file : undefined;
+  }
+
   private async desktopQuality(videoId: string): Promise<ResolvedStream> {
     const { resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
     try {
@@ -5170,10 +5189,11 @@ export default class YtFreePlugin extends Plugin {
       // yt-dlp's serve the whole video, stitched the same way. Its HLS lookup
       // stays last, for the odd video with a ladder and no MP4 pair.
       try {
-        return await resolveHdFromYtDlpFormats(videoId, await ytDlpFormats(videoId, this.ytDlpPath));
+        const formats = await ytDlpFormats(videoId, this.ytDlpPath, await this.botCookies());
+        return await resolveHdFromYtDlpFormats(videoId, formats);
       } catch (err) {
         console.warn("YT Free: HD via InnerTube and via yt-dlp both failed", hdError, err);
-        return await resolveStream(videoId, this.ytDlpPath, "quality");
+        return await resolveStream(videoId, this.ytDlpPath, "quality", await this.botCookies());
       }
     }
   }
