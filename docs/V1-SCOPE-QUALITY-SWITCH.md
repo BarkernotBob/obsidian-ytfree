@@ -7,7 +7,7 @@
 > or to HD even if setting is 360p."
 
 **Status:** Scoped and built 2026-11-04 on branch `claude/project-thread-mm476q`, stacked on
-PR #21 (badge, Start in HD, desktop HD via yt-dlp). Awaiting manual test.
+PR #21 (badge, Start in HD, desktop HD via yt-dlp). Manual test passed 2026-11-07 (Isaiah: "Looks good").
 
 ## In scope
 
