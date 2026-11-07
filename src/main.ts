@@ -16,6 +16,7 @@ import {
   setIcon,
   Setting,
   TFile,
+  type WorkspaceLeaf,
 } from "obsidian";
 import {
   AccountSession,
@@ -735,6 +736,7 @@ export default class YtFreePlugin extends Plugin {
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
     await this.progress.load();
     this.watchProgressFile();
+    this.setupNowPlayingButton();
     this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
     await this.silence.load();
     await this.setupSubscriptions();
@@ -2790,7 +2792,7 @@ export default class YtFreePlugin extends Plugin {
   /**
    * Fold the video away, or bring it back — the section buttons' second tap.
    *
-   * Unlike the collapse control it does not pause: the reader asked for room to
+   * Like the collapse control it does not pause: the reader asked for room to
    * read in, not for the video to stop.
    */
   private toggleHeaderFor(videoId: string): void {
@@ -4751,6 +4753,80 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
+   * The Now playing button: one tap back to the note whose video is playing
+   * (Isaiah, 2026-11-07).
+   *
+   * Asked for as "tapping the lock-screen tile returns me to the video", but
+   * neither iOS nor macOS tells the app which door it was opened through, so
+   * the tile cannot be told apart from the app switcher. Isaiah chose a button
+   * over jumping on every return. It shows only while a video is playing (or
+   * was paused from the lock screen) and its note is not the one in front: on
+   * a phone as a pill over the note, on the desktop in the status bar.
+   *
+   * Driven by `play`/`pause` caught at the document — media events do not
+   * bubble, but they do pass through the capture phase — and by tab changes.
+   */
+  private setupNowPlayingButton(): void {
+    const button = Platform.isMobile
+      ? document.body.createEl("button", { cls: "ytfree-now-playing" })
+      : this.addStatusBarItem().createEl("button", { cls: "ytfree-now-playing-status" });
+    this.register(() => button.remove());
+    button.hide();
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      void this.revealPlayingNote();
+    });
+
+    const refresh = (): void => {
+      const target = this.playingNoteEntry();
+      if (!target) {
+        button.hide();
+        return;
+      }
+      const title = this.nowPlayingFor(target.videoId, target.sourcePath)?.title ?? "video";
+      button.setText(`▶ ${title}`);
+      button.setAttr("aria-label", `Go to the playing video: ${title}`);
+      button.show();
+    };
+    for (const event of ["play", "pause", "ended", "emptied"]) {
+      this.registerDomEvent(document, event as keyof DocumentEventMap, refresh, { capture: true });
+    }
+    this.registerEvent(this.app.workspace.on("active-leaf-change", refresh));
+    this.registerEvent(this.app.workspace.on("layout-change", refresh));
+    this.registerDomEvent(document, "visibilitychange", refresh);
+    this.addCommand({
+      id: "go-to-playing-video",
+      name: "Go to the playing video",
+      callback: () => void this.revealPlayingNote(),
+    });
+  }
+
+  /** The playing video's entry, if its note is open in a tab that is not in front. */
+  private playingNoteEntry(): PlayerEntry | null {
+    const entry = [...this.players.values()].find((e) => e.player.isNowPlaying());
+    if (!entry || !entry.sourcePath || entry === this.preview) return null;
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (active?.file?.path === entry.sourcePath) return null;
+    return this.leafFor(entry.sourcePath) ? entry : null;
+  }
+
+  private leafFor(path: string): WorkspaceLeaf | null {
+    return (
+      this.app.workspace
+        .getLeavesOfType("markdown")
+        .find((l) => l.view instanceof MarkdownView && l.view.file?.path === path) ?? null
+    );
+  }
+
+  private async revealPlayingNote(): Promise<void> {
+    const entry = this.playingNoteEntry();
+    const leaf = entry ? this.leafFor(entry.sourcePath) : null;
+    if (!leaf) return;
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  /**
    * This video's session record, created empty the first time it is asked for.
    *
    * Never pruned. One record is six optional fields against a video ID, and a
@@ -5433,16 +5509,12 @@ export default class YtFreePlugin extends Plugin {
    * lost the reader's place in the video every time. Now only the media box
    * loses its height: the element stays mounted, so the position, the buffer
    * and any audio are all exactly where they were, and coming back is instant.
-   * Collapsing by hand also pauses — you are putting the video away.
+   * Collapsing does not pause (Isaiah, 2026-11-04): it hides the picture and
+   * the sound carries on, the same as folding it away from a section button.
    */
   private toggleCollapse(entry: PlayerEntry | null): void {
     if (!entry) return;
-    if (entry.collapsed) {
-      this.setCollapsed(entry, null);
-      return;
-    }
-    entry.player.pause();
-    this.setCollapsed(entry, "manual");
+    this.setCollapsed(entry, entry.collapsed ? null : "manual");
   }
 
   private setCollapsed(entry: PlayerEntry, mode: CollapseMode): void {

@@ -72,6 +72,21 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Re-link** (term): swapping a stitched stream's googlevideo links for fresh ones for the same
   files (same itag), keeping every byte offset (`relinkingFetch` in `src/adaptive.ts`).
 
+### 2026-11-04 (Isaiah)
+
+- **Keep playing on the phone**: leaving fullscreen, the collapse button, leaving Obsidian and
+  locking the phone do not pause the video. Reverses the old "collapse pauses" rule. Whether iOS
+  allows the background resume is unmeasured; see
+  [docs/V1-SCOPE-KEEP-PLAYING.md](docs/V1-SCOPE-KEEP-PLAYING.md).
+
+### 2026-11-07 (Isaiah)
+
+- **Background pause stays resumable**: a video paused from the lock screen or AirPods stays ready
+  to play for up to an hour (a silent loop keeps iOS from suspending Obsidian).
+- **Now playing button, not auto-jump**: the lock-screen tile can't be told apart from the app
+  switcher, so instead of jumping on return, a "▶ title" pill (phone) / status-bar item (desktop)
+  takes you to the playing note. Isaiah's call.
+
 ### 2026-10-14 (Isaiah)
 
 - **Preview (GitHub #8)**: fullscreen on the phone, not a card. Decided while building: the

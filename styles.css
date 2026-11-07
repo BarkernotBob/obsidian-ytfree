@@ -4118,3 +4118,37 @@ body.ytfree-immersive-open .ytfree-preview-close {
   border: 0;
   background: #000;
 }
+
+/*
+ * The Now playing button (see `setupNowPlayingButton`). On a phone, a pill
+ * above the bottom toolbar, only while a video plays in a tab that is not in
+ * front. Under modals, so an open Preview covers it.
+ */
+.ytfree-now-playing {
+  position: fixed;
+  right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
+  z-index: 20;
+  max-width: min(70vw, 320px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-small);
+  box-shadow: var(--shadow-s);
+}
+
+.ytfree-now-playing-status {
+  max-width: 240px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+  height: auto;
+  font-size: var(--font-ui-smaller);
+  background: none;
+  box-shadow: none;
+}
