@@ -581,7 +581,10 @@
   border-radius: var(--radius-m);
   background: var(--background-primary);
   box-shadow: var(--shadow-l);
-  z-index: 21;
+  /* Obsidian's menu layer: above the Preview modal and the immersive view (both
+     --layer-modal, 50). The panel is on document.body while open (#52), so this
+     is compared against them directly. */
+  z-index: calc(var(--layer-menu, 65) + 1);
 }
 
 /* 44pt rows, like every other list a thumb has to hit on a phone. */
@@ -613,7 +616,7 @@
 .ytfree-panel-scrim {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: var(--layer-menu, 65);
   background: transparent;
   visibility: hidden;
   opacity: 0;

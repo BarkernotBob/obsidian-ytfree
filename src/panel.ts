@@ -89,8 +89,13 @@ export type PanelRoom =
       anchor: PanelRect;
       /** What the panel wants to be, measured with no cap applied. */
       panel: { width: number; height: number };
-      /** The visible viewport. */
-      viewport: { width: number; height: number };
+      /**
+       * The visible viewport. `offsetTop`/`offsetLeft` are where it sits inside
+       * the layout viewport (iOS shifts it when the keyboard is up or the page
+       * is pinch-zoomed); the anchor and the returned `top`/`left` are both in
+       * layout-viewport coordinates, which is what `position: fixed` uses.
+       */
+      viewport: { width: number; height: number; offsetTop?: number; offsetLeft?: number };
       /**
        * Chrome overlapping the viewport at top and bottom — a phone's safe
        * area, and Obsidian's own mobile toolbar. Room is what is left.
@@ -130,9 +135,18 @@ export function panelPlacement(room: PanelRoom): PanelPlacement {
   const inset = room.inset ?? { top: 0, bottom: 0 };
   const gap = PANEL_POPOVER_GAP_PX;
   const margin = PANEL_EDGE_MARGIN_PX;
+  // Work in visible-viewport coordinates, then hand back layout ones.
+  const dy = room.viewport.offsetTop ?? 0;
+  const dx = room.viewport.offsetLeft ?? 0;
+  const anchor = {
+    top: room.anchor.top - dy,
+    bottom: room.anchor.bottom - dy,
+    left: room.anchor.left - dx,
+    right: room.anchor.right - dx,
+  };
 
-  const above = room.anchor.top - inset.top - gap - margin;
-  const below = room.viewport.height - inset.bottom - room.anchor.bottom - gap - margin;
+  const above = anchor.top - inset.top - gap - margin;
+  const below = room.viewport.height - inset.bottom - anchor.bottom - gap - margin;
 
   // Upward by preference — the button lives on a control bar under the picture,
   // and a menu that covers the picture covers less than one that covers the
@@ -149,11 +163,11 @@ export function panelPlacement(room: PanelRoom): PanelPlacement {
   // its right edge is the one the panel shares. Clamped rather than flipped —
   // flipping a panel that is nearly as wide as the screen only moves which edge
   // it runs past, and the clamp reaches the same answer without the jump.
-  const left = clamp(room.anchor.right - width, margin, room.viewport.width - margin - width);
+  const left = clamp(anchor.right - width, margin, room.viewport.width - margin - width) + dx;
 
-  const top = side === "up" ? room.anchor.top - gap - height : room.anchor.bottom + gap;
+  const top = (side === "up" ? anchor.top - gap - height : anchor.bottom + gap) + dy;
 
-  return { mode: "anchored", left, top: Math.round(top), width, maxHeight: height, side };
+  return { mode: "anchored", left: Math.round(left), top: Math.round(top), width, maxHeight: height, side };
 }
 
 /**
@@ -168,8 +182,9 @@ export function panelPlacement(room: PanelRoom): PanelPlacement {
  */
 export function anchorVisible(
   anchor: PanelRect,
-  viewport: { height: number },
+  viewport: { height: number; offsetTop?: number },
   inset: { top: number; bottom: number } = { top: 0, bottom: 0 },
 ): boolean {
-  return anchor.bottom > inset.top && anchor.top < viewport.height - inset.bottom;
+  const dy = viewport.offsetTop ?? 0;
+  return anchor.bottom - dy > inset.top && anchor.top - dy < viewport.height - inset.bottom;
 }
