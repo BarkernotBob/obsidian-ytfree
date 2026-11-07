@@ -1,0 +1,571 @@
+{
+ "formats": [
+  {
+   "format_id": "9000",
+   "url": "https://fixture.invalid/v/9000?expire=4102444800",
+   "protocol": "https",
+   "ext": "mp4",
+   "vcodec": "avc1.640028",
+   "acodec": "none",
+   "width": 1920,
+   "height": 1080,
+   "fps": 30,
+   "tbr": 4500
+  },
+  {
+   "format_id": "9001",
+   "url": "https://fixture.invalid/v/9001?expire=4102444800",
+   "protocol": "https",
+   "ext": "mp4",
+   "vcodec": "avc1.4d401f",
+   "acodec": "none",
+   "width": 1280,
+   "height": 720,
+   "fps": 30,
+   "tbr": 2500
+  },
+  {
+   "format_id": "9002",
+   "url": "https://fixture.invalid/v/9002?expire=4102444800",
+   "protocol": "https",
+   "ext": "mp4",
+   "vcodec": "avc1.4d401e",
+   "acodec": "none",
+   "width": 854,
+   "height": 480,
+   "fps": 30,
+   "tbr": 1000
+  },
+  {
+   "format_id": "9900",
+   "url": "https://fixture.invalid/v/9900?expire=4102444800",
+   "protocol": "https",
+   "ext": "m4a",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2",
+   "tbr": 128,
+   "language_preference": 10
+  },
+  {
+   "format_id": "18",
+   "url": "https://fixture.invalid/v/18?expire=4102444800",
+   "protocol": "https",
+   "ext": "mp4",
+   "vcodec": "avc1.42001E",
+   "acodec": "mp4a.40.2",
+   "width": 640,
+   "height": 360
+  }
+ ],
+ "duration": 100,
+ "heatmap": [
+  {
+   "start_time": 0,
+   "end_time": 1,
+   "value": 0.1
+  },
+  {
+   "start_time": 1,
+   "end_time": 2,
+   "value": 0.1
+  },
+  {
+   "start_time": 2,
+   "end_time": 3,
+   "value": 0.1
+  },
+  {
+   "start_time": 3,
+   "end_time": 4,
+   "value": 0.1
+  },
+  {
+   "start_time": 4,
+   "end_time": 5,
+   "value": 0.1
+  },
+  {
+   "start_time": 5,
+   "end_time": 6,
+   "value": 0.1
+  },
+  {
+   "start_time": 6,
+   "end_time": 7,
+   "value": 0.1
+  },
+  {
+   "start_time": 7,
+   "end_time": 8,
+   "value": 0.1
+  },
+  {
+   "start_time": 8,
+   "end_time": 9,
+   "value": 0.1
+  },
+  {
+   "start_time": 9,
+   "end_time": 10,
+   "value": 0.1
+  },
+  {
+   "start_time": 10,
+   "end_time": 11,
+   "value": 0.1
+  },
+  {
+   "start_time": 11,
+   "end_time": 12,
+   "value": 0.1
+  },
+  {
+   "start_time": 12,
+   "end_time": 13,
+   "value": 0.1
+  },
+  {
+   "start_time": 13,
+   "end_time": 14,
+   "value": 0.1
+  },
+  {
+   "start_time": 14,
+   "end_time": 15,
+   "value": 0.1
+  },
+  {
+   "start_time": 15,
+   "end_time": 16,
+   "value": 0.1
+  },
+  {
+   "start_time": 16,
+   "end_time": 17,
+   "value": 0.1
+  },
+  {
+   "start_time": 17,
+   "end_time": 18,
+   "value": 0.1
+  },
+  {
+   "start_time": 18,
+   "end_time": 19,
+   "value": 0.1
+  },
+  {
+   "start_time": 19,
+   "end_time": 20,
+   "value": 0.1
+  },
+  {
+   "start_time": 20,
+   "end_time": 21,
+   "value": 0.1
+  },
+  {
+   "start_time": 21,
+   "end_time": 22,
+   "value": 0.1
+  },
+  {
+   "start_time": 22,
+   "end_time": 23,
+   "value": 0.1
+  },
+  {
+   "start_time": 23,
+   "end_time": 24,
+   "value": 0.1
+  },
+  {
+   "start_time": 24,
+   "end_time": 25,
+   "value": 0.1
+  },
+  {
+   "start_time": 25,
+   "end_time": 26,
+   "value": 0.1
+  },
+  {
+   "start_time": 26,
+   "end_time": 27,
+   "value": 0.1
+  },
+  {
+   "start_time": 27,
+   "end_time": 28,
+   "value": 0.1
+  },
+  {
+   "start_time": 28,
+   "end_time": 29,
+   "value": 0.1
+  },
+  {
+   "start_time": 29,
+   "end_time": 30,
+   "value": 0.1
+  },
+  {
+   "start_time": 30,
+   "end_time": 31,
+   "value": 0.1
+  },
+  {
+   "start_time": 31,
+   "end_time": 32,
+   "value": 0.1
+  },
+  {
+   "start_time": 32,
+   "end_time": 33,
+   "value": 0.1
+  },
+  {
+   "start_time": 33,
+   "end_time": 34,
+   "value": 0.1
+  },
+  {
+   "start_time": 34,
+   "end_time": 35,
+   "value": 0.1
+  },
+  {
+   "start_time": 35,
+   "end_time": 36,
+   "value": 0.1
+  },
+  {
+   "start_time": 36,
+   "end_time": 37,
+   "value": 0.1
+  },
+  {
+   "start_time": 37,
+   "end_time": 38,
+   "value": 0.1
+  },
+  {
+   "start_time": 38,
+   "end_time": 39,
+   "value": 0.1
+  },
+  {
+   "start_time": 39,
+   "end_time": 40,
+   "value": 0.1
+  },
+  {
+   "start_time": 40,
+   "end_time": 41,
+   "value": 0.1
+  },
+  {
+   "start_time": 41,
+   "end_time": 42,
+   "value": 0.1
+  },
+  {
+   "start_time": 42,
+   "end_time": 43,
+   "value": 1
+  },
+  {
+   "start_time": 43,
+   "end_time": 44,
+   "value": 0.1
+  },
+  {
+   "start_time": 44,
+   "end_time": 45,
+   "value": 0.1
+  },
+  {
+   "start_time": 45,
+   "end_time": 46,
+   "value": 0.1
+  },
+  {
+   "start_time": 46,
+   "end_time": 47,
+   "value": 0.1
+  },
+  {
+   "start_time": 47,
+   "end_time": 48,
+   "value": 0.1
+  },
+  {
+   "start_time": 48,
+   "end_time": 49,
+   "value": 0.1
+  },
+  {
+   "start_time": 49,
+   "end_time": 50,
+   "value": 0.1
+  },
+  {
+   "start_time": 50,
+   "end_time": 51,
+   "value": 0.1
+  },
+  {
+   "start_time": 51,
+   "end_time": 52,
+   "value": 0.1
+  },
+  {
+   "start_time": 52,
+   "end_time": 53,
+   "value": 0.1
+  },
+  {
+   "start_time": 53,
+   "end_time": 54,
+   "value": 0.1
+  },
+  {
+   "start_time": 54,
+   "end_time": 55,
+   "value": 0.1
+  },
+  {
+   "start_time": 55,
+   "end_time": 56,
+   "value": 0.1
+  },
+  {
+   "start_time": 56,
+   "end_time": 57,
+   "value": 0.1
+  },
+  {
+   "start_time": 57,
+   "end_time": 58,
+   "value": 0.1
+  },
+  {
+   "start_time": 58,
+   "end_time": 59,
+   "value": 0.1
+  },
+  {
+   "start_time": 59,
+   "end_time": 60,
+   "value": 0.1
+  },
+  {
+   "start_time": 60,
+   "end_time": 61,
+   "value": 0.1
+  },
+  {
+   "start_time": 61,
+   "end_time": 62,
+   "value": 0.1
+  },
+  {
+   "start_time": 62,
+   "end_time": 63,
+   "value": 0.1
+  },
+  {
+   "start_time": 63,
+   "end_time": 64,
+   "value": 0.1
+  },
+  {
+   "start_time": 64,
+   "end_time": 65,
+   "value": 0.1
+  },
+  {
+   "start_time": 65,
+   "end_time": 66,
+   "value": 0.1
+  },
+  {
+   "start_time": 66,
+   "end_time": 67,
+   "value": 0.1
+  },
+  {
+   "start_time": 67,
+   "end_time": 68,
+   "value": 0.1
+  },
+  {
+   "start_time": 68,
+   "end_time": 69,
+   "value": 0.1
+  },
+  {
+   "start_time": 69,
+   "end_time": 70,
+   "value": 0.1
+  },
+  {
+   "start_time": 70,
+   "end_time": 71,
+   "value": 0.1
+  },
+  {
+   "start_time": 71,
+   "end_time": 72,
+   "value": 0.1
+  },
+  {
+   "start_time": 72,
+   "end_time": 73,
+   "value": 0.1
+  },
+  {
+   "start_time": 73,
+   "end_time": 74,
+   "value": 0.1
+  },
+  {
+   "start_time": 74,
+   "end_time": 75,
+   "value": 0.1
+  },
+  {
+   "start_time": 75,
+   "end_time": 76,
+   "value": 0.1
+  },
+  {
+   "start_time": 76,
+   "end_time": 77,
+   "value": 0.1
+  },
+  {
+   "start_time": 77,
+   "end_time": 78,
+   "value": 0.1
+  },
+  {
+   "start_time": 78,
+   "end_time": 79,
+   "value": 0.1
+  },
+  {
+   "start_time": 79,
+   "end_time": 80,
+   "value": 0.1
+  },
+  {
+   "start_time": 80,
+   "end_time": 81,
+   "value": 0.1
+  },
+  {
+   "start_time": 81,
+   "end_time": 82,
+   "value": 0.1
+  },
+  {
+   "start_time": 82,
+   "end_time": 83,
+   "value": 0.1
+  },
+  {
+   "start_time": 83,
+   "end_time": 84,
+   "value": 0.1
+  },
+  {
+   "start_time": 84,
+   "end_time": 85,
+   "value": 0.1
+  },
+  {
+   "start_time": 85,
+   "end_time": 86,
+   "value": 0.1
+  },
+  {
+   "start_time": 86,
+   "end_time": 87,
+   "value": 0.1
+  },
+  {
+   "start_time": 87,
+   "end_time": 88,
+   "value": 0.1
+  },
+  {
+   "start_time": 88,
+   "end_time": 89,
+   "value": 0.1
+  },
+  {
+   "start_time": 89,
+   "end_time": 90,
+   "value": 0.1
+  },
+  {
+   "start_time": 90,
+   "end_time": 91,
+   "value": 0.1
+  },
+  {
+   "start_time": 91,
+   "end_time": 92,
+   "value": 0.1
+  },
+  {
+   "start_time": 92,
+   "end_time": 93,
+   "value": 0.1
+  },
+  {
+   "start_time": 93,
+   "end_time": 94,
+   "value": 0.1
+  },
+  {
+   "start_time": 94,
+   "end_time": 95,
+   "value": 0.1
+  },
+  {
+   "start_time": 95,
+   "end_time": 96,
+   "value": 0.1
+  },
+  {
+   "start_time": 96,
+   "end_time": 97,
+   "value": 0.1
+  },
+  {
+   "start_time": 97,
+   "end_time": 98,
+   "value": 0.1
+  },
+  {
+   "start_time": 98,
+   "end_time": 99,
+   "value": 0.1
+  },
+  {
+   "start_time": 99,
+   "end_time": 100,
+   "value": 0.1
+  }
+ ],
+ "automatic_captions": {
+  "en": [
+   {
+    "ext": "json3",
+    "url": "https://fixture.invalid/timedtext/en.json3"
+   }
+  ]
+ }
+}

@@ -112,6 +112,7 @@ import type { AnswerStore } from "./info-cache.ts";
 import { trimYtDlpInfo } from "./answer-trim.ts";
 import { governor } from "./request-governor.ts";
 import { pollIsDue } from "./subscriptions.ts";
+import { offlineFormats } from "./offline-hd.ts";
 import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
 import type { YtDlpInfo } from "./ytdlp-info.ts";
 import type { NotePosition, SectionName } from "./sections";
@@ -156,6 +157,12 @@ function desktop(): Promise<DesktopApi> {
 
 interface YtFreeSettings {
   ytDlpPath: string;
+  /**
+   * Developer only, set by hand in `data.json`: a folder made by
+   * `tools/make-offline-hd.mjs`. Every video then plays from it, 360p and HD,
+   * with no request to YouTube (GitHub #38). Not in the settings tab.
+   */
+  devOfflineHd?: string;
   upgradeToHighQuality: boolean;
   /** Stitched HD on the phone. Off by default: iOS 17.1+, and more data. */
   phoneHighQuality: boolean;
@@ -5185,7 +5192,11 @@ export default class YtFreePlugin extends Plugin {
     }
     if (!this.ffmpegPath) return;
 
-    const local = await this.localFileFor(sourcePath, videoId);
+    // The offline HD player analyses its own sound file, never YouTube's.
+    const offline = this.settings.devOfflineHd?.trim();
+    const local = offline
+      ? `${offline.replace(/\/+$/, "")}/${(await (await desktop()).loadOfflineManifest(offline)).audio.file}`
+      : await this.localFileFor(sourcePath, videoId);
     if (!local && botCheck.isPaused()) {
       // Asked again on the next play once the pause is over.
       this.silenceAttempted.delete(videoId);
@@ -5371,6 +5382,8 @@ export default class YtFreePlugin extends Plugin {
    */
   private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
+      const offline = this.settings.devOfflineHd?.trim();
+      if (offline) return this.offlineStream(videoId, offline, mode);
       // HD lookups and recovery retries are automatic: none while paused. The
       // first 360p resolve is the reader opening a video, and still goes.
       if (mode === "quality" || forceRefresh) botCheck.guard();
@@ -5388,6 +5401,22 @@ export default class YtFreePlugin extends Plugin {
       this.cache.set(videoId, stream);
       return stream;
     };
+  }
+
+  /** The offline HD player (GitHub #38): local files, never YouTube. */
+  private async offlineStream(videoId: string, folder: string, mode: ResolveMode): Promise<ResolvedStream> {
+    const { loadOfflineManifest, localFileUrl, offlineFetchRange } = await desktop();
+    const manifest = await loadOfflineManifest(folder);
+    const forever = Date.now() + 365 * 86400_000;
+    if (mode === "fast") {
+      const url = localFileUrl(`${folder.replace(/\/+$/, "")}/${manifest.progressive}`);
+      return { url, isHls: false, mode, expiresAt: forever, height: 360 };
+    }
+    const { resolveHdFromYtDlpFormats } = await import("./hd.ts");
+    const stream = await resolveHdFromYtDlpFormats(
+      videoId, offlineFormats(manifest), undefined, offlineFetchRange(folder),
+    );
+    return { ...stream, expiresAt: forever };
   }
 
   private async desktopFast(videoId: string): Promise<ResolvedStream> {

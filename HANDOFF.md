@@ -42,9 +42,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
    fix is a guess at a rebuild/slow-load race. Needs a phone test.
 4. Request volume (#31–#39), scope approved 2026-11-07:
    [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md). Parts 1 and 2 merged (PR #56, #57).
-   Part 3 (#34 answers kept on the device, #36 request governor + "Show YouTube requests this
-   session", #37 one device polls) built, awaiting Isaiah's test. Next: Part 4 (#38 fixtures).
-   No live probes from Isaiah's network.
+   Part 3 merged (PR #58). Part 4 (#38: replay fixtures, recorder, offline HD player) built.
+   No real video recorded yet (`node tools/record-fixtures.ts <id>`, ~10 requests, Isaiah's call).
 5. HD backlog on GitHub: rung picker / ABR (#15).
 
 ## How to ship and test
@@ -72,6 +71,7 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   Every live tool in `tools/` claims its own daily run through `tools/live-budget.mjs`.
 - A bot check pauses all automatic YouTube requests for 45 minutes (`src/bot-check.ts`, stored in
   `localStorage` under `ytfree-bot-check-until`). Clear that key to end a pause early.
+- Offline HD player: `"devOfflineHd": "<folder>"` in data.json, folder from `tools/make-offline-hd.mjs`.
 - Kept answers: `localStorage` `ytfree-ytdlp-answers` / `ytfree-player-answers`. Requests: `src/request-governor.ts`.
 - Desktop HD byte ranges go over Node `https`, not `requestUrl`; a request Node cannot make at
   all (no status, no byte) switches that stream to `requestUrl` for good. The loader does not

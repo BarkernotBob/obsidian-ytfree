@@ -4,7 +4,7 @@
 trigger this … make sure those calls are smart as well") and his answer of 2026-11-07 ("I agree
 with all the items you recommend"). Research: [RESEARCH-YOUTUBE-REQUESTS.md](RESEARCH-YOUTUBE-REQUESTS.md).
 
-**Status:** Approved by Isaiah 2026-11-07. Part 1 merged 2026-11-07 (PR #56). Part 2 merged 2026-11-07 (PR #57), awaiting manual test. Part 3 built 2026-11-07, awaiting manual test. Covers GitHub #31–#39. Supersedes #16.
+**Status:** Approved by Isaiah 2026-11-07. Part 1 merged 2026-11-07 (PR #56). Part 2 merged 2026-11-07 (PR #57), awaiting manual test. Part 3 merged 2026-11-07 (PR #58), awaiting manual test. Part 4 built 2026-11-07. Covers GitHub #31–#39. Supersedes #16.
 
 **Ground rule for all of it:** fewer and more consistent requests. No token generation, no
 identity cycling, no proxies or IP rotation. No live probes from Isaiah's network while building;
@@ -116,6 +116,21 @@ Decided while building Part 3 (2026-11-07, Claude; open to change):
     the stitched HD stream from a local MP4. Badge, buffering, scrubbing, the quality switch and
     Start in HD can be tested in Obsidian with no YouTube requests.
 
+Decided while building Part 4 (2026-11-07, Claude; open to change):
+- The recorder is `node tools/record-fixtures.ts <videoId>` (TypeScript, so it reuses the plugin's own
+  picking and trimming code), about 10 requests once a day at most. Fixtures live in
+  `tests/fixtures/replay/<name>/`; the format is in `tools/fixture-format.ts`.
+- Only each HD file's opening through its `sidx` is stored (about 1 KB each). A replayed read past
+  it, a media segment or the 90 s check, answers zeros of the asked length.
+- No real video is recorded yet: that needs a run from Isaiah's network, which this build does not
+  do. `tests/fixtures/replay/synthetic` is recorded from files `tools/make-offline-hd.mjs` made
+  with ffmpeg (same box layout as YouTube's: `ftyp`, `moov`, `sidx`, then fragments), so every
+  replay test runs today. A real recording, when there is one, is replayed by the same tests.
+- The offline HD player is `"devOfflineHd": "<folder>"` in `data.json`, the folder made by
+  `node tools/make-offline-hd.mjs <any video> <folder>` (1080/720/480 + sound + 360p). It plays
+  every video from that folder; Smart Speed analyses its sound file. Transcripts and the hub still
+  talk to YouTube.
+
 ## Out of scope
 
 - Anything that gets past a bot check rather than avoiding one (tokens, identities, proxies).
@@ -144,4 +159,8 @@ Part 3:
 7. Run **YT Free: Show YouTube requests this session**. Opening and playing one video shows
    about 1 yt-dlp call and a handful of range reads.
 
-Part 4 needs no manual test beyond `npm test`, which I run.
+Part 4 (optional, for trying HD without YouTube):
+8. On the Mac, `node tools/make-offline-hd.mjs ~/Movies/any-video.mp4 ~/ytfree-offline` (needs
+   ffmpeg; a minute or two). Add `"devOfflineHd": "/Users/<you>/ytfree-offline"` to the plugin's
+   `data.json`, reload, open any video note: it plays the local file, the badge climbs to 1080p,
+   scrubbing and the quality switch work. Remove the line to go back to YouTube.
