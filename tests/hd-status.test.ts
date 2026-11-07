@@ -67,3 +67,10 @@ test("within: a value in time, null on timeout, null on rejection", async () => 
   assert.equal(await within(new Promise(() => undefined), 10), null);
   assert.equal(await within(Promise.reject(new Error("no")), 50), null);
 });
+
+test("badge: 360p picked for one video says so instead of pointing at Settings", () => {
+  const badge = badgeText({ phase: "off", height: 360, reason: "360p, chosen for this video." });
+  assert.equal(badge.text, "360p");
+  assert.equal(badge.title, "360p, chosen for this video.");
+  assert.equal(badge.settled, true);
+});

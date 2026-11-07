@@ -31,6 +31,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Decisions
 
+### 2026-11-04 (Isaiah asked; defaults picked by Claude, open to change)
+
+- Per-video quality: a Quality row (HD / 360p) in the player's ⋯ pop-out overrides the HD
+  setting for that video only. It never writes the setting and is kept until Obsidian quits,
+  like the pop-out's other controls. Picking a rung (720p, 480p) stays with GitHub #15.
+
 ### 2026-11-04 (measured; Claude's call, open to change)
 
 - **Phone HD (#25), part 1:** the phone asks IOS first and plays its HLS manifest with iOS's own
