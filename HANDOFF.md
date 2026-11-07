@@ -37,7 +37,10 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 1. Isaiah: install main and run the untested scope-doc tests listed under Status.
 2. Phone HD part 2: switch GitHub Pages to main `/docs` (it pointed at PR #28's branch).
-3. Request volume: backlog #31–#39, first #31 (stop after a bot check) and #39 (smoke canary).
+3. #51 (phone): Now playing pill removed; properties re-collapse after Obsidian rebuilds them. The
+   properties cause was not found in the 2026-11-07 merge diff (none of it touches collapsing), so the
+   fix is a guess at a rebuild/slow-load race. Needs a phone test.
+4. Request volume: backlog #31–#39, first #31 (stop after a bot check) and #39 (smoke canary).
    No live probes from Isaiah's network until then.
 4. HD backlog on GitHub: rung picker / ABR (#15).
 
