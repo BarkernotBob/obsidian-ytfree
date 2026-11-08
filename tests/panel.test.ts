@@ -174,3 +174,53 @@ test("chrome counts as off screen — a button under the toolbar is not reachabl
   assert.equal(anchorVisible(button(4), PHONE, { top: 44, bottom: 48 }), false);
   assert.equal(anchorVisible(button(810), PHONE, { top: 44, bottom: 48 }), false);
 });
+
+// ------------------------------------------------- #52: every row reachable
+
+/** Every phone shape that matters, portrait and landscape, keyboard up or not. */
+const SCREENS = [
+  { width: 320, height: 568 }, // iPhone SE 1st gen
+  { width: 375, height: 667 }, // SE 2/3
+  { width: 390, height: 844 },
+  { width: 430, height: 932 },
+  { width: 568, height: 320 },
+  { width: 844, height: 390 },
+  { width: 390, height: 500 }, // keyboard up
+];
+const INSET = { top: 59, bottom: 34 };
+
+test("#52: on any screen and any button position, the panel's box is inside the visible area", () => {
+  for (const viewport of SCREENS) {
+    for (let top = INSET.top; top < viewport.height - INSET.bottom - 32; top += 17) {
+      for (const panel of [PANEL, { width: 232, height: 420 }, { width: 232, height: 900 }]) {
+        const anchor = button(top, viewport.width - 10);
+        const p = panelPlacement({ anchored: true, anchor, panel, viewport, inset: INSET });
+        assert.equal(p.mode, "anchored");
+        if (p.mode !== "anchored") continue;
+        const where = `${viewport.width}x${viewport.height} button@${top} panel ${panel.height}`;
+        assert.ok(p.top >= INSET.top, `top under the status bar: ${where}`);
+        assert.ok(p.top + p.maxHeight <= viewport.height - INSET.bottom, `bottom off screen: ${where}`);
+        assert.ok(p.left >= 0 && p.left + p.width <= viewport.width, `sideways off screen: ${where}`);
+        // Shorter than its content means it scrolls; never a box with no room at all.
+        assert.ok(p.maxHeight > 0, where);
+      }
+    }
+  }
+});
+
+test("#52: a shifted visual viewport (keyboard, zoom) is honoured and the result is in layout coordinates", () => {
+  const viewport = { width: 390, height: 500, offsetTop: 300, offsetLeft: 0 };
+  // Button 100pt into the visible area, i.e. 400 in layout coordinates.
+  const p = anchored(button(400), PANEL, viewport as typeof PHONE);
+  const visibleTop = 300;
+  const visibleBottom = 800;
+  assert.ok(p.top >= visibleTop, `panel above the visible area: ${p.top}`);
+  assert.ok(p.top + p.maxHeight <= visibleBottom);
+  // 100pt above the button in the visible area is not room for 246pt, so down.
+  assert.equal(p.side, "down");
+});
+
+test("#52: anchorVisible measures against the shifted visual viewport", () => {
+  assert.equal(anchorVisible(button(100), { height: 500, offsetTop: 300 }), false);
+  assert.equal(anchorVisible(button(400), { height: 500, offsetTop: 300 }), true);
+});

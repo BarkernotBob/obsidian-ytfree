@@ -86,6 +86,9 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Now playing button, not auto-jump**: the lock-screen tile can't be told apart from the app
   switcher, so instead of jumping on return, a "▶ title" pill (phone) / status-bar item (desktop)
   takes you to the playing note. Isaiah's call.
+- **No Now playing pill on the phone** (2026-11-07, #51): Isaiah saw it as a stray "video is playing"
+  label and asked for it gone. The desktop status-bar item and the "Go to the playing video" command stay.
+- **Properties re-collapse when Obsidian rebuilds them** (#51): collapsed once per table, not once per note.
 
 ### 2026-10-19 (Isaiah)
 
@@ -102,13 +105,15 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   Decided while building: *Open YouTube URL from clipboard* still opens the note, and the new
   *Preview YouTube URL from clipboard* opens the Preview.
 
-### 2026-11-04 (Isaiah asked; recommendations by Claude, not yet approved)
+### 2026-11-04 (Isaiah asked; recommendations by Claude, approved by Isaiah 2026-11-07)
 
 - Request volume to YouTube is a design constraint: one answer per video, one identity per
   device, cached, and stop after a bot check. No token generation, identity cycling or IP
   rotation. Research: docs/RESEARCH-YOUTUBE-REQUESTS.md, backlog #31–#39.
 - **Bot check** (term): YouTube's "Sign in to confirm you're not a bot" (yt-dlp) or
   `LOGIN_REQUIRED` (InnerTube), refusing signed-out requests from a flagged IP.
+- 2026-11-07: Isaiah agreed with all nine recommendations. #16 (InnerTube before yt-dlp) is
+  closed as replaced by #32 (one `yt-dlp -J` per video). Scope: docs/V1-SCOPE-REQUEST-BUDGET.md.
 
 ### 2026-10-14 (Isaiah)
 
@@ -173,6 +178,8 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   `docs/V1-SCOPE-MIDFRAME-THUMBNAILS.md`.
 
 - `obsidian://ytfree?view=subscriptions|search` opens the hub; bare `obsidian://ytfree` opens the hub; `url=` wins over `view=` (2026-10-21).
+
+- Phone ⋯ menu (#52): moves to `document.body` while open, sits at Obsidian's menu layer, avoids safe areas, scrolls when taller than the room (2026-11-07).
 
 ### Earlier
 

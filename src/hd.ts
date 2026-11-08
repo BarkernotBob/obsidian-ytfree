@@ -8,9 +8,11 @@
  */
 
 import { requestUrl } from "obsidian";
+import { botCheck } from "./bot-check.ts";
 import { DEFAULT_MAX_HEIGHT, refusal, resolveHd, resolveHdFromYtDlp, withRange } from "./adaptive.ts";
 import type { AdaptiveFormat, ClientAnswer, FetchRange, YtDlpFormat } from "./adaptive.ts";
-import { callInnertube, CLIENTS, playerBody, PLAYER_URL } from "./innertube.ts";
+import { CLIENTS, fetchPlayer } from "./innertube.ts";
+import { governor } from "./request-governor.ts";
 import type { ResolvedStream } from "./stream.ts";
 
 /** ANDROID first: it is the client the 360p path already depends on. */
@@ -21,9 +23,14 @@ interface HdPlayerResponse {
   streamingData?: { adaptiveFormats?: AdaptiveFormat[]; hlsManifestUrl?: string };
 }
 
-async function ask(videoId: string, client: string): Promise<ClientAnswer | null> {
+async function ask(videoId: string, client: string, fresh = false): Promise<ClientAnswer | null> {
+  // HD is automatic work: once one client meets the bot check, the next is
+  // not asked (GitHub #31).
+  botCheck.guard();
   const name = client as keyof typeof CLIENTS;
-  const response = (await callInnertube(PLAYER_URL, name, playerBody(videoId))) as HdPlayerResponse;
+  // The same answer 360p already read, when it is still good (GitHub #33). A
+  // re-link after a refusal asks fresh: the kept links are the refused ones.
+  const response = (await fetchPlayer(videoId, name, fresh)) as HdPlayerResponse;
   if (response.playabilityStatus?.status !== "OK") return null;
   return {
     adaptiveFormats: response.streamingData?.adaptiveFormats ?? [],
@@ -38,6 +45,7 @@ async function ask(videoId: string, client: string): Promise<ClientAnswer | null
  * ignored here: a cancelled request runs to the end and its answer is dropped.
  */
 export const fetchRange: FetchRange = async (url, start, end, ua) => {
+  governor.count("range");
   const response = await requestUrl({
     url: withRange(url, start, end),
     headers: ua ? { "User-Agent": ua } : {},
@@ -52,7 +60,9 @@ export function resolveHdStream(
   maxHeight = DEFAULT_MAX_HEIGHT,
   fetch: FetchRange = fetchRange,
 ): Promise<ResolvedStream> {
-  return resolveHd(videoId, HD_CLIENTS, (client) => ask(videoId, client), fetch, maxHeight);
+  return resolveHd(videoId, HD_CLIENTS, (client) => ask(videoId, client), fetch, maxHeight, false, (client) =>
+    ask(videoId, client, true),
+  );
 }
 
 /**
@@ -61,7 +71,9 @@ export function resolveHdStream(
  * files stop at about a minute on most videos, so they are only the fallback.
  */
 export function resolvePhoneHdStream(videoId: string, maxHeight = DEFAULT_MAX_HEIGHT): Promise<ResolvedStream> {
-  return resolveHd(videoId, ["ios", "android"], (client) => ask(videoId, client), fetchRange, maxHeight, true);
+  return resolveHd(videoId, ["ios", "android"], (client) => ask(videoId, client), fetchRange, maxHeight, true, (client) =>
+    ask(videoId, client, true),
+  );
 }
 
 /** Desktop: the same stitched stream from yt-dlp's files (see `YtDlpFormat`). */

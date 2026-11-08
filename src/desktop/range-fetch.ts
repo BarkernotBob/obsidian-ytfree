@@ -17,6 +17,7 @@ import * as https from "https";
 import { abortError, isAbort, refusal, withRange } from "../adaptive.ts";
 import type { FetchRange } from "../adaptive.ts";
 import type { RangeIO } from "../stream.ts";
+import { governor } from "../request-governor.ts";
 
 /** googlevideo hands out a redirect now and then; more than this is a loop. */
 const MAX_REDIRECTS = 3;
@@ -91,8 +92,10 @@ function get(url: string, ua: string | undefined, io: RangeIO | undefined, redir
 }
 
 /** Inclusive byte range `[start, end]`, streamed and cancellable. */
-export const streamingFetchRange: FetchRange = (url, start, end, ua, io) =>
-  get(withRange(url, start, end), ua, io, 0);
+export const streamingFetchRange: FetchRange = (url, start, end, ua, io) => {
+  governor.count("range");
+  return get(withRange(url, start, end), ua, io, 0);
+};
 
 /**
  * The streaming request, with `fallback` (`requestUrl`) for when Node cannot

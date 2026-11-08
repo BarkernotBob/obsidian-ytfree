@@ -120,6 +120,11 @@ export interface SubscriptionsState {
   items: HubItem[];
   lastPolledAt: string | null;
   /**
+   * Which kind of device made that poll. The phone leaves polling to a desktop
+   * that has polled in the last two hours (GitHub #37). Absent in older files.
+   */
+  lastPolledBy?: "desktop" | "phone";
+  /**
    * Channels you removed, and when. A merge unions two channel lists, so
    * without this a channel removed on the phone would be handed straight back
    * by the Mac's copy — the same bug the item stamps fix, one level up.
@@ -204,6 +209,7 @@ export function normalizeState(raw: unknown): SubscriptionsState {
     );
   }
   state.lastPolledAt = typeof data.lastPolledAt === "string" ? data.lastPolledAt : null;
+  if (data.lastPolledBy === "desktop" || data.lastPolledBy === "phone") state.lastPolledBy = data.lastPolledBy;
   if (Array.isArray(data.removedChannels)) {
     state.removedChannels = data.removedChannels.filter(
       (r): r is { id: string; at: string } =>
@@ -505,12 +511,14 @@ export function mergeStates(
   // A tombstone whose video is back in the list has done its job and lost;
   // keeping it would drop the video again the next time the clocks disagree.
   const live = new Set(kept.map((item) => item.videoId));
-  const polled = [mine.lastPolledAt, theirs.lastPolledAt].filter(Boolean).sort();
+  // The later poll wins, and so does the device that made it.
+  const later = (theirs.lastPolledAt ?? "") > (mine.lastPolledAt ?? "") ? theirs : mine;
   return {
     version: 1,
     channels: [...channels.values()],
     items: kept,
-    lastPolledAt: polled.length ? polled[polled.length - 1] : null,
+    lastPolledAt: later.lastPolledAt ?? null,
+    ...(later.lastPolledBy ? { lastPolledBy: later.lastPolledBy } : {}),
     removedChannels: [...removals].map(([id, at]) => ({ id, at })),
     // Never pruned against the surviving channels: a device that has not synced
     // yet still lists the channel, and dropping the tombstone here would let it
@@ -1336,4 +1344,27 @@ export function formatViews(views: number | null): string {
   if (views >= 1_000_000) return `${(views / 1_000_000).toFixed(1).replace(/\.0$/, "")}M views`;
   if (views >= 1_000) return `${Math.round(views / 1000)}K views`;
   return `${views} views`;
+}
+
+/** How long a desktop's poll keeps the phone from polling (GitHub #37). */
+export const DESKTOP_POLL_HOLD_MS = 2 * 3600_000;
+
+/**
+ * Whether this device should poll now. Not before the poll period has passed
+ * since the last poll from any device, and on the phone not while a desktop
+ * has polled in the last two hours: one device polling is enough, and the
+ * desktop is the one that can also tell Shorts apart.
+ */
+export function pollIsDue(
+  state: Pick<SubscriptionsState, "lastPolledAt" | "lastPolledBy">,
+  now: number,
+  periodMs: number,
+  isDesktop: boolean,
+): boolean {
+  const last = Date.parse(state.lastPolledAt ?? "");
+  if (!Number.isFinite(last)) return true;
+  const age = now - last;
+  if (age < periodMs) return false;
+  if (!isDesktop && state.lastPolledBy === "desktop" && age < DESKTOP_POLL_HOLD_MS) return false;
+  return true;
 }

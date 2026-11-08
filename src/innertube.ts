@@ -14,6 +14,12 @@
  */
 
 import { requestUrl } from "obsidian";
+import { botCheck, isBotCheckPlayability } from "./bot-check.ts";
+import { trimPlayerAnswer } from "./answer-trim.ts";
+import { InfoCache } from "./info-cache.ts";
+import type { AnswerStore } from "./info-cache.ts";
+import { governor } from "./request-governor.ts";
+import { EXPIRY_SAFETY_MARGIN_MS } from "./stream.ts";
 import { BROWSE_URL, CLIENTS, NEXT_URL, PLAYER_URL, SEARCH_URL, playerBody } from "./innertube-context.ts";
 import {
   CHANNEL_SEARCH_PARAMS,
@@ -54,15 +60,18 @@ export async function callInnertube(
   const { ctx, ua } = CLIENTS[client];
   let response;
   try {
-    response = await requestUrl({
-      url,
-      method: "POST",
-      headers: { "Content-Type": "application/json", "User-Agent": ua },
-      body: JSON.stringify({ ...body, context: { client: { ...ctx, hl: "en", gl: "US" } } }),
-      // Handled here, so a 4xx reads as a network failure rather than throwing
-      // an Obsidian error object at the caller.
-      throw: false,
-    });
+    // Paced with every other "who is this video" request (GitHub #36).
+    response = await governor.run(url === PLAYER_URL ? "player" : "innertube", () =>
+      requestUrl({
+        url,
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": ua },
+        body: JSON.stringify({ ...body, context: { client: { ...ctx, hl: "en", gl: "US" } } }),
+        // Handled here, so a 4xx reads as a network failure rather than throwing
+        // an Obsidian error object at the caller.
+        throw: false,
+      }),
+    );
   } catch (err) {
     throw new InnertubeError(err instanceof Error ? err.message : String(err));
   }
@@ -71,11 +80,55 @@ export async function callInnertube(
     throw new InnertubeError(`YouTube answered HTTP ${response.status}.`);
   }
 
+  let parsed: unknown;
   try {
-    return JSON.parse(response.text) as unknown;
+    parsed = JSON.parse(response.text) as unknown;
   } catch {
     throw new InnertubeError("YouTube's response was not JSON.");
   }
+  // The bot check arrives as an ordinary 200 with a refusal inside. Seen here,
+  // once, it pauses every automatic request (GitHub #31).
+  const status = (parsed as { playabilityStatus?: { status?: unknown; reason?: unknown } })?.playabilityStatus;
+  if (status && isBotCheckPlayability(status.status, status.reason)) botCheck.trip();
+  return parsed;
+}
+
+/** Answers from the player, one per video and client (GitHub #33). */
+const players = new InfoCache<unknown>(() => Date.now(), 20);
+
+/** How long a player answer is worth keeping: its links' life, less a margin. */
+function playerKeepUntil(response: unknown, now = Date.now()): number {
+  const r = response as { playabilityStatus?: { status?: unknown }; streamingData?: { expiresInSeconds?: unknown } };
+  // A refusal or an error page is not an answer worth keeping.
+  if (r?.playabilityStatus?.status !== "OK") return now;
+  const seconds = Number(r.streamingData?.expiresInSeconds);
+  const life = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 3600_000;
+  return now + Math.max(0, life - EXPIRY_SAFETY_MARGIN_MS);
+}
+
+/**
+ * The player's answer for a video as `client`, asked once and reused until its
+ * links expire: 360p, captions, duration and HD all read the same ANDROID
+ * answer instead of asking again (GitHub #33). `fresh` skips the kept answer,
+ * for a link YouTube has just refused.
+ */
+export function fetchPlayer(videoId: string, client: keyof typeof CLIENTS, fresh = false): Promise<unknown> {
+  const key = `${client}:${videoId}`;
+  if (fresh) players.invalidate(key);
+  return players.get(key, () => callInnertube(PLAYER_URL, client, playerBody(videoId)), (r) => playerKeepUntil(r));
+}
+
+/**
+ * Keep player answers on this device across reloads (GitHub #34). Never the
+ * vault: the links inside are tied to the network that asked.
+ */
+export function attachPlayerStore(store: AnswerStore): void {
+  players.attachStore(store, trimPlayerAnswer);
+}
+
+/** Forget every kept answer for a video (a stream that died is re-resolved). */
+export function forgetPlayer(videoId: string): void {
+  for (const client of Object.keys(CLIENTS)) players.invalidate(`${client}:${videoId}`);
 }
 
 /**
@@ -146,7 +199,7 @@ export interface VideoDetails {
  */
 export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> {
   try {
-    const response = await callInnertube(PLAYER_URL, "android", playerBody(videoId));
+    const response = await fetchPlayer(videoId, "android");
     const details = (response as {
       videoDetails?: {
         shortDescription?: unknown;
@@ -178,7 +231,7 @@ export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> 
  */
 export async function fetchPublishDate(videoId: string): Promise<string> {
   try {
-    return parsePlayerPublishDate(await callInnertube(PLAYER_URL, "web", playerBody(videoId)));
+    return parsePlayerPublishDate(await fetchPlayer(videoId, "web"));
   } catch {
     return "";
   }
@@ -203,7 +256,7 @@ export async function fetchCaptionTrack(
   videoId: string,
   language: string,
 ): Promise<CaptionTrack | null> {
-  const response = await callInnertube(PLAYER_URL, "android", playerBody(videoId));
+  const response = await fetchPlayer(videoId, "android");
   return pickPlayerCaptionTrack(response as CaptionedPlayerResponse, language);
 }
 
@@ -218,6 +271,7 @@ export async function fetchCaptionTrack(
 export async function fetchTranscriptCues(videoId: string, language: string): Promise<Cue[]> {
   const track = await fetchCaptionTrack(videoId, language);
   if (!track) return [];
+  governor.count("captions");
   const response = await requestUrl({ url: track.url, throw: true });
   return parseJson3(response.text);
 }

@@ -7,12 +7,15 @@
  * (`resolveHdFromYtDlp`, including the check past the first minute), then
  * reads one top-rung segment at several points through the video.
  */
+import { liveGuard } from "./live-budget.mjs";
 import { execFileSync } from "node:child_process";
 import { resolveHdFromYtDlp, withRange } from "../src/adaptive.ts";
 import type { YtDlpFormat } from "../src/adaptive.ts";
 
-const ids = process.argv.slice(2);
-if (!ids.length) ids.push("aqz-KE-bpKQ", "dQw4w9WgXcQ");
+// Once a day per machine, counted (GitHub #39). `--force` overrides.
+const budget = liveGuard("ytdlp-hd-probe");
+const ids = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+if (!ids.length) ids.push("aqz-KE-bpKQ");
 const bin = ["/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp"].find((p) => {
   try { execFileSync(p, ["--version"]); return true; } catch { return false; }
 }) ?? "yt-dlp";
@@ -26,6 +29,7 @@ const fetchRange = async (url: string, start: number, end: number): Promise<Arra
 for (const id of ids) {
   console.log(`\n=== ${id}`);
   const t0 = performance.now();
+  budget.ytDlp();
   const info = JSON.parse(
     execFileSync(bin, ["--no-warnings", "--no-playlist", "-J", `https://www.youtube.com/watch?v=${id}`], { encoding: "utf8", maxBuffer: 64 << 20 }),
   ) as { formats: YtDlpFormat[] };

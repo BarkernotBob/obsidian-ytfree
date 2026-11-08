@@ -67,4 +67,7 @@ a tab that is not in front, a "▶ <title>" pill shows above the phone's bottom 
 the status bar). Tapping it brings that tab forward. Also a command, "Go to the playing video".
 Hidden under an open Preview, which is already in front.
 
+Changed 2026-11-07 (#51): the phone pill is removed at Isaiah's request. The phone keeps only the
+command; the desktop keeps the status-bar item.
+
 Not in v1: reopening a note whose tab was closed (the player stops with its tab).

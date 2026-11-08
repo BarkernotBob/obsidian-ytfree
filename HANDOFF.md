@@ -37,9 +37,15 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 1. Isaiah: install main and run the untested scope-doc tests listed under Status.
 2. Phone HD part 2: switch GitHub Pages to main `/docs` (it pointed at PR #28's branch).
-3. Request volume: backlog #31–#39, first #31 (stop after a bot check) and #39 (smoke canary).
-   No live probes from Isaiah's network until then.
-4. HD backlog on GitHub: rung picker / ABR (#15).
+3. #51 (phone): Now playing pill removed; properties re-collapse after Obsidian rebuilds them. The
+   properties cause was not found in the 2026-11-07 merge diff (none of it touches collapsing), so the
+   fix is a guess at a rebuild/slow-load race. Needs a phone test.
+4. Request volume (#31–#39), scope approved 2026-11-07:
+   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md). Parts 1 and 2 merged (PR #56, #57).
+   Part 3 (#34 answers kept on the device, #36 request governor + "Show YouTube requests this
+   session", #37 one device polls) built, awaiting Isaiah's test. Next: Part 4 (#38 fixtures).
+   No live probes from Isaiah's network.
+5. HD backlog on GitHub: rung picker / ABR (#15).
 
 ## How to ship and test
 
@@ -53,14 +59,20 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 - The phone harnesses read Obsidian's `app.css` from `/tmp/ytfree-harness/app.css`. Extract it with
   the `asar` command in `tools/phone-hub-harness.mjs`. `/app.css` is gitignored; never commit it.
+- `position: fixed` does not mean the viewport inside a note on a phone: `.workspace-leaf` has
+  `contain: strict` and Live Preview embeds have `contain: paint`, which clip fixed children.
+  Anything that must float over a note goes on `document.body` (see #52, `liftPanel`).
 - Obsidian 1.10+ draws a phone modal as an inset card, not a full-width sheet. Anything laid
   out for the old sheet must size its own modal (see `.is-phone .modal.ytfree-preview-modal`).
   To compare, extract `app.css` from two releases' `obsidian-X.asar.gz` (GitHub releases of
   obsidianmd/obsidian-releases) and render with `tools/preview-sheet-harness.mjs`.
 - Obsidian rewrites `community-plugins.json` from memory while it's running, so `setup.sh` only
   edits that file when Obsidian is closed.
-- The smoke test's quality lookup only prints `HLS: yes/no` (GitHub #17). `HLS: no` is normal
-  signed out (issue 043); it fails only if there's no https URL with an `expire` field.
+- `npm run smoke` is a once-a-day canary (`tools/smoke.mjs`, stamps in `~/.cache/ytfree/`).
+  Every live tool in `tools/` claims its own daily run through `tools/live-budget.mjs`.
+- A bot check pauses all automatic YouTube requests for 45 minutes (`src/bot-check.ts`, stored in
+  `localStorage` under `ytfree-bot-check-until`). Clear that key to end a pause early.
+- Kept answers: `localStorage` `ytfree-ytdlp-answers` / `ytfree-player-answers`. Requests: `src/request-governor.ts`.
 - Desktop HD byte ranges go over Node `https`, not `requestUrl`; a request Node cannot make at
   all (no status, no byte) switches that stream to `requestUrl` for good. The loader does not
   enforce `maxTimeToFirstByteMs` (only `maxLoadTimeMs`): `requestUrl` reports no first byte.
