@@ -5,9 +5,9 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Terms
 
-- **Hub**: the subscriptions screen. Chips: Inbox, In progress, Kept, All, Hidden.
+- **Hub**: the subscriptions screen. Chips: Inbox, In progress, Saved, Hidden, Everything.
 - **Inbox**: hub items not yet opened, kept or hidden.
-- **Kept**: hub items you opened or saved. Not the same as "has a note" (see 017).
+- **Saved** (chip; `kept` in code): hub items you opened or saved. Not the same as "has a note" (see 017).
 - **Hidden**: the drawer for hub mistakes. Never holds search removals (see 047).
 - **Feed poll**: the hourly check of each subscribed channel's RSS feed, a rolling window of 15
   uploads by that channel only.
@@ -30,6 +30,13 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   rung, with a 15s fallback to 360p.
 
 ## Decisions
+
+### 2026-11-07 (Isaiah, answering the #49/#50 scope)
+
+- The **Kept** chip is now **Saved**, to match the Save button.
+- **In progress** keeps a started video you removed from the hub while its note exists, and also
+  shows started video notes the hub never had (older notes, Web Clipper). On those cards Remove
+  says **Delete**, asks once, and moves the note to Obsidian's trash.
 
 ### 2026-11-04 (Isaiah asked; defaults picked by Claude, open to change)
 

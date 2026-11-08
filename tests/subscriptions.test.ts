@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { HubItem } from "../src/subscriptions.ts";
 import {
   HIDDEN_LIMIT,
+  noteOnlyItem,
   buildWatchLaterNote,
   deskSub,
   formatDuration,
@@ -708,6 +709,48 @@ test("In progress lists what a stored position says you started", () => {
     inProgress,
   });
   assert.deepEqual(visible.map((i) => i.videoId), ["aaaaaaaaaaa"]);
+});
+
+test("In progress keeps a removed video while its note exists (#50)", () => {
+  const withNote = item({ videoId: "aaaaaaaaaaa", state: "dismissed", notePath: "W/a.md" });
+  const noNote = item({ videoId: "bbbbbbbbbbb", state: "dismissed" });
+  const visible = visibleItems([withNote, noNote], {
+    filter: "progress",
+    channelId: null,
+    includeShorts: true,
+    inProgress: new Map([
+      ["aaaaaaaaaaa", "2026-07-27T10:00:00.000Z"],
+      ["bbbbbbbbbbb", "2026-07-27T11:00:00.000Z"],
+    ]),
+    hasNote: (entry) => entry.notePath === "W/a.md",
+  });
+  assert.deepEqual(visible.map((i) => i.videoId), ["aaaaaaaaaaa"]);
+});
+
+test("a removed video with a note stays out of the hub's other lists (#50)", () => {
+  const withNote = item({ videoId: "aaaaaaaaaaa", state: "dismissed", notePath: "W/a.md" });
+  for (const filter of ["new", "kept", "all"] as const) {
+    const visible = visibleItems([withNote], {
+      filter,
+      channelId: null,
+      includeShorts: true,
+      hasNote: () => true,
+    });
+    assert.deepEqual(visible, [], filter);
+  }
+});
+
+test("a note the hub never had becomes a dismissed stand-in with a picture (#50)", () => {
+  const stand = noteOnlyItem({
+    videoId: "aaaaaaaaaaa",
+    path: "Clips/Old talk.md",
+    title: "Old talk",
+    channelTitle: "Someone",
+  });
+  assert.equal(stand.state, "dismissed");
+  assert.equal(stand.notePath, "Clips/Old talk.md");
+  assert.equal(stand.title, "Old talk");
+  assert.ok(stand.thumbnail.includes("aaaaaaaaaaa"));
 });
 
 test("In progress sorts by when you last watched, not when it was published", () => {
