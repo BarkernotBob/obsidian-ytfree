@@ -33,6 +33,12 @@ export interface CardFacts {
   noteExists: boolean;
   /** The video is in the hub at all. Always true of a hub card. */
   inHub: boolean;
+  /**
+   * The note is all that is left: the video was removed from the hub (or was
+   * never in it) and only In progress still shows it. Remove then has nothing
+   * left to remove except the note, so it says Delete (GitHub #50).
+   */
+  noteOnly?: boolean;
 }
 
 /**
@@ -56,7 +62,9 @@ export function hubSlots(facts: CardFacts): CardSlot[] {
       label: "Save",
       done: facts.noteExists,
     },
-    { key: "remove", icon: "x", label: "Remove", done: false, danger: true },
+    facts.noteOnly
+      ? { key: "remove", icon: "trash-2", label: "Delete", done: false, danger: true }
+      : { key: "remove", icon: "x", label: "Remove", done: false, danger: true },
   ];
 }
 

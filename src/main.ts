@@ -112,6 +112,7 @@ import type { AnswerStore } from "./info-cache.ts";
 import { trimYtDlpInfo } from "./answer-trim.ts";
 import { governor } from "./request-governor.ts";
 import { pollIsDue } from "./subscriptions.ts";
+import type { VideoNote } from "./subscriptions.ts";
 import { offlineFormats } from "./offline-hd.ts";
 import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
 import type { YtDlpInfo } from "./ytdlp-info.ts";
@@ -1384,6 +1385,8 @@ export default class YtFreePlugin extends Plugin {
           // and the hub items are the fallback source for one — see
           // `inProgressVideos`.
           () => this.inProgressVideos(),
+          // In progress also lists notes the hub has no row for (GitHub #50).
+          () => this.videoNotes(),
         ),
     );
 
@@ -1568,6 +1571,28 @@ export default class YtFreePlugin extends Plugin {
       this.subscriptions.state.items.map((item) => [item.videoId, item.durationSeconds ?? null]),
     );
     return this.progress.inProgress((videoId) => durations.get(videoId) ?? null);
+  }
+
+  /**
+   * Every note in the vault that names a video in its frontmatter. Read from
+   * Obsidian's metadata cache, which is already in memory, and only when the
+   * In progress list is drawn.
+   */
+  videoNotes(): VideoNote[] {
+    const notes: VideoNote[] = [];
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const videoId = this.videoIdInFrontmatter(fm);
+      if (!videoId) continue;
+      const author = Array.isArray(fm?.author) ? fm?.author[0] : fm?.author;
+      notes.push({
+        videoId,
+        path: file.path,
+        title: typeof fm?.title === "string" && fm.title ? fm.title : file.basename,
+        channelTitle: typeof author === "string" ? author : "",
+      });
+    }
+    return notes;
   }
 
   hubSettings(): HubSettings {
@@ -5987,7 +6012,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Show watched videos in New")
       .setDesc(
-        "Off by default: a video you already watched on your phone or TV drops out of the Inbox. It stays in Everything and Kept either way.",
+        "Off by default: a video you already watched on your phone or TV drops out of the Inbox. It stays in Everything and Saved either way.",
       )
       .addToggle((toggle) =>
         toggle.setValue(plugin.settings.accountShowWatched).onChange(async (value) => {

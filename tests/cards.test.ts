@@ -109,3 +109,11 @@ test("the watched line is a fraction, and a missing duration draws nothing", () 
   // line, never a line wider than the picture.
   assert.equal(watchedFraction(900, 600), 1);
 });
+
+test("a note-only card says Delete where Remove was (#50)", () => {
+  const remove = hubSlots({ inHub: true, noteExists: true, noteOnly: true })[3];
+  assert.equal(remove.key, "remove");
+  assert.equal(remove.label, "Delete");
+  assert.equal(remove.icon, "trash-2");
+  assert.equal(hubSlots({ inHub: true, noteExists: true })[3].label, "Remove");
+});
