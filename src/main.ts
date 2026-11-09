@@ -284,9 +284,10 @@ interface YtFreeSettings {
    * film. What it buys is 038: `webkitEnterFullscreen` is refused until there
    * is loaded media, and the resolve cannot happen inside the tap that wants
    * fullscreen, so the only way the first press can be the real thing is for
-   * the resolve to have already happened. On, for that reason; off gives back
-   * the old mount-now-resolve-later behaviour for anyone on a metered
-   * connection.
+   * the resolve to have already happened. Off by default since GitHub #66:
+   * a resolve on every note opened is a YouTube request nobody asked for, and
+   * keeping a user's IP unflagged outranks a first-press fullscreen. On for
+   * anyone who wants 038's behaviour back.
    */
   warmOnOpen: boolean;
 }
@@ -405,6 +406,9 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   // keep whatever they were built with.
   transcriptIntervalSeconds: 20,
   followTranscript: true,
+  // Stays on (GitHub #66 weighed it): one caption fetch per note you create,
+  // never per note opened, and it already waits out a bot-check pause and the
+  // hourly background cap.
   autoFetchTranscript: true,
   heatmapPeaks: 8,
   // Blank means "wherever `defaultDownloadFolder()` says", which is
@@ -413,7 +417,9 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   // spelled out here: `os.homedir()` is unreachable at module load on mobile.
   downloadFolder: "",
   ffmpegPath: "",
-  subscriptionsPollMinutes: 60,
+  // Two hours, not one (GitHub #66): conservative for a fresh install. A big
+  // import stretches this further on its own — see `feed-schedule.ts`.
+  subscriptionsPollMinutes: 120,
   subscriptionsExpiryDays: 0,
   subscriptionsIncludeShorts: false,
   // Off, and blank. A plugin that starts POSTing somewhere on its own would be
@@ -435,7 +441,8 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   silenceWordPad: WORD_PAD,
   skipNonSpeech: true,
   debugLogs: false,
-  warmOnOpen: true,
+  // Off (GitHub #66): nothing goes to YouTube before Play. See the field.
+  warmOnOpen: false,
 };
 
 /**

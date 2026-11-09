@@ -13,7 +13,7 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
 import { fullscreenPress } from "./fullscreen.ts";
 import { dropOnJump, VIRTUAL_FRAG_POLICY, virtualLoader } from "./virtual-loader.ts";
-import { badgeText, bufferedAhead, HD_WAIT_MS, rungPhase, within } from "./hd-status.ts";
+import { badgeText, bufferedAhead, HD_WAIT_MS, hdStartPhase, rungPhase, within } from "./hd-status.ts";
 import type { HdState } from "./hd-status.ts";
 import { shouldResumeSystemPause } from "./keep-playing.ts";
 import { KEEPALIVE_MAX_MS, silentWav } from "./silent-audio.ts";
@@ -2544,11 +2544,34 @@ export class YtFreePlayer {
     this.attach(stream, this.resumeSeconds(), false);
     // Read after the await: a pick made while 360p resolved counts.
     if (this.wantHd) {
-      this.setHd({ phase: "finding", height: stream.height });
-      void this.upgrade();
+      this.startUpgrade(stream.height);
     } else {
       this.setHd(this.sdState(stream.height));
     }
+  }
+
+  /**
+   * Look up HD now if the video has played, otherwise on its first Play
+   * (GitHub #66): opening a note costs no HD resolve, and the badge says "HD
+   * on Play" meanwhile rather than "finding HD…". A newer pick (`gen`) or a
+   * destroyed player cancels the wait.
+   */
+  private startUpgrade(height: number | undefined, gen = this.qualityGen): void {
+    if (hdStartPhase(this.started) === "finding") {
+      this.setHd({ phase: "finding", height });
+      void this.upgrade(undefined, gen);
+      return;
+    }
+    this.setHd({ phase: "on-play", height });
+    this.video.addEventListener(
+      "play",
+      () => {
+        if (this.destroyed || this.local || this.upgraded || gen !== this.qualityGen || !this.wantHd) return;
+        this.setHd({ phase: "finding", height: this.hdState.height });
+        void this.upgrade(undefined, gen);
+      },
+      { once: true },
+    );
   }
 
   /** The badge for 360p by choice: the setting's, or this video's pick. */
@@ -2575,8 +2598,7 @@ export class YtFreePlayer {
     if (!this.sourced) return;
     if (hd) {
       if (this.upgraded) return;
-      this.setHd({ phase: "finding", height: this.hdState.height });
-      void this.upgrade(undefined, gen);
+      this.startUpgrade(this.hdState.height, gen);
     } else {
       void this.downgrade(gen);
     }
