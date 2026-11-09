@@ -29,7 +29,7 @@ measurement. Savings found, largest first:
 | G3 | Desktop HD, 90 s check | 1 read per Play, guarding against files that stop at a minute | yt-dlp's files were measured serving the whole video (2026-11-04); the check was for InnerTube's. Drop it on the yt-dlp path: **3 → 2 reads**. Kept on the phone |
 | G4 | Shorts check (desktop, every new hub video) | 1 request to `/shorts/<id>` per new video | A Short is at most 3 minutes. Ask only when the duration is known and ≤ 3 min: **most videos need no check** |
 | G5 | Most-replayed backfill | 1 MB WEB call on note open; a video with no heatmap (most of them) is asked again every session its note is opened | Ask on Play, not on open, and remember "none" on the device: **at most once per video, ever** |
-| G6 | Feed retries | Each failing feed is tried 4 times in a few seconds | 2 tries; the next check covers the rest. Fewer bursts when YouTube's feed endpoint is having a bad hour |
+| G6 | Feed retries | Each failing feed is tried 4 times in a few seconds | Dropped: 3,710 feeds measured with no failure (§3) |
 | G7 | Duration backfill | 1 player call per new hub video (the largest steady background cost) | Keep, under the hourly cap, newest first. A channel's Videos tab gives ~30 durations in 1 call, but that is a second identity (WEB); not worth it unless G-measurements say otherwise |
 | G8 | `yt-dlp -J` internals | yt-dlp asks YouTube several times inside one run (page, player for its default clients) | Possibly pin one client and skip the page. **Needs one measured run** (about 3 requests) before deciding; not built in this scope |
 
@@ -62,25 +62,25 @@ replay test runs the action against the fixtures and fails CI if the count goes 
 | Search, or one more page of it | 1 |
 | Channel screen, or one more page of it | 1 |
 | Recovery after a stream dies | 1 fresh lookup per video per Play |
-| Takeout import of any size | 0 at import (feeds follow §3) |
+| Takeout import of any size | 0 at import; then 1 feed per channel per poll (§3) |
 
-## 3. No burst after a big import
+## 3. Feeds: measured, no pacing needed
 
-Today every hourly poll fetches every channel's feed, 5 at a time: 300 channels is 300 requests in
-about a minute, every hour, and a failing feed is tried 4 times. That burst is the pattern most
-likely to look automated.
+Isaiah asked to torture-test feeds before adding any pacing (2026-11-09). `tools/feed-torture.ts`
+ran on his Mac on home Wi-Fi, with a video lookup (the call Play makes) after each scenario:
 
-4. Feeds are spread out instead of all fetched in one poll: at most **one feed every 30 seconds**
-   (120 an hour), oldest-checked channel first, with a little random jitter.
-5. Each channel is checked every `max(poll period, channels × 30 s)`: with 60 channels that is the
-   hourly poll as today; with 300 channels each is checked every 2.5 hours.
-5b. **Sync now** (the hub's button) still checks every channel and gets every new video, paced
-    rather than in one burst: 2 feeds at a time with about a second between them (300 channels in
-    about 3 minutes), the channels that post most often first, so new videos land within seconds
-    and the long tail fills in while the hub shows its progress. Channels checked in the last 5
-    minutes are skipped.
-6. Shorts checks and duration lookups stay under the hourly background cap (#36). After an import
-   they fill in over hours, not in one burst; cards show without a duration meanwhile.
+| Run | Scenario | Feeds | Failed | Slowest | Video lookup after |
+|---|---|---|---|---|---|
+| 18 channels | today, at once, 3× import, 30 min sustained, 1 feed ×100 | 298 | 0 | 640 ms | OK every time |
+| 300 channels | 5 at a time | 300 | 0 | 243 ms | OK |
+| 300 channels | all 300 at the same moment | 300 | 0 | 773 ms | OK |
+| 300 channels | all at once, 3 times back to back | 900 | 0 | 2.7 s | OK |
+| 300 channels | all at once every 5 min for 30 min | 1,800 | 0 | 1.3 s | OK |
+| 300 channels | one feed 100 times, 20 at a time | 100 | 0 | 281 ms | OK |
+
+3,710 feed requests in about an hour, no failure and no bot check. So feeds stay as they are: the
+hourly poll and Sync now fetch every channel (5 at a time), with no spreading or stretching. The
+hourly cap still does not count feeds. One home IP on one day; a shared IP (VPN, school) may differ.
 
 ## 4. When YouTube's player is used (needs #43)
 
