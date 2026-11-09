@@ -38,11 +38,11 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 **Focus: Obsidian store MVP** ([V1-SCOPE-MVP](docs/V1-SCOPE-MVP.md)). Issues labelled `mvp` come
 first; `post-mvp` waits. New filings get an MVP call against the rule in that doc.
 
-1. Isaiah: confirm the MVP cut (store build = YouTube's own player, local build unchanged).
-2. #60 build flag and separate local plugin id, then #43 store playback on YouTube's player.
-3. GitHub Pages must serve the hosted player page (needed by #43; see phone-HD notes).
-4. #61 store compliance (LICENSE, versions.json, `x.y.z` tags, Obsidian lint: 32 errors).
-5. #62 device regression pass, #46 search filters, plus bugs Isaiah lists.
+1. Decided 2026-11-09: one ad-free build for the store and Isaiah; own stream, YouTube's
+   player as fallback (#43). Build split (#60) is post-MVP.
+2. #43 fallback; GitHub Pages must serve the hosted player page (phone needs it).
+3. #61 store compliance (LICENSE, versions.json, `x.y.z` tags, Obsidian lint: 32 errors).
+4. #62 device test of merged-but-untested features; #25, #5, #46, #48; bugs Isaiah lists.
 
 ## How to ship and test
 

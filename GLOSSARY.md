@@ -190,9 +190,9 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - **MVP** (Isaiah, 2026-11-09): the minimum to list YT Free in Obsidian's community directory.
   Labels `mvp` / `post-mvp`. Scope: `docs/V1-SCOPE-MVP.md`.
-- **Store build / local build** (Isaiah, 2026-11-09): the store build shows YouTube's ads, Isaiah's
-  local build stays ad-free. Proposed (awaiting confirmation): one codebase, esbuild `__STORE__`
-  flag; store build plays only through YouTube's player and has a different plugin id from local.
+- **Store build** (Isaiah, 2026-11-09): ad-free, same as Isaiah's own. Ads were only meant to
+  help acceptance, and Obsidian doesn't require them. Own stream first, YouTube's embedded player
+  as fallback (#43). No separate local build for now (#60 post-MVP).
 
 ### Earlier
 

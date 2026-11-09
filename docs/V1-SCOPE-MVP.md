@@ -1,23 +1,21 @@
 # V1 scope: Obsidian store MVP
 
-**Status:** draft 2026-11-09, awaiting Isaiah's confirmation of the cut.
+**Status:** 2026-11-09. Isaiah chose an ad-free store build with our own stream; MVP list below.
 **Goal (Isaiah, 2026-11-09):** the minimum to get YT Free listed in Obsidian's community
 directory. Everything not on the MVP list waits. New filings get an MVP / post-MVP call here.
 
 ## The one decision that shapes everything
 
-Isaiah wants the store build to show YouTube's ads and his own build to stay ad-free. The only
-way to show YouTube's ads is YouTube's own player (ads are served by the player; there is no way
-to put them into a stream we resolve ourselves). So:
+**Decided (Isaiah, 2026-11-09):** the store version is ad-free, like his own. Ads were only ever
+meant to help get accepted, and Obsidian does not require them. So:
 
-- **Store build:** plays through YouTube's IFrame player, framed from the hosted page
-  (`docs/player/index.html` on GitHub Pages, already built for #28). No yt-dlp, no InnerTube
-  streams, no Node/Electron code, no sign-in. Desktop and phone use the same path.
-- **Local build (Isaiah):** today's direct-stream player, HD, yt-dlp, downloads, Smart Speed,
-  sign-in. Unchanged.
+- **One build for everyone.** Our own stream on desktop and phone, with no install needed (the
+  InnerTube path the phone and the desktop fallback already use). yt-dlp stays optional on
+  desktop for HD, downloads and Smart Speed.
+- **YouTube's embedded player as the fallback** when our stream fails for a video (#43).
+- The store/local build split (#60) is no longer needed for MVP: nothing differs between the two.
 
-Side effect: every open playback/HD/bot-check bug only exists in the local build, so none of them
-blocks the store.
+Consequence: playback, HD and bot-check bugs now affect store users, so they are MVP.
 
 ## Would Obsidian accept it? Would YouTube?
 
@@ -41,17 +39,15 @@ Facts (checked 2026-11-09):
   player) forbid blocking or modifying YouTube's ads and modifying or blocking the player's
   functionality.
 
-Inference: the ad-free build would very likely pass Obsidian's automated scan, but it breaks
-YouTube's Terms, and a store listing makes it public and easy to flag. The YouTube-player store
-build is within YouTube's Terms for playback. Its metadata features (hub, search, channel screen,
+Inference: the ad-free build would very likely pass Obsidian's automated scan. Whether it breaks
+YouTube's Terms is disputed: Isaiah's view (2026-11-09) is that signed-out, user-started playback
+is neither a Terms breach nor automated access. My reading is that the Terms apply signed out too
+and that the hub's hourly polling is automated; user-started playback is the stronger case. Isaiah
+accepts the risk. A store listing makes the plugin public and easier to flag. Its metadata features (hub, search, channel screen,
 transcripts) still read YouTube's unofficial endpoints. That is a grey area that many listed
 plugins share. I can't tell how likely YouTube or Obsidian is to act on it.
 
-Opinion: "YouTube's ads" in a plugin's own UI may draw a question about the dynamic-ads rule,
-but they come from YouTube's player the user chose to play, as with every embed plugin listed.
-Low risk.
-
-## What the store build keeps and loses (YouTube player vs today's player)
+## What a video loses when it falls back to YouTube's player (#43)
 
 Checked against the code: the hosted page reports time, duration, state, speed and quality to the
 plugin and accepts `seek` and `rate` commands (`docs/player/index.html`,
@@ -59,7 +55,7 @@ plugin and accepts `seek` and `rate` commands (`docs/player/index.html`,
 (`src/mobile/youtube-player-modal.ts`), so "keeps" below mostly means "needs wiring inline", not
 "works now".
 
-| Feature | Store build (YouTube player), desktop and phone | Notes |
+| Feature | On the YouTube player fallback, desktop and phone | Notes |
 |---|---|---|
 | Video notes, properties, tags, description, sections | Keeps | Not player-dependent. |
 | Saved timestamp / resume where you left off | Keeps, needs wiring | Status messages carry the time; save it while playing, not only on close. |
@@ -72,59 +68,38 @@ plugin and accepts `seek` and `rate` commands (`docs/player/index.html`,
 | Pinned/docked player, collapse, Go to the playing video | Keeps, needs rework | Moving a frame in the page reloads it, so docking must not re-parent it. |
 | Our controls and ⋯ menu over the picture | Moves below the picture | YouTube's policies forbid overlaying or changing its player. YouTube's own controls show. |
 | Fullscreen | YouTube's own button | Our fullscreen handling goes away. |
-| **Offline downloads** | **Lost** | yt-dlp; also against YouTube's Terms. |
-| **Sign in, account sync (Watch Later, history)** | **Lost** (by choice) | Reads YouTube cookies; too much to disclose and defend in a store plugin. |
+| Offline downloads | Unaffected | A downloaded copy plays in our player. |
 | Transcript, most-replayed | Keeps (phone path) | Not player-dependent; unofficial endpoint. |
 | Subscriptions hub, RSS polling, backfill, channel screen, search | Keeps | Not player-dependent. |
 | Halfway thumbnails, paste/click link to Preview, hub deep link, share | Keeps | Not player-dependent. |
-| Bot checks | Mostly gone for playback | YouTube's player is YouTube playing its own video. |
-
-## Build split (item 3)
-
-One codebase, two outputs, chosen at build time:
-
-- `esbuild` `define: { __STORE__: "true" | "false" }`. `npm run build` = local (as today);
-  `npm run build:store` = store. Store-only code paths sit behind `if (__STORE__)`, local-only
-  ones behind `if (!__STORE__)`; esbuild removes the dead branch, so the yt-dlp, InnerTube-stream,
-  sign-in and download code is not in the store `main.js` at all.
-- A build check (like today's `assertNoEagerNodeRequires`) fails the store build if its bundle
-  contains `child_process`, `yt-dlp`, `googlevideo` or `@electron/remote`.
-- **Different plugin ids.** Store: `ytfree` (manifest.json at HEAD, which the directory reads).
-  Local: `ytfree-local`, name "YT Free (local)", written by `install.sh`. Otherwise installing or
-  updating from the store overwrites Isaiah's build. Note: a new id means a new plugin folder, so
-  the local build's `data.json` must be copied once.
-- **Releases carry the store build only.** Tags become `x.y.z` with no `v` (Obsidian requires
-  the tag to equal the manifest version; `v0.1.0` fails). `setup.sh` then installs the store
-  build, so Isaiah installs via `install.sh` only.
-- Every PR states which build it affects: both, store, or local. Tests run against both.
+| Videos our stream can't play | Play | The reason for the fallback. |
 
 ## MVP list
 
 | # | Item | Why MVP | Issue |
 |---|---|---|---|
-| M1 | Build flag, two ids, store bundle check | Item 3 | #60 |
-| M2 | Store playback: YouTube player inline on desktop and phone, wired for resume, progress, timestamps, speed; docking without re-parenting | Store build can't play without it | #43 (reframed) |
-| M3 | GitHub Pages serving the hosted player page (one-time repo setting; store users do nothing, the plugin loads the page itself). Needed on the phone: a direct embed from `capacitor://localhost` gets error 153. Desktop: test a direct embed in #43 and skip the page there if it plays | M2 depends on it | Isaiah, one command |
-| M4 | Store compliance: LICENSE, `versions.json`, `x.y.z` tags, store manifest (description ≤250 chars without "ad-free", `isDesktopOnly: false`), README disclosures (network: YouTube, GitHub Pages), fix Obsidian lint errors (32 today: console logging, 2 regex lookbehinds that break iOS < 16.4, type-safety) | Automated scan fails otherwise | #61 |
-| M5 | Device regression pass of shipped-but-untested features that stay in the store build: hub Saved / In progress (#49, #50), phone ⋯ menu (#52), phone properties stay collapsed (#51, cause unconfirmed), paste-to-Preview, hub deep link | "Fix known bugs" | #62 |
-| M6 | Search: fix Uploaded / Sort by filters, drop "Related to your search", review all search logic | Isaiah, 2026-11-09 | #46 |
-| M9 | Local watch history with stats (videos watched, total watch time) | Isaiah, 2026-11-09 | #48 |
-| M7 | Unfiled bugs Isaiah knows of | "Fix known bugs" | Isaiah to list |
-| M8 | Store name check | "YT Free" promises ad-free; the store build shows ads | decision |
+| M1 | Fallback to YouTube's embedded player when our stream fails, wired for resume, progress, timestamps, speed | Isaiah's fallback; some videos refuse our stream | #43 |
+| M2 | GitHub Pages serving the hosted player page (one-time repo setting; users do nothing). Needed on the phone: a direct embed from `capacitor://localhost` gets error 153. Desktop: try a direct embed first | M1 depends on it on the phone | Isaiah, one command |
+| M3 | Store compliance: LICENSE, `versions.json`, `x.y.z` tags (`v0.1.0` fails), manifest description ≤250 chars, `isDesktopOnly: false`, README disclosures (network use: YouTube, GitHub Pages; optional yt-dlp; optional sign-in and the cookie file outside the vault), fix Obsidian lint errors (32 today) | Automated scan fails otherwise | #61 |
+| M4 | Device test of every merged-but-untested feature: HD before Play, quality switch, keep playing / background pause, phone HD (native HLS), hub Saved / In progress, phone ⋯ menu, phone properties, paste-to-Preview, hub deep link, request budget parts 2–3 | "Fix known bugs" | #62 |
+| M5 | Search: filters, drop "Related to your search", review all search logic | Isaiah, 2026-11-09 | #46 |
+| M6 | Local watch history with stats | Isaiah, 2026-11-09 | #48 |
+| M7 | Phone HD stops after about a minute | Bug in a shipped feature | #25 |
+| M8 | Desktop "quality" resolve returns no HLS manifest: check it still happens after #32, close if not | Bug in a shipped feature | #5 |
+| M9 | Unfiled bugs Isaiah knows of | "Fix known bugs" | Isaiah to list |
 
 ## Post-MVP
 
 | Issue | Why not MVP |
 |---|---|
-| #5 Desktop quality resolve, no HLS | Local build only |
-| #15 HD quality picker / ABR | Local build only; YouTube picks quality in the store build |
-| #25 Phone HD stops after a minute | Local build only |
-| #26 Music / lock-screen | New feature; likely impossible with YouTube's player |
+| #60 Store/local build split | Not needed while both builds are the same |
+| #15 HD quality picker / ABR | New feature; HD and the per-video switch already ship |
+| #26 Music / lock-screen | New feature |
 | 018 Watch Later | Parked by Isaiah |
 
-Rule for new filings: MVP only if it is a bug in a feature the store build ships, or something
-the store submission or scan requires. Everything else is post-MVP, including local-only bugs.
+Rule for new filings: MVP if it is a bug in a feature the plugin ships, something the store
+submission or scan requires, or Isaiah names it MVP. Everything else is post-MVP.
 
-## Manual test (store build)
+## Manual test
 
-Written when M1–M2 land.
+Written when M1 lands; M4 is the device test of everything else.
