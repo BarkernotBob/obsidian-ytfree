@@ -15,13 +15,12 @@
  * imported at the top of a file mobile loads.
  */
 
-export * from "./account.ts";
 export * from "./calibrate.ts";
 export * from "./dock-badge.ts";
 export * from "./download.ts";
 export * from "./range-fetch.ts";
 export * from "./resolver.ts";
-export * from "./signin.ts";
+export * from "./legacy-signin.ts";
 export * from "./silencedetect.ts";
 export * from "./transcript-fetch.ts";
 export * from "./offline-hd.ts";

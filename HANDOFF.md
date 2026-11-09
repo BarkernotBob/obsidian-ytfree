@@ -15,8 +15,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   #20, #21's last two commits (bot-check retry, HD ready before Play), #24, #28, #30 part 2.
 - 2026-11-07 nightly: #42 large thumbnails (phone poster) upgrade to `maxres2.jpg` after `hq2`
   shows; small cards never ask for it. See the midframe scope doc.
-- Isaiah's earlier answers are recorded in [GLOSSARY.md](GLOSSARY.md).
-- New follow-ups are filed as GitHub issues, not as files in `issues/`.
+- Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md). New follow-ups are filed as GitHub issues, not as files in `issues/`.
+- 2026-11-09: YouTube sign-in, cookies and account sync removed (#64); see GLOSSARY.
 
 ## Shipped on main (scope doc = manual test)
 
