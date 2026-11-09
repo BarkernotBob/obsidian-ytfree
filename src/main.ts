@@ -93,6 +93,7 @@ import type { AnswerStore } from "./info-cache.ts";
 import { trimYtDlpInfo } from "./answer-trim.ts";
 import { governor } from "./request-governor.ts";
 import { pollIsDue } from "./subscriptions.ts";
+import { jitteredRoundMs } from "./feed-schedule.ts";
 import type { VideoNote } from "./subscriptions.ts";
 import { offlineFormats } from "./offline-hd.ts";
 import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
@@ -1493,10 +1494,17 @@ export default class YtFreePlugin extends Plugin {
     // pressing it understands it is "agree with my other device", and the
     // answer to that is already in the vault.
     await this.subscriptions.refreshFromDisk();
-    await this.subscriptions.poll();
+    const checked = await this.subscriptions.poll();
     this.refreshHub();
-    // A button that flashes nothing looks broken.
-    new Notice(`YT Free: checked ${this.subscriptions.state.channels.length} channels.`);
+    // A button that flashes nothing looks broken. A long list is checked a
+    // round at a time (GitHub #66), and the notice says so rather than claim
+    // every channel was just asked.
+    const total = this.subscriptions.state.channels.length;
+    new Notice(
+      checked < total
+        ? `YT Free: checked ${checked} of ${total} channels — the rest follow over the next hours.`
+        : `YT Free: checked ${total} channels.`,
+    );
   }
 
   /**
@@ -1505,11 +1513,22 @@ export default class YtFreePlugin extends Plugin {
    */
   private async maybePoll(): Promise<void> {
     if (botCheck.isPaused()) return;
-    const minutes = Math.max(5, this.settings.subscriptionsPollMinutes);
-    if (!pollIsDue(this.subscriptions.state, Date.now(), minutes * 60_000, Platform.isDesktopApp)) return;
+    // One round per interval; a long list makes the interval shorter and each
+    // round smaller, never the whole list at once (GitHub #66). The jitter is
+    // drawn once per round so the ticker does not re-roll it every minute.
+    this.roundGapMs ??= jitteredRoundMs(
+      this.settings.subscriptionsPollMinutes,
+      this.subscriptions.state.channels.length,
+      Math.random,
+    );
+    if (!pollIsDue(this.subscriptions.state, Date.now(), this.roundGapMs, Platform.isDesktopApp)) return;
+    this.roundGapMs = null;
     await this.subscriptions.poll();
     this.refreshHub();
   }
+
+  /** The jittered gap the next automatic round waits for; see `maybePoll`. */
+  private roundGapMs: number | null = null;
 
   /**
    * Which videos you are part-way through, for the hub's In progress list.

@@ -22,6 +22,7 @@ import {
   normalizeBlockList,
 } from "./search-blocklist.ts";
 import type { BlockEntry } from "./search-blocklist.ts";
+import { laterStamp } from "./feed-schedule.ts";
 
 /** A channel we poll. */
 export interface Channel {
@@ -38,6 +39,12 @@ export interface Channel {
   error?: string | null;
   /** Consecutive polls whose feed request failed. Reset by any success. */
   failures?: number;
+  /**
+   * ISO time this channel's feed was last fetched, by either device. Picks
+   * which channels the next poll round fetches (GitHub #66, `feed-schedule`).
+   * Missing on a channel that has never been checked.
+   */
+  polledAt?: string;
 }
 
 /** New → clicked (Kept) or skipped (Dismissed). Only New expires. */
@@ -455,11 +462,16 @@ export function mergeStates(
     const existing = channels.get(channel.id);
     // Mine second, so a fresher title and a fresher error win; the earlier
     // `addedAt` is the true one either way.
-    channels.set(channel.id, {
+    const merged: Channel = {
       ...channel,
       addedAt:
         existing?.addedAt && existing.addedAt < channel.addedAt ? existing.addedAt : channel.addedAt,
-    });
+    };
+    // The later check wins, whichever device made it, or a round would fetch
+    // again what the other device has just fetched.
+    const polledAt = laterStamp(existing?.polledAt, channel.polledAt);
+    if (polledAt) merged.polledAt = polledAt;
+    channels.set(channel.id, merged);
     const newest = latestAdded.get(channel.id);
     if (!newest || channel.addedAt > newest) latestAdded.set(channel.id, channel.addedAt);
   }
