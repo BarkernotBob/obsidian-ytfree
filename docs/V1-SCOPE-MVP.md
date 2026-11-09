@@ -107,7 +107,8 @@ One codebase, two outputs, chosen at build time:
 | M3 | GitHub Pages serving the hosted player page (one-time repo setting; store users do nothing, the plugin loads the page itself). Needed on the phone: a direct embed from `capacitor://localhost` gets error 153. Desktop: test a direct embed in #43 and skip the page there if it plays | M2 depends on it | Isaiah, one command |
 | M4 | Store compliance: LICENSE, `versions.json`, `x.y.z` tags, store manifest (description ≤250 chars without "ad-free", `isDesktopOnly: false`), README disclosures (network: YouTube, GitHub Pages), fix Obsidian lint errors (32 today: console logging, 2 regex lookbehinds that break iOS < 16.4, type-safety) | Automated scan fails otherwise | #61 |
 | M5 | Device regression pass of shipped-but-untested features that stay in the store build: hub Saved / In progress (#49, #50), phone ⋯ menu (#52), phone properties stay collapsed (#51, cause unconfirmed), paste-to-Preview, hub deep link | "Fix known bugs" | #62 |
-| M6 | Search: Uploaded / Sort by filters broken | Known bug in a store feature | #46 (filters only) |
+| M6 | Search: fix Uploaded / Sort by filters, drop "Related to your search", review all search logic | Isaiah, 2026-11-09 | #46 |
+| M9 | Local watch history with stats (videos watched, total watch time) | Isaiah, 2026-11-09 | #48 |
 | M7 | Unfiled bugs Isaiah knows of | "Fix known bugs" | Isaiah to list |
 | M8 | Store name check | "YT Free" promises ad-free; the store build shows ads | decision |
 
@@ -119,8 +120,6 @@ One codebase, two outputs, chosen at build time:
 | #15 HD quality picker / ABR | Local build only; YouTube picks quality in the store build |
 | #25 Phone HD stops after a minute | Local build only |
 | #26 Music / lock-screen | New feature; likely impossible with YouTube's player |
-| #46 drop "Related to your search", review all search logic | Quality-of-life beyond the filter bug |
-| #48 Watch history with stats | New feature |
 | 018 Watch Later | Parked by Isaiah |
 
 Rule for new filings: MVP only if it is a bug in a feature the store build ships, or something
