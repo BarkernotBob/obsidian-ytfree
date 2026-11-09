@@ -188,6 +188,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - Phone ⋯ menu (#52): moves to `document.body` while open, sits at Obsidian's menu layer, avoids safe areas, scrolls when taller than the room (2026-11-07).
 
+- **MVP** (Isaiah, 2026-11-09): the minimum to list YT Free in Obsidian's community directory.
+  Labels `mvp` / `post-mvp`. Scope: `docs/V1-SCOPE-MVP.md`.
+- **Store build / local build** (Isaiah, 2026-11-09): the store build shows YouTube's ads, Isaiah's
+  local build stays ad-free. Proposed (awaiting confirmation): one codebase, esbuild `__STORE__`
+  flag; store build plays only through YouTube's player and has a different plugin id from local.
+
 ### Earlier
 
 - `PROGRESS_TTL_DAYS` stays 365 (2026-09-02).

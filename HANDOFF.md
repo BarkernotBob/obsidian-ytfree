@@ -4,7 +4,7 @@ Current state only; keep it under 80 lines and replace, don't append. Full histo
 2026-09-22 is in [docs/archive/HANDOFF-history-2026-09.md](docs/archive/HANDOFF-history-2026-09.md).
 Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual test section).
 
-## Status (2026-11-07)
+## Status (2026-11-09)
 
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
@@ -35,17 +35,14 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
-1. Isaiah: install main and run the untested scope-doc tests listed under Status.
-2. Phone HD part 2: switch GitHub Pages to main `/docs` (it pointed at PR #28's branch).
-3. #49/#50 (Saved chip, In progress Delete): PR #53, test steps in its scope doc.
-4. #51 (phone): Now playing pill removed; properties re-collapse after Obsidian rebuilds them. The
-   properties cause was not found in the 2026-11-07 merge diff (none of it touches collapsing), so the
-   fix is a guess at a rebuild/slow-load race. Needs a phone test.
-5. Request volume (#31–#39), scope approved 2026-11-07:
-   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md). Parts 1 and 2 merged (PR #56, #57).
-   Part 3 merged (PR #58). Part 4 (#38: replay fixtures, recorder, offline HD player) built.
-   No real video recorded yet (`node tools/record-fixtures.ts <id>`, ~10 requests, Isaiah's call).
-6. HD backlog on GitHub: rung picker / ABR (#15).
+**Focus: Obsidian store MVP** ([V1-SCOPE-MVP](docs/V1-SCOPE-MVP.md)). Issues labelled `mvp` come
+first; `post-mvp` waits. New filings get an MVP call against the rule in that doc.
+
+1. Isaiah: confirm the MVP cut (store build = YouTube's own player, local build unchanged).
+2. #60 build flag and separate local plugin id, then #43 store playback on YouTube's player.
+3. GitHub Pages must serve the hosted player page (needed by #43; see phone-HD notes).
+4. #61 store compliance (LICENSE, versions.json, `x.y.z` tags, Obsidian lint: 32 errors).
+5. #62 device regression pass, #46 search filters, plus bugs Isaiah lists.
 
 ## How to ship and test
 
