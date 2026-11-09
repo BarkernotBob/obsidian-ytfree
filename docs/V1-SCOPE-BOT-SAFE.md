@@ -74,6 +74,11 @@ likely to look automated.
    (120 an hour), oldest-checked channel first, with a little random jitter.
 5. Each channel is checked every `max(poll period, channels × 30 s)`: with 60 channels that is the
    hourly poll as today; with 300 channels each is checked every 2.5 hours.
+5b. **Sync now** (the hub's button) still checks every channel and gets every new video, paced
+    rather than in one burst: 2 feeds at a time with about a second between them (300 channels in
+    about 3 minutes), the channels that post most often first, so new videos land within seconds
+    and the long tail fills in while the hub shows its progress. Channels checked in the last 5
+    minutes are skipped.
 6. Shorts checks and duration lookups stay under the hourly background cap (#36). After an import
    they fill in over hours, not in one burst; cards show without a duration meanwhile.
 
@@ -90,10 +95,12 @@ likely to look automated.
 
 ## 4b. How long to pause after a bot check
 
-13. 45 minutes was a pick, not a measurement: YouTube publishes no figure, and the only data point
-    is 2026-11-04, when continued requests kept Isaiah's IP flagged for most of a day. So the pause
-    grows if YouTube is still refusing when it ends: 45 minutes, then 2 hours, then 6 hours, then
-    back to 45 minutes after a clean day. Play during the pause still tries once (as today).
+13. 45 minutes was a pick, not a measurement: YouTube publishes no figure. Isaiah (2026-11-09):
+    try again sooner. After a bot check our stream is tried again after 1 minute, then 5, 10, 30
+    minutes, 1 hour, 2 hours, then every 6 hours, until one succeeds. A retry is spent only by a real
+    Play (the next video the reader starts tries our stream once); no request goes out on a timer.
+    Between retries Play uses YouTube's player (#43). Background work stays paused until a retry
+    succeeds.
 
 ## 5. First-run defaults for store users
 
