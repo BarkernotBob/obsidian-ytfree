@@ -698,14 +698,19 @@ const HEAD_BYTES = 64 * 1024;
 
 /**
  * One yt-dlp format as an InnerTube-shaped one, with the init and index ranges
- * read off the file's head. Null when the head cannot be read or has no `sidx`.
+ * read off the file's head, plus the head itself. Null when the head cannot be
+ * read or has no `sidx`.
  */
-async function adaptiveFromHead(f: YtDlpFormat, fetchRange: FetchRange): Promise<AdaptiveFormat | null> {
-  const at = await fetchRange(f.url!, 0, HEAD_BYTES - 1).then(locateIndex, () => null);
-  if (!at) return null;
+async function readHead(
+  f: YtDlpFormat,
+  fetchRange: FetchRange,
+): Promise<{ shape: AdaptiveFormat; head: ArrayBuffer; at: NonNullable<ReturnType<typeof locateIndex>> } | null> {
+  const head = await fetchRange(f.url!, 0, HEAD_BYTES - 1).catch(() => null);
+  const at = head && locateIndex(head);
+  if (!head || !at) return null;
   const video = isAvcMp4(f);
   const original = (f.language_preference ?? 0) >= 10;
-  return {
+  const shape: AdaptiveFormat = {
     itag: parseInt(f.format_id ?? "0", 10) || 0,
     url: f.url,
     mimeType: video ? `video/mp4; codecs="${f.vcodec}"` : `audio/mp4; codecs="${f.acodec}"`,
@@ -717,6 +722,26 @@ async function adaptiveFromHead(f: YtDlpFormat, fetchRange: FetchRange): Promise
     indexRange: { start: String(at.index.start), end: String(at.index.end) },
     ...(video ? {} : { xtags: original ? "acont=original" : /dubbed/i.test(f.format_note ?? "") ? "acont=dubbed" : "" }),
   };
+  return { shape, head, at };
+}
+
+async function adaptiveFromHead(f: YtDlpFormat, fetchRange: FetchRange): Promise<AdaptiveFormat | null> {
+  return (await readHead(f, fetchRange))?.shape ?? null;
+}
+
+/**
+ * A yt-dlp format as a rung, in one read when the whole `sidx` box sits inside
+ * the head already read (it is about 1 KB in on YouTube's files), else two
+ * (GitHub #66 G2). Null when the head cannot be read.
+ */
+async function rungFromYtDlp(f: YtDlpFormat, fetchRange: FetchRange): Promise<Rung | null> {
+  const read = await readHead(f, fetchRange);
+  const track = read && toTrack(read.shape);
+  if (!read || !track) return null;
+  if (read.at.index.end < read.head.byteLength) {
+    return { track, segments: parseSidx(read.head.slice(read.at.index.start, read.at.index.end + 1), read.at.index.start) };
+  }
+  return readRung(track, fetchRange);
 }
 
 /**
@@ -740,11 +765,14 @@ const ytDlpMeta = (f: YtDlpFormat): RungMeta => ({
 });
 
 /**
- * HD from yt-dlp's files: the same stitched, streamed stream as `resolveHd`,
- * including the check past the first minute. Reads the heads of the top rung
- * and the sound only (a lower top is tried if the highest will not answer);
- * the other rungs are read when first played (GitHub #35). No re-link: asking
- * yt-dlp again takes too long to hide inside one slow segment.
+ * HD from yt-dlp's files: the same stitched, streamed stream as `resolveHd`.
+ * Reads the heads of the top rung and the sound only (a lower top is tried if
+ * the highest will not answer), each index out of its head: two reads in all
+ * (GitHub #66 G2). No check past the first minute (G3): that guards against
+ * InnerTube's files stopping at about a minute, and yt-dlp's were measured
+ * serving the whole video (2026-11-04). The other rungs are read when first
+ * played (GitHub #35). No re-link: asking yt-dlp again takes too long to hide
+ * inside one slow segment.
  */
 export async function resolveHdFromYtDlp(
   videoId: string,
@@ -757,23 +785,18 @@ export async function resolveHdFromYtDlp(
   const ladder = candidates.filter(isAvcMp4);
   if (!audioFormat || !ladder.length || (ladder[0].height ?? 0) <= 360) throw new Error("yt-dlp: no HD pair");
 
-  const audioShape = await adaptiveFromHead(audioFormat, fetchRange);
-  const audioTrack = audioShape && toTrack(audioShape);
-  if (!audioTrack) throw new Error("yt-dlp: no HD pair");
+  const audio = await rungFromYtDlp(audioFormat, fetchRange);
+  if (!audio) throw new Error("yt-dlp: no HD pair");
 
   for (let i = 0; i < ladder.length && (ladder[i].height ?? 0) > 360; i++) {
-    const shape = await adaptiveFromHead(ladder[i], fetchRange);
-    const video = shape && toTrack(shape);
-    if (!video) continue;
-    const [top, audio] = await Promise.all([readRung(video, fetchRange), readRung(audioTrack, fetchRange)]);
-    await deepCheck(top, fetchRange);
+    const top = await rungFromYtDlp(ladder[i], fetchRange);
+    if (!top) continue;
     const lower: LazyRung[] = ladder.slice(i + 1).map((f) => ({
       meta: ytDlpMeta(f),
       load: async () => {
-        const below = await adaptiveFromHead(f, fetchRange);
-        const track = below && toTrack(below);
-        if (!track) throw new Error(`no readable index for ${f.height}p`);
-        return readRung(track, fetchRange);
+        const rung = await rungFromYtDlp(f, fetchRange);
+        if (!rung) throw new Error(`no readable index for ${f.height}p`);
+        return rung;
       },
     }));
     return assemble(videoId, top, audio, lower, [], fetchRange);
