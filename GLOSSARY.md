@@ -194,6 +194,11 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   help acceptance, and Obsidian doesn't require them. Own stream first, YouTube's embedded player
   as fallback (#43). No separate local build for now (#60 post-MVP).
 
+- **Playback tiers** (Isaiah, 2026-11-09): yt-dlp (desktop, if installed) → our own stream →
+  YouTube's embedded player. After a bot check, straight to the embed.
+- **No sign-in** (Isaiah, 2026-11-09): YouTube cookies never reach the plugin; subscriptions by
+  manual add or Takeout CSV (#64, #65).
+
 ### Earlier
 
 - `PROGRESS_TTL_DAYS` stays 365 (2026-09-02).

@@ -12,7 +12,11 @@ meant to help get accepted, and Obsidian does not require them. So:
 - **One build for everyone.** Our own stream on desktop and phone, with no install needed (the
   InnerTube path the phone and the desktop fallback already use). yt-dlp stays optional on
   desktop for HD, downloads and Smart Speed.
-- **YouTube's embedded player as the fallback** when our stream fails for a video (#43).
+- **Three playback tiers (Isaiah, 2026-11-09):** yt-dlp if installed (desktop) → our own stream →
+  YouTube's embedded player (#43). Tiers 1 and 2 fail together on a bot check (same IP), so after a
+  bot check playback goes straight to tier 3 and makes no stream requests.
+- **No YouTube sign-in (Isaiah, 2026-11-09):** cookies never reach the plugin. Subscriptions come
+  from manual adds and the Google Takeout CSV import.
 - The store/local build split (#60) is no longer needed for MVP: nothing differs between the two.
 
 Consequence: playback, HD and bot-check bugs now affect store users, so they are MVP.
@@ -80,12 +84,14 @@ plugin and accepts `seek` and `rate` commands (`docs/player/index.html`,
 |---|---|---|---|
 | M1 | Fallback to YouTube's embedded player when our stream fails, wired for resume, progress, timestamps, speed | Isaiah's fallback; some videos refuse our stream | #43 |
 | M2 | GitHub Pages serving the hosted player page (one-time repo setting; users do nothing). Needed on the phone: a direct embed from `capacitor://localhost` gets error 153. Desktop: try a direct embed first | M1 depends on it on the phone | Isaiah, one command |
-| M3 | Store compliance: LICENSE, `versions.json`, `x.y.z` tags (`v0.1.0` fails), manifest description ≤250 chars, `isDesktopOnly: false`, README disclosures (network use: YouTube, GitHub Pages; optional yt-dlp; optional sign-in and the cookie file outside the vault), fix Obsidian lint errors (32 today) | Automated scan fails otherwise | #61 |
+| M3 | Store compliance: LICENSE, `versions.json`, `x.y.z` tags (`v0.1.0` fails), manifest description ≤250 chars, `isDesktopOnly: false`, README disclosures (network use: YouTube, GitHub Pages; optional yt-dlp; no sign-in), fix Obsidian lint errors (32 today) | Automated scan fails otherwise | #61 |
 | M4 | Device test of every merged-but-untested feature: HD before Play, quality switch, keep playing / background pause, phone HD (native HLS), hub Saved / In progress, phone ⋯ menu, phone properties, paste-to-Preview, hub deep link, request budget parts 2–3 | "Fix known bugs" | #62 |
 | M5 | Search: filters, drop "Related to your search", review all search logic | Isaiah, 2026-11-09 | #46 |
 | M6 | Local watch history with stats | Isaiah, 2026-11-09 | #48 |
 | M7 | Phone HD stops after about a minute | Bug in a shipped feature | #25 |
 | M8 | Desktop "quality" resolve returns no HLS manifest: check it still happens after #32, close if not | Bug in a shipped feature | #5 |
+| M10 | Remove sign-in, cookie file and account sync | Isaiah, 2026-11-09 | #64 |
+| M11 | Subscribe inside YT Free; Takeout import instructions | Replaces sign-in | #65 |
 | M9 | Unfiled bugs Isaiah knows of | "Fix known bugs" | Isaiah to list |
 
 ## Post-MVP
