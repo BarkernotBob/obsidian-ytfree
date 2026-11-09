@@ -30,6 +30,7 @@ export { isBotCheck };
  * error goes on.
  */
 async function ytDlp(ytDlpPath: string, args: string[], maxBuffer: number): Promise<string> {
+  const sentAt = Date.now();
   try {
     // Paced with the other "who is this video" requests (GitHub #36).
     const result = await governor.run("yt-dlp", () =>
@@ -39,6 +40,8 @@ async function ytDlp(ytDlpPath: string, args: string[], maxBuffer: number): Prom
         env: ytDlpEnv(ytDlpPath),
       }),
     );
+    // An answer during a bot-check pause ends it (GitHub #66).
+    botCheck.succeeded(sentAt);
     return result.stdout;
   } catch (err: unknown) {
     const e = err as { stderr?: string; message?: string };
