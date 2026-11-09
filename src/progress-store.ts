@@ -49,10 +49,13 @@ export class ProgressStore {
   private stampSink: ((stamps: Record<string, string>) => Promise<boolean>) | null = null;
   private draining = false;
 
-  constructor(
-    private app: App,
-    private path: string,
-  ) {}
+  private app: App;
+  private path: string;
+
+  constructor(app: App, path: string) {
+    this.app = app;
+    this.path = path;
+  }
 
   async load(): Promise<void> {
     const read = await this.read();
@@ -81,7 +84,11 @@ export class ProgressStore {
     try {
       if (!(await this.stampSink(stamps))) return;
       for (const [videoId, at] of Object.entries(stamps)) {
-        if (this.state.watched[videoId] === at) delete this.state.watched[videoId];
+        if (this.state.watched[videoId] !== at) continue;
+        delete this.state.watched[videoId];
+        // Marked, not just deleted: the merge would otherwise take it straight
+        // back from the file or the other device and hand it over again.
+        this.state.drained[videoId] = at;
       }
       this.schedule();
     } finally {
