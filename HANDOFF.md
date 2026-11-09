@@ -9,12 +9,13 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
-- Older status lines (2026-11-07 merges, #42) moved to the archive file above.
 - Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md). New follow-ups are filed as GitHub issues, not as files in `issues/`.
 - 2026-11-09: YouTube sign-in, cookies and account sync removed (#64); see GLOSSARY.
-- 2026-11-09 (#66): HD on Play, request-ceiling tests (#70); feed torture test showed no need for
-  poll rounds, so every poll checks every channel again; nothing resolves before Play on desktop.
-  Scope: [V1-SCOPE-BOT-SAFE](docs/V1-SCOPE-BOT-SAFE.md).
+- 2026-11-09 (#66, PR #67): HD on Play and ceiling tests (#70); torture test showed no need for
+  poll rounds; nothing before Play on desktop; bot-check retries on Play (1, 5, 10, 30 min, 1 h,
+  2 h, 6 h); savings G1–G5; embed rule waits for #43 ([scope](docs/V1-SCOPE-BOT-SAFE.md)).
+- 2026-11-09: #48 watch history built (PR #74, [V1-SCOPE-WATCH-HISTORY](docs/V1-SCOPE-WATCH-HISTORY.md)):
+  History hub chip, `history.json`. Next: device test (manual test in the scope doc). #43 must feed it.
 - 2026-11-09 nightly: Subscribe inside YT Free on the channel screen and a search card's ⋯ menu,
   and step-by-step Takeout steps in the import dialog (#65, `src/subscribe.ts`).
 

@@ -1,6 +1,7 @@
 import Hls from "hls.js";
 import { Platform, setIcon } from "obsidian";
 import { formatTimestamp } from "./format.ts";
+import { playedSpanMs } from "./history.ts";
 import { SHARE_ICON } from "./icon.ts";
 import { anchorVisible, panelPlacement } from "./panel.ts";
 import type { SectionName } from "./sections.ts";
@@ -71,6 +72,13 @@ export interface PlayerOptions {
    * decides what is worth writing down.
    */
   onProgress?: (seconds: number, duration: number) => void;
+  /**
+   * Seconds of real time spent playing since the last call (GitHub #48): paused,
+   * buffering and seeking time does not count, and 2× speed counts at the clock
+   * rate, so ten minutes of video at 2× is five. Called just before each
+   * `onProgress`, so the receiver sees the time before it sees the position.
+   */
+  onWatchTime?: (seconds: number) => void;
   /**
    * Smart Speed. Absent, the control is not drawn at all and the engine does
    * not exist; present, the toggle is always drawn — availability changes how
@@ -474,6 +482,15 @@ export class YtFreePlayer {
   private loading: Promise<void> | null = null;
   /** Throttle for the position reports — see `trackProgress`. */
   private lastProgressAt = 0;
+  /**
+   * Watch-time clock (GitHub #48): where the unbanked span of playing started
+   * and the latest sighting inside it, as wall-clock ms and media seconds.
+   * Null while not playing.
+   */
+  private watchFrom: { wall: number; media: number } | null = null;
+  private watchTick: { wall: number; media: number } | null = null;
+  /** Playing time banked since the last report, in ms. */
+  private playedMs = 0;
   private reportProgress: (() => void) | null = null;
 
   // --- Smart Speed. All inert unless `options.smartSpeed` was supplied.
@@ -922,6 +939,32 @@ export class YtFreePlayer {
       : Math.max(0, target);
   }
 
+  /** Note that the video is playing right now, starting the clock if it was stopped. */
+  private sightPlaying(): void {
+    const v = this.video;
+    if (v.paused || v.ended || v.seeking) return;
+    const seen = { wall: Date.now(), media: v.currentTime };
+    if (!this.watchFrom) this.watchFrom = seen;
+    this.watchTick = seen;
+  }
+
+  /**
+   * Move the clock's span into `playedMs` and carry on from its last sighting.
+   *
+   * The span counts the smaller of the wall clock and the media time it
+   * covered at the current speed. Wall clock alone would count a phone that
+   * was suspended mid-play (the clock moved, the video did not); media time
+   * alone would count 2× as double. The `seeking` handler banks before the
+   * jump using the last sighting, so a seek adds nothing.
+   */
+  private bankPlaying(): void {
+    const from = this.watchFrom;
+    const tick = this.watchTick;
+    if (!from || !tick) return;
+    this.playedMs += playedSpanMs(tick.wall - from.wall, tick.media - from.media, this.video.playbackRate);
+    this.watchFrom = tick;
+  }
+
   /**
    * Report where playback has got to, often enough to survive being killed.
    *
@@ -940,8 +983,26 @@ export class YtFreePlayer {
       // and reporting it would clear a real one recorded on another device.
       if (!this.started) return;
       this.lastProgressAt = Date.now();
+      this.sightPlaying();
+      this.bankPlaying();
+      if (this.playedMs >= 1000) {
+        const whole = Math.floor(this.playedMs / 1000);
+        this.playedMs -= whole * 1000;
+        this.options.onWatchTime?.(whole);
+      }
       onProgress(this.video.currentTime, this.video.duration);
     };
+
+    // Watch time: the clock runs only while the picture is actually moving.
+    this.video.addEventListener("playing", () => this.sightPlaying());
+    this.video.addEventListener("timeupdate", () => this.sightPlaying());
+    for (const event of ["pause", "waiting", "seeking", "ended", "emptied", "error"]) {
+      this.video.addEventListener(event, () => {
+        this.bankPlaying();
+        this.watchFrom = null;
+        this.watchTick = null;
+      });
+    }
 
     // The OS scrubber rides on the same events but is not throttled with them:
     // it is two numbers handed to the system, it costs nothing, and it is the

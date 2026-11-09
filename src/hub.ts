@@ -36,6 +36,7 @@ import {
   hideItem,
   keepItem,
   noteOnlyItem,
+  historyOnlyItem,
   parseChannelInput,
   parseSubscriptionsCsv,
   expireItems,
@@ -130,6 +131,8 @@ import {
 } from "./subscribe";
 import type { SearchScreenCopy, SearchScreenKind } from "./search-screen";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
+import type { HistoryStore } from "./history-store.ts";
+import { statsLine } from "./history.ts";
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
 
@@ -144,6 +147,8 @@ export const HUB_VIEW_TYPE = "ytfree-hub";
 export type PreviewMount = (
   host: HTMLElement,
   videoId: string,
+  /** What the sheet knows about the video, for watch history (GitHub #48). */
+  meta?: { title: string; channel: string; channelId: string },
 ) => Promise<PreviewHandle>;
 
 /**
@@ -1260,6 +1265,7 @@ const FILTER_LABELS: ReadonlyArray<readonly [HubFilter, string]> = [
   ["progress", "In progress"],
   ["kept", "Saved"],
   ["hidden", "Hidden"],
+  ["history", "History"],
   ["all", "Everything"],
 ];
 
@@ -1275,6 +1281,7 @@ const FILTER_RULES: Record<HubFilter, string> = {
   progress: "started and not finished — most recently watched first",
   kept: "saved — a note exists",
   hidden: "you removed these",
+  history: "everything you watched — most recent first",
   all: "inbox + saved, including already-watched",
 };
 
@@ -1338,6 +1345,8 @@ export class HubView extends ItemView {
    * Rebuilt with every In progress list; never stored (GitHub #50).
    */
   private noteOnly = new Map<string, HubItem>();
+  /** History cards for videos the hub has no row for, rebuilt with each History list. */
+  private historyOnly = new Map<string, HubItem>();
   private channelFilter: string | null = null;
   /** The hub's own box: free text over the list you are looking at. */
   private itemQuery = "";
@@ -1446,8 +1455,20 @@ export class HubView extends ItemView {
      * for notes the hub has no row for (GitHub #50). Null in tests.
      */
     private videoNotes: (() => VideoNote[]) | null = null,
+    /** Watch history (GitHub #48). Null in tests: the History list is empty. */
+    private history: HistoryStore | null = null,
   ) {
     super(leaf);
+  }
+
+  /**
+   * History changed, here or on the other device. Only the History list and
+   * its line depend on it; any other list is left exactly as it is.
+   */
+  historyChanged(): void {
+    if (this.mode !== "hub" || this.filter !== "history") return;
+    this.renderList(true);
+    this.renderStatus();
   }
 
   getViewType(): string {
@@ -2238,7 +2259,11 @@ export class HubView extends ItemView {
     if (paused) parts.push(paused);
     if (this.store.polling) parts.push("Checking channels…");
     else if (channels.length === 0) parts.push("No channels yet — import your subscriptions.");
-    else if (this.itemQuery) {
+    else if (this.filter === "history" && this.history) {
+      // The stats are the whole history; a search narrows the list, not them.
+      parts.push(statsLine(this.history.stats()));
+      if (this.itemQuery) parts.push(`${shown} match${shown === 1 ? "" : "es"} for “${this.itemQuery}”`);
+    } else if (this.itemQuery) {
       parts.push(`${shown} match${shown === 1 ? "" : "es"} for “${this.itemQuery}”`);
     } else {
       // The count, then the rule that produced it. Which list you are on and
@@ -2249,7 +2274,7 @@ export class HubView extends ItemView {
       parts.push(`${shown} ${noun} · ${FILTER_RULES[this.filter]}`);
       if (this.filter === "hidden" && shown > 0) parts.push("put one back with the arrow");
     }
-    if (lastPolledAt && !this.store.polling && this.filter !== "hidden") {
+    if (lastPolledAt && !this.store.polling && this.filter !== "hidden" && this.filter !== "history") {
       parts.push(`checked ${relativeAge(lastPolledAt, new Date())}`);
     }
     this.statusEl.setText(parts.join(" · "));
@@ -2323,6 +2348,7 @@ export class HubView extends ItemView {
   }
 
   private currentItems(): HubItem[] {
+    if (this.filter === "history") return this.historyItems();
     const inProgress = this.filter === "progress" ? this.inProgress?.() : undefined;
     this.noteOnly = new Map();
     if (inProgress && this.videoNotes) {
@@ -2346,6 +2372,57 @@ export class HubView extends ItemView {
       // next time it is drawn. Only computed for the list that uses it.
       inProgress,
       hasNote: (item) => this.noteFile(item) !== null,
+    });
+  }
+
+  /**
+   * The History list: every video in history, as the hub's own row where it
+   * has one, else a card built from the history entry (and its note's title,
+   * for the old entries that came over without one).
+   */
+  private historyItems(): HubItem[] {
+    this.historyOnly = new Map();
+    const history = this.history;
+    if (!history) return [];
+    const order = history.order();
+    const entries = history.entries();
+    let notes: Map<string, VideoNote> | null = null;
+    const noteFor = (videoId: string): VideoNote | undefined => {
+      if (!notes) {
+        notes = new Map();
+        for (const note of this.videoNotes?.() ?? []) if (!notes.has(note.videoId)) notes.set(note.videoId, note);
+      }
+      return notes.get(videoId);
+    };
+    const items: HubItem[] = [];
+    for (const videoId of order.keys()) {
+      const own = this.store.itemFor(videoId);
+      if (own) {
+        items.push(own);
+        continue;
+      }
+      const entry = entries[videoId];
+      if (!entry) continue;
+      const note = entry.title && entry.channel ? undefined : noteFor(videoId);
+      const item = historyOnlyItem(
+        videoId,
+        {
+          ...entry,
+          title: entry.title || note?.title || "",
+          channel: entry.channel || note?.channelTitle || "",
+        },
+        note?.path,
+      );
+      this.historyOnly.set(videoId, item);
+      items.push(item);
+    }
+    return visibleItems(items, {
+      filter: "history",
+      channelId: this.channelFilter,
+      // Every video you watched, Shorts included: this is a record, not a feed.
+      includeShorts: true,
+      query: this.itemQuery,
+      history: order,
     });
   }
 
@@ -2950,6 +3027,9 @@ export class HubView extends ItemView {
     if (this.filter === "hidden") {
       return "Nothing hidden. Removing a video from the hub puts it here.";
     }
+    if (this.filter === "history") {
+      return "Nothing watched yet. A video lands here once you have watched 2 minutes or a tenth of it.";
+    }
     return this.store.state.channels.length === 0
       ? "Run “YT Free: Import YouTube subscriptions” to get started."
       : "Nothing here. Try Everything, or check for new videos.";
@@ -3031,13 +3111,38 @@ export class HubView extends ItemView {
       deskSubText: deskSub(item, now),
       phoneSub: { channel, trailing },
       watched: watchedFraction(this.resumeAt(item.videoId), item.durationSeconds),
-      slots: () => hubSlots(facts()),
+      slots: () => this.slotsFor(item, facts()),
       run: (key, repaint) => this.runItemAction(key, item, repaint),
     });
     card.toggleClass("is-watched", Boolean(item.watched));
 
     this.cards.set(item.videoId, card);
     grid.appendChild(card);
+  }
+
+  /**
+   * The four buttons. On History, Remove means "out of my history", never
+   * Delete: removing a history row must not trash a note.
+   */
+  private slotsFor(item: HubItem, facts: CardFacts): CardSlot[] {
+    if (this.filter !== "history") return hubSlots(facts);
+    return hubSlots({
+      ...facts,
+      inHub: this.store.hasItem(item.videoId),
+      noteExists: facts.noteExists || this.noteFile(item) !== null,
+      noteOnly: false,
+    });
+  }
+
+  /** Remove on a History card: out of history on every device; the hub and notes are untouched. */
+  private async removeFromHistory(item: HubItem): Promise<void> {
+    await this.history?.remove(item.videoId);
+    this.historyOnly.delete(item.videoId);
+    const card = this.cards.get(item.videoId);
+    card?.remove();
+    this.cards.delete(item.videoId);
+    if (this.cards.size === 0) this.renderList();
+    this.renderStatus();
   }
 
   /** One hub action, from the card or from inside the preview. */
@@ -3048,6 +3153,23 @@ export class HubView extends ItemView {
   ): Promise<void> {
     if (key === "preview") {
       this.openPreview(item.videoId, repaint);
+      return;
+    }
+    if (key === "remove" && this.filter === "history") {
+      await this.removeFromHistory(item);
+      return;
+    }
+    if (!this.store.hasItem(item.videoId)) {
+      // A History card for a video the hub never had: its note if there is
+      // one, otherwise the same path as a search result — into the hub, then
+      // saved or opened.
+      const file = this.noteFile(item);
+      if (key === "watch" && file) {
+        await this.app.workspace.getLeaf(false).openFile(file);
+        return;
+      }
+      if (key === "save" && file) return;
+      await this.runResultAction(key, historyResult(item), repaint);
       return;
     }
     if (key === "remove" && this.isNoteOnly(item.videoId)) {
@@ -3329,7 +3451,7 @@ export class HubView extends ItemView {
    * Watch worth pressing.
    */
   private openPreview(videoId: string, repaintCard: () => void, startAt = 0): void {
-    const item = this.store.itemFor(videoId) ?? this.noteOnly.get(videoId);
+    const item = this.store.itemFor(videoId) ?? this.noteOnly.get(videoId) ?? this.historyOnly.get(videoId);
     const result =
       this.searchResults.find((entry) => entry.videoId === videoId) ??
       this.channel?.results.find((entry) => entry.videoId === videoId) ??
@@ -3368,6 +3490,7 @@ export class HubView extends ItemView {
       mount: this.mountPreview,
       title: item?.title ?? result?.title ?? "",
       channel: item?.channelTitle ?? result?.channelTitle ?? "",
+      channelId,
       facts: [
         item ? formatDuration(item.durationSeconds) : (result?.duration ?? ""),
         result ? formatViews(result.views) : "",
@@ -3420,6 +3543,7 @@ interface PreviewSpec {
   mount: PreviewMount | null;
   title: string;
   channel: string;
+  channelId: string;
   /** Length, views, age — whichever of them this video has. */
   facts: string[];
   description: string;
@@ -3644,7 +3768,13 @@ class PreviewModal extends Modal {
     if (!this.spec.mount) return;
     const stage = contentEl.createDiv({ cls: "ytfree-preview-player" });
     this.mountClose(stage);
-    void this.spec.mount(stage, this.spec.videoId).then(
+    void this.spec
+      .mount(stage, this.spec.videoId, {
+        title: this.spec.title,
+        channel: this.spec.channel,
+        channelId: this.spec.channelId,
+      })
+      .then(
       (handle) => {
         // Dismissed while the stream was resolving. Nobody will call the
         // teardown later, so it is called now — otherwise a sheet closed during
@@ -4210,4 +4340,19 @@ class ConfirmDeleteModal extends Modal {
     this.answer(confirmed);
     this.close();
   }
+}
+
+/** A History card's video as a search result, so Watch and Save can add it to the hub. */
+function historyResult(item: HubItem): SearchResult {
+  return {
+    videoId: item.videoId,
+    title: item.title,
+    channelId: item.channelId,
+    channelTitle: item.channelTitle,
+    publishedText: "",
+    views: null,
+    duration: formatDuration(item.durationSeconds),
+    thumbnail: item.thumbnail,
+    secondary: false,
+  };
 }
