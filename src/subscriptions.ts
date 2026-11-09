@@ -640,6 +640,23 @@ export function noteFeedFailure(channel: Channel, message: string): void {
   channel.error = channel.failures >= FEED_FAILURE_GRACE ? message : null;
 }
 
+/** The longest a Short can run (YouTube's limit since October 2024). */
+export const SHORTS_MAX_SECONDS = 180;
+
+/**
+ * What the Shorts check should do with an item (GitHub #66 G4): a known
+ * duration over 3 minutes is long-form with no request; anything else is
+ * asked. A video whose duration is not known yet is asked too rather than
+ * waiting: the duration backfill fills only a few a poll, and a Short left
+ * unchecked shows in the hub. Dismissed items are never asked.
+ */
+export function shortsCheck(item: Pick<HubItem, "isShort" | "durationSeconds" | "state">): "done" | "long" | "ask" | "skip" {
+  if (item.isShort !== null) return "done";
+  if (typeof item.durationSeconds === "number" && item.durationSeconds > SHORTS_MAX_SECONDS) return "long";
+  if (item.state === "dismissed") return "skip";
+  return "ask";
+}
+
 export function shortsProbeUrl(videoId: string): string {
   return `https://www.youtube.com/shorts/${videoId}`;
 }

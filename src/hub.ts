@@ -8,7 +8,7 @@
 
 import { botCheck } from "./bot-check.ts";
 import { governor } from "./request-governor.ts";
-import { durationsPerRound, feedGapMs, pickRound } from "./feed-schedule.ts";
+import { DURATIONS_PER_POLL, stalestFirst } from "./feed-schedule.ts";
 import {
   App,
   ButtonComponent,
@@ -58,6 +58,7 @@ import {
   restoreItem,
   sanitizeFileName,
   searchResultToItem,
+  shortsCheck,
   visibleItems,
 } from "./subscriptions";
 import type { DiskRead } from "./state-sync";
@@ -603,24 +604,24 @@ export class SubscriptionsStore {
     // from an import, whose later rounds are no longer "seeding") fills the
     // hub without a push about every video in its feed.
     const quiet = new Set<string>();
-    const round = pickRound(this.state.channels);
+    // Every channel, stalest first (GitHub #66). Rounds and spacing were tried
+    // and dropped: 3,710 feeds from one home IP, 300 at once and 1,800 over half
+    // an hour, met no failure and no bot check (2026-11-09, tools/feed-torture.ts).
+    const round = stalestFirst(this.state.channels);
     // Channels whose whole feed window rolled since the last poll (048), with
     // what the hub knew before this poll merged anything.
     const gaps: Array<{ channel: Channel; knownBefore: Set<string> }> = [];
     const horizon = horizonDays(this.settings().expiryDays);
     let checked = 0;
     try {
-      let first = true;
-      for (const picked of round) {
-        // A paused breaker stops the round where it is (a bot check can trip
+      await mapLimit(round, 5, async (picked) => {
+        // A paused breaker stops the poll where it is (a bot check can trip
         // on any request, this one's included).
-        if (botCheck.isPaused()) break;
-        if (!first) await sleep(feedGapMs(Math.random));
-        first = false;
-        // Looked up again: a refresh from disk during the round replaces the
+        if (botCheck.isPaused()) return;
+        // Looked up again: a refresh from disk during the poll replaces the
         // state, and a stamp on the old object would be lost.
         const channel = this.state.channels.find((c) => c.id === picked.id);
-        if (!channel) continue;
+        if (!channel) return;
         checked += 1;
         const firstSight = isFirstSight(channel, this.state.items);
         // Checked, whether the feed answers or not: a failing channel waits for
@@ -664,7 +665,7 @@ export class SubscriptionsStore {
           // Google no longer paints half the list red.
           noteFeedFailure(channel, err instanceof Error ? err.message : String(err));
         }
-      }
+      });
 
       // One channel at a time, and only the ones that showed a gap. A failure
       // leaves the poll's own results alone, and is not retried: the feed has
@@ -685,22 +686,27 @@ export class SubscriptionsStore {
       const expired = expireItems(this.state.items, this.settings().expiryDays, now);
       this.state.items = expired.items;
 
+      // Durations first: they decide which videos need the Shorts check.
+      await this.backfillDurations(DURATIONS_PER_POLL);
+
       // Telling a Short from a long-form video means reading a redirect status,
       // which needs Node's `https` — so it only happens on desktop, and it is
       // imported dynamically because that import throws at module load on iOS.
       // Mobile leaves `isShort` null, which already means "ask again later";
-      // the next desktop poll fills it in and nothing is misclassified.
+      // the next desktop poll fills it in and nothing is misclassified. A video
+      // known to run over 3 minutes is not asked (GitHub #66 G4).
       if (Platform.isDesktopApp) {
-        const { probeIsShort } = await import("./desktop/shorts-probe.ts");
-        const unprobed = this.state.items.filter((item) => item.isShort === null);
-        await mapLimit(unprobed, 2, async (item) => {
-          if (!governor.backgroundRoom()) return;
-          governor.count("probe");
-          item.isShort = await probeIsShort(item.videoId);
-        });
+        for (const item of this.state.items) if (shortsCheck(item) === "long") item.isShort = false;
+        const unprobed = this.state.items.filter((item) => shortsCheck(item) === "ask");
+        if (unprobed.length) {
+          const { probeIsShort } = await import("./desktop/shorts-probe.ts");
+          await mapLimit(unprobed, 2, async (item) => {
+            if (!governor.backgroundRoom()) return;
+            governor.count("probe");
+            item.isShort = await probeIsShort(item.videoId);
+          });
+        }
       }
-
-      await this.backfillDurations(durationsPerRound(this.state.channels.length));
 
       this.state.lastPolledAt = now.toISOString();
       // Which kind of device polled, so the phone can leave it to the desktop.

@@ -9,12 +9,11 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
-- Older status lines (2026-11-07 merges, #42) moved to the archive file above.
 - Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md). New follow-ups are filed as GitHub issues, not as files in `issues/`.
 - 2026-11-09: YouTube sign-in, cookies and account sync removed (#64); see GLOSSARY.
-- 2026-11-09 nightly (#66, partial): poll rounds, HD on Play, first-run defaults, request-ceiling
-  tests (`tests/request-ceilings.test.ts`, `tests/feed-schedule.test.ts`). Still open on #66:
-  embed fall-through (needs #43); desktop/Preview still resolve the 360p stream at open.
+- 2026-11-09 (#66, PR #67): HD on Play and ceiling tests (#70); torture test showed no need for
+  poll rounds; nothing before Play on desktop; bot-check retries on Play (1, 5, 10, 30 min, 1 h,
+  2 h, 6 h); savings G1–G5; embed rule waits for #43 ([scope](docs/V1-SCOPE-BOT-SAFE.md)).
 - 2026-11-09: #48 watch history built (PR #74, [V1-SCOPE-WATCH-HISTORY](docs/V1-SCOPE-WATCH-HISTORY.md)):
   History hub chip, `history.json`. Next: device test (manual test in the scope doc). #43 must feed it.
 - 2026-11-09 nightly: Subscribe inside YT Free on the channel screen and a search card's ⋯ menu,
@@ -71,8 +70,9 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
   edits that file when Obsidian is closed.
 - `npm run smoke` is a once-a-day canary (`tools/smoke.mjs`, stamps in `~/.cache/ytfree/`).
   Every live tool in `tools/` claims its own daily run through `tools/live-budget.mjs`.
-- A bot check pauses all automatic YouTube requests for 45 minutes (`src/bot-check.ts`, stored in
-  `localStorage` under `ytfree-bot-check-until`). Clear that key to end a pause early.
+- A bot check pauses all automatic YouTube requests until a Play retry succeeds (retries at 1, 5,
+  10, 30 min, 1 h, 2 h, then 6 h; `src/bot-check.ts`, stored in `localStorage` under
+  `ytfree-bot-check-until`). Clear that key to end a pause early.
 - Offline HD player: `"devOfflineHd": "<folder>"` in data.json, folder from `tools/make-offline-hd.mjs`.
 - Kept answers: `localStorage` `ytfree-ytdlp-answers` / `ytfree-player-answers`. Requests: `src/request-governor.ts`.
 - Desktop HD byte ranges go over Node `https`, not `requestUrl`; a request Node cannot make at

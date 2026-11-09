@@ -91,12 +91,12 @@ import {
 } from "./transcript";
 import { attachPlayerStore, fetchCaptionTrack, fetchHeatmap, fetchVideoDetails, forgetPlayer } from "./innertube";
 import { BotCheckPausedError, botCheck, isBotCheck } from "./bot-check.ts";
+import { DeviceIdSet } from "./device-id-set";
 import { InfoCache } from "./info-cache.ts";
 import type { AnswerStore } from "./info-cache.ts";
 import { trimYtDlpInfo } from "./answer-trim.ts";
 import { governor } from "./request-governor.ts";
 import { pollIsDue } from "./subscriptions.ts";
-import { jitteredRoundMs } from "./feed-schedule.ts";
 import type { VideoNote } from "./subscriptions.ts";
 import { offlineFormats } from "./offline-hd.ts";
 import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
@@ -322,6 +322,8 @@ const SILENCE_REFRESH_DEBOUNCE_MS = 1200;
 const DELETE_CONFIRM_MS = 5_000;
 /** Device-local key for the bot-check pause (`bot-check.ts`). */
 const BOT_CHECK_KEY = "ytfree-bot-check-until";
+/** A caption file does not change; kept this long in memory all the same. */
+const CAPTION_KEEP_MS = 6 * 60 * 60_000;
 
 /** Settings keys from the removed YouTube sign-in (GitHub #64), dropped on load. */
 const LEGACY_ACCOUNT_KEYS = [
@@ -335,6 +337,7 @@ const LEGACY_ACCOUNT_KEYS = [
 /** Kept answers, per device (GitHub #34). Never in the vault: links are IP-bound. */
 const YTDLP_ANSWERS_KEY = "ytfree-ytdlp-answers";
 const PLAYER_ANSWERS_KEY = "ytfree-player-answers";
+const NO_HEATMAP_KEY = "ytfree-no-heatmap";
 
 /** A `localStorage` key as an answer store; any failure is the cache's to swallow. */
 function localStore(key: string): AnswerStore {
@@ -420,9 +423,9 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   // spelled out here: `os.homedir()` is unreachable at module load on mobile.
   downloadFolder: "",
   ffmpegPath: "",
-  // Two hours, not one (GitHub #66): conservative for a fresh install. A big
-  // import stretches this further on its own — see `feed-schedule.ts`.
-  subscriptionsPollMinutes: 120,
+  // Hourly. #66 weighed two hours and kept one: feed traffic was measured
+  // safe (tools/feed-torture.ts), and a feed only holds its last 15 videos.
+  subscriptionsPollMinutes: 60,
   subscriptionsExpiryDays: 0,
   subscriptionsIncludeShorts: false,
   // Off, and blank. A plugin that starts POSTing somewhere on its own would be
@@ -706,6 +709,8 @@ export default class YtFreePlugin extends Plugin {
   private autoFetchAttempted = new Set<string>();
   /** Notes whose missing heatmap has already been chased this session. */
   private backfillAttempted = new Set<string>();
+  /** Videos YouTube has no most-replayed graph for, kept on this device (GitHub #66 G5). */
+  private noHeatmap = new DeviceIdSet(null);
   /** Auto-fetches run one at a time, however many notes arrive at once. */
   private autoFetchChain: Promise<void> = Promise.resolve();
   private lastActiveVideoId: string | null = null;
@@ -757,6 +762,8 @@ export default class YtFreePlugin extends Plugin {
   private silenceAttempted = new Set<string>();
   /** One `yt-dlp -J` answer per video, until its links expire (GitHub #32). */
   private ytInfo = new InfoCache<YtDlpInfo>(() => Date.now(), 15);
+  /** Caption files this session, by video and language (GitHub #66 G1). */
+  private captionFiles = new InfoCache<string>(() => Date.now(), 20);
   /** Running ffmpeg analyses, keyed by video, so a closing note can kill one. */
   private silenceJobs = new Map<string, { cancel: () => void }>();
   /** Jobs we stopped, so a partial map is stored as partial. See `cancelSilence`. */
@@ -780,6 +787,7 @@ export default class YtFreePlugin extends Plugin {
     // Answers kept on this device survive a reload or a new build (GitHub #34):
     // reopening a video sends nothing until its links expire.
     const languages = [...new Set([this.transcriptLanguage(), "en"])];
+    this.noHeatmap = new DeviceIdSet(localStore(NO_HEATMAP_KEY));
     this.ytInfo.attachStore(localStore(YTDLP_ANSWERS_KEY), (info) => trimYtDlpInfo(info, languages));
     attachPlayerStore(localStore(PLAYER_ANSWERS_KEY));
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
@@ -1122,7 +1130,6 @@ export default class YtFreePlugin extends Plugin {
         this.syncPinnedPlayers();
         if (file) {
           this.queueAutoFetch(file);
-          this.queueHeatmapBackfill(file);
         }
       }),
     );
@@ -1517,15 +1524,14 @@ export default class YtFreePlugin extends Plugin {
     await this.subscriptions.refreshFromDisk();
     const checked = await this.subscriptions.poll();
     this.refreshHub();
-    // A button that flashes nothing looks broken. A long list is checked a
-    // round at a time (GitHub #66), and the notice says so rather than claim
-    // every channel was just asked.
+    // A button that flashes nothing looks broken. Every channel is checked;
+    // fewer only when a bot check paused the poll partway (GitHub #31).
     const total = this.subscriptions.state.channels.length;
     new Notice(
       checked === 0 && total > 0
         ? "YT Free: a check is already running."
         : checked < total
-        ? `YT Free: checked ${checked} of ${total} channels — the rest follow over the next hours.`
+        ? `YT Free: checked ${checked} of ${total} channels — YouTube paused the rest.`
         : `YT Free: checked ${total} channels.`,
     );
   }
@@ -1536,24 +1542,12 @@ export default class YtFreePlugin extends Plugin {
    */
   private async maybePoll(): Promise<void> {
     if (botCheck.isPaused()) return;
-    // One round per interval; a long list makes the interval shorter and each
-    // round smaller, never the whole list at once (GitHub #66). The jitter is
-    // drawn once per round so the ticker does not re-roll it every minute; the
-    // gap itself is worked out each tick, so an import or a new setting counts.
-    const draw = (this.roundJitter ??= Math.random());
-    const gap = jitteredRoundMs(
-      this.settings.subscriptionsPollMinutes,
-      this.subscriptions.state.channels.length,
-      () => draw,
-    );
+    // Every channel once per period (GitHub #66: measured safe, no rounds).
+    const gap = Math.max(5, this.settings.subscriptionsPollMinutes) * 60_000;
     if (!pollIsDue(this.subscriptions.state, Date.now(), gap, Platform.isDesktopApp)) return;
-    this.roundJitter = null;
     await this.subscriptions.poll();
     this.refreshHub();
   }
-
-  /** The jitter draw for the next automatic round's gap; see `maybePoll`. */
-  private roundJitter: number | null = null;
 
   /**
    * Which videos you are part-way through, for the hub's In progress list.
@@ -2742,26 +2736,25 @@ export default class YtFreePlugin extends Plugin {
 
   /**
    * Fill in the most-replayed list on a note that has a transcript and no
-   * heatmap — silently, on open, with no command to remember.
+   * heatmap — silently, on the note's first Play, with no command to remember.
    *
    * This exists for the notes the phone made while the heatmap was desktop
    * only. It is not the auto-fetch: it never touches the transcript, it costs
-   * one request, and it says nothing unless it has something to add. Peaks are
-   * labelled from the transcript already in the note rather than from a second
-   * caption download — see `parseTranscriptCues`.
+   * at most one request, and it says nothing unless it has something to add.
+   * Peaks are labelled from the transcript already in the note rather than
+   * from a second caption download — see `parseTranscriptCues`.
    *
-   * Attempted once per note per session. A video with no heatmap — which is
-   * most videos — therefore gets one wasted request per session in which you
-   * open its note, and that is the price of not writing a "we checked" marker
-   * into a file that syncs.
+   * On Play, not on open (GitHub #66 G5): opening notes to skim them sends
+   * nothing. On desktop the heatmap comes from the `yt-dlp -J` Play just made,
+   * so it is usually free. A video with no heatmap (most of them) is
+   * remembered on this device and never asked again; the marker stays out of
+   * the synced note.
    */
-  private queueHeatmapBackfill(file: TFile): void {
+  private queueHeatmapBackfill(file: TFile, videoId: string): void {
     if (!this.settings.autoFetchTranscript) return;
     if (this.backfillAttempted.has(file.path)) return;
+    if (this.noHeatmap.has(videoId)) return;
     if (botCheck.isPaused() || !governor.backgroundRoom()) return;
-
-    const videoId = this.videoIdForNote(file.path);
-    if (!videoId) return;
 
     this.backfillAttempted.add(file.path);
     this.autoFetchChain = this.autoFetchChain
@@ -2780,9 +2773,24 @@ export default class YtFreePlugin extends Plugin {
     if (!TRANSCRIPT_ALIASES.some((heading) => content.includes(heading))) return;
     if (HEATMAP_ALIASES.some((heading) => content.includes(heading))) return;
 
-    const heatmap = await fetchHeatmap(videoId).catch(() => [] as VideoInfo["heatmap"]);
+    // The answer Play already has, when there is one (desktop); else one call.
+    const kept = this.ytInfo.peek(videoId);
+    const info = kept ? await kept.catch(() => null) : null;
+    let heatmap: VideoInfo["heatmap"] = [];
+    let answered = true;
+    if (info) heatmap = info.heatmap ?? [];
+    else {
+      heatmap = await fetchHeatmap(videoId).catch(() => {
+        answered = false;
+        return [] as VideoInfo["heatmap"];
+      });
+    }
     const peaks = topPeaks(heatmap, this.settings.heatmapPeaks);
-    if (peaks.length === 0) return;
+    if (peaks.length === 0) {
+      // "None" only when YouTube answered: a failed request is asked again.
+      if (answered) this.noHeatmap.add(videoId);
+      return;
+    }
 
     const cues = parseTranscriptCues(content);
     await this.app.vault.process(file, (current) =>
@@ -2918,7 +2926,7 @@ export default class YtFreePlugin extends Plugin {
       return null;
     }
     const track = pickCaptionTrack(info, this.transcriptLanguage());
-    return { track, cues: await this.fetchCues(track), heatmap: info.heatmap };
+    return { track, cues: await this.fetchCues(videoId, track), heatmap: info.heatmap };
   }
 
   /**
@@ -2937,7 +2945,7 @@ export default class YtFreePlugin extends Plugin {
       fetchCaptionTrack(videoId, this.transcriptLanguage()),
       fetchHeatmap(videoId).catch(() => [] as VideoInfo["heatmap"]),
     ]);
-    return { track, cues: await this.fetchCues(track), heatmap };
+    return { track, cues: await this.fetchCues(videoId, track), heatmap };
   }
 
   /**
@@ -2945,11 +2953,25 @@ export default class YtFreePlugin extends Plugin {
    * immediately valid, so this is one plain request either way — no second
    * yt-dlp call and no temp file.
    */
-  private async fetchCues(track: CaptionTrack | null): Promise<Cue[]> {
+  private async fetchCues(videoId: string, track: CaptionTrack | null): Promise<Cue[]> {
     if (!track) return [];
-    governor.count("captions");
-    const response = await requestUrl({ url: track.url, throw: true });
-    return parseJson3(response.text);
+    return parseJson3(await this.captionText(videoId, track));
+  }
+
+  /**
+   * A caption file, fetched once per video and language and shared by the
+   * transcript and Smart Speed (GitHub #66 G1). Keyed by video, not URL: the
+   * phone's link and yt-dlp's differ for the same file.
+   */
+  private captionText(videoId: string, track: CaptionTrack): Promise<string> {
+    return this.captionFiles.get(
+      `${videoId}:${track.lang}:${track.auto ? "auto" : "human"}`,
+      async () => {
+        governor.count("captions");
+        return (await requestUrl({ url: track.url, throw: true })).text;
+      },
+      () => Date.now() + CAPTION_KEEP_MS,
+    );
   }
 
   private transcriptLanguage(): string {
@@ -4221,7 +4243,7 @@ export default class YtFreePlugin extends Plugin {
         onToggleCollapse: mobile ? () => this.toggleCollapse(entry) : undefined,
         // Reads `activate` at call time, not now: the lazy loader is attached
         // further down, after this player exists.
-        ensureLoaded: mobile ? () => entry?.activate?.() ?? Promise.resolve() : undefined,
+        ensureLoaded: () => entry?.activate?.() ?? Promise.resolve(),
         // Silent unless Troubleshooting is on. See `debug`.
         debug: (message, extra) => this.debug(message, extra),
         // Only where there is a note to jump around in. A fenced block rendered
@@ -4356,7 +4378,12 @@ export default class YtFreePlugin extends Plugin {
     this.applyStoredSilence(player, videoId);
     player.video.addEventListener(
       "play",
-      () => void this.produceSilence(player, videoId, sourcePath),
+      () => {
+        void this.produceSilence(player, videoId, sourcePath);
+        // Most-replayed for a note that lacks it, on Play, not on open (GitHub #66 G5).
+        const note = preview ? null : this.app.vault.getAbstractFileByPath(sourcePath);
+        if (note instanceof TFile) this.queueHeatmapBackfill(note, videoId);
+      },
       { once: true },
     );
 
@@ -4376,45 +4403,14 @@ export default class YtFreePlugin extends Plugin {
       return entry;
     }
 
-    if (mobile) {
-      this.deferMobileLoad(entry, media, setStatus);
-      return entry;
-    }
-
-    setStatus("Resolving stream…");
-    try {
-      await player.load(this.settings.upgradeToHighQuality, this.settings.startInHd);
-      this.announceResume(videoId, setStatus);
-      this.announcePause(setStatus);
-      return entry;
-    } catch (err) {
-      player.destroy();
-      if (this.preview === entry) this.preview = null;
-      else if (this.players.get(videoId) === entry) this.players.delete(videoId);
-      if (err instanceof YtDlpMissingError) {
-        this.renderError(
-          wrapper,
-          "Could not play this video. yt-dlp is not installed here, and the phone's way of playing (without yt-dlp) did not work for this video either.",
-          "brew install yt-dlp",
-        );
-      } else if (isBotCheck(err) || err instanceof BotCheckPausedError) {
-        // Not a broken yt-dlp: YouTube is refusing signed-out requests from
-        // this network for now, and upgrading would change nothing.
-        this.renderError(
-          wrapper,
-          (botCheck.message() ?? "YouTube is asking this network to prove it isn't a bot.") +
-            " Reopen this note after that time.",
-          (err as Error).message,
-        );
-      } else {
-        this.renderError(
-          wrapper,
-          "Could not resolve this video. YouTube may have changed extraction — updating yt-dlp usually fixes it.",
-          `brew upgrade yt-dlp\n\n${(err as Error).message}`,
-        );
-      }
-      return null;
-    }
+    // Nothing before Play, on every device (GitHub #66): opening a note or a
+    // preview sends no request. The desktop used to resolve here so HD was
+    // ready before Play; Isaiah dropped that on 2026-11-09 to save requests.
+    // The desktop's picture box is the player's stage; it keeps 16:9 while the
+    // poster is up, so the first frame moves nothing.
+    const host = mobile ? media : (wrapper.querySelector<HTMLElement>(".ytfree-stage") ?? wrapper);
+    this.deferMobileLoad(entry, host, setStatus);
+    return entry;
   }
 
   /**
@@ -4867,11 +4863,10 @@ export default class YtFreePlugin extends Plugin {
    * Producer one: the gaps between caption lines. No ffmpeg, no yt-dlp, both
    * platforms — this is the baseline a stranger gets.
    *
-   * InnerTube on desktop as well as on mobile, deliberately. The desktop
-   * transcript command goes through `yt-dlp -J` because it also wants the replay
-   * heatmap out of the same call; this wants nothing but caption timing, and
-   * one `requestUrl` beats spawning yt-dlp and waiting several seconds for a
-   * megabyte of metadata we would throw away.
+   * The caption list comes from the `yt-dlp -J` Play already made when one is
+   * kept or on its way (desktop), and from InnerTube otherwise; this never
+   * spawns yt-dlp of its own. The caption file is the one the transcript
+   * fetched, when it did (GitHub #66 G1).
    *
    * Returns null — not an empty array — when the video simply has no captions,
    * because "no map" and "a map with no pauses in it" are different facts and
@@ -4884,11 +4879,15 @@ export default class YtFreePlugin extends Plugin {
     videoId: string,
     minGap: number,
   ): Promise<{ windows: SilenceWindow[]; words: number[]; wordTimed: boolean } | null> {
-    const track = await fetchCaptionTrack(videoId, this.transcriptLanguage());
+    // The caption list from the `yt-dlp -J` Play already made, when there is
+    // one: no player call and no second identity (GitHub #66 G1).
+    const kept = this.ytInfo.peek(videoId);
+    const info = kept ? await kept.catch(() => null) : null;
+    const track = info
+      ? pickCaptionTrack(info, this.transcriptLanguage())
+      : await fetchCaptionTrack(videoId, this.transcriptLanguage());
     if (!track) return null;
-    governor.count("captions");
-    const response = await requestUrl({ url: track.url, throw: true });
-    const cues = parseJson3Timed(response.text);
+    const cues = parseJson3Timed(await this.captionText(videoId, track));
     if (cues.length === 0) return null;
     // Two decimal places: 10 ms is a tenth of the closest two word starts ever
     // measured, and the full float doubles the size of a file two devices sync.
@@ -5123,8 +5122,10 @@ export default class YtFreePlugin extends Plugin {
       const offline = this.settings.devOfflineHd?.trim();
       if (offline) return this.offlineStream(videoId, offline, mode);
       // HD lookups and recovery retries are automatic: none while paused. The
-      // first 360p resolve is the reader opening a video, and still goes.
+      // first resolve is the reader pressing Play, and goes when a retry is
+      // due (GitHub #66: 1, 5, 10, 30 min, 1 h, 2 h, then every 6 h).
       if (mode === "quality" || forceRefresh) botCheck.guard();
+      else botCheck.guardPlay();
       if (forceRefresh) {
         this.cache.invalidate(videoId);
         this.ytInfo.invalidate(videoId);
@@ -5234,6 +5235,7 @@ export default class YtFreePlugin extends Plugin {
   private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
       if (mode === "quality" || forceRefresh) botCheck.guard();
+      else botCheck.guardPlay();
       if (forceRefresh) {
         this.cache.invalidate(videoId);
         forgetPlayer(videoId);
@@ -5255,7 +5257,7 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * Mobile: mount now, resolve later.
+   * Mount now, resolve on Play: the phone always did, the desktop since #66.
    *
    * Opening a note should not cost a video. The player takes up its final space
    * immediately and shows a poster; the stream is fetched the first time
@@ -5270,6 +5272,7 @@ export default class YtFreePlugin extends Plugin {
 
     // Absolutely positioned over the media box, so adding and removing it
     // cannot affect the layout of anything.
+    media.addClass("has-poster");
     const poster = media.createEl("button", { cls: "ytfree-poster", attr: { type: "button" } });
     const thumb = poster.createEl("img", { cls: "ytfree-poster-image", attr: { alt: "" } });
     // The halfway frame, as on the hub's cards; the uploader's picture if
@@ -5307,6 +5310,7 @@ export default class YtFreePlugin extends Plugin {
      */
     const uncover = (): void => {
       poster.remove();
+      media.removeClass("has-poster");
       media.querySelector(".ytfree-fallback")?.remove();
       setStatus(null);
     };
@@ -5322,7 +5326,8 @@ export default class YtFreePlugin extends Plugin {
      * waits on the resolve already in flight rather than starting a second one.
      */
     let resolved: Promise<void> | null = null;
-    const resolve = (): Promise<void> => (resolved ??= player.load(this.settings.phoneHighQuality, this.settings.startInHd));
+    const hd = Platform.isDesktopApp ? this.settings.upgradeToHighQuality : this.settings.phoneHighQuality;
+    const resolve = (): Promise<void> => (resolved ??= player.load(hd, this.settings.startInHd));
 
     // Metadata now, so the first press of Fullscreen is the phone's own
     // fullscreen rather than our substitute. Failures are swallowed: nothing
@@ -5346,6 +5351,7 @@ export default class YtFreePlugin extends Plugin {
         .then(() => {
           uncover();
           player.play();
+          this.announcePause(setStatus);
         })
         .catch((err: unknown) => {
           // Reset, so a failure caused by a dead connection can be tried again.
@@ -5420,13 +5426,16 @@ export default class YtFreePlugin extends Plugin {
     const paused = isBotCheck(err) || err instanceof BotCheckPausedError ? botCheck.message() : null;
     const detail = paused
       ? paused
+      : err instanceof YtDlpMissingError
+        ? "yt-dlp is not installed here, and the phone's way of playing did not work for this video either. Install it with: brew install yt-dlp"
       : kind === "login"
         ? "This video needs a signed-in account — age-restricted or members-only."
         : kind === "network"
           ? "Could not reach YouTube. Check your connection and try again."
           : kind === "no-format"
             ? "YouTube offered no single-file format for this video."
-            : `Could not resolve this video. ${err instanceof Error ? err.message : String(err)}`;
+            : `Could not resolve this video. ${err instanceof Error ? err.message : String(err)}` +
+              (Platform.isDesktopApp ? " Updating yt-dlp (brew upgrade yt-dlp) usually fixes it." : "");
 
     const box = media.createDiv({ cls: "ytfree-fallback" });
     box.createDiv({ cls: "ytfree-fallback-text", text: detail });
@@ -5832,7 +5841,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Check every")
       .setDesc(
-        "Minutes between checks, plus once when Obsidian starts. A long list is checked a slice at a time and stretched so it never asks for more than 120 feeds an hour. A channel feed only holds its last 15 videos, so a long gap between checks can lose the oldest of a burst for good.",
+        "Minutes between checks, plus once when Obsidian starts. A channel feed only holds its last 15 videos, so a long gap between checks can lose the oldest of a burst for good.",
       )
       .addSlider((slider) =>
         slider

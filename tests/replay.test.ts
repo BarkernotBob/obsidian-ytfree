@@ -72,12 +72,12 @@ for (const fx of fixtures) {
     assert.ok(pickAudioUrl(fx.info.formats ?? [])?.startsWith(FIXTURE_HOST));
   });
 
-  test(`${fx.name}: HD stitches from the recorded openings in at most 5 reads`, async () => {
+  test(`${fx.name}: HD stitches from the recorded openings in 2 reads (GitHub #66 ceiling)`, async () => {
     const fetch = replayFetch(fx.bytes);
     const stream = await resolveHdFromYtDlp(fx.name, fx.info.formats ?? [], fetch);
     assert.equal(stream.isHls, true);
     assert.ok((stream.height ?? 0) >= 720, `top rung ${stream.height}p`);
-    assert.ok(fetch.reads.length <= 5, `${fetch.reads.length} reads`);
+    assert.ok(fetch.reads.length <= 2, `${fetch.reads.length} reads`);
 
     const top = stream.virtual!.files[rungUrl(fx.name, stream.height!)];
     const segments = top.split("\n").filter((l) => l.startsWith("#EXTINF:"));

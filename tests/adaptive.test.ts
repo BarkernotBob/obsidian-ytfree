@@ -589,7 +589,7 @@ test("ytDlpCandidates: H.264 MP4 per height over https, and the original-languag
   assert.deepEqual(picked, ["137", "136", "140-0"]);
 });
 
-test("resolveHdFromYtDlp reads the top rung's and the sound's heads, then builds and checks the stream", async () => {
+test("resolveHdFromYtDlp starts HD in two reads: the top rung's head and the sound's (GitHub #66 G2, G3)", async () => {
   const log: string[] = [];
   const fetch = async (u: string, start: number, end: number): Promise<ArrayBuffer> => {
     log.push(`${u.match(/itag=(\d+)/)?.[1]}:${start}-${end}`);
@@ -598,12 +598,24 @@ test("resolveHdFromYtDlp reads the top rung's and the sound's heads, then builds
   const stream = await resolveHdFromYtDlp("abcdefghijk", ytFormats, fetch);
   assert.equal(stream.height, 1080);
   assert.ok(stream.virtual);
-  // Heads of 1080p and the sound, their indexes, and one read past a minute.
-  assert.deepEqual(log.sort(), ["137:0-65535", "137:1688-2687", "137:632-687", "140:0-65535", "140:632-687"]);
-  // 720p is read only when played.
+  // Heads of 1080p and the sound; each index is read out of its head, and
+  // there is no read past a minute on yt-dlp's files.
+  assert.deepEqual(log.sort(), ["137:0-65535", "140:0-65535"]);
+  // 720p is read only when played, in one read too.
   const p720 = await stream.virtual!.lazyFiles![`${virtualBase("abcdefghijk")}video-720.m3u8`]();
   assert.match(p720, /itag=136/);
-  assert.ok(log.includes("136:0-65535") && log.includes("136:632-687"));
+  assert.deepEqual(log.filter((l) => l.startsWith("136:")), ["136:0-65535"]);
+});
+
+test("resolveHdFromYtDlp reads the index on its own when the head stops inside it", async () => {
+  const log: string[] = [];
+  const fetch = async (u: string, start: number, end: number): Promise<ArrayBuffer> => {
+    log.push(`${u.match(/itag=(\d+)/)?.[1]}:${start}-${end}`);
+    return start === 0 ? mp4Head().slice(0, 650) : sidx([[1000, 5000], [1000, 5000]]);
+  };
+  const stream = await resolveHdFromYtDlp("abcdefghijk", ytFormats, fetch);
+  assert.equal(stream.height, 1080);
+  assert.deepEqual(log.sort(), ["137:0-65535", "137:632-687", "140:0-65535", "140:632-687"]);
 });
 
 test("resolveHdFromYtDlp throws when no file has a readable head", async () => {

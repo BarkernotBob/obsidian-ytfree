@@ -4057,3 +4057,12 @@ body.ytfree-immersive-open .ytfree-preview-close {
   background: none;
   box-shadow: none;
 }
+
+/*
+ * Desktop since #66: the stream resolves on Play, so the stage holds a poster
+ * first. 16:9 while it does, so the first frame lands without a jump.
+ */
+.ytfree-stage.has-poster .ytfree-video {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+}
