@@ -104,7 +104,7 @@ One codebase, two outputs, chosen at build time:
 |---|---|---|---|
 | M1 | Build flag, two ids, store bundle check | Item 3 | #60 |
 | M2 | Store playback: YouTube player inline on desktop and phone, wired for resume, progress, timestamps, speed; docking without re-parenting | Store build can't play without it | #43 (reframed) |
-| M3 | GitHub Pages serving the hosted player page | M2 depends on it | Isaiah, one command |
+| M3 | GitHub Pages serving the hosted player page (one-time repo setting; store users do nothing, the plugin loads the page itself). Needed on the phone: a direct embed from `capacitor://localhost` gets error 153. Desktop: test a direct embed in #43 and skip the page there if it plays | M2 depends on it | Isaiah, one command |
 | M4 | Store compliance: LICENSE, `versions.json`, `x.y.z` tags, store manifest (description ≤250 chars without "ad-free", `isDesktopOnly: false`), README disclosures (network: YouTube, GitHub Pages), fix Obsidian lint errors (32 today: console logging, 2 regex lookbehinds that break iOS < 16.4, type-safety) | Automated scan fails otherwise | #61 |
 | M5 | Device regression pass of shipped-but-untested features that stay in the store build: hub Saved / In progress (#49, #50), phone ⋯ menu (#52), phone properties stay collapsed (#51, cause unconfirmed), paste-to-Preview, hub deep link | "Fix known bugs" | #62 |
 | M6 | Search: Uploaded / Sort by filters broken | Known bug in a store feature | #46 (filters only) |
