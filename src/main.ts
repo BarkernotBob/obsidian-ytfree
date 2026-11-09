@@ -5778,7 +5778,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Check every")
       .setDesc(
-        "Minutes between checks, plus once when Obsidian starts. A channel feed only holds its last 15 videos, so a long gap between checks can lose the oldest of a burst for good.",
+        "Minutes between checks, plus once when Obsidian starts. A long list is checked a slice at a time and stretched so it never asks for more than 120 feeds an hour. A channel feed only holds its last 15 videos, so a long gap between checks can lose the oldest of a burst for good.",
       )
       .addSlider((slider) =>
         slider
