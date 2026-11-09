@@ -6,8 +6,8 @@ stay on our own stream, never to move them to YouTube's player; and the desktop 
 before Play ("I'm fine to cut that ask to reduce our requests"), but the badge must stop saying it
 is finding HD when nothing is happening.
 
-**Status:** Draft, revised 2026-11-09 after Isaiah asked for a review of every request path before
-setting limits (section 0), and kept the most-replayed backfill on. Awaiting his approval. Builds on #31–#39 (merged:
+**Status:** Approved by Isaiah 2026-11-09 ("Go"), after a review of every request path
+(section 0) and the feed torture tests (section 3). Built on PR #67. Builds on #31–#39 (merged:
 [V1-SCOPE-REQUEST-BUDGET](V1-SCOPE-REQUEST-BUDGET.md)). Part of the store MVP (M12 in
 [V1-SCOPE-MVP](V1-SCOPE-MVP.md)).
 
@@ -110,11 +110,26 @@ hourly cap still does not count feeds. One home IP on one day; a shared IP (VPN,
     none is remembered on the device (G5).
 12. A fresh install with no subscriptions sends nothing until the first search, Play or import.
 
+## Decided while building (Claude's calls, open to change)
+
+- PR #70 (another session) had already added HD on Play, the ceiling tests and poll rounds. HD on
+  Play and the tests stay; the rounds are removed, since section 3 measured no need for them. The
+  poll is back to every 60 minutes, every channel.
+- G1: caption files are shared in memory for the session (transcript and Smart Speed), not stored.
+- G4: a video whose duration is not known yet is still checked for Shorts. Waiting for its
+  duration (5 a poll) would leave Shorts showing in the hub after a big import. Only a known
+  duration over 3 minutes skips the check.
+- 4b: a bot check seen while still waiting (a request already in flight) does not move to the next
+  wait. Until #43 lands, a Play between retries shows the pause message with the next retry time.
+- Older builds stored a plain end time for the pause; it is honoured until it passes.
+
 ## Manual test (for Isaiah)
 
-1. On the Mac, open a video note and don't press Play. The badge shows nothing. Run
-   **YT Free: Show YouTube requests this session**: it says no requests to YouTube yet.
+1. On the Mac, open a video note and don't press Play. The player shows the thumbnail and the
+   badge says "HD on Play". Run **YT Free: Show YouTube requests this session**: no requests yet.
 2. Press Play. The badge says "finding HD…" briefly, then climbs to 1080p. Run the command again:
-   about 1 yt-dlp run and a handful of video byte reads.
-3. Import a big Takeout CSV. Nothing is fetched at once; over the next hour the hub fills in about
-   two channels a minute.
+   1 yt-dlp run and 2 video byte reads before playback (then the video itself).
+3. Leave the note, open it again, press Play: no new yt-dlp run.
+4. Open a few notes that have a transcript but no most-replayed section without playing them:
+   nothing is sent. Play one: the section appears if the video has one.
+5. Press the hub's refresh button: every channel is checked and the notice says how many.

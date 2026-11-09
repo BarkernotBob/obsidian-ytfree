@@ -152,6 +152,10 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   rotation. Research: docs/RESEARCH-YOUTUBE-REQUESTS.md, backlog #31–#39.
 - **Bot check** (term): YouTube's "Sign in to confirm you're not a bot" (yt-dlp) or
   `LOGIN_REQUIRED` (InnerTube), refusing signed-out requests from a flagged IP.
+- **Request savings** (#66, 2026-11-09): Smart Speed reads captions from Play's `yt-dlp -J` and
+  shares the caption file with the transcript; desktop HD starts in 2 reads (index from the head,
+  no 90 s check on yt-dlp files); no Shorts check for a video known to run over 3 min;
+  most-replayed is filled on Play, and "none" is remembered on the device (`ytfree-no-heatmap`).
 - **Bot-check pause** (Isaiah, 2026-11-09, #66): replaces the fixed 45 minutes. Automatic work
   (polls, backfills, HD lookups) stops until a request goes through. Only a Play retries our
   stream, the first Play after 1 min, then 5, 10, 30 min, 1 h, 2 h, then every 6 h. Nothing
