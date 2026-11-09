@@ -6,6 +6,12 @@
  *
  *   node tools/feed-torture.ts --state "<vault>/.obsidian/plugins/ytfree/subscriptions.json"
  *   node tools/feed-torture.ts --channels ids.txt        (one channel ID per line)
+ *   node tools/feed-torture.ts --gather 300              (a big import, see below)
+ *
+ * `--gather N` stands in for a Takeout import of N channels: yt-dlp searches a
+ * spread of everyday topics (flat, no video pages; about 1 request per 20
+ * results) until it has N distinct channel IDs, saves them to
+ * ~/.cache/ytfree/torture-channels-N.txt, and reuses that file next time.
  *
  * LIVE and deliberately heavy: run it only from a network you are willing to
  * see flagged for a few hours (Isaiah chose where). Once a day per machine
@@ -23,7 +29,8 @@
  * once: that is the answer, and more requests would only deepen the flag.
  * A scenario also stops early if more than half of its last 20 feeds failed.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { liveGuard } from "./live-budget.mjs";
@@ -37,7 +44,41 @@ const flag = (name: string): string | undefined => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 
-function loadChannels(): string[] {
+const TOPICS = [
+  "cooking", "woodworking", "guitar lesson", "chess", "history documentary", "physics", "gardening",
+  "car review", "travel vlog", "piano", "drawing tutorial", "math", "fitness", "home repair", "bikes",
+  "photography", "astronomy", "baking", "language learning", "board games", "fishing", "camping",
+  "electronics", "knitting", "coffee", "podcast", "news analysis", "philosophy", "birds", "running",
+];
+
+function gather(n: number, budget: { ytDlp: () => void }): string[] {
+  const dir = join(homedir(), ".cache", "ytfree");
+  const file = join(dir, `torture-channels-${n}.txt`);
+  if (existsSync(file)) {
+    const kept = readFileSync(file, "utf8").split(/\s+/).filter((l) => /^UC[\w-]{22}$/.test(l));
+    if (kept.length >= n) return kept.slice(0, n);
+  }
+  const bin = ["/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp"].find((p) => existsSync(p)) ?? "yt-dlp";
+  const ids = new Set<string>();
+  for (const topic of TOPICS) {
+    if (ids.size >= n) break;
+    budget.ytDlp();
+    const out = execFileSync(
+      bin,
+      ["--flat-playlist", "--no-warnings", "--print", "%(channel_id)s", `ytsearch40:${topic}`],
+      { encoding: "utf8", maxBuffer: 8 << 20 },
+    );
+    for (const id of out.split(/\s+/)) if (/^UC[\w-]{22}$/.test(id)) ids.add(id);
+    console.log(`  gathered ${ids.size} channels (${topic})`);
+  }
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(file, [...ids].join("\n") + "\n");
+  return [...ids].slice(0, n);
+}
+
+function loadChannels(budget: { ytDlp: () => void }): string[] {
+  const want = Number(flag("--gather"));
+  if (want > 0) return gather(want, budget);
   const state = flag("--state");
   if (state) {
     const parsed = JSON.parse(readFileSync(state, "utf8")) as { channels?: Array<{ id?: string }> };
@@ -45,16 +86,16 @@ function loadChannels(): string[] {
   }
   const list = flag("--channels");
   if (list) return readFileSync(list, "utf8").split(/\s+/).filter((l) => /^UC[\w-]{22}$/.test(l));
-  console.log("usage: node tools/feed-torture.ts --state <subscriptions.json> | --channels <file>");
+  console.log("usage: node tools/feed-torture.ts --state <subscriptions.json> | --channels <file> | --gather <N>");
   process.exit(1);
 }
 
-const channels = [...new Set(loadChannels())];
+const budget = liveGuard("feed-torture", process.argv);
+const channels = [...new Set(loadChannels(budget))];
 if (channels.length < 10) {
   console.log(`Only ${channels.length} channels; need at least 10 for a meaningful test.`);
   process.exit(1);
 }
-liveGuard("feed-torture", process.argv);
 
 // The UA Obsidian's requestUrl sends on a Mac, near enough.
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.10.3 Chrome/138.0.0.0 Electron/37.0.0 Safari/537.36";
