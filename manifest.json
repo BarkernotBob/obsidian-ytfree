@@ -2,7 +2,9 @@
   "id": "ytfree",
   "name": "YT Free",
   "version": "0.1.0",
-  "minAppVersion": "1.5.0",
-  "description": "Play YouTube videos in notes without ads, by resolving the stream instead of loading YouTube's player. Desktop uses yt-dlp for downloads, transcripts and 1080p; mobile plays 360p inline with no extra install.",
-  "author": "BarkernotBob"
+  "minAppVersion": "1.6.6",
+  "description": "Watch YouTube videos inside your notes in a plain video player, with clickable timestamps, resume and a subscriptions hub. Works on desktop and mobile with no install; optional yt-dlp on desktop adds downloads and Smart Speed.",
+  "author": "BarkernotBob",
+  "authorUrl": "https://github.com/BarkernotBob",
+  "isDesktopOnly": false
 }

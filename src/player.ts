@@ -277,9 +277,11 @@ function hdReason(err: unknown): string {
 
 /**
  * Which player currently owns `navigator.mediaSession` — there is one of those
- * per document, and a vault can have several players open at once.
+ * per document, and a vault can have several players open at once. Held as
+ * each player's own key object rather than the player itself, so no module
+ * variable aliases `this`.
  */
-let nowPlayingOwner: YtFreePlayer | null = null;
+let nowPlayingOwner: object | null = null;
 
 /**
  * One silent, looping `<audio>` per document, playing only while a video was
@@ -343,6 +345,9 @@ function stopSilence(): void {
  * same way — re-resolve, seek back, resume. The user should never see the seam.
  */
 export class YtFreePlayer {
+  /** Identifies this player as the owner of the media session (see `nowPlayingOwner`). */
+  private readonly nowPlayingKey = {};
+
   readonly video: HTMLVideoElement;
   private hls: Hls | null = null;
   private unhookJump: (() => void) | null = null;
@@ -829,7 +834,7 @@ export class YtFreePlayer {
     if (!session) return;
     // There is one media session per document and any number of players, so
     // whoever started playing last owns it — and only that player may clear it.
-    nowPlayingOwner = this;
+    nowPlayingOwner = this.nowPlayingKey;
 
     const now = this.options.nowPlaying?.();
     if (now && typeof MediaMetadata === "function") {
@@ -896,7 +901,7 @@ export class YtFreePlayer {
   /** Leave the lock screen empty rather than pointing at a closed note. */
   private clearNowPlaying(): void {
     const session = navigator.mediaSession;
-    if (!session || nowPlayingOwner !== this) return;
+    if (!session || nowPlayingOwner !== this.nowPlayingKey) return;
     nowPlayingOwner = null;
     session.metadata = null;
     session.playbackState = "none";
@@ -1953,7 +1958,7 @@ export class YtFreePlayer {
    * the app, or an hour passes (`KEEPALIVE_MAX_MS`).
    */
   private holdBackgroundSession(): void {
-    if (!Platform.isMobile || nowPlayingOwner !== this) return;
+    if (!Platform.isMobile || nowPlayingOwner !== this.nowPlayingKey) return;
     this.heldInBackground = true;
     this.options.debug?.("background hold: paused while hidden, holding the session");
     startSilence(this.options.debug);
@@ -1967,7 +1972,7 @@ export class YtFreePlayer {
    * for exactly this.
    */
   isNowPlaying(): boolean {
-    if (this.destroyed || nowPlayingOwner !== this || this.video.ended) return false;
+    if (this.destroyed || nowPlayingOwner !== this.nowPlayingKey || this.video.ended) return false;
     return !this.video.paused || this.heldInBackground;
   }
 
@@ -3159,7 +3164,7 @@ export class YtFreePlayer {
     // below does not reach.
     if (this.panelOpen) this.togglePanel(false);
     this.watchPanelAnchor(false);
-    if (nowPlayingOwner === this) stopSilence();
+    if (nowPlayingOwner === this.nowPlayingKey) stopSilence();
     this.clearNowPlaying();
     this.teardownHls();
     this.video.removeAttribute("src");

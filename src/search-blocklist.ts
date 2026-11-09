@@ -133,14 +133,12 @@ export function liftHides(
 
 export function normalizeBlockList(raw: unknown): BlockEntry[] {
   if (!Array.isArray(raw)) return [];
-  return raw
-    .filter(
-      (e): e is BlockEntry =>
-        Boolean(e) &&
-        typeof e.id === "string" &&
-        typeof e.at === "string" &&
-        typeof (e.title ?? "") === "string",
-    )
+  return (raw as unknown[])
+    .filter((e): e is BlockEntry => {
+      if (!e || typeof e !== "object") return false;
+      const o = e as Record<string, unknown>;
+      return typeof o.id === "string" && typeof o.at === "string" && typeof (o.title ?? "") === "string";
+    })
     .map((e) => {
       const entry: BlockEntry = { id: e.id, title: e.title ?? "", at: e.at };
       if (e.undone === true) entry.undone = true;

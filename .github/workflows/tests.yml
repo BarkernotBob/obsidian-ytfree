@@ -19,4 +19,5 @@ jobs:
           cache: npm
           cache-dependency-path: ./package-lock.json
       - run: npm ci --legacy-peer-deps  # obsidian pins an older @codemirror/state peer
+      - run: npm run lint
       - run: npm run check

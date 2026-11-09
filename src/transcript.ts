@@ -269,7 +269,7 @@ export function parseJson3Timed(text: string): TimedCue[] {
     }>;
   };
   try {
-    data = JSON.parse(text);
+    data = JSON.parse(text) as typeof data;
   } catch {
     return [];
   }

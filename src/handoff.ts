@@ -129,18 +129,20 @@ export function youTubeLinkAt(
   offset: number,
 ): { url: string; from: number; to: number } | null {
   const patterns = [
-    /(!?)\[[^\]\n]*\]\(<?(https?:\/\/[^\s)>]+)>?\)/g,
-    /()<(https?:\/\/[^\s>]+)>/g,
-    /()(?<![(<\w])(https?:\/\/[^\s)<>\]]+)/g,
+    /()(!?)\[[^\]\n]*\]\(<?(https?:\/\/[^\s)>]+)>?\)/g,
+    /()()<(https?:\/\/[^\s>]+)>/g,
+    // Group 1 stands in for a lookbehind, which iOS before 16.4 cannot parse:
+    // it eats the character before the URL and is skipped below.
+    /(^|[^(<\w])()(https?:\/\/[^\s)<>\]]+)/g,
   ];
   for (const re of patterns) {
     let m: RegExpExecArray | null;
     while ((m = re.exec(line))) {
-      const from = m.index;
+      const from = m.index + m[1].length;
       const to = m.index + m[0].length;
       if (offset < from || offset > to) continue;
-      if (m[1] === "!") return null;
-      return isYouTubeUrl(m[2]) ? { url: m[2], from, to } : null;
+      if (m[2] === "!") return null;
+      return isYouTubeUrl(m[3]) ? { url: m[3], from, to } : null;
     }
   }
   return null;
