@@ -230,6 +230,11 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   YouTube's embedded player. After a bot check, straight to the embed.
 - **No sign-in** (Isaiah, 2026-11-09): YouTube cookies never reach the plugin; subscriptions by
   manual add or Takeout CSV (#64, #65).
+- **Subscribe in YT Free** (GitHub #65; details Claude's calls, open to change): adds the channel
+  to the hub's list only, nothing sent to YouTube; videos arrive on the next feed check (no extra
+  poll). On the channel screen the button turns into a greyed "Subscribed" of the same width;
+  there is no unsubscribe there yet. A search card's ⋯ menu offers "Subscribe in YT Free" above
+  "Hide this channel", and shows a greyed "Subscribed in YT Free" for a followed channel.
 
 ### Earlier
 

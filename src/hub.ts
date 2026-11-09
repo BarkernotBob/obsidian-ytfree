@@ -120,6 +120,13 @@ import {
 } from "./search-params";
 import type { SearchFilters } from "./search-params";
 import { channelScreen, searchScreen } from "./search-screen";
+import {
+  TAKEOUT_STEPS,
+  TAKEOUT_URL,
+  searchChannelMenu,
+  subscribeButton,
+  subscribedNotice,
+} from "./subscribe";
 import type { SearchScreenCopy, SearchScreenKind } from "./search-screen";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 
@@ -1388,6 +1395,7 @@ export class HubView extends ItemView {
   private channelToken = 0;
   private channelInputEl: HTMLInputElement | null = null;
   private channelFactsEl: HTMLElement | null = null;
+  private channelSubscribeEl: HTMLButtonElement | null = null;
 
   /**
    * A phone gets a different menu, not a narrower one. See docs/MOBILE-UX.md:
@@ -1454,6 +1462,7 @@ export class HubView extends ItemView {
       this.renderStatus();
       this.renderChannels();
       this.renderMenuLabel();
+      this.renderSubscribeButton();
       // A local click has already swapped its own card, and rebuilding the grid
       // under the finger that clicked it is the one thing this UI must never
       // do. A merge is the opposite case: those changes were made on the other
@@ -1505,6 +1514,7 @@ export class HubView extends ItemView {
     this.searchInputEl = null;
     this.channelInputEl = null;
     this.channelFactsEl = null;
+    this.channelSubscribeEl = null;
     this.menuEl = null;
     this.scrimEl = null;
     this.menuButtonEl = null;
@@ -1878,8 +1888,8 @@ export class HubView extends ItemView {
   /**
    * The channel's header and its search box.
    *
-   * No Subscribe button for now: the old one opened youtube.com and relied on
-   * the account sync removed in GitHub #64. In-app subscribe is GitHub #65.
+   * Subscribe adds the channel to the hub's own list (GitHub #65): nothing is
+   * sent to YouTube, and its videos arrive on the next feed check.
    */
   private buildChannel(root: HTMLElement): void {
     const channel = this.channel;
@@ -1897,6 +1907,20 @@ export class HubView extends ItemView {
     if (channel?.header?.avatar) avatar.src = channel.header.avatar;
     else avatar.addClass("is-empty");
     title.createSpan({ cls: "ytfree-hub-screen-name", text: this.channelName() || "Channel" });
+
+    if (channel) {
+      const subscribe = header.createEl("button", {
+        cls: "ytfree-channel-subscribe",
+        attr: { type: "button" },
+      });
+      subscribe.addEventListener("click", () => {
+        const current = this.channel;
+        if (!current) return;
+        this.subscribeToChannel(current.channelId, this.channelName());
+      });
+      this.channelSubscribeEl = subscribe;
+      this.renderSubscribeButton();
+    }
 
     this.channelFactsEl = root.createDiv({ cls: "ytfree-channel-facts" });
     this.renderChannelFacts();
@@ -1943,6 +1967,32 @@ export class HubView extends ItemView {
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status ytfree-hub-status-browse" });
     const body = root.createDiv({ cls: "ytfree-hub-body" });
     this.listEl = body.createDiv({ cls: "ytfree-hub-list" });
+  }
+
+  /**
+   * The channel screen's Subscribe button, from the store. Both labels share
+   * one fixed width (styles.css), so the click that flips it moves nothing.
+   */
+  private renderSubscribeButton(): void {
+    const el = this.channelSubscribeEl;
+    const channel = this.channel;
+    if (!el || !channel) return;
+    const copy = subscribeButton(this.store.isSubscribed(channel.channelId));
+    el.setText(copy.text);
+    el.title = copy.title;
+    el.disabled = copy.disabled;
+    el.toggleClass("mod-cta", !copy.disabled);
+    el.toggleClass("is-subscribed", copy.disabled);
+  }
+
+  /** Subscribe inside YT Free (GitHub #65), from the channel screen or a search card. */
+  private subscribeToChannel(channelId: string, title: string): void {
+    if (!channelId) return;
+    if (!this.store.isSubscribed(channelId)) {
+      this.store.addChannels([{ id: channelId, title: title || channelId }]);
+    }
+    this.renderSubscribeButton();
+    new Notice(subscribedNotice(title));
   }
 
   /** Handle, subscribers, video count — whichever the header has said so far. */
@@ -2652,9 +2702,9 @@ export class HubView extends ItemView {
     // A search card is not tracked in `cards` — a results list is rebuilt whole
     // — but Remove has to find this one element to swap it for the strip, and
     // Undo has to swap it back without redrawing anything above it.
-    // Hide channel lives on search cards only: on a channel screen you went to
-    // that channel on purpose, and a channel you subscribe to cannot be hidden.
-    if (where === "search" && result.channelId && !this.store.isSubscribed(result.channelId)) {
+    // The channel menu lives on search cards only: on a channel screen you went
+    // to that channel on purpose, and its own header has Subscribe.
+    if (where === "search" && result.channelId) {
       this.addChannelChip(card, result);
     }
     this.results.set(result.videoId, card);
@@ -2663,8 +2713,9 @@ export class HubView extends ItemView {
 
   /**
    * The `⋯` chip in a search card's thumbnail corner. A menu rather than a
-   * fifth button, so later secondary actions have somewhere to go without
-   * competing with the four. One item today.
+   * fifth button, so secondary actions have somewhere to go without competing
+   * with the four. Built at click time, so it reflects a subscribe made since
+   * the card was drawn (`searchChannelMenu`).
    */
   private addChannelChip(card: HTMLElement, result: SearchResult): void {
     const thumb = card.querySelector<HTMLElement>(".ytfree-hub-thumb");
@@ -2678,12 +2729,15 @@ export class HubView extends ItemView {
       evt.preventDefault();
       evt.stopPropagation();
       const menu = new Menu();
-      menu.addItem((item) =>
-        item
-          .setTitle("Hide this channel")
-          .setIcon("eye-off")
-          .onClick(() => this.hideChannelFromSearch(result)),
-      );
+      for (const entry of searchChannelMenu(this.store.isSubscribed(result.channelId))) {
+        menu.addItem((item) => {
+          item.setTitle(entry.title).setIcon(entry.icon);
+          if (entry.key === "subscribed") item.setDisabled(true);
+          else if (entry.key === "subscribe") {
+            item.onClick(() => this.subscribeToChannel(result.channelId, result.channelTitle));
+          } else item.onClick(() => this.hideChannelFromSearch(result));
+        });
+      }
       menu.showAtMouseEvent(evt);
     });
   }
@@ -3964,9 +4018,24 @@ export class ImportSubscriptionsModal extends Modal {
     contentEl.createEl("h2", { text: "Import YouTube subscriptions" });
     contentEl.createEl("p", {
       cls: "ytfree-hub-hint",
+      text: "Your YouTube subscriptions come out of Google Takeout as one file, subscriptions.csv:",
+    });
+    const steps = contentEl.createEl("ol", { cls: "ytfree-takeout-steps" });
+    TAKEOUT_STEPS.forEach((step, index) => {
+      const li = steps.createEl("li");
+      // The first step's site is a link, so nobody has to type it.
+      if (index === 0) {
+        const [before, after] = step.split("takeout.google.com");
+        li.appendText(before);
+        li.createEl("a", { text: "takeout.google.com", href: TAKEOUT_URL });
+        li.appendText(after);
+      } else li.setText(step);
+    });
+    contentEl.createEl("p", {
+      cls: "ytfree-hub-hint",
       text:
-        "Google Takeout → YouTube and YouTube Music → deselect everything except “subscriptions”. " +
-        "The export contains subscriptions.csv. Importing again later adds new channels and changes nothing else.",
+        "Importing again later adds new channels and changes nothing else. " +
+        "You can also subscribe from a channel's screen, or from a search result's ⋯ menu.",
     });
 
     // A reserved status line: filling it in must not resize the dialog.
