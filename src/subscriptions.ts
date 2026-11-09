@@ -13,6 +13,7 @@
 
 import { escapeDescription, linkifyTimestamps } from "./description.ts";
 import { mergeNotified } from "./notify.ts";
+import { historyMatches } from "./history.ts";
 import { DESCRIPTION_HEADING, NOTES_HEADING } from "./sections.ts";
 import type { SearchResult } from "./search.ts";
 import {
@@ -1082,7 +1083,7 @@ export function expireItems(
   return { items: survivors, removed: items.length - survivors.length };
 }
 
-export type HubFilter = "new" | "all" | "kept" | "hidden" | "progress";
+export type HubFilter = "new" | "all" | "kept" | "hidden" | "progress" | "history";
 
 /**
  * What the hub shows, newest first, after the filters have had their say.
@@ -1117,12 +1118,18 @@ export function visibleItems(
      * says you meant to. Absent, a removed video never shows there.
      */
     hasNote?: (item: HubItem) => boolean;
+    /**
+     * Watch history (GitHub #48): id → when last watched. The History list is
+     * exactly these, whatever their hub state, newest first.
+     */
+    history?: ReadonlyMap<string, string>;
   },
 ): HubItem[] {
   const matching = items.filter((item) => {
     if (options.channelId && item.channelId !== options.channelId) return false;
     if (!options.includeShorts && item.isShort === true) return false;
     if (!hubItemMatches(item, options.query ?? "")) return false;
+    if (options.filter === "history") return options.history?.has(item.videoId) ?? false;
     if (options.filter === "hidden") return item.state === "dismissed";
     if (options.filter === "progress") {
       // A video you turned down is not a video you are part-way through, even
@@ -1147,8 +1154,9 @@ export function visibleItems(
   // In progress is ordered by when you last watched it, for the same reason and
   // more strongly: "the one I was in the middle of" is the entire question, and
   // when the video was published has nothing to do with the answer.
-  if (options.filter === "progress") {
-    const watchedAt = options.inProgress ?? new Map<string, string>();
+  if (options.filter === "progress" || options.filter === "history") {
+    const watchedAt =
+      (options.filter === "history" ? options.history : options.inProgress) ?? new Map<string, string>();
     return matching.sort(
       (a, b) =>
         (Date.parse(watchedAt.get(b.videoId) ?? "") || 0) -
@@ -1174,10 +1182,7 @@ export function visibleItems(
  * state cost nothing.
  */
 export function hubItemMatches(item: HubItem, query: string): boolean {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return true;
-  const haystack = `${item.title} ${item.channelTitle}`.toLowerCase();
-  return terms.every((term) => haystack.includes(term));
+  return historyMatches(item.title, item.channelTitle, query);
 }
 
 // ---------------------------------------------------------------------- note
@@ -1273,6 +1278,33 @@ export interface VideoNote {
  * state that means "not in any of the hub's own lists", so the card offers
  * Delete rather than Remove — the note is all there is to remove (GitHub #50).
  */
+/**
+ * A History card for a video the hub has no row for (GitHub #48): watched from
+ * search, a channel screen, a pasted link or a note. Drawn, never stored.
+ * `kept` so its buttons read as a video you have, not one you turned down.
+ */
+export function historyOnlyItem(
+  videoId: string,
+  entry: { title: string; channel: string; channelId?: string; duration?: number },
+  notePath?: string,
+): HubItem {
+  return {
+    videoId,
+    channelId: entry.channelId ?? "",
+    channelTitle: entry.channel,
+    title: entry.title || "Unknown video",
+    published: "",
+    thumbnail: thumbnailUrl(videoId),
+    description: "",
+    views: null,
+    durationSeconds: entry.duration,
+    isShort: null,
+    state: "kept",
+    seenAt: "",
+    notePath,
+  };
+}
+
 export function noteOnlyItem(note: VideoNote): HubItem {
   return {
     videoId: note.videoId,

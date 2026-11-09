@@ -7,6 +7,7 @@ import {
   MarkdownRenderChild,
   MarkdownView,
   Menu,
+  Modal,
   Notice,
   editorLivePreviewField,
   Platform,
@@ -51,6 +52,8 @@ import { previewCloseAction } from "./preview";
 import { describeTestOutcome, describeWebhook } from "./notify";
 import type { NotificationFormat } from "./notify";
 import { ProgressStore } from "./progress-store";
+import { HistoryStore } from "./history-store.ts";
+import type { HistoryMeta } from "./history.ts";
 import { shareUrl } from "./share";
 import { SilenceStore } from "./silence-store";
 import {
@@ -744,6 +747,10 @@ export default class YtFreePlugin extends Plugin {
   subscriptions!: SubscriptionsStore;
   /** Where each video got to, so reopening a note does not start at 0:00. */
   progress!: ProgressStore;
+  /** Every video you have watched, and for how long (GitHub #48). Never pruned. */
+  history!: HistoryStore;
+  /** What a Preview sheet said about its video, for history: a search result has no hub row or note. */
+  private previewMeta = new Map<string, HistoryMeta>();
   /** Where the pauses are, per video — shared with the phone through iCloud. */
   silence!: SilenceStore;
   /** Videos whose silence map has already been chased this session. */
@@ -777,6 +784,11 @@ export default class YtFreePlugin extends Plugin {
     attachPlayerStore(localStore(PLAYER_ANSWERS_KEY));
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
     await this.progress.load();
+    this.history = new HistoryStore(this.app, `${this.pluginDir()}/history.json`);
+    await this.history.load();
+    // The old watch stamps move from progress.json into history (GitHub #48).
+    this.progress.drainStampsTo((stamps) => this.history.importStamps(stamps));
+    this.register(this.history.onChange(() => this.refreshHistoryViews()));
     this.watchProgressFile();
     this.setupNowPlayingButton();
     this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
@@ -1352,7 +1364,7 @@ export default class YtFreePlugin extends Plugin {
           (videoId) => this.progress.resumeFor(videoId),
           // The player inside Preview. The hub knows nothing about streams;
           // this is the only thing it is given to build one with.
-          (host, videoId) => this.mountPreviewPlayer(host, videoId),
+          (host, videoId, meta) => this.mountPreviewPlayer(host, videoId, meta),
           // Share, from the Preview sheet. The same menu the player's own
           // Share button opens.
           (anchor, videoId, seconds) => this.shareMenuFor(anchor, videoId, seconds),
@@ -1362,6 +1374,8 @@ export default class YtFreePlugin extends Plugin {
           () => this.inProgressVideos(),
           // In progress also lists notes the hub has no row for (GitHub #50).
           () => this.videoNotes(),
+          // The History list and its stats line (GitHub #48).
+          this.history,
         ),
     );
 
@@ -1631,7 +1645,7 @@ export default class YtFreePlugin extends Plugin {
       // Cheapest condition first: without a watch stamp nothing else can make
       // this note eligible, and reading every video note in the vault to find
       // that out would be a lot of I/O for an answer we already have.
-      const watchedAt = this.progress.watchedFor(videoId);
+      const watchedAt = this.history.playedAt(videoId);
       if (!watchedAt) continue;
 
       candidates.push({
@@ -2040,6 +2054,7 @@ export default class YtFreePlugin extends Plugin {
     // After the players, not before: each `destroy` reports its final position,
     // and this is the write that gets those positions onto disk.
     void this.progress.flush();
+    void this.history.flush();
     void this.silence.flush();
   }
 
@@ -2050,6 +2065,27 @@ export default class YtFreePlugin extends Plugin {
    * any other way knows its own name and whatever its frontmatter says. Either
    * beats "Obsidian" and a blank square, so both are used, hub first.
    */
+  /**
+   * Title and channel for a history entry, from whatever already knows them:
+   * the hub row, the Preview sheet that is playing it, or the note. No request.
+   */
+  private historyMetaFor(videoId: string, sourcePath: string): HistoryMeta {
+    const item = this.subscriptions?.state.items.find((entry) => entry.videoId === videoId);
+    if (item) return { title: item.title, channel: item.channelTitle, channelId: item.channelId };
+    const sheet = this.previewMeta.get(videoId);
+    if (sheet) return sheet;
+    const playing = this.nowPlayingFor(videoId, sourcePath);
+    return { title: playing?.title, channel: playing?.artist };
+  }
+
+  /** History changed here or on the other device: redraw any hub showing it. */
+  private refreshHistoryViews(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(HUB_VIEW_TYPE)) {
+      const view = leaf.view;
+      if (view instanceof HubView) view.historyChanged();
+    }
+  }
+
   private nowPlayingFor(videoId: string, sourcePath: string): NowPlaying | null {
     const item = this.subscriptions?.state.items.find((entry) => entry.videoId === videoId);
     if (item) {
@@ -4209,9 +4245,13 @@ export default class YtFreePlugin extends Plugin {
         // `ProgressStore.recordPosition`. The position is what makes a preview
         // and a later watch one session; the stamp is what would make skimming
         // look like viewing.
-        onProgress: preview
-          ? (seconds, duration) => this.progress.recordPosition(videoId, seconds, duration)
-          : (seconds, duration) => this.progress.record(videoId, seconds, duration),
+        onProgress: (seconds, duration) => {
+          this.progress.recordPosition(videoId, seconds, duration);
+          // History counts Preview too (it is watching), but only a note
+          // player moves the stamp the note tidy reads — see `HistoryEntry.playedAt`.
+          this.history.record(videoId, seconds, duration, this.historyMetaFor(videoId, sourcePath), !preview);
+        },
+        onWatchTime: (seconds) => this.history.addWatch(videoId, seconds),
         nowPlaying: () => this.nowPlayingFor(videoId, sourcePath),
         // Two ways out of the player and into its settings: the whole screen,
         // and the four dials you actually change while something is playing.
@@ -4390,8 +4430,13 @@ export default class YtFreePlugin extends Plugin {
    * two previews can only mean the modal was reopened, and two streams playing
    * at once is never what was asked for.
    */
-  async mountPreviewPlayer(host: HTMLElement, videoId: string): Promise<PreviewHandle> {
+  async mountPreviewPlayer(
+    host: HTMLElement,
+    videoId: string,
+    meta?: { title: string; channel: string; channelId: string },
+  ): Promise<PreviewHandle> {
     this.destroyPreview();
+    if (meta) this.previewMeta.set(videoId, meta);
 
     // A note player for the same video is paused rather than torn down: it may
     // be a pinned player in a note the reader is coming back to, and the whole
@@ -4592,12 +4637,17 @@ export default class YtFreePlugin extends Plugin {
    * Both are a stat and nothing more when the file has not moved.
    */
   private watchProgressFile(): void {
-    this.registerDomEvent(window, "focus", () => void this.progress.refreshFromDisk());
+    this.registerDomEvent(window, "focus", () => {
+      void this.progress.refreshFromDisk();
+      void this.history.refreshFromDisk();
+    });
     this.registerDomEvent(document, "visibilitychange", () => {
       if (!document.hidden) {
         void this.progress.refreshFromDisk();
+        void this.history.refreshFromDisk();
         return;
       }
+      void this.history.flush();
       // Going away is the other half, and on a phone it is the important one:
       // a position is written on a four-second debounce, and an app swiped out
       // of the switcher is never asked to unload. Whatever is pending goes to
@@ -5828,6 +5878,20 @@ class YtFreeSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Clear watch history")
+      .setDesc(
+        "Deletes every video in the hub's History list and its watch time, on all your devices. Your notes and the hub are not touched. This can't be undone.",
+      )
+      .addButton((button) =>
+        button
+          .setButtonText("Clear history…")
+          .setWarning()
+          .onClick(() => {
+            new ConfirmClearHistoryModal(this.app, () => void this.plugin.history.clear()).open();
+          }),
+      );
+
+    new Setting(containerEl)
       .setName("Include Shorts")
       .setDesc(
         "The feed mixes Shorts with normal videos and marks neither, so each new video is checked once to tell them apart. Off by default.",
@@ -6334,5 +6398,37 @@ class YtFreeSettingTab extends PluginSettingTab {
           this.plugin.refreshPinnedPlayers();
         }),
       );
+  }
+}
+
+/** "Clear history?" — asked once, because nothing brings it back (GitHub #48). */
+class ConfirmClearHistoryModal extends Modal {
+  constructor(
+    app: App,
+    private readonly onConfirm: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.setTitle("Clear watch history?");
+    this.contentEl.createEl("p", {
+      text: "Delete your whole watch history and stats on all devices? This can't be undone.",
+    });
+    new Setting(this.contentEl)
+      .addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton((button) =>
+        button
+          .setButtonText("Clear history")
+          .setWarning()
+          .onClick(() => {
+            this.onConfirm();
+            this.close();
+          }),
+      );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }
