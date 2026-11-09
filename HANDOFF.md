@@ -17,6 +17,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   shows; small cards never ask for it. See the midframe scope doc.
 - Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md). New follow-ups are filed as GitHub issues, not as files in `issues/`.
 - 2026-11-09: YouTube sign-in, cookies and account sync removed (#64); see GLOSSARY.
+- 2026-11-09 nightly: Subscribe inside YT Free on the channel screen and a search card's ⋯ menu,
+  and step-by-step Takeout steps in the import dialog (#65, `src/subscribe.ts`).
 
 ## Shipped on main (scope doc = manual test)
 
