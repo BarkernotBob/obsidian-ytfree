@@ -25,11 +25,8 @@ import {
   setIcon,
 } from "obsidian";
 import { SEARCH_YT_ICON, SHARE_ICON, YT_ICON } from "./icon";
-import type { AccountLine, AccountSession } from "./account";
-import { accountStatusLine } from "./account";
 import type { Channel, HubFilter, HubItem, SubscriptionsState, VideoNote } from "./subscriptions";
 import {
-  applyUnsubscribes,
   buildWatchLaterNote,
   deskSub,
   emptyState,
@@ -95,7 +92,6 @@ import {
   horizonDays,
   walkBackfillPage,
 } from "./backfill";
-import { channelUrl } from "./channel";
 import { parseYouTubeLink } from "./handoff";
 import {
   HIDDEN_CHANNELS_LIMIT,
@@ -177,7 +173,11 @@ export interface HubSettings {
   expiryDays: number;
   includeShorts: boolean;
   watchLaterFolder: string;
-  /** Keep videos the account says were already watched in the Inbox. */
+  /**
+   * Keep items marked watched in the Inbox. Only the removed account sync ever
+   * marked an item watched (GitHub #64), so the plugin passes true and any old
+   * marks no longer hide anything.
+   */
   showWatched: boolean;
   /** Which captions Preview asks for — the same setting the note fetch uses. */
   transcriptLanguage: string;
@@ -190,15 +190,6 @@ export interface HubSettings {
   transcriptIntervalSeconds: number;
   /** Where a poll announces new Inbox videos, and whether it does at all. */
   notifications: NotificationSettings;
-  /**
-   * The account sync, as far as the hub needs to know it. Null on mobile, where
-   * there is no account sync to have an opinion about.
-   *
-   * The hub says when the feeds were last polled and said nothing at all about
-   * the account, so an account sync that had been dead for five weeks was
-   * invisible on the one screen anybody looks at. See issue 044.
-   */
-  account: { session: AccountSession; syncHours: number } | null;
 }
 
 /**
@@ -557,53 +548,6 @@ export class SubscriptionsStore {
     this.state.searchHiddenChannels = list;
     const names = lifted.map((entry) => entry.title || entry.id).join(", ");
     new Notice(`YT Free: subscribed, so ${names} is no longer hidden from search.`);
-  }
-
-  /**
-   * Reconcile the polled channels against a **trusted** live subscription list.
-   *
-   * "Trusted" is load-bearing and checked by the caller, not here: only a
-   * successful read of the subscription manager may drive removals. See
-   * `applyUnsubscribes` for what a fallback list or a failed fetch would do.
-   *
-   * Adds are the same adds `addChannels` makes. Removals take the channel out
-   * of the polled list and leave every item alone — that is the whole point,
-   * and it is why this cannot be `removeChannel` in a loop.
-   */
-  applyAccountChannels(live: Array<{ id: string; title: string }>): {
-    added: number;
-    removed: number;
-  } {
-    const known = new Set(this.state.channels.map((c) => c.id));
-    const now = new Date();
-    let added = 0;
-    const fresh: string[] = [];
-    for (const channel of live) {
-      if (known.has(channel.id)) continue;
-      known.add(channel.id);
-      added++;
-      fresh.push(channel.id);
-      this.state.channels.push({
-        id: channel.id,
-        title: channel.title,
-        addedAt: now.toISOString(),
-        error: null,
-      });
-    }
-
-    const result = applyUnsubscribes(
-      this.state.channels,
-      this.state.unsubscribedChannels,
-      live.map((c) => c.id),
-      now,
-    );
-    this.state.channels = result.channels;
-    this.state.unsubscribedChannels = result.unsubscribedChannels;
-    this.liftSearchHides(fresh);
-
-    this.emit();
-    void this.save();
-    return { added, removed: result.removed.length };
   }
 
   /**
@@ -1364,8 +1308,6 @@ export class HubView extends ItemView {
   private listEl: HTMLElement | null = null;
   private channelsEl: HTMLElement | null = null;
   private statusEl: HTMLElement | null = null;
-  /** The account-sync banner. Always in the DOM; empty when there is no alert. */
-  private accountAlertEl: HTMLElement | null = null;
   /** Cards on screen right now, so a click can update one in place. */
   private cards = new Map<string, HTMLElement>();
   /** The columns the cards go in. Not the list: the sentinel sits outside it. */
@@ -1453,11 +1395,6 @@ export class HubView extends ItemView {
      */
     private shareMenu: ShareMenu | null = null,
     /**
-     * Opens the sign-in window, for the banner's button. Null on mobile and in
-     * tests, where the banner simply has no action to offer.
-     */
-    private signIn: (() => Promise<void>) | null = null,
-    /**
      * Which videos you are part-way through, and when you last watched each.
      * Null — no plugin behind this view — and the In progress list is empty.
      */
@@ -1535,7 +1472,6 @@ export class HubView extends ItemView {
     this.listEl = null;
     this.channelsEl = null;
     this.statusEl = null;
-    this.accountAlertEl = null;
     this.primaryEl = null;
     this.relatedEl = null;
     this.searchInputEl = null;
@@ -1589,8 +1525,8 @@ export class HubView extends ItemView {
     // The same thing the settings pane's "Sync now" runs, notices included, so
     // there is only one meaning of "sync" in the plugin.
     const refresh = actions.createEl("button", { cls: "ytfree-hub-icon-button" });
-    refresh.setAttribute("aria-label", "Sync now — your account, then the channel feeds");
-    refresh.setAttribute("title", "Sync now — your account, then the channel feeds");
+    refresh.setAttribute("aria-label", "Sync now — check the channel feeds");
+    refresh.setAttribute("title", "Sync now — check the channel feeds");
     setIcon(refresh, "refresh-cw");
     refresh.addEventListener("click", () => {
       const run = this.sync ? this.sync() : this.store.poll();
@@ -1599,10 +1535,6 @@ export class HubView extends ItemView {
 
     this.buildItemFilter(root);
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status" });
-    // Created empty and always present, so the row it sits in does not appear
-    // and disappear under a click. `renderAccountAlert` fills it or blanks it.
-    this.accountAlertEl = root.createDiv({ cls: "ytfree-hub-account-alert" });
-    this.renderAccountAlert();
 
     const body = root.createDiv({ cls: "ytfree-hub-body" });
     if (this.phone) this.buildPhoneBody(body);
@@ -1918,10 +1850,8 @@ export class HubView extends ItemView {
   /**
    * The channel's header and its search box.
    *
-   * Subscribe opens youtube.com in the browser, and that is all it does: the
-   * subscription itself is an authenticated write this plugin never makes, and
-   * the next account sync picks the channel up from your real subscriptions.
-   * Desktop only — the sync that would notice it is desktop only too.
+   * No Subscribe button for now: the old one opened youtube.com and relied on
+   * the account sync removed in GitHub #64. In-app subscribe is GitHub #65.
    */
   private buildChannel(root: HTMLElement): void {
     const channel = this.channel;
@@ -1939,20 +1869,6 @@ export class HubView extends ItemView {
     if (channel?.header?.avatar) avatar.src = channel.header.avatar;
     else avatar.addClass("is-empty");
     title.createSpan({ cls: "ytfree-hub-screen-name", text: this.channelName() || "Channel" });
-
-    if (Platform.isDesktopApp && channel) {
-      const subscribe = header.createEl("button", {
-        cls: "ytfree-channel-subscribe",
-        text: "Subscribe",
-        attr: {
-          type: "button",
-          title: "Opens this channel on youtube.com. The next account sync picks the subscription up.",
-        },
-      });
-      subscribe.addEventListener("click", () => {
-        window.open(channelUrl(channel.channelId), "_blank");
-      });
-    }
 
     this.channelFactsEl = root.createDiv({ cls: "ytfree-channel-facts" });
     this.renderChannelFacts();
@@ -2215,7 +2131,6 @@ export class HubView extends ItemView {
 
   renderAll(): void {
     this.renderStatus();
-    this.renderAccountAlert();
     this.renderChannels();
     this.renderMenuLabel();
     this.renderList();
@@ -2253,49 +2168,7 @@ export class HubView extends ItemView {
     if (lastPolledAt && !this.store.polling && this.filter !== "hidden") {
       parts.push(`checked ${relativeAge(lastPolledAt, new Date())}`);
     }
-    // The account, in the same voice and on the same line as the feeds. A sync
-    // you cannot see the age of is a sync nobody notices has stopped.
-    const account = this.accountLine();
-    if (account && this.filter !== "hidden") parts.push(account.text);
     this.statusEl.setText(parts.join(" · "));
-  }
-
-  /** What the account sync is worth saying right now, or null. */
-  private accountLine(): AccountLine | null {
-    const account = this.settings().account;
-    if (!account) return null;
-    return accountStatusLine(account.session, account.syncHours, new Date());
-  }
-
-  /**
-   * The banner, for the two states worth interrupting over: the session has
-   * expired, or nothing has succeeded in two sync periods. Anything less says
-   * its piece on the status line and stays out of the way.
-   *
-   * The element is never added or removed — only emptied — so nothing on the
-   * screen moves when the state behind it changes.
-   */
-  private renderAccountAlert(): void {
-    const host = this.accountAlertEl;
-    if (!host) return;
-    host.empty();
-    const line = this.accountLine();
-    host.toggleClass("is-visible", Boolean(line?.alert));
-    if (!line?.alert) return;
-
-    host.createSpan({ cls: "ytfree-hub-account-alert-text", text: line.text });
-    if (!line.action) return;
-    const button = host.createEl("button", {
-      cls: "ytfree-hub-account-alert-button",
-      text: line.action === "sign-in" ? "Sign in again" : "Sync now",
-    });
-    button.addEventListener("click", () => {
-      const run =
-        line.action === "sign-in"
-          ? (this.signIn?.() ?? Promise.resolve())
-          : (this.sync?.() ?? this.store.poll());
-      void run.then(() => this.renderAll());
-    });
   }
 
   /**

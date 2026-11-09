@@ -11,8 +11,8 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Hidden**: the drawer for hub mistakes. Never holds search removals (see 047).
 - **Feed poll**: the hourly check of each subscribed channel's RSS feed, a rolling window of 15
   uploads by that channel only.
-- **Account sync**: desktop-only, signed-in, every 12 hours, through yt-dlp with cookies:
-  subscriptions, Watch Later, history.
+- **Account sync**: removed 2026-11-09 (GitHub #64). There is no YouTube sign-in; subscriptions
+  come from adding a channel and the Google Takeout `subscriptions.csv` import.
 - **Channel screen**: one channel's whole uploads catalogue via InnerTube `browse` with
   continuation, with a search box over it (045).
 - **Collab video**: a video uploaded by channel A that lists subscribed channel B as a
@@ -109,6 +109,15 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   label and asked for it gone. The desktop status-bar item and the "Go to the playing video" command stay.
 - **Properties re-collapse when Obsidian rebuilds them** (#51): collapsed once per table, not once per note.
 
+### 2026-11-09 (Isaiah)
+
+- **No YouTube sign-in (GitHub #64)**, for the Obsidian store MVP: the sign-in window, cookie
+  file, account sync (subscriptions, Watch Later, history, collabs) and the "Try signed in"
+  bot-check button are gone. No cookies reach yt-dlp or any request. The first load after the
+  update deletes the old cookie file and the `persist:ytfree-account` partition and drops the
+  `account*` settings. Old "watched" marks no longer hide hub items. The channel screen's
+  Subscribe button (it relied on account sync) is gone until in-app subscribe (GitHub #65).
+
 ### 2026-10-19 (Isaiah)
 
 - **Where a YouTube link lands**: the video's note if one exists, else its Preview. No setting,
@@ -200,8 +209,19 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - Phone ⋯ menu (#52): moves to `document.body` while open, sits at Obsidian's menu layer, avoids safe areas, scrolls when taller than the room (2026-11-07).
 
+- **MVP** (Isaiah, 2026-11-09): the minimum to list YT Free in Obsidian's community directory.
+  Labels `mvp` / `post-mvp`. Scope: `docs/V1-SCOPE-MVP.md`.
+- **Store build** (Isaiah, 2026-11-09): ad-free, same as Isaiah's own. Ads were only meant to
+  help acceptance, and Obsidian doesn't require them. Own stream first, YouTube's embedded player
+  as fallback (#43). No separate local build for now (#60 post-MVP).
+
+- **Playback tiers** (Isaiah, 2026-11-09): yt-dlp (desktop, if installed) → our own stream →
+  YouTube's embedded player. After a bot check, straight to the embed.
+- **No sign-in** (Isaiah, 2026-11-09): YouTube cookies never reach the plugin; subscriptions by
+  manual add or Takeout CSV (#64, #65).
+
 ### Earlier
 
 - `PROGRESS_TTL_DAYS` stays 365 (2026-09-02).
 - In progress floor is `min(0.1 × duration, 120s)`, backed by `progress.json` (2026-08-06).
-- Subscribe opens the channel in the external browser; no authenticated writes (2026-08-06).
+- Subscribe opens the channel in the external browser; no authenticated writes (2026-08-06). Removed 2026-11-09 with sign-in (#64).

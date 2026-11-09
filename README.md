@@ -129,8 +129,7 @@ or your vault to its author or anyone else.
 - **YouTube** (`youtube.com`, `i.ytimg.com`, `*.googlevideo.com`): video pages, streams,
   thumbnails, search, channel pages, transcripts and the RSS feeds of channels you subscribe
   to. The subscriptions hub checks those feeds on a timer while Obsidian is open (hourly by
-  default; Settings → *Check every*). Requests are signed out unless you use the optional
-  desktop sign-in below.
+  default; Settings → *Check every*). Requests are always signed out.
 - **The YT Free player page** (`barkernotbob.github.io/obsidian-ytfree/player/`, served by
   GitHub Pages): only when a video plays in YouTube's own embedded player, which then loads
   from YouTube as usual.
@@ -143,11 +142,12 @@ They are separate programs you install yourself; YT Free never downloads or inst
 Without them it plays through its own stream on desktop and mobile.
 
 **Files outside your vault.** On desktop, downloaded videos go to `~/Movies/YT Free` (or the
-folder you choose in settings). The optional YouTube sign-in on desktop keeps its cookie file
-in `~/Library/Application Support/obsidian-ytfree/`.
+folder you choose in settings). (Versions before
+sign-in was removed kept a cookie file in `~/Library/Application Support/obsidian-ytfree/`;
+YT Free deletes it on first load.)
 
-**Accounts and payments.** No account is needed, and nothing is paid for. Sign-in is optional
-and desktop-only.
+**Accounts and payments.** No account and no sign-in; nothing is paid for. Your YouTube
+cookies never reach the plugin.
 
 **Ads.** YT Free shows no ads of its own.
 
