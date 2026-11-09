@@ -1638,49 +1638,6 @@ body.ytfree-immersive-open {
   text-overflow: ellipsis;
 }
 
-/* The account-sync banner — issue 044.
- *
- * Always in the tree, never inserted or removed: it collapses to nothing by
- * height and opacity so a state change behind it cannot shove the list down
- * under a finger that is already on a card. The transition is on the collapse,
- * not on a click. */
-.ytfree-hub-account-alert {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.6em;
-  margin: 0 0.9em;
-  padding: 0 0.7em;
-  height: 0;
-  overflow: hidden;
-  visibility: hidden;
-  border-radius: var(--radius-s);
-  background: var(--background-modifier-error-hover, rgba(255, 100, 100, 0.12));
-  color: var(--text-normal);
-  font-size: var(--font-ui-smaller);
-}
-
-.ytfree-hub-account-alert.is-visible {
-  height: 2.2em;
-  visibility: visible;
-  margin-bottom: 0.4em;
-}
-
-.ytfree-hub-account-alert-text {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ytfree-hub-account-alert-button {
-  flex: 0 0 auto;
-  height: 1.7em;
-  padding: 0 0.7em;
-  font-size: var(--font-ui-smaller);
-  cursor: pointer;
-}
-
 /* Lined up with the search field and the filter bar above it, which sit at
    0.7em rather than the hub's 0.9em. A status line that starts three pixels
    left of the box it describes is the kind of thing that reads as unfinished
@@ -3935,62 +3892,6 @@ body.ytfree-immersive-open .ytfree-preview-close {
   .is-phone .ytfree-preview-wrapper {
     max-width: calc(24vh * 16 / 9);
   }
-}
-
-/* ---------------------------------------------------------------- account */
-
-/*
- * The sign-in window. Sized in the stylesheet rather than inline so the modal
- * has its final dimensions before the webview loads — a window that grows once
- * YouTube renders would move the avatar out from under the pointer.
- */
-.ytfree-signin-modal {
-  width: min(560px, 90vw);
-  height: min(780px, 88vh);
-}
-
-.ytfree-signin-status {
-  min-height: 1.6em;
-  line-height: 1.6em;
-  font-size: var(--font-ui-small);
-  color: var(--text-muted);
-}
-
-.ytfree-signin-nav {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0.4em 0;
-}
-
-.ytfree-signin-navbutton {
-  padding: 0 0.6em;
-}
-
-.ytfree-signin-url {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-}
-
-.ytfree-signin-view {
-  width: 100%;
-  height: calc(100% - 6em);
-  min-height: 520px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-}
-
-/* Reserved line: the session status changes length as it changes state. */
-.ytfree-account-status {
-  min-height: 1.6em;
-  line-height: 1.6em;
-  margin-top: 0.4em;
-  color: var(--text-accent);
-}
-
-/* The label swaps between "Sign in…" and "Sign out"; the width must not. */
-.ytfree-account-button {
-  min-width: 7.5em;
 }
 
 /* Reserved line: it reports on the webhook and then on the last test, which

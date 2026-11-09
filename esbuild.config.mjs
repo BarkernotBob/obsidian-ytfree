@@ -49,9 +49,9 @@ const ctx = await esbuild.context({
   external: [
     "obsidian",
     "electron",
-    // The sign-in window reaches Electron's session store through the remote
-    // module. It exists only in the desktop renderer and must not be bundled;
-    // `src/desktop/signin.ts` is the only file that requires it.
+    // The dock badge and the old sign-in clean-up reach Electron through the
+    // remote module. It exists only in the desktop renderer and must not be
+    // bundled.
     "@electron/remote",
     "@codemirror/state",
     "@codemirror/view",
