@@ -14,7 +14,9 @@ meant to help get accepted, and Obsidian does not require them. So:
   desktop for HD, downloads and Smart Speed.
 - **Three playback tiers (Isaiah, 2026-11-09):** yt-dlp if installed (desktop) → our own stream →
   YouTube's embedded player (#43). Tiers 1 and 2 fail together on a bot check (same IP), so after a
-  bot check playback goes straight to tier 3 and makes no stream requests.
+  bot check (an actual one on this IP, not a guess) playback goes to tier 3 for the 45-minute
+  breaker window, then tries streams again. Never move anyone to tier 3 preemptively: the point of
+  keeping flags near 0 is that users stay on our stream (Isaiah, 2026-11-09).
 - **No YouTube sign-in (Isaiah, 2026-11-09):** cookies never reach the plugin. Subscriptions come
   from manual adds and the Google Takeout CSV import.
 - The store/local build split (#60) is no longer needed for MVP: nothing differs between the two.
@@ -92,7 +94,7 @@ plugin and accepts `seek` and `rate` commands (`docs/player/index.html`,
 | M8 | Desktop "quality" resolve returns no HLS manifest: check it still happens after #32, close if not | Bug in a shipped feature | #5 |
 | M10 | Remove sign-in, cookie file and account sync | Isaiah, 2026-11-09 | #64 |
 | M11 | Subscribe inside YT Free; Takeout import instructions | Replaces sign-in | #65 |
-| M12 | Bot-check risk for store users near 0: request ceilings as tests, no burst on big imports, tier fall-through goes to the embed on any bot check, nothing resolved before Play, conservative first-run defaults. Builds on #31–#39 (merged) | Isaiah, 2026-11-09 | #66 |
+| M12 | Bot-check risk for store users near 0: request ceilings as tests, no burst on big imports, embed only after an actual bot check, for the breaker window, nothing resolved before Play, conservative first-run defaults. Builds on #31–#39 (merged) | Isaiah, 2026-11-09 | #66 |
 | M9 | Unfiled bugs Isaiah knows of | "Fix known bugs" | Isaiah to list |
 
 ## Post-MVP
