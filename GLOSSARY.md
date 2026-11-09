@@ -18,18 +18,19 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Saved** (chip; `kept` in code): hub items you opened or saved. Not the same as "has a note" (see 017).
 - **Hidden**: the drawer for hub mistakes. Never holds search removals (see 047).
 - **Feed poll**: the check of a subscribed channel's RSS feed, a rolling window of 15
-  uploads by that channel only. Default every 120 minutes for new installs (GitHub #66).
-- **Poll round** (GitHub #66): one poll fetches at most 25 channel feeds, the ones checked
-  longest ago (`Channel.polledAt`), one at a time with a 0.4-2 s random gap. The gap between
-  rounds is lengthened by a random 0-30% and never under 5 minutes, and a long list stretches the period so
-  the hub never averages more than 120 feeds an hour (600 channels: each checked every 5 h).
-  Sync now runs one round too. A channel's first round after an import seeds its videos
+  uploads by that channel only. Every channel, every 60 minutes, 5 at a time, stalest first;
+  Sync now checks every channel too. A channel's first check after an import seeds its videos
   without sending a notification. Code: `src/feed-schedule.ts`.
-- **HD on Play** (GitHub #66): the HD lookup waits for the first press of Play; the badge
-  reads "· HD on Play" until then. "Start in HD" (opt-in) still looks it up at open.
-- **First-run defaults** (GitHub #66, Claude's call): poll every 120 min; phone stream warm-up
-  on note open off; auto-transcript stays on (it reuses the player answer the note already
-  fetched, so it costs one captions request). Existing installs keep their saved settings.
+- **Feed torture test** (GitHub #66, 2026-11-09, Isaiah's ask): `tools/feed-torture.ts` on his Mac,
+  home Wi-Fi. 3,710 feed requests (18 and 300 channels; 300 at once, 900 back to back, 1,800 over
+  30 min, one feed ×100) with zero failures, no bot check, and video lookups fine after each. So
+  the poll rounds and 120-feeds-an-hour ceiling built in #70 were removed, and the default poll
+  went back to 60 min. One home IP on one day; a shared IP may differ.
+- **Nothing before Play** (GitHub #66): opening a note or a preview sends no request on any device.
+  The desktop shows a poster and resolves on Play, like the phone (Isaiah dropped "HD ready before
+  Play", 2026-11-09). The badge reads "· HD on Play" until then; "finding HD…" only while a lookup runs.
+- **First-run defaults** (GitHub #66): phone stream warm-up on note open off; auto-transcript stays
+  on; most-replayed stays on (Isaiah, 2026-11-09). Existing installs keep their saved settings.
 - **Account sync**: removed 2026-11-09 (GitHub #64). There is no YouTube sign-in; subscriptions
   come from adding a channel and the Google Takeout `subscriptions.csv` import.
 - **Channel screen**: one channel's whole uploads catalogue via InnerTube `browse` with
@@ -59,6 +60,23 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   (#48) to use the same `src/synced-file.ts`.
 - Other sync tools (Obsidian Sync, Drive, Syncthing): same fix; hidden-folder gap is a README
   note for MVP, visible folder post-MVP (#75).
+
+### 2026-11-09 (Isaiah, watch history and stats, #48)
+
+- **History**: a hub chip listing every video you have watched, newest first, with one line
+  `N videos · Xh Ym watched`. Searchable by title and channel. Never cleared automatically.
+  Scope: `docs/V1-SCOPE-WATCH-HISTORY.md`.
+- **Watched** = the In progress floor, `min(2 min, 10% of the video)` played.
+- **Watch time** = real time spent playing: pauses excluded, 2× counts half.
+- Two files: resume positions stay in `progress.json`; the watch stamps move to `history.json`.
+- All existing watch stamps are imported; stats start at 0, no "since" label.
+- Remove one video from a History card's ⋯ menu; Clear history in settings (confirm) wipes all.
+- Breakdowns (week / day / channel) and export are post-MVP (#73).
+- Claude's calls (2026-11-09, open to change): Preview counts toward History and watch time;
+  only a note player moves `playedAt`, the stamp the note tidy reads, so previewing never makes a
+  note trashable. Remove on a History card is the card's Remove button (no ⋯ menu exists). Each
+  device names itself with a random id in `localStorage` (`ytfree-device-id`) for its watch-time
+  counter.
 
 ### 2026-11-09 (store compliance, #61; Claude's calls, open to change)
 
@@ -169,6 +187,14 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   rotation. Research: docs/RESEARCH-YOUTUBE-REQUESTS.md, backlog #31–#39.
 - **Bot check** (term): YouTube's "Sign in to confirm you're not a bot" (yt-dlp) or
   `LOGIN_REQUIRED` (InnerTube), refusing signed-out requests from a flagged IP.
+- **Request savings** (#66, 2026-11-09): Smart Speed reads captions from Play's `yt-dlp -J` and
+  shares the caption file with the transcript; desktop HD starts in 2 reads (index from the head,
+  no 90 s check on yt-dlp files); no Shorts check for a video known to run over 3 min;
+  most-replayed is filled on Play, and "none" is remembered on the device (`ytfree-no-heatmap`).
+- **Bot-check pause** (Isaiah, 2026-11-09, #66): replaces the fixed 45 minutes. Automatic work
+  (polls, backfills, HD lookups) stops until a request goes through. Only a Play retries our
+  stream, the first Play after 1 min, then 5, 10, 30 min, 1 h, 2 h, then every 6 h. Nothing
+  retries on a timer. A Play between retries sends nothing (YouTube's player once #43 lands).
 - 2026-11-07: Isaiah agreed with all nine recommendations. #16 (InnerTube before yt-dlp) is
   closed as replaced by #32 (one `yt-dlp -J` per video). Scope: docs/V1-SCOPE-REQUEST-BUDGET.md.
 

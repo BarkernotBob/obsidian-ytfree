@@ -61,6 +61,16 @@ export class InfoCache<T> {
     return request;
   }
 
+  /**
+   * The kept or in-flight answer for `key`, or null. Never sends anything:
+   * for a caller that has a cheaper way of its own when nothing is kept.
+   */
+  peek(key: string): Promise<T> | null {
+    const hit = this.kept.get(key);
+    if (hit && hit.until > this.now()) return Promise.resolve(hit.value);
+    return this.pending.get(key) ?? null;
+  }
+
   /** Forget `key`, so the next ask goes out fresh (a stream that died). */
   invalidate(key: string): void {
     const had = this.kept.delete(key);

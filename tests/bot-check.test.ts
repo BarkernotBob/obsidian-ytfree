@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
-  BOT_CHECK_COOLDOWN_MS,
   BotCheckBreaker,
+  RETRY_SCHEDULE_MS,
   BotCheckPausedError,
   clockTime,
   isBotCheck,
@@ -44,26 +44,68 @@ test("a bot-check player response is a bot check; an age gate is not", () => {
   assert.ok(!isBotCheckPlayability("LOGIN_REQUIRED", undefined));
 });
 
-test("a trip pauses for 45 minutes, then lifts on its own", () => {
-  const c = clock();
-  const breaker = new BotCheckBreaker(c.now);
-  assert.equal(breaker.isPaused(), false);
-  breaker.trip();
-  assert.equal(breaker.pausedUntil(), c.now() + BOT_CHECK_COOLDOWN_MS);
-  c.advance(BOT_CHECK_COOLDOWN_MS - 1);
-  assert.equal(breaker.isPaused(), true);
-  c.advance(1);
-  assert.equal(breaker.isPaused(), false);
-  assert.equal(breaker.message(), null);
+const MIN = 60_000;
+
+test("the retry waits are 1, 5, 10, 30 min, 1 h, 2 h, then every 6 h", () => {
+  assert.deepEqual(RETRY_SCHEDULE_MS.map((ms) => ms / MIN), [1, 5, 10, 30, 60, 120, 360]);
 });
 
-test("a second bot check during the pause extends it", () => {
+test("each failed Play retry moves to the next wait; the last wait repeats", () => {
+  const c = clock();
+  const breaker = new BotCheckBreaker(c.now);
+  const waits: number[] = [];
+  for (let i = 0; i < 9; i++) {
+    breaker.trip(); // the first bot check, then each retry that met it again
+    const next = breaker.pausedUntil()!;
+    waits.push((next - c.now()) / MIN);
+    c.advance(next - c.now()); // the reader presses Play the moment it is due
+  }
+  assert.deepEqual(waits, [1, 5, 10, 30, 60, 120, 360, 360, 360]);
+});
+
+test("a bot check while still waiting (a request in flight) does not lengthen the wait", () => {
   const c = clock();
   const breaker = new BotCheckBreaker(c.now);
   breaker.trip();
-  c.advance(30 * 60_000);
+  const next = breaker.pausedUntil();
+  c.advance(10_000);
   breaker.trip();
-  assert.equal(breaker.pausedUntil(), c.now() + BOT_CHECK_COOLDOWN_MS);
+  breaker.trip();
+  assert.equal(breaker.pausedUntil(), next);
+  assert.equal(breaker.strikeCount(), 1);
+});
+
+test("background work stays paused past the retry time; Play is let through only once it is due", () => {
+  const c = clock();
+  const breaker = new BotCheckBreaker(c.now);
+  breaker.guardPlay(); // no pause: Play goes
+  breaker.trip();
+  assert.throws(() => breaker.guardPlay(), BotCheckPausedError);
+  assert.throws(() => breaker.guard(), BotCheckPausedError);
+  c.advance(MIN);
+  assert.equal(breaker.retryDue(), true);
+  breaker.guardPlay(); // the retry
+  assert.throws(() => breaker.guard(), BotCheckPausedError, "polls still wait for a success");
+  c.advance(48 * 60 * MIN);
+  assert.equal(breaker.isPaused(), true, "no timer ends the pause");
+});
+
+test("a success sent during the pause ends it; one sent before it began does not", () => {
+  const c = clock();
+  const breaker = new BotCheckBreaker(c.now);
+  const before = c.now();
+  c.advance(1000);
+  breaker.trip();
+  breaker.succeeded(before);
+  assert.equal(breaker.isPaused(), true, "an answer to an older request proves nothing");
+  c.advance(MIN);
+  breaker.succeeded(c.now());
+  assert.equal(breaker.isPaused(), false);
+  assert.equal(breaker.message(), null);
+  breaker.guard();
+  // The next bot check starts again at 1 minute.
+  breaker.trip();
+  assert.equal(breaker.pausedUntil()! - c.now(), MIN);
 });
 
 test("guard throws the pause message while paused and nothing otherwise", () => {
@@ -73,31 +115,45 @@ test("guard throws the pause message while paused and nothing otherwise", () => 
   breaker.trip();
   assert.throws(() => breaker.guard(), (err: unknown) => {
     assert.ok(err instanceof BotCheckPausedError);
-    assert.equal((err as Error).message, pauseMessage(c.now() + BOT_CHECK_COOLDOWN_MS));
+    assert.equal((err as Error).message, pauseMessage(c.now() + MIN, c.now()));
     return true;
   });
 });
 
-test("the pause survives a reload through the store", () => {
+test("the pause and its strike count survive a reload through the store", () => {
   const c = clock();
   const store = memoryStore();
   const first = new BotCheckBreaker(c.now);
   first.attach(store);
   first.trip();
+  c.advance(MIN);
+  first.trip();
 
   const reloaded = new BotCheckBreaker(c.now);
   reloaded.attach(store);
-  assert.equal(reloaded.pausedUntil(), c.now() + BOT_CHECK_COOLDOWN_MS);
-
-  reloaded.clear();
+  assert.equal(reloaded.strikeCount(), 2);
+  assert.equal(reloaded.pausedUntil(), c.now() + 5 * MIN);
+  // Any success after a reload ends it: the request was sent during the pause.
+  reloaded.succeeded(c.now());
   assert.equal(store.peek(), null);
 });
+
+test("an older build's stored end time still pauses until then, and not after", () => {
+  const c = clock();
+  const live = new BotCheckBreaker(c.now);
+  live.attach(memoryStore(String(c.now() + 20 * MIN)));
+  assert.equal(live.isPaused(), true);
+  assert.equal(live.pausedUntil(), c.now() + 20 * MIN);
+})
 
 test("an expired or unreadable stored pause is no pause", () => {
   const c = clock();
   const old = new BotCheckBreaker(c.now);
   old.attach(memoryStore(String(c.now() - 1)));
   assert.equal(old.isPaused(), false);
+  const garbled = new BotCheckBreaker(c.now);
+  garbled.attach(memoryStore("{not json"));
+  assert.equal(garbled.isPaused(), false);
 
   const broken = new BotCheckBreaker(c.now);
   broken.attach({ read: () => { throw new Error("no storage"); }, write: () => { throw new Error("no storage"); } });
@@ -113,14 +169,15 @@ test("listeners hear trips, and one that throws does not stop the rest", () => {
   breaker.trip();
   assert.equal(heard, 1);
   off();
-  breaker.trip();
+  breaker.clear();
   assert.equal(heard, 1);
 });
 
-test("the message names the end time on the device's clock", () => {
-  const until = new Date(2026, 10, 7, 9, 5).getTime();
-  assert.equal(clockTime(until), "09:05");
-  assert.match(pauseMessage(until), /prove it isn't a bot\. YT Free is pausing its requests until 09:05\.$/);
+test("the message names the next retry on the device's clock, or the next Play once due", () => {
+  const next = new Date(2026, 10, 7, 9, 5).getTime();
+  assert.equal(clockTime(next), "09:05");
+  assert.match(pauseMessage(next, next - 1), /prove it isn't a bot\. .*first video you play after 09:05\.$/);
+  assert.match(pauseMessage(next, next), /try again with the next video you play\.$/);
 });
 
 test("the resolver tries yt-dlp once on a bot check, signed out, and pauses", async () => {

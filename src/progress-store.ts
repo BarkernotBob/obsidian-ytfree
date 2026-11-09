@@ -10,13 +10,11 @@ import type { App } from "obsidian";
 import {
   emptyProgress,
   inProgressVideos,
-  markWatched,
   mergeProgress,
   normalizeProgress,
   pruneProgress,
   recordPosition,
   resumePoint,
-  watchedAt,
 } from "./progress.ts";
 import type { ProgressState } from "./progress.ts";
 import { SyncedFile, adapterDisk } from "./synced-file.ts";
@@ -37,6 +35,13 @@ export class ProgressStore {
   private dirty = false;
   /** The file and its sync rules — see `synced-file.ts` (V1-SCOPE-SYNC). */
   private file: SyncedFile<ProgressState>;
+  /**
+   * Where the old "watched" stamps go (GitHub #48). They moved to
+   * `history.json`; any still in this file — written before the move, or by a
+   * device still on an older build — are handed over and dropped from here.
+   */
+  private stampSink: ((stamps: Record<string, string>) => Promise<boolean>) | null = null;
+  private draining = false;
 
   constructor(
     app: App,
@@ -61,6 +66,34 @@ export class ProgressStore {
   }
 
   /**
+   * Hand every watch stamp, now and on every later read, to history.
+   *
+   * A stamp leaves this file only after the sink says history is on disk with
+   * it, so a crash or an unreadable `history.json` mid-move loses nothing: the
+   * stamp is still here next time, and importing it twice changes nothing.
+   */
+  drainStampsTo(sink: (stamps: Record<string, string>) => Promise<boolean>): void {
+    this.stampSink = sink;
+    void this.drainStamps();
+  }
+
+  private async drainStamps(): Promise<void> {
+    if (!this.stampSink || this.draining) return;
+    const stamps = { ...this.state.watched };
+    if (Object.keys(stamps).length === 0) return;
+    this.draining = true;
+    try {
+      if (!(await this.stampSink(stamps))) return;
+      for (const [videoId, at] of Object.entries(stamps)) {
+        if (this.state.watched[videoId] === at) delete this.state.watched[videoId];
+      }
+      this.schedule();
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  /**
    * Pick up what the other device has watched since we last looked, and send
    * back what it is missing.
    *
@@ -69,6 +102,7 @@ export class ProgressStore {
    */
   async refreshFromDisk(): Promise<void> {
     await this.file.refresh();
+    void this.drainStamps();
   }
 
   /** Where to pick this video up, or 0. */
@@ -85,31 +119,11 @@ export class ProgressStore {
     return resumePoint(this.state, videoId);
   }
 
-  /** When this video was last played, or null. Read by the note tidy. */
-  watchedFor(videoId: string): string | null {
-    return watchedAt(this.state, videoId);
-  }
-
-  /** Note a position. Only a real change costs a write. */
-  record(videoId: string, seconds: number, duration: number): void {
-    const now = new Date();
-    // Both, always, and neither short-circuits the other: a position at the
-    // credits is deleted rather than stored, and that is exactly the report
-    // that most needs to leave a watch stamp behind.
-    const moved = recordPosition(this.state, videoId, seconds, duration, now);
-    const stamped = markWatched(this.state, videoId, now);
-    if (moved || stamped) this.schedule();
-  }
-
   /**
-   * Note a position without saying the video was watched.
+   * Note a position. Only a real change costs a write.
    *
-   * What Preview reports. The two halves of `record` are separable for exactly
-   * this reason: a preview and a later watch are the same session in different
-   * containers, so the position has to carry over — but a preview that stamped
-   * `watched` would punish previewing, and a hub that punishes previewing is a
-   * hub where you press Watch on everything, which is the thing the preview
-   * exists to stop.
+   * The "you watched this" stamp that used to ride along here lives in
+   * `history.json` now (GitHub #48; `HistoryStore.record`).
    */
   recordPosition(videoId: string, seconds: number, duration: number): void {
     if (recordPosition(this.state, videoId, seconds, duration, new Date())) this.schedule();
@@ -139,5 +153,7 @@ export class ProgressStore {
     // refused write stays dirty and is tried again.
     const outcome = await this.file.save();
     if (!outcome.landed) this.schedule();
+    // Stamps another device wrote since the last read go to history.
+    if (outcome.landed && Object.keys(this.state.watched).length > 0) void this.drainStamps();
   }
 }
