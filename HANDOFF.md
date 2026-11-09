@@ -38,7 +38,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 **Focus: Obsidian store MVP** ([V1-SCOPE-MVP](docs/V1-SCOPE-MVP.md)). Issues labelled `mvp` come
 first; `post-mvp` waits. New filings get an MVP call against the rule in that doc.
 
-1. Decided 2026-11-09: one ad-free build for the store and Isaiah; own stream, YouTube's
+1. MVP path approved 2026-11-09. Order: #61, #64 → #66 → #43 → #46, #48, #65 → #25, #5 → #62.
+   Decided 2026-11-09: one ad-free build for the store and Isaiah; own stream, YouTube's
    player as fallback (#43). Build split (#60) is post-MVP.
 2. #43 fallback; GitHub Pages must serve the hosted player page (phone needs it).
 3. #61 store compliance (LICENSE, versions.json, `x.y.z` tags, Obsidian lint: 32 errors).

@@ -1,6 +1,6 @@
 # V1 scope: Obsidian store MVP
 
-**Status:** 2026-11-09. Isaiah chose an ad-free store build with our own stream; MVP list below.
+**Status:** approved by Isaiah 2026-11-09. Build order: #61, #64 → #66 → #43 → #46, #48, #65 → #25, #5 → #62 (device test last).
 **Goal (Isaiah, 2026-11-09):** the minimum to get YT Free listed in Obsidian's community
 directory. Everything not on the MVP list waits. New filings get an MVP / post-MVP call here.
 
