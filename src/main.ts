@@ -93,6 +93,7 @@ import type { AnswerStore } from "./info-cache.ts";
 import { trimYtDlpInfo } from "./answer-trim.ts";
 import { governor } from "./request-governor.ts";
 import { pollIsDue } from "./subscriptions.ts";
+import { jitteredRoundMs } from "./feed-schedule.ts";
 import type { VideoNote } from "./subscriptions.ts";
 import { offlineFormats } from "./offline-hd.ts";
 import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
@@ -283,9 +284,10 @@ interface YtFreeSettings {
    * film. What it buys is 038: `webkitEnterFullscreen` is refused until there
    * is loaded media, and the resolve cannot happen inside the tap that wants
    * fullscreen, so the only way the first press can be the real thing is for
-   * the resolve to have already happened. On, for that reason; off gives back
-   * the old mount-now-resolve-later behaviour for anyone on a metered
-   * connection.
+   * the resolve to have already happened. Off by default since GitHub #66:
+   * a resolve on every note opened is a YouTube request nobody asked for, and
+   * keeping a user's IP unflagged outranks a first-press fullscreen. On for
+   * anyone who wants 038's behaviour back.
    */
   warmOnOpen: boolean;
 }
@@ -404,6 +406,9 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   // keep whatever they were built with.
   transcriptIntervalSeconds: 20,
   followTranscript: true,
+  // Stays on (GitHub #66 weighed it): one caption fetch per note you create,
+  // never per note opened, and it already waits out a bot-check pause and the
+  // hourly background cap.
   autoFetchTranscript: true,
   heatmapPeaks: 8,
   // Blank means "wherever `defaultDownloadFolder()` says", which is
@@ -412,7 +417,9 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   // spelled out here: `os.homedir()` is unreachable at module load on mobile.
   downloadFolder: "",
   ffmpegPath: "",
-  subscriptionsPollMinutes: 60,
+  // Two hours, not one (GitHub #66): conservative for a fresh install. A big
+  // import stretches this further on its own — see `feed-schedule.ts`.
+  subscriptionsPollMinutes: 120,
   subscriptionsExpiryDays: 0,
   subscriptionsIncludeShorts: false,
   // Off, and blank. A plugin that starts POSTing somewhere on its own would be
@@ -434,7 +441,8 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   silenceWordPad: WORD_PAD,
   skipNonSpeech: true,
   debugLogs: false,
-  warmOnOpen: true,
+  // Off (GitHub #66): nothing goes to YouTube before Play. See the field.
+  warmOnOpen: false,
 };
 
 /**
@@ -1493,10 +1501,19 @@ export default class YtFreePlugin extends Plugin {
     // pressing it understands it is "agree with my other device", and the
     // answer to that is already in the vault.
     await this.subscriptions.refreshFromDisk();
-    await this.subscriptions.poll();
+    const checked = await this.subscriptions.poll();
     this.refreshHub();
-    // A button that flashes nothing looks broken.
-    new Notice(`YT Free: checked ${this.subscriptions.state.channels.length} channels.`);
+    // A button that flashes nothing looks broken. A long list is checked a
+    // round at a time (GitHub #66), and the notice says so rather than claim
+    // every channel was just asked.
+    const total = this.subscriptions.state.channels.length;
+    new Notice(
+      checked === 0 && total > 0
+        ? "YT Free: a check is already running."
+        : checked < total
+        ? `YT Free: checked ${checked} of ${total} channels — the rest follow over the next hours.`
+        : `YT Free: checked ${total} channels.`,
+    );
   }
 
   /**
@@ -1505,11 +1522,24 @@ export default class YtFreePlugin extends Plugin {
    */
   private async maybePoll(): Promise<void> {
     if (botCheck.isPaused()) return;
-    const minutes = Math.max(5, this.settings.subscriptionsPollMinutes);
-    if (!pollIsDue(this.subscriptions.state, Date.now(), minutes * 60_000, Platform.isDesktopApp)) return;
+    // One round per interval; a long list makes the interval shorter and each
+    // round smaller, never the whole list at once (GitHub #66). The jitter is
+    // drawn once per round so the ticker does not re-roll it every minute; the
+    // gap itself is worked out each tick, so an import or a new setting counts.
+    const draw = (this.roundJitter ??= Math.random());
+    const gap = jitteredRoundMs(
+      this.settings.subscriptionsPollMinutes,
+      this.subscriptions.state.channels.length,
+      () => draw,
+    );
+    if (!pollIsDue(this.subscriptions.state, Date.now(), gap, Platform.isDesktopApp)) return;
+    this.roundJitter = null;
     await this.subscriptions.poll();
     this.refreshHub();
   }
+
+  /** The jitter draw for the next automatic round's gap; see `maybePoll`. */
+  private roundJitter: number | null = null;
 
   /**
    * Which videos you are part-way through, for the hub's In progress list.
@@ -5752,7 +5782,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Check every")
       .setDesc(
-        "Minutes between checks, plus once when Obsidian starts. A channel feed only holds its last 15 videos, so a long gap between checks can lose the oldest of a burst for good.",
+        "Minutes between checks, plus once when Obsidian starts. A long list is checked a slice at a time and stretched so it never asks for more than 120 feeds an hour. A channel feed only holds its last 15 videos, so a long gap between checks can lose the oldest of a burst for good.",
       )
       .addSlider((slider) =>
         slider

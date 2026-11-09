@@ -9,14 +9,12 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
-- 2026-11-07: every open PR was merged into main at Isaiah's request ("merge all those in"),
-  tested or not: #19, #20, #21, #22, #24, #27, #28, #29, #30, #40, #41. 701 unit tests pass,
-  `tsc` and build clean on the combined main. Untested on a device at merge time: #19 steps 3-6,
-  #20, #21's last two commits (bot-check retry, HD ready before Play), #24, #28, #30 part 2.
-- 2026-11-07 nightly: #42 large thumbnails (phone poster) upgrade to `maxres2.jpg` after `hq2`
-  shows; small cards never ask for it. See the midframe scope doc.
+- Older status lines (2026-11-07 merges, #42) moved to the archive file above.
 - Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md). New follow-ups are filed as GitHub issues, not as files in `issues/`.
 - 2026-11-09: YouTube sign-in, cookies and account sync removed (#64); see GLOSSARY.
+- 2026-11-09 nightly (#66, partial): poll rounds, HD on Play, first-run defaults, request-ceiling
+  tests (`tests/request-ceilings.test.ts`, `tests/feed-schedule.test.ts`). Still open on #66:
+  embed fall-through (needs #43); desktop/Preview still resolve the 360p stream at open.
 - 2026-11-09 nightly: Subscribe inside YT Free on the channel screen and a search card's ⋯ menu,
   and step-by-step Takeout steps in the import dialog (#65, `src/subscribe.ts`).
 

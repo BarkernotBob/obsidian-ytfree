@@ -2686,3 +2686,11 @@ Reload the plugin in Obsidian, then run the manual test in `issues/001-flow-capt
   or another plugin writing to the note will also pause playback.
 - `npm` flagged esbuild's postinstall script as unapproved. Build works, so it was not
   needed, but a clean clone may need `npm approve-scripts`.
+
+## Moved from HANDOFF.md (2026-11-09)
+
+- 2026-11-07: every open PR was merged into main at Isaiah's request ("merge all those in"),
+  tested or not: #19, #20, #21, #22, #24, #27, #28, #29, #30, #40, #41. 701 unit tests pass,
+  `tsc` and build clean on the combined main. Untested on a device at merge time: #19 steps 3-6,
+  #20, #21's last two commits (bot-check retry, HD ready before Play), #24, #28, #30 part 2.
+- 2026-11-07 nightly: #42 phone poster upgrades to `maxres2.jpg`; see the midframe scope doc.

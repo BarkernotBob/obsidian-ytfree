@@ -8,6 +8,7 @@
 
 import { botCheck } from "./bot-check.ts";
 import { governor } from "./request-governor.ts";
+import { durationsPerRound, feedGapMs, pickRound } from "./feed-schedule.ts";
 import {
   App,
   ButtonComponent,
@@ -39,6 +40,7 @@ import {
   parseSubscriptionsCsv,
   expireItems,
   feedUrl,
+  isFirstSight,
   noteFeedFailure,
   noteFeedSuccess,
   withRetries,
@@ -220,18 +222,6 @@ const postWebhook: Post = async ({ url, body, contentType, headers }) => {
     throw: true,
   });
 };
-
-/**
- * How many durations one poll will go and fetch.
- *
- * A channel feed states no duration, so every feed item needs a player call to
- * learn one — and a fresh import is hundreds of items. Capped rather than
- * batched into oblivion: the newest items are done first, a poll costs a
- * bounded number of requests, and a backlog fills itself in over the next few
- * polls without anyone waiting for it. A card with no duration yet is a card
- * with an empty badge, which is a reserved box either way.
- */
-const DURATION_BACKFILL_PER_POLL = 5;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -579,15 +569,22 @@ export class SubscriptionsStore {
 
   // ----------------------------------------------------------------- poll
 
-  async poll(): Promise<void> {
-    if (this.polling) return;
-    // Every channel's feed, durations and backfills: the burst a bot-check
-    // pause exists to stop (GitHub #31). The hub's status line says why.
-    if (botCheck.isPaused()) return;
+  /**
+   * One poll round: the feeds of the channels checked longest ago, at most
+   * `ROUND_MAX_CHANNELS` of them, one at a time with a random gap (GitHub #66).
+   * A short list is all one round, so nothing changed for it; a big import is
+   * spread across the period instead of fetched in one burst. Resolves to how
+   * many channels this round checked.
+   */
+  async poll(): Promise<number> {
+    if (this.polling) return 0;
+    // Feeds, durations and backfills: the burst a bot-check pause exists to
+    // stop (GitHub #31). The hub's status line says why.
+    if (botCheck.isPaused()) return 0;
     // Before anything: a poll ends in a save, and a save built on a stale copy
     // of the file is what used to undo the other device's decisions.
     await this.refreshFromDisk();
-    if (this.state.channels.length === 0) return;
+    if (this.state.channels.length === 0) return 0;
     this.polling = true;
     this.emit();
 
@@ -597,12 +594,33 @@ export class SubscriptionsStore {
     // itself with a push about fifteen hundred videos it just discovered.
     const seeding = this.state.lastPolledAt === null;
     const added: HubItem[] = [];
+    // The same rule per channel: a channel fetched for the first time (fresh
+    // from an import, whose later rounds are no longer "seeding") fills the
+    // hub without a push about every video in its feed.
+    const quiet = new Set<string>();
+    const round = pickRound(this.state.channels);
     // Channels whose whole feed window rolled since the last poll (048), with
     // what the hub knew before this poll merged anything.
     const gaps: Array<{ channel: Channel; knownBefore: Set<string> }> = [];
     const horizon = horizonDays(this.settings().expiryDays);
+    let checked = 0;
     try {
-      await mapLimit(this.state.channels, 5, async (channel) => {
+      let first = true;
+      for (const picked of round) {
+        // A paused breaker stops the round where it is (a bot check can trip
+        // on any request, this one's included).
+        if (botCheck.isPaused()) break;
+        if (!first) await sleep(feedGapMs(Math.random));
+        first = false;
+        // Looked up again: a refresh from disk during the round replaces the
+        // state, and a stamp on the old object would be lost.
+        const channel = this.state.channels.find((c) => c.id === picked.id);
+        if (!channel) continue;
+        checked += 1;
+        const firstSight = isFirstSight(channel, this.state.items);
+        // Checked, whether the feed answers or not: a failing channel waits for
+        // its turn like the rest instead of heading every round.
+        channel.polledAt = now.toISOString();
         try {
           // Retried, because the endpoint fails at random — see FEED_ATTEMPTS.
           const response = await withRetries(
@@ -634,13 +652,14 @@ export class SubscriptionsStore {
           );
           this.state.items = merged.items;
           added.push(...merged.added);
+          if (firstSight) for (const item of merged.added) quiet.add(item.videoId);
         } catch (err) {
           // Counted, and shown only after several polls running have failed. A
           // channel that is genuinely gone still surfaces; a bad afternoon at
           // Google no longer paints half the list red.
           noteFeedFailure(channel, err instanceof Error ? err.message : String(err));
         }
-      });
+      }
 
       // One channel at a time, and only the ones that showed a gap. A failure
       // leaves the poll's own results alone, and is not retried: the feed has
@@ -676,7 +695,7 @@ export class SubscriptionsStore {
         });
       }
 
-      await this.backfillDurations();
+      await this.backfillDurations(durationsPerRound(this.state.channels.length));
 
       this.state.lastPolledAt = now.toISOString();
       // Which kind of device polled, so the phone can leave it to the desktop.
@@ -687,8 +706,9 @@ export class SubscriptionsStore {
       // The claim and the send both live here, after the save, so that a feed
       // that threw halfway through still writes what it did get — and so that
       // nothing about a notification can decide whether a poll succeeded.
-      await this.notifyNewItems(added, seeding);
+      await this.notifyNewItems(added, seeding, quiet);
     }
+    return checked;
   }
 
   /**
@@ -751,7 +771,11 @@ export class SubscriptionsStore {
    * Nothing in here can fail the poll. `sendNotification` resolves on every
    * path, and the two awaits around it are the ones the poll was making anyway.
    */
-  private async notifyNewItems(added: HubItem[], seeding: boolean): Promise<void> {
+  private async notifyNewItems(
+    added: HubItem[],
+    seeding: boolean,
+    quiet: ReadonlySet<string> = new Set(),
+  ): Promise<void> {
     const settings = this.settings();
     const candidates = added.length
       ? pickNotifiable(added, this.state.items, this.state.notifiedVideos ?? [], {
@@ -772,7 +796,11 @@ export class SubscriptionsStore {
 
     if (seeding || !candidates.length || !notificationsReady(settings.notifications)) return;
 
-    const mine = unclaimed(candidates, disk?.notifiedVideos ?? []);
+    // Claimed above like the rest, never sent: see `quiet` in `poll`.
+    const mine = unclaimed(
+      candidates.filter((item) => !quiet.has(item.videoId)),
+      disk?.notifiedVideos ?? [],
+    );
     if (!mine.length) return;
 
     await sendNotification(settings.notifications, buildPayload(mine, new Date()), postWebhook);
@@ -796,11 +824,11 @@ export class SubscriptionsStore {
    * thumbnail to put a badge on. A refusal is recorded as `null` so a private
    * or deleted video is asked once rather than on every poll forever.
    */
-  private async backfillDurations(): Promise<void> {
+  private async backfillDurations(limit: number): Promise<void> {
     const pending = this.state.items
       .filter((item) => item.state !== "dismissed" && item.durationSeconds === undefined)
       .sort((a, b) => (Date.parse(b.published) || 0) - (Date.parse(a.published) || 0))
-      .slice(0, DURATION_BACKFILL_PER_POLL);
+      .slice(0, limit);
     if (pending.length === 0) return;
 
     // One at a time (GitHub #37), and not past the hourly cap (#36).
