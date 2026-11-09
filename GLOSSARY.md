@@ -152,6 +152,10 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   rotation. Research: docs/RESEARCH-YOUTUBE-REQUESTS.md, backlog #31–#39.
 - **Bot check** (term): YouTube's "Sign in to confirm you're not a bot" (yt-dlp) or
   `LOGIN_REQUIRED` (InnerTube), refusing signed-out requests from a flagged IP.
+- **Bot-check pause** (Isaiah, 2026-11-09, #66): replaces the fixed 45 minutes. Automatic work
+  (polls, backfills, HD lookups) stops until a request goes through. Only a Play retries our
+  stream, the first Play after 1 min, then 5, 10, 30 min, 1 h, 2 h, then every 6 h. Nothing
+  retries on a timer. A Play between retries sends nothing (YouTube's player once #43 lands).
 - 2026-11-07: Isaiah agreed with all nine recommendations. #16 (InnerTube before yt-dlp) is
   closed as replaced by #32 (one `yt-dlp -J` per video). Scope: docs/V1-SCOPE-REQUEST-BUDGET.md.
 

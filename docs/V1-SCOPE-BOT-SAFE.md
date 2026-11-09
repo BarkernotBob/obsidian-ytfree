@@ -87,8 +87,8 @@ hourly cap still does not count feeds. One home IP on one day; a shared IP (VPN,
 7. Our stream stays the default everywhere. YouTube's player plays a video only when:
    - both stream tiers have failed for **that video** (yt-dlp, then our own stream, each tried
      once), or
-   - YouTube actually answered with a bot check on this network, and only for the 45-minute
-     breaker window. After it, streams are tried again.
+   - YouTube actually answered with a bot check on this network, and only between retries
+     (item 13). A Play that is due for a retry tries our stream first.
 8. Never preemptively: not on a guess, not because a video is age-restricted, not as a setting
    default. A fall-through tries each stream tier at most once per video per Play.
 9. This scope builds the rule (one function, tested) and hands it to #43, which builds the player.

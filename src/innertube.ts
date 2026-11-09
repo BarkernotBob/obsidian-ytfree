@@ -59,6 +59,7 @@ export async function callInnertube(
 ): Promise<unknown> {
   const { ctx, ua } = CLIENTS[client];
   let response;
+  const sentAt = Date.now();
   try {
     // Paced with every other "who is this video" request (GitHub #36).
     response = await governor.run(url === PLAYER_URL ? "player" : "innertube", () =>
@@ -90,6 +91,8 @@ export async function callInnertube(
   // once, it pauses every automatic request (GitHub #31).
   const status = (parsed as { playabilityStatus?: { status?: unknown; reason?: unknown } })?.playabilityStatus;
   if (status && isBotCheckPlayability(status.status, status.reason)) botCheck.trip();
+  // A playable answer during a bot-check pause ends it (GitHub #66).
+  else if (status?.status === "OK") botCheck.succeeded(sentAt);
   return parsed;
 }
 

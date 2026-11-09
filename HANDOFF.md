@@ -69,8 +69,9 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
   edits that file when Obsidian is closed.
 - `npm run smoke` is a once-a-day canary (`tools/smoke.mjs`, stamps in `~/.cache/ytfree/`).
   Every live tool in `tools/` claims its own daily run through `tools/live-budget.mjs`.
-- A bot check pauses all automatic YouTube requests for 45 minutes (`src/bot-check.ts`, stored in
-  `localStorage` under `ytfree-bot-check-until`). Clear that key to end a pause early.
+- A bot check pauses all automatic YouTube requests until a Play retry succeeds (retries at 1, 5,
+  10, 30 min, 1 h, 2 h, then 6 h; `src/bot-check.ts`, stored in `localStorage` under
+  `ytfree-bot-check-until`). Clear that key to end a pause early.
 - Offline HD player: `"devOfflineHd": "<folder>"` in data.json, folder from `tools/make-offline-hd.mjs`.
 - Kept answers: `localStorage` `ytfree-ytdlp-answers` / `ytfree-player-answers`. Requests: `src/request-governor.ts`.
 - Desktop HD byte ranges go over Node `https`, not `requestUrl`; a request Node cannot make at

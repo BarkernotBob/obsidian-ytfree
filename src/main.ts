@@ -5028,8 +5028,10 @@ export default class YtFreePlugin extends Plugin {
       const offline = this.settings.devOfflineHd?.trim();
       if (offline) return this.offlineStream(videoId, offline, mode);
       // HD lookups and recovery retries are automatic: none while paused. The
-      // first 360p resolve is the reader opening a video, and still goes.
+      // first resolve is the reader pressing Play, and goes when a retry is
+      // due (GitHub #66: 1, 5, 10, 30 min, 1 h, 2 h, then every 6 h).
       if (mode === "quality" || forceRefresh) botCheck.guard();
+      else botCheck.guardPlay();
       if (forceRefresh) {
         this.cache.invalidate(videoId);
         this.ytInfo.invalidate(videoId);
@@ -5139,6 +5141,7 @@ export default class YtFreePlugin extends Plugin {
   private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
     return async (mode, forceRefresh) => {
       if (mode === "quality" || forceRefresh) botCheck.guard();
+      else botCheck.guardPlay();
       if (forceRefresh) {
         this.cache.invalidate(videoId);
         forgetPlayer(videoId);
