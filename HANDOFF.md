@@ -12,9 +12,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - Older status lines (2026-11-07 merges, #42) moved to the archive file above.
 - Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md). New follow-ups are filed as GitHub issues, not as files in `issues/`.
 - 2026-11-09: YouTube sign-in, cookies and account sync removed (#64); see GLOSSARY.
-- 2026-11-09 nightly (#66, partial): poll rounds, HD on Play, first-run defaults, request-ceiling
-  tests (`tests/request-ceilings.test.ts`, `tests/feed-schedule.test.ts`). Still open on #66:
-  embed fall-through (needs #43); desktop/Preview still resolve the 360p stream at open.
+- 2026-11-09 (#66): HD on Play, request-ceiling tests (#70); feed torture test showed no need for
+  poll rounds, so every poll checks every channel again; nothing resolves before Play on desktop.
+  Scope: [V1-SCOPE-BOT-SAFE](docs/V1-SCOPE-BOT-SAFE.md).
 - 2026-11-09 nightly: Subscribe inside YT Free on the channel screen and a search card's ⋯ menu,
   and step-by-step Takeout steps in the import dialog (#65, `src/subscribe.ts`).
 

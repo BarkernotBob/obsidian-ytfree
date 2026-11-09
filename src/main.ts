@@ -93,7 +93,6 @@ import type { AnswerStore } from "./info-cache.ts";
 import { trimYtDlpInfo } from "./answer-trim.ts";
 import { governor } from "./request-governor.ts";
 import { pollIsDue } from "./subscriptions.ts";
-import { jitteredRoundMs } from "./feed-schedule.ts";
 import type { VideoNote } from "./subscriptions.ts";
 import { offlineFormats } from "./offline-hd.ts";
 import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
@@ -417,9 +416,9 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
   // spelled out here: `os.homedir()` is unreachable at module load on mobile.
   downloadFolder: "",
   ffmpegPath: "",
-  // Two hours, not one (GitHub #66): conservative for a fresh install. A big
-  // import stretches this further on its own — see `feed-schedule.ts`.
-  subscriptionsPollMinutes: 120,
+  // Hourly. #66 weighed two hours and kept one: feed traffic was measured
+  // safe (tools/feed-torture.ts), and a feed only holds its last 15 videos.
+  subscriptionsPollMinutes: 60,
   subscriptionsExpiryDays: 0,
   subscriptionsIncludeShorts: false,
   // Off, and blank. A plugin that starts POSTing somewhere on its own would be
@@ -1503,15 +1502,14 @@ export default class YtFreePlugin extends Plugin {
     await this.subscriptions.refreshFromDisk();
     const checked = await this.subscriptions.poll();
     this.refreshHub();
-    // A button that flashes nothing looks broken. A long list is checked a
-    // round at a time (GitHub #66), and the notice says so rather than claim
-    // every channel was just asked.
+    // A button that flashes nothing looks broken. Every channel is checked;
+    // fewer only when a bot check paused the poll partway (GitHub #31).
     const total = this.subscriptions.state.channels.length;
     new Notice(
       checked === 0 && total > 0
         ? "YT Free: a check is already running."
         : checked < total
-        ? `YT Free: checked ${checked} of ${total} channels — the rest follow over the next hours.`
+        ? `YT Free: checked ${checked} of ${total} channels — YouTube paused the rest.`
         : `YT Free: checked ${total} channels.`,
     );
   }
@@ -1522,24 +1520,12 @@ export default class YtFreePlugin extends Plugin {
    */
   private async maybePoll(): Promise<void> {
     if (botCheck.isPaused()) return;
-    // One round per interval; a long list makes the interval shorter and each
-    // round smaller, never the whole list at once (GitHub #66). The jitter is
-    // drawn once per round so the ticker does not re-roll it every minute; the
-    // gap itself is worked out each tick, so an import or a new setting counts.
-    const draw = (this.roundJitter ??= Math.random());
-    const gap = jitteredRoundMs(
-      this.settings.subscriptionsPollMinutes,
-      this.subscriptions.state.channels.length,
-      () => draw,
-    );
+    // Every channel once per period (GitHub #66: measured safe, no rounds).
+    const gap = Math.max(5, this.settings.subscriptionsPollMinutes) * 60_000;
     if (!pollIsDue(this.subscriptions.state, Date.now(), gap, Platform.isDesktopApp)) return;
-    this.roundJitter = null;
     await this.subscriptions.poll();
     this.refreshHub();
   }
-
-  /** The jitter draw for the next automatic round's gap; see `maybePoll`. */
-  private roundJitter: number | null = null;
 
   /**
    * Which videos you are part-way through, for the hub's In progress list.
@@ -4185,7 +4171,7 @@ export default class YtFreePlugin extends Plugin {
         onToggleCollapse: mobile ? () => this.toggleCollapse(entry) : undefined,
         // Reads `activate` at call time, not now: the lazy loader is attached
         // further down, after this player exists.
-        ensureLoaded: mobile ? () => entry?.activate?.() ?? Promise.resolve() : undefined,
+        ensureLoaded: () => entry?.activate?.() ?? Promise.resolve(),
         // Silent unless Troubleshooting is on. See `debug`.
         debug: (message, extra) => this.debug(message, extra),
         // Only where there is a note to jump around in. A fenced block rendered
@@ -4336,45 +4322,14 @@ export default class YtFreePlugin extends Plugin {
       return entry;
     }
 
-    if (mobile) {
-      this.deferMobileLoad(entry, media, setStatus);
-      return entry;
-    }
-
-    setStatus("Resolving stream…");
-    try {
-      await player.load(this.settings.upgradeToHighQuality, this.settings.startInHd);
-      this.announceResume(videoId, setStatus);
-      this.announcePause(setStatus);
-      return entry;
-    } catch (err) {
-      player.destroy();
-      if (this.preview === entry) this.preview = null;
-      else if (this.players.get(videoId) === entry) this.players.delete(videoId);
-      if (err instanceof YtDlpMissingError) {
-        this.renderError(
-          wrapper,
-          "Could not play this video. yt-dlp is not installed here, and the phone's way of playing (without yt-dlp) did not work for this video either.",
-          "brew install yt-dlp",
-        );
-      } else if (isBotCheck(err) || err instanceof BotCheckPausedError) {
-        // Not a broken yt-dlp: YouTube is refusing signed-out requests from
-        // this network for now, and upgrading would change nothing.
-        this.renderError(
-          wrapper,
-          (botCheck.message() ?? "YouTube is asking this network to prove it isn't a bot.") +
-            " Reopen this note after that time.",
-          (err as Error).message,
-        );
-      } else {
-        this.renderError(
-          wrapper,
-          "Could not resolve this video. YouTube may have changed extraction — updating yt-dlp usually fixes it.",
-          `brew upgrade yt-dlp\n\n${(err as Error).message}`,
-        );
-      }
-      return null;
-    }
+    // Nothing before Play, on every device (GitHub #66): opening a note or a
+    // preview sends no request. The desktop used to resolve here so HD was
+    // ready before Play; Isaiah dropped that on 2026-11-09 to save requests.
+    // The desktop's picture box is the player's stage; it keeps 16:9 while the
+    // poster is up, so the first frame moves nothing.
+    const host = mobile ? media : (wrapper.querySelector<HTMLElement>(".ytfree-stage") ?? wrapper);
+    this.deferMobileLoad(entry, host, setStatus);
+    return entry;
   }
 
   /**
@@ -5205,7 +5160,7 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * Mobile: mount now, resolve later.
+   * Mount now, resolve on Play: the phone always did, the desktop since #66.
    *
    * Opening a note should not cost a video. The player takes up its final space
    * immediately and shows a poster; the stream is fetched the first time
@@ -5220,6 +5175,7 @@ export default class YtFreePlugin extends Plugin {
 
     // Absolutely positioned over the media box, so adding and removing it
     // cannot affect the layout of anything.
+    media.addClass("has-poster");
     const poster = media.createEl("button", { cls: "ytfree-poster", attr: { type: "button" } });
     const thumb = poster.createEl("img", { cls: "ytfree-poster-image", attr: { alt: "" } });
     // The halfway frame, as on the hub's cards; the uploader's picture if
@@ -5257,6 +5213,7 @@ export default class YtFreePlugin extends Plugin {
      */
     const uncover = (): void => {
       poster.remove();
+      media.removeClass("has-poster");
       media.querySelector(".ytfree-fallback")?.remove();
       setStatus(null);
     };
@@ -5272,7 +5229,8 @@ export default class YtFreePlugin extends Plugin {
      * waits on the resolve already in flight rather than starting a second one.
      */
     let resolved: Promise<void> | null = null;
-    const resolve = (): Promise<void> => (resolved ??= player.load(this.settings.phoneHighQuality, this.settings.startInHd));
+    const hd = Platform.isDesktopApp ? this.settings.upgradeToHighQuality : this.settings.phoneHighQuality;
+    const resolve = (): Promise<void> => (resolved ??= player.load(hd, this.settings.startInHd));
 
     // Metadata now, so the first press of Fullscreen is the phone's own
     // fullscreen rather than our substitute. Failures are swallowed: nothing
@@ -5296,6 +5254,7 @@ export default class YtFreePlugin extends Plugin {
         .then(() => {
           uncover();
           player.play();
+          this.announcePause(setStatus);
         })
         .catch((err: unknown) => {
           // Reset, so a failure caused by a dead connection can be tried again.
@@ -5370,13 +5329,16 @@ export default class YtFreePlugin extends Plugin {
     const paused = isBotCheck(err) || err instanceof BotCheckPausedError ? botCheck.message() : null;
     const detail = paused
       ? paused
+      : err instanceof YtDlpMissingError
+        ? "yt-dlp is not installed here, and the phone's way of playing did not work for this video either. Install it with: brew install yt-dlp"
       : kind === "login"
         ? "This video needs a signed-in account — age-restricted or members-only."
         : kind === "network"
           ? "Could not reach YouTube. Check your connection and try again."
           : kind === "no-format"
             ? "YouTube offered no single-file format for this video."
-            : `Could not resolve this video. ${err instanceof Error ? err.message : String(err)}`;
+            : `Could not resolve this video. ${err instanceof Error ? err.message : String(err)}` +
+              (Platform.isDesktopApp ? " Updating yt-dlp (brew upgrade yt-dlp) usually fixes it." : "");
 
     const box = media.createDiv({ cls: "ytfree-fallback" });
     box.createDiv({ cls: "ytfree-fallback-text", text: detail });
@@ -5782,7 +5744,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Check every")
       .setDesc(
-        "Minutes between checks, plus once when Obsidian starts. A long list is checked a slice at a time and stretched so it never asks for more than 120 feeds an hour. A channel feed only holds its last 15 videos, so a long gap between checks can lose the oldest of a burst for good.",
+        "Minutes between checks, plus once when Obsidian starts. A channel feed only holds its last 15 videos, so a long gap between checks can lose the oldest of a burst for good.",
       )
       .addSlider((slider) =>
         slider
