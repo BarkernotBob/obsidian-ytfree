@@ -1962,6 +1962,18 @@ body.ytfree-immersive-open {
   margin: 0.5em 0;
 }
 
+/* Google Takeout, step by step, in the import dialog (GitHub #65). */
+.ytfree-takeout-steps {
+  margin: 0.4em 0 0.8em;
+  padding-left: 1.6em;
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+}
+
+.ytfree-takeout-steps li + li {
+  margin-top: 0.25em;
+}
+
 .ytfree-hub-modal-status {
   min-height: 1.6em;
   line-height: 1.6em;
@@ -3952,9 +3964,19 @@ body.ytfree-immersive-open .ytfree-preview-close {
   visibility: hidden;
 }
 
+/* One width for "Subscribe" and "Subscribed", so the click that flips the
+   label moves nothing (GitHub #65). Same box, same border, either way. */
 .ytfree-channel-subscribe {
   flex: 0 0 auto;
   margin-left: auto;
+  width: 7.5em;
+  justify-content: center;
+}
+
+.ytfree-channel-subscribe.is-subscribed:disabled {
+  opacity: 1;
+  cursor: default;
+  color: var(--text-muted);
 }
 
 .ytfree-channel-facts {
