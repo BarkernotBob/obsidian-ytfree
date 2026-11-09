@@ -614,6 +614,16 @@ export async function withRetries<T>(
 }
 
 /** A feed answered. Forget the run of failures and clear anything shown. */
+/**
+ * A channel the hub has never had a feed from (GitHub #66): its videos fill
+ * the hub without a push. `polledAt` is stamped before the fetch, so a channel
+ * whose only fetches so far failed still counts, as long as it has no items.
+ */
+export function isFirstSight(channel: Channel, items: readonly HubItem[]): boolean {
+  if (items.some((item) => item.channelId === channel.id)) return false;
+  return !channel.polledAt || (channel.failures ?? 0) > 0;
+}
+
 export function noteFeedSuccess(channel: Channel): void {
   channel.failures = 0;
   channel.error = null;

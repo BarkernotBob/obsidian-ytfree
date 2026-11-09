@@ -13,7 +13,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   uploads by that channel only. Default every 120 minutes for new installs (GitHub #66).
 - **Poll round** (GitHub #66): one poll fetches at most 25 channel feeds, the ones checked
   longest ago (`Channel.polledAt`), one at a time with a 0.4-2 s random gap. The gap between
-  rounds is jittered ±15% and never under 5 minutes, and a long list stretches the period so
+  rounds is lengthened by a random 0-30% and never under 5 minutes, and a long list stretches the period so
   the hub never averages more than 120 feeds an hour (600 channels: each checked every 5 h).
   Sync now runs one round too. A channel's first round after an import seeds its videos
   without sending a notification. Code: `src/feed-schedule.ts`.

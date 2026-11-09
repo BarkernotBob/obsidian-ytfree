@@ -1508,7 +1508,9 @@ export default class YtFreePlugin extends Plugin {
     // every channel was just asked.
     const total = this.subscriptions.state.channels.length;
     new Notice(
-      checked < total
+      checked === 0 && total > 0
+        ? "YT Free: a check is already running."
+        : checked < total
         ? `YT Free: checked ${checked} of ${total} channels — the rest follow over the next hours.`
         : `YT Free: checked ${total} channels.`,
     );
@@ -1522,20 +1524,22 @@ export default class YtFreePlugin extends Plugin {
     if (botCheck.isPaused()) return;
     // One round per interval; a long list makes the interval shorter and each
     // round smaller, never the whole list at once (GitHub #66). The jitter is
-    // drawn once per round so the ticker does not re-roll it every minute.
-    this.roundGapMs ??= jitteredRoundMs(
+    // drawn once per round so the ticker does not re-roll it every minute; the
+    // gap itself is worked out each tick, so an import or a new setting counts.
+    const draw = (this.roundJitter ??= Math.random());
+    const gap = jitteredRoundMs(
       this.settings.subscriptionsPollMinutes,
       this.subscriptions.state.channels.length,
-      Math.random,
+      () => draw,
     );
-    if (!pollIsDue(this.subscriptions.state, Date.now(), this.roundGapMs, Platform.isDesktopApp)) return;
-    this.roundGapMs = null;
+    if (!pollIsDue(this.subscriptions.state, Date.now(), gap, Platform.isDesktopApp)) return;
+    this.roundJitter = null;
     await this.subscriptions.poll();
     this.refreshHub();
   }
 
-  /** The jittered gap the next automatic round waits for; see `maybePoll`. */
-  private roundGapMs: number | null = null;
+  /** The jitter draw for the next automatic round's gap; see `maybePoll`. */
+  private roundJitter: number | null = null;
 
   /**
    * Which videos you are part-way through, for the hub's In progress list.

@@ -2563,16 +2563,20 @@ export class YtFreePlayer {
       return;
     }
     this.setHd({ phase: "on-play", height });
-    this.video.addEventListener(
-      "play",
-      () => {
-        if (this.destroyed || this.local || this.upgraded || gen !== this.qualityGen || !this.wantHd) return;
-        this.setHd({ phase: "finding", height: this.hdState.height });
-        void this.upgrade(undefined, gen);
-      },
-      { once: true },
-    );
+    // One waiting listener at most: a Quality toggle before Play replaces it.
+    if (this.hdOnPlay) this.video.removeEventListener("play", this.hdOnPlay);
+    const onPlay = (): void => {
+      this.hdOnPlay = null;
+      if (this.destroyed || this.local || this.upgraded || gen !== this.qualityGen || !this.wantHd) return;
+      this.setHd({ phase: "finding", height: this.hdState.height });
+      void this.upgrade(undefined, gen);
+    };
+    this.hdOnPlay = onPlay;
+    this.video.addEventListener("play", onPlay, { once: true });
   }
+
+  /** The HD lookup waiting for the first Play (GitHub #66), if one is. */
+  private hdOnPlay: (() => void) | null = null;
 
   /** The badge for 360p by choice: the setting's, or this video's pick. */
   private sdState(height?: number): HdState {

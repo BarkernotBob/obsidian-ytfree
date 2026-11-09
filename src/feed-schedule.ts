@@ -13,8 +13,8 @@
  *   feeds an hour on average: 120 channels keep the configured period, 600 are
  *   each checked every five hours.
  * - **Jitter.** Feeds inside a round are fetched one at a time with a random
- *   gap, and the gap between rounds is nudged by up to ±`ROUND_JITTER`, so the
- *   traffic does not look like a clock.
+ *   gap, and the gap between rounds is lengthened by up to 2 × `ROUND_JITTER`,
+ *   so the traffic does not look like a clock.
  *
  * Pure: no `obsidian`, no clock, no randomness of its own. Callers pass `now`
  * and a `random()` so the tests can pin both.
@@ -29,14 +29,22 @@ export const ROUND_MAX_CHANNELS = 25;
 /** Shortest gap between two rounds, whatever the settings say. */
 export const MIN_ROUND_MS = 5 * 60_000;
 
-/** Round intervals are scaled by a random factor in [1 − this, 1 + this]. */
+/**
+ * Round intervals are lengthened by a random factor in [1, 1 + 2 × this].
+ * Only ever longer: the un-jittered interval already sits at the
+ * `FEEDS_PER_HOUR` ceiling, so a shorter gap would break it.
+ */
 export const ROUND_JITTER = 0.15;
 
 /** Gap between two feeds inside a round: this, plus up to `FEED_GAP_SPREAD_MS`. */
 export const FEED_GAP_MIN_MS = 400;
 export const FEED_GAP_SPREAD_MS = 1600;
 
-/** Player calls for missing durations per pass over the whole list. */
+/**
+ * Player calls for missing durations per pass over a short list. A long list
+ * spreads these over its rounds but still makes at least one a round, so its
+ * pass makes up to `roundsPerPeriod` of them.
+ */
 export const DURATIONS_PER_PERIOD = 5;
 
 /**
@@ -71,13 +79,13 @@ export function roundIntervalMs(settingMinutes: number, channelCount: number): n
   return Math.max(MIN_ROUND_MS, interval);
 }
 
-/** `roundIntervalMs`, scaled by a jitter factor drawn from `random()` ∈ [0, 1). */
+/** `roundIntervalMs`, lengthened by a jitter factor drawn from `random()` ∈ [0, 1). */
 export function jitteredRoundMs(
   settingMinutes: number,
   channelCount: number,
   random: () => number,
 ): number {
-  const factor = 1 - ROUND_JITTER + 2 * ROUND_JITTER * random();
+  const factor = 1 + 2 * ROUND_JITTER * random();
   return Math.max(MIN_ROUND_MS, Math.round(roundIntervalMs(settingMinutes, channelCount) * factor));
 }
 

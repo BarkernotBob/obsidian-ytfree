@@ -22,7 +22,7 @@ import {
   roundSize,
   roundsPerPeriod,
 } from "../src/feed-schedule.ts";
-import { emptyState, mergeStates } from "../src/subscriptions.ts";
+import { emptyState, isFirstSight, mergeStates } from "../src/subscriptions.ts";
 import type { Channel } from "../src/subscriptions.ts";
 
 const HOUR = 3_600_000;
@@ -54,10 +54,17 @@ test("rounds never run closer than five minutes", () => {
   assert.ok(jitteredRoundMs(5, 30, () => 0) >= MIN_ROUND_MS);
 });
 
-test("round and feed gaps are jittered within their bounds", () => {
+test("round gaps are only ever lengthened by jitter, so the hourly ceiling holds", () => {
   const base = roundIntervalMs(120, 100);
-  assert.equal(jitteredRoundMs(120, 100, () => 0), Math.round(base * (1 - ROUND_JITTER)));
-  assert.ok(jitteredRoundMs(120, 100, () => 0.999) <= Math.round(base * (1 + ROUND_JITTER)));
+  assert.equal(jitteredRoundMs(120, 100, () => 0), Math.round(base));
+  assert.ok(jitteredRoundMs(120, 100, () => 0.999) <= Math.round(base * (1 + 2 * ROUND_JITTER)));
+  for (const count of [100, 600, 1500]) {
+    const perHour = (roundSize(count) / jitteredRoundMs(5, count, () => 0)) * HOUR;
+    assert.ok(perHour <= FEEDS_PER_HOUR + 1e-6, `${count} channels: ${perHour}/h`);
+  }
+});
+
+test("feed gaps inside a round are jittered within their bounds", () => {
   assert.equal(feedGapMs(() => 0), FEED_GAP_MIN_MS);
   assert.ok(feedGapMs(() => 0.999) < FEED_GAP_MIN_MS + FEED_GAP_SPREAD_MS);
 });
@@ -95,4 +102,16 @@ test("merging two devices keeps the later polledAt for each channel", () => {
   assert.equal(mergeStates(theirs, mine).channels[0].polledAt, "2026-11-09T00:00:00.000Z");
   const never = { ...emptyState(), channels: [channel()] };
   assert.equal(mergeStates(never, theirs).channels[0].polledAt, "2026-11-09T00:00:00.000Z");
+});
+
+test("a new channel whose first fetch failed still fills the hub without a push", () => {
+  const channel: Channel = { id: "UCbbbbbbbbbbbbbbbbbbbbbb", title: "B", addedAt: "2026-11-01T00:00:00.000Z" };
+  assert.equal(isFirstSight(channel, []), true);
+  // The round stamps polledAt before the fetch; the fetch then fails.
+  channel.polledAt = "2026-11-09T00:00:00.000Z";
+  channel.failures = 1;
+  assert.equal(isFirstSight(channel, []), true);
+  // Once a feed has answered, its later videos are news.
+  channel.failures = 0;
+  assert.equal(isFirstSight(channel, []), false);
 });

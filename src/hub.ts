@@ -40,6 +40,7 @@ import {
   parseSubscriptionsCsv,
   expireItems,
   feedUrl,
+  isFirstSight,
   noteFeedFailure,
   noteFeedSuccess,
   withRetries,
@@ -595,16 +596,21 @@ export class SubscriptionsStore {
     // what the hub knew before this poll merged anything.
     const gaps: Array<{ channel: Channel; knownBefore: Set<string> }> = [];
     const horizon = horizonDays(this.settings().expiryDays);
+    let checked = 0;
     try {
       let first = true;
-      for (const channel of round) {
+      for (const picked of round) {
         // A paused breaker stops the round where it is (a bot check can trip
         // on any request, this one's included).
         if (botCheck.isPaused()) break;
         if (!first) await sleep(feedGapMs(Math.random));
         first = false;
-        const firstSight =
-          !channel.polledAt && !this.state.items.some((item) => item.channelId === channel.id);
+        // Looked up again: a refresh from disk during the round replaces the
+        // state, and a stamp on the old object would be lost.
+        const channel = this.state.channels.find((c) => c.id === picked.id);
+        if (!channel) continue;
+        checked += 1;
+        const firstSight = isFirstSight(channel, this.state.items);
         // Checked, whether the feed answers or not: a failing channel waits for
         // its turn like the rest instead of heading every round.
         channel.polledAt = now.toISOString();
@@ -695,7 +701,7 @@ export class SubscriptionsStore {
       // nothing about a notification can decide whether a poll succeeded.
       await this.notifyNewItems(added, seeding, quiet);
     }
-    return round.length;
+    return checked;
   }
 
   /**
