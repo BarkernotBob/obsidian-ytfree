@@ -12,6 +12,8 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   (a sync collision). Backs off from 15 s to 5 min if writes keep crossing.
 - **Cleared** (`progress.json`): dated mark that a video's position was finished/reset, so the
   other device's older position cannot bring it back.
+- **Drained** (`progress.json`): watch stamps already handed to `history.json` (#48), so a
+  merge with an older copy cannot bring them back and restart the hand-over every save.
 
 - **Hub**: the subscriptions screen. Chips: Inbox, In progress, Saved, Hidden, Everything.
 - **Inbox**: hub items not yet opened, kept or hidden.

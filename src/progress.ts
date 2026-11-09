@@ -82,10 +82,17 @@ export interface ProgressState {
    * than its clear wins, and the clear is dropped once it has lost.
    */
   cleared: Record<string, string>;
+  /**
+   * Watch stamps already handed to `history.json` (GitHub #48), by the stamp
+   * that was handed over. A stamp at or before its entry here is dropped on
+   * every merge, so the other device's copy cannot hand it back and set off
+   * the hand-over again on every save.
+   */
+  drained: Record<string, string>;
 }
 
 export function emptyProgress(): ProgressState {
-  return { positions: {}, watched: {}, cleared: {} };
+  return { positions: {}, watched: {}, cleared: {}, drained: {} };
 }
 
 /**
@@ -116,12 +123,13 @@ export function normalizeProgress(raw: unknown): ProgressState {
     }
   }
 
-  const cleared = (raw as ProgressState | null)?.cleared;
-  if (cleared && typeof cleared === "object" && !Array.isArray(cleared)) {
-    for (const [videoId, value] of Object.entries(cleared)) {
+  for (const key of ["cleared", "drained"] as const) {
+    const list = (raw as ProgressState | null)?.[key];
+    if (!list || typeof list !== "object" || Array.isArray(list)) continue;
+    for (const [videoId, value] of Object.entries(list)) {
       if (!VIDEO_ID_RE.test(videoId)) continue;
       const at = String(value ?? "");
-      if (Number.isFinite(Date.parse(at))) state.cleared[videoId] = at;
+      if (Number.isFinite(Date.parse(at))) state[key][videoId] = at;
     }
   }
 
@@ -326,6 +334,17 @@ export function mergeProgress(mine: ProgressState, theirs: ProgressState): Progr
     if (!ours || newer(at, ours)) merged.watched[videoId] = at;
   }
 
+  for (const list of [mine.drained ?? {}, theirs.drained ?? {}]) {
+    for (const [videoId, at] of Object.entries(list)) {
+      const seen = merged.drained[videoId];
+      if (!seen || newer(at, seen)) merged.drained[videoId] = at;
+    }
+  }
+  for (const [videoId, at] of Object.entries(merged.drained)) {
+    const stamp = merged.watched[videoId];
+    if (stamp !== undefined && !newer(stamp, at)) delete merged.watched[videoId];
+  }
+
   // A clear beats any position it is not older than; a position recorded after
   // it wins, and the clear has done its job.
   for (const list of [mine.cleared ?? {}, theirs.cleared ?? {}]) {
@@ -382,19 +401,21 @@ export function pruneProgress(state: ProgressState, now: Date, ttlDays = PROGRES
     }
   }
 
-  // The clears, on the same terms as positions: a clear older than any
-  // position could be is no longer holding anything back.
-  for (const [videoId, at] of Object.entries(state.cleared)) {
-    if (Date.parse(at) >= cutoff) continue;
-    delete state.cleared[videoId];
-    changed = true;
-  }
-  const clears = Object.entries(state.cleared);
-  if (clears.length > MAX_PROGRESS_ENTRIES) {
-    clears.sort((a, b) => Date.parse(a[1]) - Date.parse(b[1]));
-    for (const [videoId] of clears.slice(0, clears.length - MAX_PROGRESS_ENTRIES)) {
-      delete state.cleared[videoId];
+  // The clears and hand-over marks, on the same terms as positions: one older
+  // than any stamp it could hold back is no longer holding anything back.
+  for (const key of ["cleared", "drained"] as const) {
+    for (const [videoId, at] of Object.entries(state[key])) {
+      if (Date.parse(at) >= cutoff) continue;
+      delete state[key][videoId];
       changed = true;
+    }
+    const marks = Object.entries(state[key]);
+    if (marks.length > MAX_PROGRESS_ENTRIES) {
+      marks.sort((a, b) => Date.parse(a[1]) - Date.parse(b[1]));
+      for (const [videoId] of marks.slice(0, marks.length - MAX_PROGRESS_ENTRIES)) {
+        delete state[key][videoId];
+        changed = true;
+      }
     }
   }
 

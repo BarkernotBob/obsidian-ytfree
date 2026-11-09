@@ -45,7 +45,7 @@ export class ProgressStore {
 
   constructor(
     app: App,
-    private path: string,
+    path: string,
     local: LocalCopy | null = null,
   ) {
     this.file = new SyncedFile(
@@ -85,7 +85,11 @@ export class ProgressStore {
     try {
       if (!(await this.stampSink(stamps))) return;
       for (const [videoId, at] of Object.entries(stamps)) {
-        if (this.state.watched[videoId] === at) delete this.state.watched[videoId];
+        if (this.state.watched[videoId] !== at) continue;
+        delete this.state.watched[videoId];
+        // Marked, not just deleted: the merge would otherwise take it straight
+        // back from the file or the other device and hand it over again.
+        this.state.drained[videoId] = at;
       }
       this.schedule();
     } finally {
