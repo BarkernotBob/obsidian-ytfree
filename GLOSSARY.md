@@ -53,6 +53,11 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - All existing watch stamps are imported; stats start at 0, no "since" label.
 - Remove one video from a History card's ⋯ menu; Clear history in settings (confirm) wipes all.
 - Breakdowns (week / day / channel) and export are post-MVP (#73).
+- Claude's calls (2026-11-09, open to change): Preview counts toward History and watch time;
+  only a note player moves `playedAt`, the stamp the note tidy reads, so previewing never makes a
+  note trashable. Remove on a History card is the card's Remove button (no ⋯ menu exists). Each
+  device names itself with a random id in `localStorage` (`ytfree-device-id`) for its watch-time
+  counter.
 
 ### 2026-11-09 (store compliance, #61; Claude's calls, open to change)
 

@@ -15,8 +15,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-09 nightly (#66, partial): poll rounds, HD on Play, first-run defaults, request-ceiling
   tests (`tests/request-ceilings.test.ts`, `tests/feed-schedule.test.ts`). Still open on #66:
   embed fall-through (needs #43); desktop/Preview still resolve the 360p stream at open.
-- 2026-11-09: #48 watch history scoped with Isaiah ([V1-SCOPE-WATCH-HISTORY](docs/V1-SCOPE-WATCH-HISTORY.md));
-  next step is his approval, then build.
+- 2026-11-09: #48 watch history built (PR #74, [V1-SCOPE-WATCH-HISTORY](docs/V1-SCOPE-WATCH-HISTORY.md)):
+  History hub chip, `history.json`. Next: device test (manual test in the scope doc). #43 must feed it.
 - 2026-11-09 nightly: Subscribe inside YT Free on the channel screen and a search card's ⋯ menu,
   and step-by-step Takeout steps in the import dialog (#65, `src/subscribe.ts`).
 
