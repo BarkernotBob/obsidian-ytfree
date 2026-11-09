@@ -50,6 +50,7 @@ import { YT_ICON, registerIcons } from "./icon";
 import { previewCloseAction } from "./preview";
 import { describeTestOutcome, describeWebhook } from "./notify";
 import type { NotificationFormat } from "./notify";
+import { appLocalCopy } from "./synced-file.ts";
 import { ProgressStore } from "./progress-store";
 import { shareUrl } from "./share";
 import { SilenceStore } from "./silence-store";
@@ -775,7 +776,11 @@ export default class YtFreePlugin extends Plugin {
     const languages = [...new Set([this.transcriptLanguage(), "en"])];
     this.ytInfo.attachStore(localStore(YTDLP_ANSWERS_KEY), (info) => trimYtDlpInfo(info, languages));
     attachPlayerStore(localStore(PLAYER_ANSWERS_KEY));
-    this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
+    this.progress = new ProgressStore(
+      this.app,
+      `${this.pluginDir()}/progress.json`,
+      appLocalCopy(this.app, "ytfree-sync-progress"),
+    );
     await this.progress.load();
     this.watchProgressFile();
     this.setupNowPlayingButton();
@@ -4592,10 +4597,16 @@ export default class YtFreePlugin extends Plugin {
    * Both are a stat and nothing more when the file has not moved.
    */
   private watchProgressFile(): void {
-    this.registerDomEvent(window, "focus", () => void this.progress.refreshFromDisk());
+    // The hub file too (V1-SCOPE-SYNC): coming back to the app is exactly when
+    // the other device's Removes are waiting, and the hub may not be open.
+    const refresh = (): void => {
+      void this.progress.refreshFromDisk();
+      void this.subscriptions?.refreshFromDisk();
+    };
+    this.registerDomEvent(window, "focus", refresh);
     this.registerDomEvent(document, "visibilitychange", () => {
       if (!document.hidden) {
-        void this.progress.refreshFromDisk();
+        refresh();
         return;
       }
       // Going away is the other half, and on a phone it is the important one:

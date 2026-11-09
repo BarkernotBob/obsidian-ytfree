@@ -48,12 +48,15 @@ function settle(entries: Iterable<BlockEntry>, limit: number, now: Date): BlockE
   const byId = new Map<string, BlockEntry>();
   for (const entry of entries) {
     const seen = byId.get(entry.id);
-    if (!seen || entry.at > seen.at) byId.set(entry.id, entry);
+    // Ties on content, so both devices keep the same entry.
+    if (!seen || entry.at > seen.at || (entry.at === seen.at && JSON.stringify(entry) > JSON.stringify(seen))) {
+      byId.set(entry.id, entry);
+    }
   }
   const cutoff = new Date(now.getTime() - UNDO_KEEP_DAYS * 86_400_000).toISOString();
   return [...byId.values()]
     .filter((entry) => !entry.undone || entry.at >= cutoff)
-    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+    .sort((a, b) => (a.at !== b.at ? (a.at < b.at ? -1 : 1) : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .slice(-limit);
 }
 

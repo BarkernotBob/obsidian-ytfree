@@ -49,6 +49,7 @@ import {
   formatDuration,
   formatViews,
   mergeItems,
+  mergeStates,
   normalizeState,
   parseChannelFeed,
   phoneSubParts,
@@ -59,13 +60,8 @@ import {
   searchResultToItem,
   visibleItems,
 } from "./subscriptions";
-import type { DiskRead } from "./state-sync";
-import {
-  SAVE_READ_ATTEMPTS,
-  SAVE_READ_BACKOFF_MS,
-  planRefresh,
-  planSave,
-} from "./state-sync";
+import { SyncedFile, adapterDisk, appLocalCopy } from "./synced-file";
+import { listFingerprint } from "./state-sync";
 import {
   buildPayload,
   notificationsReady,
@@ -238,10 +234,10 @@ const SAVE_RETRY_MS = 20_000;
  *
  * The poll is hourly, which is the right interval for asking YouTube what is
  * new and far too long for noticing that the phone removed something a minute
- * ago. A stat every twenty seconds costs nothing and is the difference between
- * "the two devices agree" and "the two devices agree eventually".
+ * ago. A stat every five seconds costs nothing and is the difference between
+ * "the two devices agree" and "the two devices agree eventually" (V1-SCOPE-SYNC).
  */
-export const HUB_REFRESH_MS = 20_000;
+export const HUB_REFRESH_MS = 5_000;
 
 /** Run `worker` over `items`, at most `limit` in flight. */
 async function mapLimit<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
@@ -271,31 +267,38 @@ export type ChangeReason = "local" | "merge";
  * Two facts rather than one, because they answer different questions and the
  * old single answer conflated them — see `saveReporting`.
  */
-interface SaveOutcome {
-  written: boolean;
-  disk: SubscriptionsState | null;
-}
-
 export class SubscriptionsStore {
-  state: SubscriptionsState = emptyState();
   polling = false;
   /** Bumped on every change so open views can redraw — see `ChangeReason`. */
   private listeners = new Set<(reason: ChangeReason) => void>();
-  private saving: Promise<SaveOutcome> = Promise.resolve({ written: false, disk: null });
   /**
-   * mtime of the last state file we *successfully read* or wrote.
-   *
-   * The qualifier is the fix in 034: a failed read must not advance this, or
-   * that version of the file is treated as already seen and this device never
-   * looks at it again — one blip becoming a permanent disagreement.
+   * The file, and the rules for sharing it with the other device — merge on
+   * save, write back what it is missing, a device-local copy, conflict copies.
+   * See `synced-file.ts` and docs/V1-SCOPE-SYNC.md.
    */
-  private diskTime = 0;
+  private file: SyncedFile<SubscriptionsState>;
 
   constructor(
     private app: App,
     private statePath: string,
     private settings: () => HubSettings,
-  ) {}
+  ) {
+    this.file = new SyncedFile(
+      adapterDisk(app.vault.adapter),
+      statePath,
+      { empty: emptyState, parse: normalizeState, merge: mergeStates },
+      appLocalCopy(app, "ytfree-sync-subscriptions"),
+    );
+  }
+
+  /** The live state. One object, mutated in place by the actions below. */
+  get state(): SubscriptionsState {
+    return this.file.state;
+  }
+
+  set state(value: SubscriptionsState) {
+    this.file.state = value;
+  }
 
   onChange(listener: (reason: ChangeReason) => void): () => void {
     this.listeners.add(listener);
@@ -307,74 +310,17 @@ export class SubscriptionsStore {
   }
 
   async load(): Promise<void> {
-    const read = await this.readDisk();
-    // At load — and only at load — an unreadable file is survivable: starting
-    // empty means the plugin opens, and the first refresh that reads the file
-    // merges everything back. Saving is what must never assume it.
-    if (read.kind === "state") this.state = read.state;
-    await this.noteDiskTime();
-  }
-
-  /**
-   * What is in the file this instant.
-   *
-   * Three answers, not two. "There is no file" and "there is a file I could not
-   * read" used to collapse into the same `null`, and the caller could only ask
-   * whether it got a state — so a save treated a half-synced file, the most
-   * likely kind on a vault in iCloud, as permission to overwrite it.
-   */
-  private async readDisk(): Promise<DiskRead> {
-    try {
-      if (!(await this.app.vault.adapter.exists(this.statePath))) return { kind: "absent" };
-      const raw = await this.app.vault.adapter.read(this.statePath);
-      return { kind: "state", state: normalizeState(JSON.parse(raw)) };
-    } catch (err) {
-      console.error("YT Free: subscriptions state unreadable.", err);
-      return { kind: "unreadable" };
-    }
-  }
-
-  /**
-   * Read, retrying briefly.
-   *
-   * The failures worth retrying last milliseconds — a file being replaced under
-   * us — so two short waits turn nearly all of them into an ordinary merge, and
-   * what is left is handled by not writing.
-   */
-  private async readDiskForSave(): Promise<DiskRead> {
-    for (let attempt = 0; ; attempt += 1) {
-      const read = await this.readDisk();
-      if (read.kind !== "unreadable" || attempt >= SAVE_READ_ATTEMPTS - 1) return read;
-      await sleep(SAVE_READ_BACKOFF_MS[attempt] ?? 600);
-    }
-  }
-
-  private async noteDiskTime(): Promise<void> {
-    try {
-      this.diskTime = (await this.app.vault.adapter.stat(this.statePath))?.mtime ?? 0;
-    } catch {
-      // Leave the watermark alone: a stat we could not take is not evidence.
-    }
+    // Owed when this device's local copy held a decision the file lost — the
+    // app was killed, or its last write lost a collision with the other device.
+    if (await this.file.load()) void this.save();
   }
 
   /**
    * Write the state — by merging into what is on disk, or not at all.
    *
-   * The file is synced by iCloud and both devices hold it open, so a plain
-   * write means the last device to save wins the entire file. That is how
-   * videos hidden on the phone came back: the Mac's poll rewrote the file from
-   * the snapshot it loaded hours earlier. Re-reading here costs one file read
-   * per save and makes the file the union of both devices' decisions instead.
-   *
-   * And when the read fails, nothing is written. That was the hole left in 014:
-   * the merge was skipped and this device's whole snapshot went out anyway,
-   * which is the original bug with an extra condition on it. The change is
-   * still in memory and the next save carries it — a save deferred costs
-   * seconds, a save that overwrites an unread file costs the other device's
-   * decisions.
-   *
-   * Serialized: a poll and a click can both finish inside the same tick, and
-   * two merges must not interleave with each other's reads.
+   * Both devices hold the file open, so a plain write means the last device to
+   * save wins the entire file (014); a save is a merge. When the read fails,
+   * nothing is written (034). Serialized inside `SyncedFile`.
    *
    * Returns the copy that was on disk *before* the merge, or null if there was
    * none. That is the only place a caller can learn what the other device had
@@ -386,38 +332,20 @@ export class SubscriptionsStore {
   }
 
   /**
-   * The same save, for the one caller that has to know whether it landed.
-   *
-   * `save` answers null for both "there was no file" and "the write was
-   * refused", which is enough for everything that only wants the other device's
-   * copy. The tidy sweep cannot use that: it trashes a note on the strength of
-   * the tombstone reaching disk, and "refused" read as "no file yet" is exactly
-   * the divergence issue 042 exists to prevent. See `sweepAway`.
+   * The same save, for the one caller that has to know whether it landed: the
+   * tidy sweep trashes a note on the strength of the tombstone reaching disk
+   * (issue 042). See `sweepAway`.
    */
-  private saveReporting(): Promise<SaveOutcome> {
-    this.saving = this.saving
-      .then(async (): Promise<SaveOutcome> => {
-        const read = await this.readDiskForSave();
-        const plan = planSave(this.state, read);
-        if (!plan.write) {
-          console.error("YT Free: state file unreadable, not overwriting it. Will retry.");
-          // Nudge the next tick to try again rather than waiting on a click.
-          this.scheduleRetry();
-          // Null, not the unread file: a caller that claims work on the strength
-          // of a read that never happened is exactly the race 036 avoids.
-          return { written: false, disk: null };
-        }
-        this.state = plan.state;
-        await this.app.vault.adapter.write(this.statePath, JSON.stringify(this.state));
-        await this.noteDiskTime();
-        if (plan.merged) this.emit("merge");
-        return { written: true, disk: read.kind === "state" ? read.state : null };
-      })
-      .catch((err) => {
-        console.error("YT Free: could not write subscriptions state.", err);
-        return { written: false, disk: null };
-      });
-    return this.saving;
+  private async saveReporting(): Promise<{ written: boolean; disk: SubscriptionsState | null }> {
+    const before = listFingerprint(this.state);
+    const outcome = await this.file.save();
+    if (!outcome.landed) {
+      console.error("YT Free: state file unreadable, not overwriting it. Will retry.");
+      this.scheduleRetry();
+      return { written: false, disk: null };
+    }
+    if (listFingerprint(this.state) !== before) this.emit("merge");
+    return { written: true, disk: outcome.disk };
   }
 
   /** Set when a save was refused, so an unattended device still catches up. */
@@ -438,29 +366,17 @@ export class SubscriptionsStore {
   }
 
   /**
-   * Pick up decisions made on the other device, without waiting for a save.
+   * Pick up decisions made on the other device, and send back any this device
+   * made that the file has lost.
    *
    * A stat, and a read only when the file has actually moved — cheap enough to
-   * call on every hub open, every poll tick, and on a timer while the hub is
-   * open. Without it a Mac left open all day would keep showing videos the
-   * phone hid hours ago, and would keep merging against a copy of the file that
-   * gets staler by the hour.
+   * call on every hub open, every poll tick, every focus and on a timer while
+   * the hub is open.
    */
   async refreshFromDisk(): Promise<void> {
-    let mtime: number;
-    try {
-      mtime = (await this.app.vault.adapter.stat(this.statePath))?.mtime ?? 0;
-    } catch {
-      return;
-    }
-    if (mtime === this.diskTime) return;
-
-    const plan = planRefresh(this.state, await this.readDisk());
-    // Only a read that answered may say this version has been seen.
-    if (!plan.seen) return;
-    this.diskTime = mtime;
-    this.state = plan.state;
-    if (plan.changed) this.emit("merge");
+    const before = listFingerprint(this.state);
+    await this.file.refresh();
+    if (listFingerprint(this.state) !== before) this.emit("merge");
   }
 
   // ------------------------------------------------------------- channels

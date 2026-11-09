@@ -151,7 +151,7 @@ export function mergeNotified(
   }
   return [...byId]
     .map(([id, at]) => ({ id, at }))
-    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+    .sort((a, b) => (a.at !== b.at ? (a.at < b.at ? -1 : 1) : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .slice(-limit);
 }
 

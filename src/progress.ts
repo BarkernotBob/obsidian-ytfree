@@ -74,10 +74,18 @@ export interface ProgressState {
    * the fact that a finished video should still carry.
    */
   watched: Record<string, string>;
+  /**
+   * When each video's position was last *cleared* — finished, or scrubbed back
+   * under `MIN_REMEMBER_SECONDS`. Without it a clear could not cross devices:
+   * an absence reads as "never seen", so the other device's older position came
+   * back and the video reopened near its end (V1-SCOPE-SYNC). A position newer
+   * than its clear wins, and the clear is dropped once it has lost.
+   */
+  cleared: Record<string, string>;
 }
 
 export function emptyProgress(): ProgressState {
-  return { positions: {}, watched: {} };
+  return { positions: {}, watched: {}, cleared: {} };
 }
 
 /**
@@ -105,6 +113,15 @@ export function normalizeProgress(raw: unknown): ProgressState {
         Number.isFinite(duration) && duration > 0
           ? { seconds, updatedAt, duration }
           : { seconds, updatedAt };
+    }
+  }
+
+  const cleared = (raw as ProgressState | null)?.cleared;
+  if (cleared && typeof cleared === "object" && !Array.isArray(cleared)) {
+    for (const [videoId, value] of Object.entries(cleared)) {
+      if (!VIDEO_ID_RE.test(videoId)) continue;
+      const at = String(value ?? "");
+      if (Number.isFinite(Date.parse(at))) state.cleared[videoId] = at;
     }
   }
 
@@ -145,8 +162,18 @@ export function recordPosition(
   const at = Math.floor(seconds);
   if (!Number.isFinite(at)) return false;
 
-  if (at < MIN_REMEMBER_SECONDS || isFinished(at, duration)) {
-    return clearPosition(state, videoId);
+  const finished = isFinished(at, duration);
+  if (at < MIN_REMEMBER_SECONDS || finished) {
+    if (videoId in state.positions) return clearPosition(state, videoId, now);
+    // Finished here before the other device's position arrived: the clear
+    // still has to be said, or that older position wins when it lands. At
+    // most once a minute — the credits report every few seconds.
+    const lastClear = Date.parse(state.cleared[videoId] ?? "");
+    if (finished && !(now.getTime() - lastClear < CLEAR_RESTAMP_MS)) {
+      state.cleared[videoId] = now.toISOString();
+      return true;
+    }
+    return false;
   }
 
   const existing = state.positions[videoId];
@@ -157,6 +184,7 @@ export function recordPosition(
   if (existing && existing.seconds === at && (known === undefined || existing.duration === known)) {
     return false;
   }
+  delete state.cleared[videoId];
   state.positions[videoId] = {
     seconds: at,
     updatedAt: now.toISOString(),
@@ -236,15 +264,19 @@ export function watchedAt(state: ProgressState, videoId: string): string | null 
   return state.watched[videoId] ?? null;
 }
 
+/** How often a finish with nothing to clear may restamp its clear. */
+const CLEAR_RESTAMP_MS = 60_000;
+
 export function isFinished(seconds: number, duration: number): boolean {
   if (!Number.isFinite(duration) || duration <= 0) return false;
   const margin = Math.max(END_MARGIN_SECONDS, duration * END_MARGIN_FRACTION);
   return seconds >= duration - margin;
 }
 
-export function clearPosition(state: ProgressState, videoId: string): boolean {
+export function clearPosition(state: ProgressState, videoId: string, now = new Date()): boolean {
   if (!(videoId in state.positions)) return false;
   delete state.positions[videoId];
+  state.cleared[videoId] = now.toISOString();
   return true;
 }
 
@@ -267,21 +299,25 @@ export function resumePoint(state: ProgressState, videoId: string): number {
  * *watched* a video knows where it got to, and that is what `updatedAt`
  * records.
  *
- * The one thing it cannot do is carry a deletion. A finished video has its
- * position removed rather than zeroed, and an absence is indistinguishable from
- * "this device has never seen it" — so a video finished here while the other
- * device still holds an old position for it comes back with that position, and
- * reopens near the end instead of at the start. That is a scrub back, once,
- * against silently losing a position every time two devices disagree; the
- * cheaper of the two mistakes wins.
+ * A finished video's position is removed rather than zeroed, and an absence
+ * reads as "never seen" — so the clear is carried as its own dated entry in
+ * `cleared`, and wins against any position not newer than it.
  */
 export function mergeProgress(mine: ProgressState, theirs: ProgressState): ProgressState {
   const merged = emptyProgress();
 
+  // Ties broken by the larger second, so both devices pick the same entry and
+  // never rewrite the file back and forth over it (V1-SCOPE-SYNC).
   for (const [videoId, point] of Object.entries(mine.positions)) merged.positions[videoId] = point;
   for (const [videoId, point] of Object.entries(theirs.positions)) {
     const ours = merged.positions[videoId];
-    if (!ours || newer(point.updatedAt, ours.updatedAt)) merged.positions[videoId] = point;
+    if (
+      !ours ||
+      newer(point.updatedAt, ours.updatedAt) ||
+      (point.updatedAt === ours.updatedAt && pointKey(point) > pointKey(ours))
+    ) {
+      merged.positions[videoId] = point;
+    }
   }
 
   for (const [videoId, at] of Object.entries(mine.watched)) merged.watched[videoId] = at;
@@ -290,7 +326,26 @@ export function mergeProgress(mine: ProgressState, theirs: ProgressState): Progr
     if (!ours || newer(at, ours)) merged.watched[videoId] = at;
   }
 
+  // A clear beats any position it is not older than; a position recorded after
+  // it wins, and the clear has done its job.
+  for (const list of [mine.cleared ?? {}, theirs.cleared ?? {}]) {
+    for (const [videoId, at] of Object.entries(list)) {
+      const seen = merged.cleared[videoId];
+      if (!seen || newer(at, seen)) merged.cleared[videoId] = at;
+    }
+  }
+  for (const [videoId, at] of Object.entries(merged.cleared)) {
+    const point = merged.positions[videoId];
+    if (!point) continue;
+    if (newer(point.updatedAt, at)) delete merged.cleared[videoId];
+    else delete merged.positions[videoId];
+  }
+
   return merged;
+}
+
+function pointKey(point: WatchPoint): string {
+  return `${String(point.seconds).padStart(8, "0")}:${point.duration ?? ""}`;
 }
 
 /** Strictly later, with an unparseable stamp losing to anything readable. */
@@ -323,6 +378,22 @@ export function pruneProgress(state: ProgressState, now: Date, ttlDays = PROGRES
     entries.sort((a, b) => Date.parse(a[1].updatedAt) - Date.parse(b[1].updatedAt));
     for (const [videoId] of entries.slice(0, entries.length - MAX_PROGRESS_ENTRIES)) {
       delete state.positions[videoId];
+      changed = true;
+    }
+  }
+
+  // The clears, on the same terms as positions: a clear older than any
+  // position could be is no longer holding anything back.
+  for (const [videoId, at] of Object.entries(state.cleared)) {
+    if (Date.parse(at) >= cutoff) continue;
+    delete state.cleared[videoId];
+    changed = true;
+  }
+  const clears = Object.entries(state.cleared);
+  if (clears.length > MAX_PROGRESS_ENTRIES) {
+    clears.sort((a, b) => Date.parse(a[1]) - Date.parse(b[1]));
+    for (const [videoId] of clears.slice(0, clears.length - MAX_PROGRESS_ENTRIES)) {
+      delete state.cleared[videoId];
       changed = true;
     }
   }
