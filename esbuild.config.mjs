@@ -1,7 +1,10 @@
 import esbuild from "esbuild";
 import process from "process";
 import { readFileSync } from "fs";
-import builtins from "builtin-modules";
+import { builtinModules } from "node:module";
+
+// Both spellings, e.g. `fs` and `node:fs`, as the builtin-modules package listed them.
+const builtins = [...builtinModules, ...builtinModules.map((m) => `node:${m}`)];
 
 const prod = process.argv[2] === "production";
 
@@ -49,9 +52,9 @@ const ctx = await esbuild.context({
   external: [
     "obsidian",
     "electron",
-    // The sign-in window reaches Electron's session store through the remote
-    // module. It exists only in the desktop renderer and must not be bundled;
-    // `src/desktop/signin.ts` is the only file that requires it.
+    // The dock badge and the old sign-in clean-up reach Electron through the
+    // remote module. It exists only in the desktop renderer and must not be
+    // bundled.
     "@electron/remote",
     "@codemirror/state",
     "@codemirror/view",

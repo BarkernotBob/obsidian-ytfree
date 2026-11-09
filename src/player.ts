@@ -13,7 +13,7 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
 import { fullscreenPress } from "./fullscreen.ts";
 import { dropOnJump, VIRTUAL_FRAG_POLICY, virtualLoader } from "./virtual-loader.ts";
-import { badgeText, bufferedAhead, HD_WAIT_MS, rungPhase, within } from "./hd-status.ts";
+import { badgeText, bufferedAhead, HD_WAIT_MS, hdStartPhase, rungPhase, within } from "./hd-status.ts";
 import type { HdState } from "./hd-status.ts";
 import { shouldResumeSystemPause } from "./keep-playing.ts";
 import { KEEPALIVE_MAX_MS, silentWav } from "./silent-audio.ts";
@@ -277,9 +277,11 @@ function hdReason(err: unknown): string {
 
 /**
  * Which player currently owns `navigator.mediaSession` — there is one of those
- * per document, and a vault can have several players open at once.
+ * per document, and a vault can have several players open at once. Held as
+ * each player's own key object rather than the player itself, so no module
+ * variable aliases `this`.
  */
-let nowPlayingOwner: YtFreePlayer | null = null;
+let nowPlayingOwner: object | null = null;
 
 /**
  * One silent, looping `<audio>` per document, playing only while a video was
@@ -343,6 +345,9 @@ function stopSilence(): void {
  * same way — re-resolve, seek back, resume. The user should never see the seam.
  */
 export class YtFreePlayer {
+  /** Identifies this player as the owner of the media session (see `nowPlayingOwner`). */
+  private readonly nowPlayingKey = {};
+
   readonly video: HTMLVideoElement;
   private hls: Hls | null = null;
   private unhookJump: (() => void) | null = null;
@@ -829,7 +834,7 @@ export class YtFreePlayer {
     if (!session) return;
     // There is one media session per document and any number of players, so
     // whoever started playing last owns it — and only that player may clear it.
-    nowPlayingOwner = this;
+    nowPlayingOwner = this.nowPlayingKey;
 
     const now = this.options.nowPlaying?.();
     if (now && typeof MediaMetadata === "function") {
@@ -896,7 +901,7 @@ export class YtFreePlayer {
   /** Leave the lock screen empty rather than pointing at a closed note. */
   private clearNowPlaying(): void {
     const session = navigator.mediaSession;
-    if (!session || nowPlayingOwner !== this) return;
+    if (!session || nowPlayingOwner !== this.nowPlayingKey) return;
     nowPlayingOwner = null;
     session.metadata = null;
     session.playbackState = "none";
@@ -1953,7 +1958,7 @@ export class YtFreePlayer {
    * the app, or an hour passes (`KEEPALIVE_MAX_MS`).
    */
   private holdBackgroundSession(): void {
-    if (!Platform.isMobile || nowPlayingOwner !== this) return;
+    if (!Platform.isMobile || nowPlayingOwner !== this.nowPlayingKey) return;
     this.heldInBackground = true;
     this.options.debug?.("background hold: paused while hidden, holding the session");
     startSilence(this.options.debug);
@@ -1967,7 +1972,7 @@ export class YtFreePlayer {
    * for exactly this.
    */
   isNowPlaying(): boolean {
-    if (this.destroyed || nowPlayingOwner !== this || this.video.ended) return false;
+    if (this.destroyed || nowPlayingOwner !== this.nowPlayingKey || this.video.ended) return false;
     return !this.video.paused || this.heldInBackground;
   }
 
@@ -2539,12 +2544,39 @@ export class YtFreePlayer {
     this.attach(stream, this.resumeSeconds(), false);
     // Read after the await: a pick made while 360p resolved counts.
     if (this.wantHd) {
-      this.setHd({ phase: "finding", height: stream.height });
-      void this.upgrade();
+      this.startUpgrade(stream.height);
     } else {
       this.setHd(this.sdState(stream.height));
     }
   }
+
+  /**
+   * Look up HD now if the video has played, otherwise on its first Play
+   * (GitHub #66): opening a note costs no HD resolve, and the badge says "HD
+   * on Play" meanwhile rather than "finding HD…". A newer pick (`gen`) or a
+   * destroyed player cancels the wait.
+   */
+  private startUpgrade(height: number | undefined, gen = this.qualityGen): void {
+    if (hdStartPhase(this.started) === "finding") {
+      this.setHd({ phase: "finding", height });
+      void this.upgrade(undefined, gen);
+      return;
+    }
+    this.setHd({ phase: "on-play", height });
+    // One waiting listener at most: a Quality toggle before Play replaces it.
+    if (this.hdOnPlay) this.video.removeEventListener("play", this.hdOnPlay);
+    const onPlay = (): void => {
+      this.hdOnPlay = null;
+      if (this.destroyed || this.local || this.upgraded || gen !== this.qualityGen || !this.wantHd) return;
+      this.setHd({ phase: "finding", height: this.hdState.height });
+      void this.upgrade(undefined, gen);
+    };
+    this.hdOnPlay = onPlay;
+    this.video.addEventListener("play", onPlay, { once: true });
+  }
+
+  /** The HD lookup waiting for the first Play (GitHub #66), if one is. */
+  private hdOnPlay: (() => void) | null = null;
 
   /** The badge for 360p by choice: the setting's, or this video's pick. */
   private sdState(height?: number): HdState {
@@ -2570,8 +2602,7 @@ export class YtFreePlayer {
     if (!this.sourced) return;
     if (hd) {
       if (this.upgraded) return;
-      this.setHd({ phase: "finding", height: this.hdState.height });
-      void this.upgrade(undefined, gen);
+      this.startUpgrade(this.hdState.height, gen);
     } else {
       void this.downgrade(gen);
     }
@@ -3159,7 +3190,7 @@ export class YtFreePlayer {
     // below does not reach.
     if (this.panelOpen) this.togglePanel(false);
     this.watchPanelAnchor(false);
-    if (nowPlayingOwner === this) stopSilence();
+    if (nowPlayingOwner === this.nowPlayingKey) stopSilence();
     this.clearNowPlaying();
     this.teardownHls();
     this.video.removeAttribute("src");

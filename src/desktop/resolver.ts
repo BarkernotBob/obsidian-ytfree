@@ -25,22 +25,15 @@ const pExecFile = promisify(execFile);
 export { isBotCheck };
 
 /**
- * Run yt-dlp once. `cookieFile` signs the request in, and is only passed when
- * the user asked for it ("Try signed in"): there is no automatic signed-in
- * retry any more, because on a flagged network it doubled every request and
- * put the account's standing behind each one (GitHub #31). A bot check pauses
- * the plugin's automatic requests (`botCheck`) before the error goes on.
+ * Run yt-dlp once, always signed out: no cookies are ever passed (GitHub #64).
+ * A bot check pauses the plugin's automatic requests (`botCheck`) before the
+ * error goes on.
  */
-async function ytDlp(
-  ytDlpPath: string,
-  args: string[],
-  maxBuffer: number,
-  cookieFile?: string,
-): Promise<string> {
+async function ytDlp(ytDlpPath: string, args: string[], maxBuffer: number): Promise<string> {
   try {
     // Paced with the other "who is this video" requests (GitHub #36).
     const result = await governor.run("yt-dlp", () =>
-      pExecFile(ytDlpPath, [...(cookieFile ? ["--cookies", cookieFile] : []), ...args], {
+      pExecFile(ytDlpPath, args, {
         timeout: 120_000,
         maxBuffer,
         env: ytDlpEnv(ytDlpPath),
@@ -95,16 +88,14 @@ export async function getVersion(ytDlpPath: string): Promise<string> {
  * Everything yt-dlp knows about a video, in one run (GitHub #32): the 360p
  * file, the HD files, the sound alone, captions and the replay heatmap. Its
  * default client set, never a pinned one: one identity per open, and the set
- * whose files serve the whole video (measured 2026-11-04). `cookieFile` only
- * when the reader chose "Try signed in".
+ * whose files serve the whole video (measured 2026-11-04).
  */
-export async function fetchYtDlpInfo(videoId: string, ytDlpPath: string, cookieFile?: string): Promise<YtDlpInfo> {
+export async function fetchYtDlpInfo(videoId: string, ytDlpPath: string): Promise<YtDlpInfo> {
   const stdout = await ytDlp(
     ytDlpPath,
     ["--no-warnings", "--no-playlist", "--skip-download", "-J", `https://www.youtube.com/watch?v=${videoId}`],
     // Info JSON for a long video with 150+ caption languages runs to megabytes.
     64 * 1024 * 1024,
-    cookieFile,
   );
   try {
     return JSON.parse(stdout) as YtDlpInfo;
@@ -123,8 +114,7 @@ export async function resolveStream(
   videoId: string,
   ytDlpPath: string,
   mode: ResolveMode,
-  cookieFile?: string,
 ): Promise<ResolvedStream> {
-  const info = await fetchYtDlpInfo(videoId, ytDlpPath, cookieFile);
+  const info = await fetchYtDlpInfo(videoId, ytDlpPath);
   return mode === "quality" ? (hlsStreamFromInfo(info) ?? fastStreamFromInfo(info)) : fastStreamFromInfo(info);
 }

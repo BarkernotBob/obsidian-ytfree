@@ -8,6 +8,7 @@
 
 import { botCheck } from "./bot-check.ts";
 import { governor } from "./request-governor.ts";
+import { durationsPerRound, feedGapMs, pickRound } from "./feed-schedule.ts";
 import {
   App,
   ButtonComponent,
@@ -25,11 +26,8 @@ import {
   setIcon,
 } from "obsidian";
 import { SEARCH_YT_ICON, SHARE_ICON, YT_ICON } from "./icon";
-import type { AccountLine, AccountSession } from "./account";
-import { accountStatusLine } from "./account";
 import type { Channel, HubFilter, HubItem, SubscriptionsState, VideoNote } from "./subscriptions";
 import {
-  applyUnsubscribes,
   buildWatchLaterNote,
   deskSub,
   emptyState,
@@ -42,6 +40,7 @@ import {
   parseSubscriptionsCsv,
   expireItems,
   feedUrl,
+  isFirstSight,
   noteFeedFailure,
   noteFeedSuccess,
   withRetries,
@@ -95,7 +94,6 @@ import {
   horizonDays,
   walkBackfillPage,
 } from "./backfill";
-import { channelUrl } from "./channel";
 import { parseYouTubeLink } from "./handoff";
 import {
   HIDDEN_CHANNELS_LIMIT,
@@ -122,6 +120,13 @@ import {
 } from "./search-params";
 import type { SearchFilters } from "./search-params";
 import { channelScreen, searchScreen } from "./search-screen";
+import {
+  TAKEOUT_STEPS,
+  TAKEOUT_URL,
+  searchChannelMenu,
+  subscribeButton,
+  subscribedNotice,
+} from "./subscribe";
 import type { SearchScreenCopy, SearchScreenKind } from "./search-screen";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 
@@ -177,7 +182,11 @@ export interface HubSettings {
   expiryDays: number;
   includeShorts: boolean;
   watchLaterFolder: string;
-  /** Keep videos the account says were already watched in the Inbox. */
+  /**
+   * Keep items marked watched in the Inbox. Only the removed account sync ever
+   * marked an item watched (GitHub #64), so the plugin passes true and any old
+   * marks no longer hide anything.
+   */
   showWatched: boolean;
   /** Which captions Preview asks for — the same setting the note fetch uses. */
   transcriptLanguage: string;
@@ -190,15 +199,6 @@ export interface HubSettings {
   transcriptIntervalSeconds: number;
   /** Where a poll announces new Inbox videos, and whether it does at all. */
   notifications: NotificationSettings;
-  /**
-   * The account sync, as far as the hub needs to know it. Null on mobile, where
-   * there is no account sync to have an opinion about.
-   *
-   * The hub says when the feeds were last polled and said nothing at all about
-   * the account, so an account sync that had been dead for five weeks was
-   * invisible on the one screen anybody looks at. See issue 044.
-   */
-  account: { session: AccountSession; syncHours: number } | null;
 }
 
 /**
@@ -222,18 +222,6 @@ const postWebhook: Post = async ({ url, body, contentType, headers }) => {
     throw: true,
   });
 };
-
-/**
- * How many durations one poll will go and fetch.
- *
- * A channel feed states no duration, so every feed item needs a player call to
- * learn one — and a fresh import is hundreds of items. Capped rather than
- * batched into oblivion: the newest items are done first, a poll costs a
- * bounded number of requests, and a backlog fills itself in over the next few
- * polls without anyone waiting for it. A card with no duration yet is a card
- * with an empty badge, which is a reserved box either way.
- */
-const DURATION_BACKFILL_PER_POLL = 5;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -560,53 +548,6 @@ export class SubscriptionsStore {
   }
 
   /**
-   * Reconcile the polled channels against a **trusted** live subscription list.
-   *
-   * "Trusted" is load-bearing and checked by the caller, not here: only a
-   * successful read of the subscription manager may drive removals. See
-   * `applyUnsubscribes` for what a fallback list or a failed fetch would do.
-   *
-   * Adds are the same adds `addChannels` makes. Removals take the channel out
-   * of the polled list and leave every item alone — that is the whole point,
-   * and it is why this cannot be `removeChannel` in a loop.
-   */
-  applyAccountChannels(live: Array<{ id: string; title: string }>): {
-    added: number;
-    removed: number;
-  } {
-    const known = new Set(this.state.channels.map((c) => c.id));
-    const now = new Date();
-    let added = 0;
-    const fresh: string[] = [];
-    for (const channel of live) {
-      if (known.has(channel.id)) continue;
-      known.add(channel.id);
-      added++;
-      fresh.push(channel.id);
-      this.state.channels.push({
-        id: channel.id,
-        title: channel.title,
-        addedAt: now.toISOString(),
-        error: null,
-      });
-    }
-
-    const result = applyUnsubscribes(
-      this.state.channels,
-      this.state.unsubscribedChannels,
-      live.map((c) => c.id),
-      now,
-    );
-    this.state.channels = result.channels;
-    this.state.unsubscribedChannels = result.unsubscribedChannels;
-    this.liftSearchHides(fresh);
-
-    this.emit();
-    void this.save();
-    return { added, removed: result.removed.length };
-  }
-
-  /**
    * Forget a channel and everything of its we have not kept. Notes already made
    * from it stay — the plugin never deletes a file.
    */
@@ -628,15 +569,22 @@ export class SubscriptionsStore {
 
   // ----------------------------------------------------------------- poll
 
-  async poll(): Promise<void> {
-    if (this.polling) return;
-    // Every channel's feed, durations and backfills: the burst a bot-check
-    // pause exists to stop (GitHub #31). The hub's status line says why.
-    if (botCheck.isPaused()) return;
+  /**
+   * One poll round: the feeds of the channels checked longest ago, at most
+   * `ROUND_MAX_CHANNELS` of them, one at a time with a random gap (GitHub #66).
+   * A short list is all one round, so nothing changed for it; a big import is
+   * spread across the period instead of fetched in one burst. Resolves to how
+   * many channels this round checked.
+   */
+  async poll(): Promise<number> {
+    if (this.polling) return 0;
+    // Feeds, durations and backfills: the burst a bot-check pause exists to
+    // stop (GitHub #31). The hub's status line says why.
+    if (botCheck.isPaused()) return 0;
     // Before anything: a poll ends in a save, and a save built on a stale copy
     // of the file is what used to undo the other device's decisions.
     await this.refreshFromDisk();
-    if (this.state.channels.length === 0) return;
+    if (this.state.channels.length === 0) return 0;
     this.polling = true;
     this.emit();
 
@@ -646,12 +594,33 @@ export class SubscriptionsStore {
     // itself with a push about fifteen hundred videos it just discovered.
     const seeding = this.state.lastPolledAt === null;
     const added: HubItem[] = [];
+    // The same rule per channel: a channel fetched for the first time (fresh
+    // from an import, whose later rounds are no longer "seeding") fills the
+    // hub without a push about every video in its feed.
+    const quiet = new Set<string>();
+    const round = pickRound(this.state.channels);
     // Channels whose whole feed window rolled since the last poll (048), with
     // what the hub knew before this poll merged anything.
     const gaps: Array<{ channel: Channel; knownBefore: Set<string> }> = [];
     const horizon = horizonDays(this.settings().expiryDays);
+    let checked = 0;
     try {
-      await mapLimit(this.state.channels, 5, async (channel) => {
+      let first = true;
+      for (const picked of round) {
+        // A paused breaker stops the round where it is (a bot check can trip
+        // on any request, this one's included).
+        if (botCheck.isPaused()) break;
+        if (!first) await sleep(feedGapMs(Math.random));
+        first = false;
+        // Looked up again: a refresh from disk during the round replaces the
+        // state, and a stamp on the old object would be lost.
+        const channel = this.state.channels.find((c) => c.id === picked.id);
+        if (!channel) continue;
+        checked += 1;
+        const firstSight = isFirstSight(channel, this.state.items);
+        // Checked, whether the feed answers or not: a failing channel waits for
+        // its turn like the rest instead of heading every round.
+        channel.polledAt = now.toISOString();
         try {
           // Retried, because the endpoint fails at random — see FEED_ATTEMPTS.
           const response = await withRetries(
@@ -683,13 +652,14 @@ export class SubscriptionsStore {
           );
           this.state.items = merged.items;
           added.push(...merged.added);
+          if (firstSight) for (const item of merged.added) quiet.add(item.videoId);
         } catch (err) {
           // Counted, and shown only after several polls running have failed. A
           // channel that is genuinely gone still surfaces; a bad afternoon at
           // Google no longer paints half the list red.
           noteFeedFailure(channel, err instanceof Error ? err.message : String(err));
         }
-      });
+      }
 
       // One channel at a time, and only the ones that showed a gap. A failure
       // leaves the poll's own results alone, and is not retried: the feed has
@@ -725,7 +695,7 @@ export class SubscriptionsStore {
         });
       }
 
-      await this.backfillDurations();
+      await this.backfillDurations(durationsPerRound(this.state.channels.length));
 
       this.state.lastPolledAt = now.toISOString();
       // Which kind of device polled, so the phone can leave it to the desktop.
@@ -736,8 +706,9 @@ export class SubscriptionsStore {
       // The claim and the send both live here, after the save, so that a feed
       // that threw halfway through still writes what it did get — and so that
       // nothing about a notification can decide whether a poll succeeded.
-      await this.notifyNewItems(added, seeding);
+      await this.notifyNewItems(added, seeding, quiet);
     }
+    return checked;
   }
 
   /**
@@ -800,7 +771,11 @@ export class SubscriptionsStore {
    * Nothing in here can fail the poll. `sendNotification` resolves on every
    * path, and the two awaits around it are the ones the poll was making anyway.
    */
-  private async notifyNewItems(added: HubItem[], seeding: boolean): Promise<void> {
+  private async notifyNewItems(
+    added: HubItem[],
+    seeding: boolean,
+    quiet: ReadonlySet<string> = new Set(),
+  ): Promise<void> {
     const settings = this.settings();
     const candidates = added.length
       ? pickNotifiable(added, this.state.items, this.state.notifiedVideos ?? [], {
@@ -821,7 +796,11 @@ export class SubscriptionsStore {
 
     if (seeding || !candidates.length || !notificationsReady(settings.notifications)) return;
 
-    const mine = unclaimed(candidates, disk?.notifiedVideos ?? []);
+    // Claimed above like the rest, never sent: see `quiet` in `poll`.
+    const mine = unclaimed(
+      candidates.filter((item) => !quiet.has(item.videoId)),
+      disk?.notifiedVideos ?? [],
+    );
     if (!mine.length) return;
 
     await sendNotification(settings.notifications, buildPayload(mine, new Date()), postWebhook);
@@ -845,11 +824,11 @@ export class SubscriptionsStore {
    * thumbnail to put a badge on. A refusal is recorded as `null` so a private
    * or deleted video is asked once rather than on every poll forever.
    */
-  private async backfillDurations(): Promise<void> {
+  private async backfillDurations(limit: number): Promise<void> {
     const pending = this.state.items
       .filter((item) => item.state !== "dismissed" && item.durationSeconds === undefined)
       .sort((a, b) => (Date.parse(b.published) || 0) - (Date.parse(a.published) || 0))
-      .slice(0, DURATION_BACKFILL_PER_POLL);
+      .slice(0, limit);
     if (pending.length === 0) return;
 
     // One at a time (GitHub #37), and not past the hourly cap (#36).
@@ -1364,8 +1343,6 @@ export class HubView extends ItemView {
   private listEl: HTMLElement | null = null;
   private channelsEl: HTMLElement | null = null;
   private statusEl: HTMLElement | null = null;
-  /** The account-sync banner. Always in the DOM; empty when there is no alert. */
-  private accountAlertEl: HTMLElement | null = null;
   /** Cards on screen right now, so a click can update one in place. */
   private cards = new Map<string, HTMLElement>();
   /** The columns the cards go in. Not the list: the sentinel sits outside it. */
@@ -1418,6 +1395,7 @@ export class HubView extends ItemView {
   private channelToken = 0;
   private channelInputEl: HTMLInputElement | null = null;
   private channelFactsEl: HTMLElement | null = null;
+  private channelSubscribeEl: HTMLButtonElement | null = null;
 
   /**
    * A phone gets a different menu, not a narrower one. See docs/MOBILE-UX.md:
@@ -1453,11 +1431,6 @@ export class HubView extends ItemView {
      */
     private shareMenu: ShareMenu | null = null,
     /**
-     * Opens the sign-in window, for the banner's button. Null on mobile and in
-     * tests, where the banner simply has no action to offer.
-     */
-    private signIn: (() => Promise<void>) | null = null,
-    /**
      * Which videos you are part-way through, and when you last watched each.
      * Null — no plugin behind this view — and the In progress list is empty.
      */
@@ -1489,6 +1462,7 @@ export class HubView extends ItemView {
       this.renderStatus();
       this.renderChannels();
       this.renderMenuLabel();
+      this.renderSubscribeButton();
       // A local click has already swapped its own card, and rebuilding the grid
       // under the finger that clicked it is the one thing this UI must never
       // do. A merge is the opposite case: those changes were made on the other
@@ -1535,12 +1509,12 @@ export class HubView extends ItemView {
     this.listEl = null;
     this.channelsEl = null;
     this.statusEl = null;
-    this.accountAlertEl = null;
     this.primaryEl = null;
     this.relatedEl = null;
     this.searchInputEl = null;
     this.channelInputEl = null;
     this.channelFactsEl = null;
+    this.channelSubscribeEl = null;
     this.menuEl = null;
     this.scrimEl = null;
     this.menuButtonEl = null;
@@ -1589,8 +1563,8 @@ export class HubView extends ItemView {
     // The same thing the settings pane's "Sync now" runs, notices included, so
     // there is only one meaning of "sync" in the plugin.
     const refresh = actions.createEl("button", { cls: "ytfree-hub-icon-button" });
-    refresh.setAttribute("aria-label", "Sync now — your account, then the channel feeds");
-    refresh.setAttribute("title", "Sync now — your account, then the channel feeds");
+    refresh.setAttribute("aria-label", "Sync now — check the channel feeds");
+    refresh.setAttribute("title", "Sync now — check the channel feeds");
     setIcon(refresh, "refresh-cw");
     refresh.addEventListener("click", () => {
       const run = this.sync ? this.sync() : this.store.poll();
@@ -1599,10 +1573,6 @@ export class HubView extends ItemView {
 
     this.buildItemFilter(root);
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status" });
-    // Created empty and always present, so the row it sits in does not appear
-    // and disappear under a click. `renderAccountAlert` fills it or blanks it.
-    this.accountAlertEl = root.createDiv({ cls: "ytfree-hub-account-alert" });
-    this.renderAccountAlert();
 
     const body = root.createDiv({ cls: "ytfree-hub-body" });
     if (this.phone) this.buildPhoneBody(body);
@@ -1918,10 +1888,8 @@ export class HubView extends ItemView {
   /**
    * The channel's header and its search box.
    *
-   * Subscribe opens youtube.com in the browser, and that is all it does: the
-   * subscription itself is an authenticated write this plugin never makes, and
-   * the next account sync picks the channel up from your real subscriptions.
-   * Desktop only — the sync that would notice it is desktop only too.
+   * Subscribe adds the channel to the hub's own list (GitHub #65): nothing is
+   * sent to YouTube, and its videos arrive on the next feed check.
    */
   private buildChannel(root: HTMLElement): void {
     const channel = this.channel;
@@ -1940,18 +1908,18 @@ export class HubView extends ItemView {
     else avatar.addClass("is-empty");
     title.createSpan({ cls: "ytfree-hub-screen-name", text: this.channelName() || "Channel" });
 
-    if (Platform.isDesktopApp && channel) {
+    if (channel) {
       const subscribe = header.createEl("button", {
         cls: "ytfree-channel-subscribe",
-        text: "Subscribe",
-        attr: {
-          type: "button",
-          title: "Opens this channel on youtube.com. The next account sync picks the subscription up.",
-        },
+        attr: { type: "button" },
       });
       subscribe.addEventListener("click", () => {
-        window.open(channelUrl(channel.channelId), "_blank");
+        const current = this.channel;
+        if (!current) return;
+        this.subscribeToChannel(current.channelId, this.channelName());
       });
+      this.channelSubscribeEl = subscribe;
+      this.renderSubscribeButton();
     }
 
     this.channelFactsEl = root.createDiv({ cls: "ytfree-channel-facts" });
@@ -1999,6 +1967,32 @@ export class HubView extends ItemView {
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status ytfree-hub-status-browse" });
     const body = root.createDiv({ cls: "ytfree-hub-body" });
     this.listEl = body.createDiv({ cls: "ytfree-hub-list" });
+  }
+
+  /**
+   * The channel screen's Subscribe button, from the store. Both labels share
+   * one fixed width (styles.css), so the click that flips it moves nothing.
+   */
+  private renderSubscribeButton(): void {
+    const el = this.channelSubscribeEl;
+    const channel = this.channel;
+    if (!el || !channel) return;
+    const copy = subscribeButton(this.store.isSubscribed(channel.channelId));
+    el.setText(copy.text);
+    el.title = copy.title;
+    el.disabled = copy.disabled;
+    el.toggleClass("mod-cta", !copy.disabled);
+    el.toggleClass("is-subscribed", copy.disabled);
+  }
+
+  /** Subscribe inside YT Free (GitHub #65), from the channel screen or a search card. */
+  private subscribeToChannel(channelId: string, title: string): void {
+    if (!channelId) return;
+    if (!this.store.isSubscribed(channelId)) {
+      this.store.addChannels([{ id: channelId, title: title || channelId }]);
+    }
+    this.renderSubscribeButton();
+    new Notice(subscribedNotice(title));
   }
 
   /** Handle, subscribers, video count — whichever the header has said so far. */
@@ -2215,7 +2209,6 @@ export class HubView extends ItemView {
 
   renderAll(): void {
     this.renderStatus();
-    this.renderAccountAlert();
     this.renderChannels();
     this.renderMenuLabel();
     this.renderList();
@@ -2253,49 +2246,7 @@ export class HubView extends ItemView {
     if (lastPolledAt && !this.store.polling && this.filter !== "hidden") {
       parts.push(`checked ${relativeAge(lastPolledAt, new Date())}`);
     }
-    // The account, in the same voice and on the same line as the feeds. A sync
-    // you cannot see the age of is a sync nobody notices has stopped.
-    const account = this.accountLine();
-    if (account && this.filter !== "hidden") parts.push(account.text);
     this.statusEl.setText(parts.join(" · "));
-  }
-
-  /** What the account sync is worth saying right now, or null. */
-  private accountLine(): AccountLine | null {
-    const account = this.settings().account;
-    if (!account) return null;
-    return accountStatusLine(account.session, account.syncHours, new Date());
-  }
-
-  /**
-   * The banner, for the two states worth interrupting over: the session has
-   * expired, or nothing has succeeded in two sync periods. Anything less says
-   * its piece on the status line and stays out of the way.
-   *
-   * The element is never added or removed — only emptied — so nothing on the
-   * screen moves when the state behind it changes.
-   */
-  private renderAccountAlert(): void {
-    const host = this.accountAlertEl;
-    if (!host) return;
-    host.empty();
-    const line = this.accountLine();
-    host.toggleClass("is-visible", Boolean(line?.alert));
-    if (!line?.alert) return;
-
-    host.createSpan({ cls: "ytfree-hub-account-alert-text", text: line.text });
-    if (!line.action) return;
-    const button = host.createEl("button", {
-      cls: "ytfree-hub-account-alert-button",
-      text: line.action === "sign-in" ? "Sign in again" : "Sync now",
-    });
-    button.addEventListener("click", () => {
-      const run =
-        line.action === "sign-in"
-          ? (this.signIn?.() ?? Promise.resolve())
-          : (this.sync?.() ?? this.store.poll());
-      void run.then(() => this.renderAll());
-    });
   }
 
   /**
@@ -2751,9 +2702,9 @@ export class HubView extends ItemView {
     // A search card is not tracked in `cards` — a results list is rebuilt whole
     // — but Remove has to find this one element to swap it for the strip, and
     // Undo has to swap it back without redrawing anything above it.
-    // Hide channel lives on search cards only: on a channel screen you went to
-    // that channel on purpose, and a channel you subscribe to cannot be hidden.
-    if (where === "search" && result.channelId && !this.store.isSubscribed(result.channelId)) {
+    // The channel menu lives on search cards only: on a channel screen you went
+    // to that channel on purpose, and its own header has Subscribe.
+    if (where === "search" && result.channelId) {
       this.addChannelChip(card, result);
     }
     this.results.set(result.videoId, card);
@@ -2762,8 +2713,9 @@ export class HubView extends ItemView {
 
   /**
    * The `⋯` chip in a search card's thumbnail corner. A menu rather than a
-   * fifth button, so later secondary actions have somewhere to go without
-   * competing with the four. One item today.
+   * fifth button, so secondary actions have somewhere to go without competing
+   * with the four. Built at click time, so it reflects a subscribe made since
+   * the card was drawn (`searchChannelMenu`).
    */
   private addChannelChip(card: HTMLElement, result: SearchResult): void {
     const thumb = card.querySelector<HTMLElement>(".ytfree-hub-thumb");
@@ -2777,12 +2729,15 @@ export class HubView extends ItemView {
       evt.preventDefault();
       evt.stopPropagation();
       const menu = new Menu();
-      menu.addItem((item) =>
-        item
-          .setTitle("Hide this channel")
-          .setIcon("eye-off")
-          .onClick(() => this.hideChannelFromSearch(result)),
-      );
+      for (const entry of searchChannelMenu(this.store.isSubscribed(result.channelId))) {
+        menu.addItem((item) => {
+          item.setTitle(entry.title).setIcon(entry.icon);
+          if (entry.key === "subscribed") item.setDisabled(true);
+          else if (entry.key === "subscribe") {
+            item.onClick(() => this.subscribeToChannel(result.channelId, result.channelTitle));
+          } else item.onClick(() => this.hideChannelFromSearch(result));
+        });
+      }
       menu.showAtMouseEvent(evt);
     });
   }
@@ -4063,9 +4018,24 @@ export class ImportSubscriptionsModal extends Modal {
     contentEl.createEl("h2", { text: "Import YouTube subscriptions" });
     contentEl.createEl("p", {
       cls: "ytfree-hub-hint",
+      text: "Your YouTube subscriptions come out of Google Takeout as one file, subscriptions.csv:",
+    });
+    const steps = contentEl.createEl("ol", { cls: "ytfree-takeout-steps" });
+    TAKEOUT_STEPS.forEach((step, index) => {
+      const li = steps.createEl("li");
+      // The first step's site is a link, so nobody has to type it.
+      if (index === 0) {
+        const [before, after] = step.split("takeout.google.com");
+        li.appendText(before);
+        li.createEl("a", { text: "takeout.google.com", href: TAKEOUT_URL });
+        li.appendText(after);
+      } else li.setText(step);
+    });
+    contentEl.createEl("p", {
+      cls: "ytfree-hub-hint",
       text:
-        "Google Takeout → YouTube and YouTube Music → deselect everything except “subscriptions”. " +
-        "The export contains subscriptions.csv. Importing again later adds new channels and changes nothing else.",
+        "Importing again later adds new channels and changes nothing else. " +
+        "You can also subscribe from a channel's screen, or from a search result's ⋯ menu.",
     });
 
     // A reserved status line: filling it in must not resize the dialog.

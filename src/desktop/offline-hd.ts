@@ -25,7 +25,7 @@ export function offlineFetchRange(folder: string): FetchRange {
       const buffer = Buffer.alloc(end - start + 1);
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
       if (bytesRead === 0) throw Object.assign(new Error("HTTP 416"), { status: 416 });
-      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + bytesRead) as ArrayBuffer;
+      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + bytesRead);
     } finally {
       await handle.close();
     }

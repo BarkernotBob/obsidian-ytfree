@@ -46,7 +46,7 @@ export class InfoCache<T> {
             this.kept.delete(key);
             this.kept.set(key, { value, until: keepUntil });
             // Map order is insertion order: the first key is the oldest.
-            while (this.kept.size > this.maxEntries) this.kept.delete(this.kept.keys().next().value!);
+            this.dropOldest();
             this.save();
           }
         }
@@ -95,7 +95,15 @@ export class InfoCache<T> {
       if (!kept || typeof kept.until !== "number" || kept.until <= now) continue;
       if (!this.kept.has(entry[0])) this.kept.set(entry[0], kept);
     }
-    while (this.kept.size > this.maxEntries) this.kept.delete(this.kept.keys().next().value!);
+    this.dropOldest();
+  }
+
+  /** Drop the oldest entries past `maxEntries`. Map order is insertion order. */
+  private dropOldest(): void {
+    for (const key of this.kept.keys()) {
+      if (this.kept.size <= this.maxEntries) break;
+      this.kept.delete(key);
+    }
   }
 
   private save(): void {
