@@ -88,6 +88,7 @@ import {
 } from "./transcript";
 import { attachPlayerStore, fetchCaptionTrack, fetchHeatmap, fetchVideoDetails, forgetPlayer } from "./innertube";
 import { BotCheckPausedError, botCheck, isBotCheck } from "./bot-check.ts";
+import { DeviceIdSet } from "./device-id-set";
 import { InfoCache } from "./info-cache.ts";
 import type { AnswerStore } from "./info-cache.ts";
 import { trimYtDlpInfo } from "./answer-trim.ts";
@@ -333,6 +334,7 @@ const LEGACY_ACCOUNT_KEYS = [
 /** Kept answers, per device (GitHub #34). Never in the vault: links are IP-bound. */
 const YTDLP_ANSWERS_KEY = "ytfree-ytdlp-answers";
 const PLAYER_ANSWERS_KEY = "ytfree-player-answers";
+const NO_HEATMAP_KEY = "ytfree-no-heatmap";
 
 /** A `localStorage` key as an answer store; any failure is the cache's to swallow. */
 function localStore(key: string): AnswerStore {
@@ -704,6 +706,8 @@ export default class YtFreePlugin extends Plugin {
   private autoFetchAttempted = new Set<string>();
   /** Notes whose missing heatmap has already been chased this session. */
   private backfillAttempted = new Set<string>();
+  /** Videos YouTube has no most-replayed graph for, kept on this device (GitHub #66 G5). */
+  private noHeatmap = new DeviceIdSet(null);
   /** Auto-fetches run one at a time, however many notes arrive at once. */
   private autoFetchChain: Promise<void> = Promise.resolve();
   private lastActiveVideoId: string | null = null;
@@ -776,6 +780,7 @@ export default class YtFreePlugin extends Plugin {
     // Answers kept on this device survive a reload or a new build (GitHub #34):
     // reopening a video sends nothing until its links expire.
     const languages = [...new Set([this.transcriptLanguage(), "en"])];
+    this.noHeatmap = new DeviceIdSet(localStore(NO_HEATMAP_KEY));
     this.ytInfo.attachStore(localStore(YTDLP_ANSWERS_KEY), (info) => trimYtDlpInfo(info, languages));
     attachPlayerStore(localStore(PLAYER_ANSWERS_KEY));
     this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
@@ -1113,7 +1118,6 @@ export default class YtFreePlugin extends Plugin {
         this.syncPinnedPlayers();
         if (file) {
           this.queueAutoFetch(file);
-          this.queueHeatmapBackfill(file);
         }
       }),
     );
@@ -2696,26 +2700,25 @@ export default class YtFreePlugin extends Plugin {
 
   /**
    * Fill in the most-replayed list on a note that has a transcript and no
-   * heatmap — silently, on open, with no command to remember.
+   * heatmap — silently, on the note's first Play, with no command to remember.
    *
    * This exists for the notes the phone made while the heatmap was desktop
    * only. It is not the auto-fetch: it never touches the transcript, it costs
-   * one request, and it says nothing unless it has something to add. Peaks are
-   * labelled from the transcript already in the note rather than from a second
-   * caption download — see `parseTranscriptCues`.
+   * at most one request, and it says nothing unless it has something to add.
+   * Peaks are labelled from the transcript already in the note rather than
+   * from a second caption download — see `parseTranscriptCues`.
    *
-   * Attempted once per note per session. A video with no heatmap — which is
-   * most videos — therefore gets one wasted request per session in which you
-   * open its note, and that is the price of not writing a "we checked" marker
-   * into a file that syncs.
+   * On Play, not on open (GitHub #66 G5): opening notes to skim them sends
+   * nothing. On desktop the heatmap comes from the `yt-dlp -J` Play just made,
+   * so it is usually free. A video with no heatmap (most of them) is
+   * remembered on this device and never asked again; the marker stays out of
+   * the synced note.
    */
-  private queueHeatmapBackfill(file: TFile): void {
+  private queueHeatmapBackfill(file: TFile, videoId: string): void {
     if (!this.settings.autoFetchTranscript) return;
     if (this.backfillAttempted.has(file.path)) return;
+    if (this.noHeatmap.has(videoId)) return;
     if (botCheck.isPaused() || !governor.backgroundRoom()) return;
-
-    const videoId = this.videoIdForNote(file.path);
-    if (!videoId) return;
 
     this.backfillAttempted.add(file.path);
     this.autoFetchChain = this.autoFetchChain
@@ -2734,9 +2737,24 @@ export default class YtFreePlugin extends Plugin {
     if (!TRANSCRIPT_ALIASES.some((heading) => content.includes(heading))) return;
     if (HEATMAP_ALIASES.some((heading) => content.includes(heading))) return;
 
-    const heatmap = await fetchHeatmap(videoId).catch(() => [] as VideoInfo["heatmap"]);
+    // The answer Play already has, when there is one (desktop); else one call.
+    const kept = this.ytInfo.peek(videoId);
+    const info = kept ? await kept.catch(() => null) : null;
+    let heatmap: VideoInfo["heatmap"] = [];
+    let answered = true;
+    if (info) heatmap = info.heatmap ?? [];
+    else {
+      heatmap = await fetchHeatmap(videoId).catch(() => {
+        answered = false;
+        return [] as VideoInfo["heatmap"];
+      });
+    }
     const peaks = topPeaks(heatmap, this.settings.heatmapPeaks);
-    if (peaks.length === 0) return;
+    if (peaks.length === 0) {
+      // "None" only when YouTube answered: a failed request is asked again.
+      if (answered) this.noHeatmap.add(videoId);
+      return;
+    }
 
     const cues = parseTranscriptCues(content);
     await this.app.vault.process(file, (current) =>
@@ -4320,7 +4338,12 @@ export default class YtFreePlugin extends Plugin {
     this.applyStoredSilence(player, videoId);
     player.video.addEventListener(
       "play",
-      () => void this.produceSilence(player, videoId, sourcePath),
+      () => {
+        void this.produceSilence(player, videoId, sourcePath);
+        // Most-replayed for a note that lacks it, on Play, not on open (GitHub #66 G5).
+        const note = preview ? null : this.app.vault.getAbstractFileByPath(sourcePath);
+        if (note instanceof TFile) this.queueHeatmapBackfill(note, videoId);
+      },
       { once: true },
     );
 
