@@ -1,7 +1,10 @@
 import esbuild from "esbuild";
 import process from "process";
 import { readFileSync } from "fs";
-import builtins from "builtin-modules";
+import { builtinModules } from "node:module";
+
+// Both spellings, e.g. `fs` and `node:fs`, as the builtin-modules package listed them.
+const builtins = [...builtinModules, ...builtinModules.map((m) => `node:${m}`)];
 
 const prod = process.argv[2] === "production";
 

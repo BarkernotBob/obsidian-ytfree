@@ -151,6 +151,11 @@ import {
  */
 type DesktopApi = typeof import("./desktop/index.ts");
 let desktopApi: Promise<DesktopApi> | null = null;
+/** A frontmatter field's first value: the field itself, or its first item when it is a list. */
+function firstValue(field: unknown): unknown {
+  return Array.isArray(field) ? (field[0] as unknown) : field;
+}
+
 function desktop(): Promise<DesktopApi> {
   if (!desktopApi) desktopApi = import("./desktop/index.ts");
   return desktopApi;
@@ -589,7 +594,7 @@ interface FoldableMode {
 }
 
 function foldableMode(view: MarkdownView): FoldableMode {
-  return view.currentMode as unknown as FoldableMode;
+  return view.currentMode;
 }
 
 /**
@@ -1584,7 +1589,7 @@ export default class YtFreePlugin extends Plugin {
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const videoId = this.videoIdInFrontmatter(fm);
       if (!videoId) continue;
-      const author = Array.isArray(fm?.author) ? fm?.author[0] : fm?.author;
+      const author = firstValue(fm?.author);
       notes.push({
         videoId,
         path: file.path,
@@ -1695,7 +1700,7 @@ export default class YtFreePlugin extends Plugin {
       });
 
       if (outcome === "swept") {
-        console.info(`YT Free: trashed empty video note ${candidate.path}`);
+        console.debug(`YT Free: trashed empty video note ${candidate.path}`);
         removed++;
       } else if (outcome === "refused") {
         refused++;
@@ -1878,7 +1883,7 @@ export default class YtFreePlugin extends Plugin {
     const report = diagnoseDockBadge();
     const path = `${this.pluginDir()}/dock-diagnostics.json`;
     await this.app.vault.adapter.write(path, JSON.stringify(report, null, 2));
-    console.log("YT Free dock badge diagnostics", report);
+    console.debug("YT Free dock badge diagnostics", report);
     new Notice(`YT Free: dock diagnostics written to ${path}`);
   }
 
@@ -1951,7 +1956,7 @@ export default class YtFreePlugin extends Plugin {
       this.settings.accountSession = healed;
       await this.saveSettings();
       this.refreshSettingsTab();
-      console.log("YT Free: account session un-wedged — the cookie file is back.");
+      console.debug("YT Free: account session un-wedged — the cookie file is back.");
     } catch (err) {
       console.error("YT Free: could not check the cookie file at load.", err);
     }
@@ -2356,7 +2361,7 @@ export default class YtFreePlugin extends Plugin {
     const file = this.app.vault.getAbstractFileByPath(sourcePath);
     if (!(file instanceof TFile)) return null;
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    const author = Array.isArray(fm?.author) ? fm?.author[0] : fm?.author;
+    const author = firstValue(fm?.author);
     return {
       title: typeof fm?.title === "string" && fm.title.trim() ? fm.title : file.basename,
       artist: typeof author === "string" ? author : undefined,
@@ -2434,8 +2439,7 @@ export default class YtFreePlugin extends Plugin {
     if (!fm) return null;
     for (const key of this.settings.pinnedFrontmatterKeys.split(",").map((k) => k.trim())) {
       if (!key) continue;
-      const value = fm[key];
-      const raw = Array.isArray(value) ? value[0] : value;
+      const raw = firstValue(fm[key]);
       if (typeof raw !== "string") continue;
       const id = extractVideoId(raw);
       if (id) return id;
@@ -3282,7 +3286,7 @@ export default class YtFreePlugin extends Plugin {
     if (!path) return null;
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) return null;
-    const recorded = this.app.metadataCache.getFileCache(file)?.frontmatter?.[LOCAL_MEDIA_KEY];
+    const recorded: unknown = this.app.metadataCache.getFileCache(file)?.frontmatter?.[LOCAL_MEDIA_KEY];
     const { resolveLocalFile } = await desktop();
     // Search the folder even with nothing recorded: a file downloaded on this
     // Mac is findable by its [videoId] marker regardless of what the note says.
@@ -3302,7 +3306,7 @@ export default class YtFreePlugin extends Plugin {
   }
 
   private async setLocalMedia(file: TFile, path: string | null): Promise<void> {
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
+    await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
       if (path) fm[LOCAL_MEDIA_KEY] = path;
       else delete fm[LOCAL_MEDIA_KEY];
     });
@@ -4286,7 +4290,7 @@ export default class YtFreePlugin extends Plugin {
    */
   private async shareVideo(videoId: string, seconds: number | null): Promise<void> {
     const url = shareUrl(videoId, seconds);
-    const share = navigator.share?.bind(navigator);
+    const share = typeof navigator.share === "function" ? (data: ShareData) => navigator.share(data) : null;
     if (!Platform.isDesktopApp && share) {
       try {
         await share({ url });
@@ -4359,13 +4363,15 @@ export default class YtFreePlugin extends Plugin {
 
     // Tear the player down when the note or preview pane closes, so no stream
     // keeps buffering in the background.
-    const self = this;
+    const teardown = (): void => {
+      entry.player.destroy();
+      this.cancelSilence(videoId);
+      if (this.players.get(videoId) === entry) this.players.delete(videoId);
+    };
     ctx.addChild(
       new (class extends MarkdownRenderChild {
         onunload(): void {
-          entry.player.destroy();
-          self.cancelSilence(videoId);
-          if (self.players.get(videoId) === entry) self.players.delete(videoId);
+          teardown();
         }
       })(wrapper),
     );
@@ -5243,7 +5249,7 @@ export default class YtFreePlugin extends Plugin {
     // gets the old single-stream treatment rather than nothing.
     const duration = Number.isFinite(player.video.duration) ? player.video.duration : 0;
     if (duration <= 0) {
-      console.info("YT Free: Smart Speed analysing without chunking — no duration yet.");
+      console.debug("YT Free: Smart Speed analysing without chunking — no duration yet.");
     }
 
     // Where silence is on *this* recording, measured once and handed to every
@@ -5255,7 +5261,7 @@ export default class YtFreePlugin extends Plugin {
       floorMargin: this.settings.silenceFloorMargin,
     });
     const noiseDb = this.settings.silenceNoiseDb ?? choice.thresholdDb;
-    console.info(
+    console.debug(
       `YT Free: Smart Speed threshold ${noiseDb} dB for ${videoId}` +
         (this.settings.silenceNoiseDb !== null
           ? " (manual override)"
@@ -5282,7 +5288,7 @@ export default class YtFreePlugin extends Plugin {
       }
     };
 
-    console.info(
+    console.debug(
       `YT Free: Smart Speed analysing ${videoId} with ffmpeg` +
         (duration > 0 ? ` (${Math.round(duration)}s, from ${Math.round(frontier)}s)` : ""),
     );
@@ -5839,7 +5845,8 @@ export default class YtFreePlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const saved: unknown = await this.loadData();
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
     // 022 raised the floor of "shortest pause to skip" to 0.4 s. Below that a
     // pause is a breath between words rather than a gap between thoughts, and
     // the map fills with fragments too short for the player to do anything with
@@ -5865,8 +5872,8 @@ export default class YtFreePlugin extends Plugin {
    */
   debug(message: string, extra?: unknown): void {
     if (!this.settings.debugLogs) return;
-    if (extra === undefined) console.info(`YT Free [debug]: ${message}`);
-    else console.info(`YT Free [debug]: ${message}`, extra);
+    if (extra === undefined) console.debug(`YT Free [debug]: ${message}`);
+    else console.debug(`YT Free [debug]: ${message}`, extra);
   }
 
   /**
@@ -6801,7 +6808,7 @@ class YtFreeSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Log what the player is doing")
       .setDesc(
-        "Prints the fullscreen and keyboard decisions to the developer console, which is the only way to see them: iOS refuses both silently when the tap that asked for them has already finished. Turn on before reproducing a problem on the phone, and off afterwards.",
+        "Prints the fullscreen and keyboard decisions to the developer console (Verbose level), which is the only way to see them: iOS refuses both silently when the tap that asked for them has already finished. Turn on before reproducing a problem on the phone, and off afterwards.",
       )
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.debugLogs).onChange(async (value) => {

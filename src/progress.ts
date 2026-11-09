@@ -96,11 +96,11 @@ export function normalizeProgress(raw: unknown): ProgressState {
   if (positions && typeof positions === "object") {
     for (const [videoId, value] of Object.entries(positions)) {
       if (!VIDEO_ID_RE.test(videoId)) continue;
-      const seconds = Math.floor(Number((value as WatchPoint)?.seconds));
+      const seconds = Math.floor(Number(value?.seconds));
       if (!Number.isFinite(seconds) || seconds < MIN_REMEMBER_SECONDS) continue;
-      const updatedAt = String((value as WatchPoint)?.updatedAt ?? "");
+      const updatedAt = String(value?.updatedAt ?? "");
       if (!Number.isFinite(Date.parse(updatedAt))) continue;
-      const duration = Number((value as WatchPoint)?.duration);
+      const duration = Number(value?.duration);
       state.positions[videoId] =
         Number.isFinite(duration) && duration > 0
           ? { seconds, updatedAt, duration }

@@ -10,12 +10,16 @@
 /**
  * `mm:ss` or `h:mm:ss`, and nothing that merely contains those digits.
  *
- * The guards matter more than the shape: `(?<![\d:.])` and `(?![\d:.])` keep the
+ * The guards matter more than the shape: `(^|[^\d:.])` and `(?![\d:.])` keep the
  * match off the tail of a longer clock (`1:02:03` must not also yield `02:03`)
  * and off decimals like `1.5:30`. Hours are allowed up to three digits so a
  * 100-hour livestream VOD still matches.
+ *
+ * The leading guard is a capture, not a lookbehind, because iOS before 16.4
+ * cannot parse lookbehinds. Group 1 is that guard character (or empty): callers
+ * skip it, and the clock itself is groups 2–4.
  */
-const TIMESTAMP_RE = /(?<![\d:.])(?:(\d{1,3}):)?([0-5]?\d):([0-5]\d)(?![\d:.])/g;
+const TIMESTAMP_RE = /(^|[^\d:.])(?:(\d{1,3}):)?([0-5]?\d):([0-5]\d)(?![\d:.])/g;
 
 /** Markdown inline links — `[text](target)` — so we never link inside one. */
 const MARKDOWN_LINK_RE = /\[[^\]\n]*\]\([^)\n]*\)/g;
@@ -51,10 +55,11 @@ export function findTimestamps(text: string): TimestampMatch[] {
   const found: TimestampMatch[] = [];
   const re = timestampPattern();
   for (let m = re.exec(text); m; m = re.exec(text)) {
-    if (links.some(([start, end]) => m.index >= start && m.index < end)) continue;
-    const hours = m[1] ? Number(m[1]) : 0;
-    const seconds = hours * 3600 + Number(m[2]) * 60 + Number(m[3]);
-    found.push({ index: m.index, text: m[0], seconds });
+    const index = m.index + m[1].length;
+    if (links.some(([start, end]) => index >= start && index < end)) continue;
+    const hours = m[2] ? Number(m[2]) : 0;
+    const seconds = hours * 3600 + Number(m[3]) * 60 + Number(m[4]);
+    found.push({ index, text: m[0].slice(m[1].length), seconds });
   }
   return found;
 }

@@ -51,9 +51,10 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 - `./install.sh` reads the vault path from a gitignored `.vault` file at the repo root (or
   `YTFREE_VAULT`). Create it once per machine. Reload Obsidian after installing.
-- Release: bump `manifest.json`'s version, `npm run check`, then
-  `gh release create vX.Y.Z main.js manifest.json styles.css --title vX.Y.Z --notes "…"`.
-  Re-running `setup.sh` (or BRAT) picks it up.
+- Release: on a clean main, `npm version X.Y.Z && git push --follow-tags`. That bumps
+  `manifest.json` and `versions.json` and pushes a bare `X.Y.Z` tag (Obsidian rejects `vX.Y.Z`);
+  `release.yml` lints, tests, builds and publishes it; Obsidian scans every release. `npm run lint`
+  is Obsidian's own rule set; CI fails on errors.
 
 ## Gotchas
 
@@ -77,4 +78,3 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - Desktop HD byte ranges go over Node `https`, not `requestUrl`; a request Node cannot make at
   all (no status, no byte) switches that stream to `requestUrl` for good. The loader does not
   enforce `maxTimeToFirstByteMs` (only `maxLoadTimeMs`): `requestUrl` reports no first byte.
-- `PROGRESS_TTL_DAYS` stays 365 on purpose (decided 2026-09-02).

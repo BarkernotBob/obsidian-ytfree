@@ -3,9 +3,10 @@
 Play YouTube videos inside Obsidian notes without ads.
 
 It does not strip ads out of YouTube's player — that is impossible, because YouTube
-stitches ads into the same stream as the content. Instead it skips the player entirely:
-`yt-dlp` resolves the video to its underlying stream URL, which plays in a plain HTML5
-`<video>` element. There is no ad in the bytes to begin with.
+stitches ads into the same stream as the content. Instead it skips the player entirely and
+plays the video's underlying stream in a plain HTML5 `<video>` element. On desktop with
+`yt-dlp` installed, yt-dlp finds that stream; otherwise (and always on mobile) YT Free asks
+YouTube for it directly. No install is needed. There is no ad in the bytes to begin with.
 
 ## Install (Mac)
 
@@ -120,12 +121,43 @@ fix is `brew upgrade yt-dlp`. It runs at most once per 24 hours per machine
 (`npm run smoke -- --force` overrides), because bursts of live requests got a home network
 bot-flagged once. The old full live suite is parked as `npm run smoke:full`.
 
+## Network use and privacy
+
+YT Free talks to these services. Nothing else, and no telemetry: it sends no data about you
+or your vault to its author or anyone else.
+
+- **YouTube** (`youtube.com`, `i.ytimg.com`, `*.googlevideo.com`): video pages, streams,
+  thumbnails, search, channel pages, transcripts and the RSS feeds of channels you subscribe
+  to. The subscriptions hub checks those feeds on a timer while Obsidian is open (hourly by
+  default; Settings → *Check every*). Requests are signed out unless you use the optional
+  desktop sign-in below.
+- **The YT Free player page** (`barkernotbob.github.io/obsidian-ytfree/player/`, served by
+  GitHub Pages): only when a video plays in YouTube's own embedded player, which then loads
+  from YouTube as usual.
+- **A notification address you enter** (optional, blank by default): when you fill it in, new
+  videos are POSTed there.
+
+**Optional desktop helpers.** If you install [`yt-dlp`](https://github.com/yt-dlp/yt-dlp)
+(and optionally `ffmpeg`), YT Free runs them on desktop for HD, downloads and Smart Speed.
+They are separate programs you install yourself; YT Free never downloads or installs them.
+Without them it plays through its own stream on desktop and mobile.
+
+**Files outside your vault.** On desktop, downloaded videos go to `~/Movies/YT Free` (or the
+folder you choose in settings). The optional YouTube sign-in on desktop keeps its cookie file
+in `~/Library/Application Support/obsidian-ytfree/`.
+
+**Accounts and payments.** No account is needed, and nothing is paid for. Sign-in is optional
+and desktop-only.
+
+**Ads.** YT Free shows no ads of its own.
+
 ## Known limitations
 
-- **Desktop only, permanently.** yt-dlp is a shelled-out binary; Obsidian mobile has no
-  Node runtime.
-- Breaks when YouTube changes extraction. This is a maintenance treadmill, not
-  set-and-forget.
+- Breaks when YouTube changes how its streams are reached. This is a maintenance
+  treadmill, not set-and-forget. On desktop the usual fix is `brew upgrade yt-dlp`.
 - First resolve after a yt-dlp upgrade is slow (it recompiles its JS challenge solver);
   later ones are much faster.
-- No transcripts, screenshots, or offline download — see `docs/V1-SCOPE.md`.
+
+## License
+
+[MIT](LICENSE)

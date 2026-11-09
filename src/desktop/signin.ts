@@ -178,7 +178,7 @@ export class SignInModal extends Modal {
     });
 
     view.addEventListener("did-navigate", (evt) => {
-      console.log("YT Free: sign-in → " + safeUrl((evt as unknown as { url: string }).url));
+      console.debug("YT Free: sign-in → " + safeUrl((evt as unknown as { url: string }).url));
     });
 
     view.addEventListener("dom-ready", () => {

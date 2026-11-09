@@ -31,6 +31,18 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Decisions
 
+### 2026-11-09 (store compliance, #61; Claude's calls, open to change)
+
+- License is MIT (package.json said ISC; Obsidian needs a LICENSE file, and MIT is the common
+  choice in its directory).
+- `minAppVersion` 1.6.6: `FileManager.trashFile` needs it. Obsidian's lint fails below that.
+- TypeScript is pinned to 5.9: typescript-eslint, which Obsidian's lint runs on, does not
+  support TypeScript 7.
+- Plugin logging is `console.debug` (Obsidian's rules allow only debug, warn and error), so the
+  debug switch's lines show at the console's Verbose level.
+- Regexes avoid lookbehind (iOS before 16.4 cannot parse it); a capture group stands in.
+- Release tags are bare `x.y.z`; the old `v0.1.0` tag stays as history.
+
 ### 2026-11-07 (Isaiah, answering the #49/#50 scope)
 
 - The **Kept** chip is now **Saved**, to match the Save button.
