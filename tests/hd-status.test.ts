@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { badgeText, bufferedAhead, rungPhase, within } from "../src/hd-status.ts";
+import { badgeText, bufferedAhead, hdStartPhase, rungPhase, within } from "../src/hd-status.ts";
 
 test("badge: finding HD shows what plays meanwhile, 360p when unknown", () => {
   assert.equal(badgeText({ phase: "finding" }).text, "360p · finding HD…");
@@ -73,4 +73,14 @@ test("badge: 360p picked for one video says so instead of pointing at Settings",
   assert.equal(badge.text, "360p");
   assert.equal(badge.title, "360p, chosen for this video.");
   assert.equal(badge.settled, true);
+});
+
+// GitHub #66: nothing before Play. The HD lookup waits for the first Play, and
+// the badge must not claim to be searching while it waits.
+test("before the first Play, HD waits and the badge says it loads on Play", () => {
+  assert.equal(hdStartPhase(false), "on-play");
+  assert.equal(hdStartPhase(true), "finding");
+  const b = badgeText({ phase: "on-play", height: 360 });
+  assert.equal(b.text, "360p · HD on Play");
+  assert.doesNotMatch(b.text + b.title, /finding|looking up|searching/i);
 });

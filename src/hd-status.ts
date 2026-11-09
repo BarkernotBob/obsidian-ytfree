@@ -13,12 +13,14 @@ export const HD_WAIT_MS = 15_000;
  *
  * - `off`: HD was not asked for (the setting is off, 360p was picked for this
  *   video, or a local file). `reason`, when set, replaces the hover text.
+ * - `on-play`: HD is wanted and waits for the first Play (GitHub #66): nothing
+ *   is fetched for it before then, and the badge must not claim otherwise.
  * - `finding`: the HD resolve is running; `height` is what plays meanwhile.
  * - `none`: HD is not coming for this video right now; `reason` says why.
  * - `climbing`: HD is attached and playing below its top rung.
  * - `top`: HD is playing its top rung.
  */
-export type HdPhase = "off" | "finding" | "none" | "climbing" | "top";
+export type HdPhase = "off" | "on-play" | "finding" | "none" | "climbing" | "top";
 
 export interface HdState {
   phase: HdPhase;
@@ -44,6 +46,12 @@ const p = (height: number | undefined): string => `${height ?? SD}p`;
 
 export function badgeText(state: HdState): BadgeText {
   switch (state.phase) {
+    case "on-play":
+      return {
+        text: `${p(state.height)} · HD on Play`,
+        title: "HD is fetched when you press Play, not before.",
+        settled: true,
+      };
     case "finding":
       return {
         text: `${p(state.height)} · finding HD…`,
@@ -68,6 +76,15 @@ export function badgeText(state: HdState): BadgeText {
     default:
       return { text: p(state.height), title: state.reason ?? "HD is off in Settings → YT Free.", settled: true };
   }
+}
+
+/**
+ * The phase an HD lookup starts in (GitHub #66: nothing before Play). Before
+ * the first Play it waits, and says so; once the video has played somebody is
+ * watching, and an HD pick is looked up at once.
+ */
+export function hdStartPhase(hasPlayed: boolean): "finding" | "on-play" {
+  return hasPlayed ? "finding" : "on-play";
 }
 
 /** The phase that a rung switch means, given the stream's top rung. */
