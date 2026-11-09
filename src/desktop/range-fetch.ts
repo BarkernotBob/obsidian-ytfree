@@ -49,7 +49,7 @@ function get(url: string, ua: string | undefined, io: RangeIO | undefined, redir
       if (status >= 300 && status < 400 && res.headers.location && redirects < MAX_REDIRECTS) {
         res.resume();
         const next = new URL(res.headers.location, url).toString();
-        finish(() => get(next, ua, io, redirects + 1).then(resolve, reject));
+        finish(() => void get(next, ua, io, redirects + 1).then(resolve, reject));
         req.destroy();
         return;
       }
@@ -72,7 +72,7 @@ function get(url: string, ua: string | undefined, io: RangeIO | undefined, redir
           // A small Buffer can sit inside a larger shared pool: then copy out
           // exactly its bytes. A segment-sized one owns its memory.
           const whole = all.byteOffset === 0 && all.byteLength === all.buffer.byteLength;
-          resolve((whole ? all.buffer : all.buffer.slice(all.byteOffset, all.byteOffset + all.byteLength)) as ArrayBuffer);
+          resolve(whole ? all.buffer : all.buffer.slice(all.byteOffset, all.byteOffset + all.byteLength));
         });
       });
       res.on("error", (err) => finish(() => reject(err)));

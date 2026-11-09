@@ -39,7 +39,7 @@ export function trimYtDlpInfo(info: YtDlpInfo, languages: string[] = ["en"]): Yt
     .map((f) => {
       const kept: Record<string, unknown> = {};
       for (const field of FORMAT_FIELDS) if (f[field] !== undefined) kept[field] = f[field];
-      return kept as YtDlpFormat;
+      return kept;
     });
   return {
     formats,

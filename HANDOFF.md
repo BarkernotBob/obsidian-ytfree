@@ -4,7 +4,7 @@ Current state only; keep it under 80 lines and replace, don't append. Full histo
 2026-09-22 is in [docs/archive/HANDOFF-history-2026-09.md](docs/archive/HANDOFF-history-2026-09.md).
 Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual test section).
 
-## Status (2026-11-07)
+## Status (2026-11-09)
 
 - The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
   `app.css`, the owner's first name and the vault name are gone from every commit).
@@ -15,8 +15,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   #20, #21's last two commits (bot-check retry, HD ready before Play), #24, #28, #30 part 2.
 - 2026-11-07 nightly: #42 large thumbnails (phone poster) upgrade to `maxres2.jpg` after `hq2`
   shows; small cards never ask for it. See the midframe scope doc.
-- Isaiah's earlier answers are recorded in [GLOSSARY.md](GLOSSARY.md).
-- New follow-ups are filed as GitHub issues, not as files in `issues/`.
+- Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md). New follow-ups are filed as GitHub issues, not as files in `issues/`.
+- 2026-11-09: YouTube sign-in, cookies and account sync removed (#64); see GLOSSARY.
 
 ## Shipped on main (scope doc = manual test)
 
@@ -35,25 +35,24 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Next step
 
-1. Isaiah: install main and run the untested scope-doc tests listed under Status.
-2. Phone HD part 2: switch GitHub Pages to main `/docs` (it pointed at PR #28's branch).
-3. #49/#50 (Saved chip, In progress Delete): PR #53, test steps in its scope doc.
-4. #51 (phone): Now playing pill removed; properties re-collapse after Obsidian rebuilds them. The
-   properties cause was not found in the 2026-11-07 merge diff (none of it touches collapsing), so the
-   fix is a guess at a rebuild/slow-load race. Needs a phone test.
-5. Request volume (#31–#39), scope approved 2026-11-07:
-   [V1-SCOPE-REQUEST-BUDGET](docs/V1-SCOPE-REQUEST-BUDGET.md). Parts 1 and 2 merged (PR #56, #57).
-   Part 3 merged (PR #58). Part 4 (#38: replay fixtures, recorder, offline HD player) built.
-   No real video recorded yet (`node tools/record-fixtures.ts <id>`, ~10 requests, Isaiah's call).
-6. HD backlog on GitHub: rung picker / ABR (#15).
+**Focus: Obsidian store MVP** ([V1-SCOPE-MVP](docs/V1-SCOPE-MVP.md)). Issues labelled `mvp` come
+first; `post-mvp` waits. New filings get an MVP call against the rule in that doc.
+
+1. MVP path approved 2026-11-09. Order: #61, #64 → #66 → #43 → #46, #48, #65 → #25, #5 → #62.
+   Decided 2026-11-09: one ad-free build for the store and Isaiah; own stream, YouTube's
+   player as fallback (#43). Build split (#60) is post-MVP.
+2. #43 fallback; GitHub Pages must serve the hosted player page (phone needs it).
+3. #61 store compliance (LICENSE, versions.json, `x.y.z` tags, Obsidian lint: 32 errors).
+4. #62 device test of merged-but-untested features; #25, #5, #46, #48; bugs Isaiah lists.
 
 ## How to ship and test
 
 - `./install.sh` reads the vault path from a gitignored `.vault` file at the repo root (or
   `YTFREE_VAULT`). Create it once per machine. Reload Obsidian after installing.
-- Release: bump `manifest.json`'s version, `npm run check`, then
-  `gh release create vX.Y.Z main.js manifest.json styles.css --title vX.Y.Z --notes "…"`.
-  Re-running `setup.sh` (or BRAT) picks it up.
+- Release: on a clean main, `npm version X.Y.Z && git push --follow-tags`. That bumps
+  `manifest.json` and `versions.json` and pushes a bare `X.Y.Z` tag (Obsidian rejects `vX.Y.Z`);
+  `release.yml` lints, tests, builds and publishes it; Obsidian scans every release. `npm run lint`
+  is Obsidian's own rule set; CI fails on errors.
 
 ## Gotchas
 
@@ -77,4 +76,3 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - Desktop HD byte ranges go over Node `https`, not `requestUrl`; a request Node cannot make at
   all (no status, no byte) switches that stream to `requestUrl` for good. The loader does not
   enforce `maxTimeToFirstByteMs` (only `maxLoadTimeMs`): `requestUrl` reports no first byte.
-- `PROGRESS_TTL_DAYS` stays 365 on purpose (decided 2026-09-02).
