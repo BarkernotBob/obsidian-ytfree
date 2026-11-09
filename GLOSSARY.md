@@ -188,6 +188,17 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - Phone ⋯ menu (#52): moves to `document.body` while open, sits at Obsidian's menu layer, avoids safe areas, scrolls when taller than the room (2026-11-07).
 
+- **MVP** (Isaiah, 2026-11-09): the minimum to list YT Free in Obsidian's community directory.
+  Labels `mvp` / `post-mvp`. Scope: `docs/V1-SCOPE-MVP.md`.
+- **Store build** (Isaiah, 2026-11-09): ad-free, same as Isaiah's own. Ads were only meant to
+  help acceptance, and Obsidian doesn't require them. Own stream first, YouTube's embedded player
+  as fallback (#43). No separate local build for now (#60 post-MVP).
+
+- **Playback tiers** (Isaiah, 2026-11-09): yt-dlp (desktop, if installed) → our own stream →
+  YouTube's embedded player. After a bot check, straight to the embed.
+- **No sign-in** (Isaiah, 2026-11-09): YouTube cookies never reach the plugin; subscriptions by
+  manual add or Takeout CSV (#64, #65).
+
 ### Earlier
 
 - `PROGRESS_TTL_DAYS` stays 365 (2026-09-02).
