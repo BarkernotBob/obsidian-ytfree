@@ -318,6 +318,8 @@ const SILENCE_REFRESH_DEBOUNCE_MS = 1200;
 const DELETE_CONFIRM_MS = 5_000;
 /** Device-local key for the bot-check pause (`bot-check.ts`). */
 const BOT_CHECK_KEY = "ytfree-bot-check-until";
+/** A caption file does not change; kept this long in memory all the same. */
+const CAPTION_KEEP_MS = 6 * 60 * 60_000;
 
 /** Settings keys from the removed YouTube sign-in (GitHub #64), dropped on load. */
 const LEGACY_ACCOUNT_KEYS = [
@@ -749,6 +751,8 @@ export default class YtFreePlugin extends Plugin {
   private silenceAttempted = new Set<string>();
   /** One `yt-dlp -J` answer per video, until its links expire (GitHub #32). */
   private ytInfo = new InfoCache<YtDlpInfo>(() => Date.now(), 15);
+  /** Caption files this session, by video and language (GitHub #66 G1). */
+  private captionFiles = new InfoCache<string>(() => Date.now(), 20);
   /** Running ffmpeg analyses, keyed by video, so a closing note can kill one. */
   private silenceJobs = new Map<string, { cancel: () => void }>();
   /** Jobs we stopped, so a partial map is stored as partial. See `cancelSilence`. */
@@ -2868,7 +2872,7 @@ export default class YtFreePlugin extends Plugin {
       return null;
     }
     const track = pickCaptionTrack(info, this.transcriptLanguage());
-    return { track, cues: await this.fetchCues(track), heatmap: info.heatmap };
+    return { track, cues: await this.fetchCues(videoId, track), heatmap: info.heatmap };
   }
 
   /**
@@ -2887,7 +2891,7 @@ export default class YtFreePlugin extends Plugin {
       fetchCaptionTrack(videoId, this.transcriptLanguage()),
       fetchHeatmap(videoId).catch(() => [] as VideoInfo["heatmap"]),
     ]);
-    return { track, cues: await this.fetchCues(track), heatmap };
+    return { track, cues: await this.fetchCues(videoId, track), heatmap };
   }
 
   /**
@@ -2895,11 +2899,25 @@ export default class YtFreePlugin extends Plugin {
    * immediately valid, so this is one plain request either way — no second
    * yt-dlp call and no temp file.
    */
-  private async fetchCues(track: CaptionTrack | null): Promise<Cue[]> {
+  private async fetchCues(videoId: string, track: CaptionTrack | null): Promise<Cue[]> {
     if (!track) return [];
-    governor.count("captions");
-    const response = await requestUrl({ url: track.url, throw: true });
-    return parseJson3(response.text);
+    return parseJson3(await this.captionText(videoId, track));
+  }
+
+  /**
+   * A caption file, fetched once per video and language and shared by the
+   * transcript and Smart Speed (GitHub #66 G1). Keyed by video, not URL: the
+   * phone's link and yt-dlp's differ for the same file.
+   */
+  private captionText(videoId: string, track: CaptionTrack): Promise<string> {
+    return this.captionFiles.get(
+      `${videoId}:${track.lang}:${track.auto ? "auto" : "human"}`,
+      async () => {
+        governor.count("captions");
+        return (await requestUrl({ url: track.url, throw: true })).text;
+      },
+      () => Date.now() + CAPTION_KEEP_MS,
+    );
   }
 
   private transcriptLanguage(): string {
@@ -4772,11 +4790,10 @@ export default class YtFreePlugin extends Plugin {
    * Producer one: the gaps between caption lines. No ffmpeg, no yt-dlp, both
    * platforms — this is the baseline a stranger gets.
    *
-   * InnerTube on desktop as well as on mobile, deliberately. The desktop
-   * transcript command goes through `yt-dlp -J` because it also wants the replay
-   * heatmap out of the same call; this wants nothing but caption timing, and
-   * one `requestUrl` beats spawning yt-dlp and waiting several seconds for a
-   * megabyte of metadata we would throw away.
+   * The caption list comes from the `yt-dlp -J` Play already made when one is
+   * kept or on its way (desktop), and from InnerTube otherwise; this never
+   * spawns yt-dlp of its own. The caption file is the one the transcript
+   * fetched, when it did (GitHub #66 G1).
    *
    * Returns null — not an empty array — when the video simply has no captions,
    * because "no map" and "a map with no pauses in it" are different facts and
@@ -4789,11 +4806,15 @@ export default class YtFreePlugin extends Plugin {
     videoId: string,
     minGap: number,
   ): Promise<{ windows: SilenceWindow[]; words: number[]; wordTimed: boolean } | null> {
-    const track = await fetchCaptionTrack(videoId, this.transcriptLanguage());
+    // The caption list from the `yt-dlp -J` Play already made, when there is
+    // one: no player call and no second identity (GitHub #66 G1).
+    const kept = this.ytInfo.peek(videoId);
+    const info = kept ? await kept.catch(() => null) : null;
+    const track = info
+      ? pickCaptionTrack(info, this.transcriptLanguage())
+      : await fetchCaptionTrack(videoId, this.transcriptLanguage());
     if (!track) return null;
-    governor.count("captions");
-    const response = await requestUrl({ url: track.url, throw: true });
-    const cues = parseJson3Timed(response.text);
+    const cues = parseJson3Timed(await this.captionText(videoId, track));
     if (cues.length === 0) return null;
     // Two decimal places: 10 ms is a tenth of the closest two word starts ever
     // measured, and the full float doubles the size of a file two devices sync.

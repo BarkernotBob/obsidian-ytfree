@@ -112,3 +112,19 @@ test("InfoCache: an answer marked not worth keeping is asked for again", async (
   await cache.get("v", async () => (loads++, "x"), () => 100);
   assert.equal(loads, 2);
 });
+
+test("InfoCache: peek hands over a kept or in-flight answer and never loads (GitHub #66 G1)", async () => {
+  let now = 1000;
+  const cache = new InfoCache<string>(() => now);
+  assert.equal(cache.peek("v"), null);
+  let release!: (v: string) => void;
+  const pending = cache.get("v", () => new Promise<string>((r) => (release = r)), () => 5000);
+  const shared = cache.peek("v");
+  assert.ok(shared, "an answer on its way is shared");
+  release("answer");
+  assert.equal(await shared, "answer");
+  assert.equal(await pending, "answer");
+  assert.equal(await cache.peek("v"), "answer");
+  now = 5000;
+  assert.equal(cache.peek("v"), null, "an expired answer is not handed over");
+});
