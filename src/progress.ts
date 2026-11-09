@@ -74,10 +74,17 @@ export interface ProgressState {
    * the fact that a finished video should still carry.
    */
   watched: Record<string, string>;
+  /**
+   * Watch stamps already handed to `history.json` (GitHub #48), by the stamp
+   * that was handed over. A stamp at or before its entry here is dropped on
+   * every merge, so the other device's copy cannot hand it back and set off
+   * the hand-over again on every save.
+   */
+  drained: Record<string, string>;
 }
 
 export function emptyProgress(): ProgressState {
-  return { positions: {}, watched: {} };
+  return { positions: {}, watched: {}, drained: {} };
 }
 
 /**
@@ -105,6 +112,15 @@ export function normalizeProgress(raw: unknown): ProgressState {
         Number.isFinite(duration) && duration > 0
           ? { seconds, updatedAt, duration }
           : { seconds, updatedAt };
+    }
+  }
+
+  const drained = (raw as ProgressState | null)?.drained;
+  if (drained && typeof drained === "object" && !Array.isArray(drained)) {
+    for (const [videoId, value] of Object.entries(drained)) {
+      if (!VIDEO_ID_RE.test(videoId)) continue;
+      const at = String(value ?? "");
+      if (Number.isFinite(Date.parse(at))) state.drained[videoId] = at;
     }
   }
 
@@ -290,6 +306,17 @@ export function mergeProgress(mine: ProgressState, theirs: ProgressState): Progr
     if (!ours || newer(at, ours)) merged.watched[videoId] = at;
   }
 
+  for (const list of [mine.drained ?? {}, theirs.drained ?? {}]) {
+    for (const [videoId, at] of Object.entries(list)) {
+      const seen = merged.drained[videoId];
+      if (!seen || newer(at, seen)) merged.drained[videoId] = at;
+    }
+  }
+  for (const [videoId, at] of Object.entries(merged.drained)) {
+    const stamp = merged.watched[videoId];
+    if (stamp !== undefined && !newer(stamp, at)) delete merged.watched[videoId];
+  }
+
   return merged;
 }
 
@@ -343,5 +370,13 @@ export function pruneProgress(state: ProgressState, now: Date, ttlDays = PROGRES
       changed = true;
     }
   }
+  // The hand-over marks, on the same terms: one older than any stamp it could
+  // hold back is no longer holding anything back.
+  for (const [videoId, at] of Object.entries(state.drained)) {
+    if (Date.parse(at) >= cutoff) continue;
+    delete state.drained[videoId];
+    changed = true;
+  }
+
   return changed;
 }
