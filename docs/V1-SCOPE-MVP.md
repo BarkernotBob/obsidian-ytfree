@@ -92,6 +92,7 @@ plugin and accepts `seek` and `rate` commands (`docs/player/index.html`,
 | M8 | Desktop "quality" resolve returns no HLS manifest: check it still happens after #32, close if not | Bug in a shipped feature | #5 |
 | M10 | Remove sign-in, cookie file and account sync | Isaiah, 2026-11-09 | #64 |
 | M11 | Subscribe inside YT Free; Takeout import instructions | Replaces sign-in | #65 |
+| M12 | Bot-check risk for store users near 0: request ceilings as tests, no burst on big imports, tier fall-through goes to the embed on any bot check, nothing resolved before Play, conservative first-run defaults. Builds on #31–#39 (merged) | Isaiah, 2026-11-09 | #66 |
 | M9 | Unfiled bugs Isaiah knows of | "Fix known bugs" | Isaiah to list |
 
 ## Post-MVP
