@@ -46,3 +46,17 @@ test("a new channel whose first fetch failed still fills the hub without a push"
   channel.failures = 0;
   assert.equal(isFirstSight(channel, []), false);
 });
+
+test("the Shorts check sends nothing for a video known to run over 3 minutes (GitHub #66 G4)", async () => {
+  const { shortsCheck } = await import("../src/subscriptions.ts");
+  const item = (durationSeconds: number | null | undefined, isShort: boolean | null = null, state = "new") =>
+    ({ isShort, durationSeconds, state }) as Parameters<typeof shortsCheck>[0];
+  assert.equal(shortsCheck(item(600)), "long", "a 10-minute video needs no request");
+  assert.equal(shortsCheck(item(181)), "long");
+  assert.equal(shortsCheck(item(180)), "ask");
+  assert.equal(shortsCheck(item(45)), "ask");
+  assert.equal(shortsCheck(item(null)), "ask", "YouTube would not say: ask");
+  assert.equal(shortsCheck(item(undefined)), "ask", "not known yet: asked, so a Short does not show meanwhile");
+  assert.equal(shortsCheck(item(45, true)), "done");
+  assert.equal(shortsCheck(item(45, null, "dismissed")), "skip");
+});

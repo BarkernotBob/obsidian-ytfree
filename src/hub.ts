@@ -57,6 +57,7 @@ import {
   restoreItem,
   sanitizeFileName,
   searchResultToItem,
+  shortsCheck,
   visibleItems,
 } from "./subscriptions";
 import type { DiskRead } from "./state-sync";
@@ -680,22 +681,27 @@ export class SubscriptionsStore {
       const expired = expireItems(this.state.items, this.settings().expiryDays, now);
       this.state.items = expired.items;
 
+      // Durations first: they decide which videos need the Shorts check.
+      await this.backfillDurations(DURATIONS_PER_POLL);
+
       // Telling a Short from a long-form video means reading a redirect status,
       // which needs Node's `https` — so it only happens on desktop, and it is
       // imported dynamically because that import throws at module load on iOS.
       // Mobile leaves `isShort` null, which already means "ask again later";
-      // the next desktop poll fills it in and nothing is misclassified.
+      // the next desktop poll fills it in and nothing is misclassified. A video
+      // known to run over 3 minutes is not asked (GitHub #66 G4).
       if (Platform.isDesktopApp) {
-        const { probeIsShort } = await import("./desktop/shorts-probe.ts");
-        const unprobed = this.state.items.filter((item) => item.isShort === null);
-        await mapLimit(unprobed, 2, async (item) => {
-          if (!governor.backgroundRoom()) return;
-          governor.count("probe");
-          item.isShort = await probeIsShort(item.videoId);
-        });
+        for (const item of this.state.items) if (shortsCheck(item) === "long") item.isShort = false;
+        const unprobed = this.state.items.filter((item) => shortsCheck(item) === "ask");
+        if (unprobed.length) {
+          const { probeIsShort } = await import("./desktop/shorts-probe.ts");
+          await mapLimit(unprobed, 2, async (item) => {
+            if (!governor.backgroundRoom()) return;
+            governor.count("probe");
+            item.isShort = await probeIsShort(item.videoId);
+          });
+        }
       }
-
-      await this.backfillDurations(DURATIONS_PER_POLL);
 
       this.state.lastPolledAt = now.toISOString();
       // Which kind of device polled, so the phone can leave it to the desktop.
