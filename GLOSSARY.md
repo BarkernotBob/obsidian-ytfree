@@ -319,11 +319,15 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 ### 2026-11-10 (one-tap YouTube player toggle, Isaiah)
 
 - MVP. A YouTube button on the phone's control bar, first on the right, swaps between our player
-  and YouTube's in one tap, keeping the second, speed and playing/paused. Phone only: the desktop
-  has yt-dlp for HD. It replaces "Back to our player" and the Quality menu's "YouTube player (HD)"
+  and YouTube's in one tap, keeping the second, speed and playing/paused. Phone, and desktop only
+  when yt-dlp is missing (18:21: with yt-dlp the desktop gets HD from it). It replaces "Back to our player" and the Quality menu's "YouTube player (HD)"
   ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)).
 - If iOS won't start YouTube's player with sound from our button, a tap on its play button is
   acceptable only once a fix is shown impossible; a muted start is not wanted.
+- No pin button on the player's control bar (Isaiah, 2026-11-10): the collapse arrow is enough,
+  and the room goes to the YouTube button. The pinned player is still on/off from the command
+  palette and the settings tab.
+
 
 ### 2026-11-10 (store defaults and helpers; Isaiah)
 

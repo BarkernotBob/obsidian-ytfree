@@ -28,9 +28,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   needs a tap to start with sound, try a muted start then unmute in `docs/player/index.html`.
 - 2026-11-10: Notes button on the phone folds the video again (it was folding for the keyboard,
   then reopening it in the same tap). Next: Isaiah's phone test.
-- 2026-11-10: why YouTube's player shows no ads: likely because our page starts the video itself
-  (Google requires click-to-play for embed ads). Keep every start scripted. Next: Isaiah's 3-step
-  device test ([RESEARCH-EMBED-ADS](docs/RESEARCH-EMBED-ADS.md)).
+- 2026-11-10: why YouTube's player shows no ads: Obsidian's iOS app (Safari got ads on the same
+  page, Obsidian 0 in 10; github.io, autoplay, framing ruled out). Not our code, so can't be locked
+  in; detect it with an "ad seen" log line (#91). ([RESEARCH-EMBED-ADS](docs/RESEARCH-EMBED-ADS.md))
 
 ## Shipped on main (scope doc = manual test)
 

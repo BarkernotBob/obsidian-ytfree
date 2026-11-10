@@ -951,6 +951,7 @@ export default class YtFreePlugin extends Plugin {
     // Registered only after layout is ready: during startup Obsidian fires
     // `create` for every file already in the vault, which would make the whole
     // vault look new and queue a transcript fetch for all of it.
+    this.app.workspace.onLayoutReady(() => void this.probeYtDlp());
     this.app.workspace.onLayoutReady(() => {
       this.registerEvent(
         this.app.vault.on("create", (file) => {
@@ -1916,8 +1917,7 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * Pinned player on or off, from the command palette or from the pin on the
-   * control bar.
+   * Pinned player on or off, from the command palette or the settings tab.
    *
    * One place, because the button and the command have to mean the same thing —
    * and because turning it *on* has a second half the command never had: a
@@ -1930,9 +1930,6 @@ export default class YtFreePlugin extends Plugin {
     await this.saveSettings();
     this.syncPinnedPlayers();
     this.rerenderMarkdownViews();
-    // A fenced player that survives the switch keeps its own pin button, and a
-    // stale pin is worse than no pin: it says the opposite of what is true.
-    for (const entry of this.players.values()) entry.player.setPinned(this.settings.pinnedPlayer);
     new Notice(`YT Free: pinned player ${this.settings.pinnedPlayer ? "on" : "off"}.`);
   }
 
@@ -4085,16 +4082,6 @@ export default class YtFreePlugin extends Plugin {
         // Two ways out of the player and into its settings: the whole screen,
         // and the four dials you actually change while something is playing.
         onOpenSettings: () => this.openSettingsTab(),
-        // The pinned player, from the player itself. A global switch, so it is
-        // on the bar rather than in the pop-out, where everything is per-video.
-        // A preview has no note to pin to, so the control is absent rather than
-        // dead.
-        pin: preview
-          ? undefined
-          : {
-              pinned: this.settings.pinnedPlayer,
-              onToggle: () => void this.togglePinnedPlayer(),
-            },
         // Always. A preview has no note to pin to and nowhere to download to,
         // but it has a video ID, and that is all a link is made of.
         share: (anchor, seconds) => this.shareMenuFor(anchor, videoId, seconds),
@@ -4129,8 +4116,9 @@ export default class YtFreePlugin extends Plugin {
             const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
             return mountYouTubePlayer(host, videoId, at, rate, onStatus, (line) => this.youtubeLog(line), play);
           },
-          // Phone only: the desktop has yt-dlp for HD (Isaiah, 2026-11-10).
-          youtubeToggle: mobile,
+          // The phone, and a desktop without yt-dlp: with yt-dlp the desktop
+          // gets HD from it (Isaiah, 2026-11-10).
+          youtubeToggle: mobile || this.ytDlpUnavailable,
           forgetStreamFailures: () => this.tierFailures.clear(videoId),
         },
         // Everything the reader set on this video that a rebuilt player would
@@ -4943,6 +4931,7 @@ export default class YtFreePlugin extends Plugin {
       ytDlpUnavailable: () => this.ytDlpUnavailable,
       markYtDlpUnavailable: () => {
         this.ytDlpUnavailable = true;
+        this.paintYouTubeToggles();
       },
       innertubeFast: async (videoId) => {
         const { resolveMobileStream } = await import("./mobile/innertube.ts");
@@ -5400,5 +5389,28 @@ export default class YtFreePlugin extends Plugin {
     this.ytDlpPath = null;
     this.ytDlpUnavailable = false;
     this.cache.clear();
+    void this.probeYtDlp();
+  }
+
+  /**
+   * Desktop: look for yt-dlp once, locally (`yt-dlp --version`, no network),
+   * so the YouTube button is on the bar from the start when it is missing.
+   */
+  private async probeYtDlp(): Promise<void> {
+    if (!Platform.isDesktopApp || this.ytDlpPath) return;
+    try {
+      const { findYtDlp } = await desktop();
+      this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
+      this.ytDlpUnavailable = false;
+    } catch {
+      this.ytDlpUnavailable = true;
+    }
+    this.paintYouTubeToggles();
+  }
+
+  /** Every open player's YouTube button follows whether yt-dlp is here. */
+  private paintYouTubeToggles(): void {
+    if (!Platform.isDesktopApp) return;
+    for (const entry of this.players.values()) entry.player.setYouTubeToggle(this.ytDlpUnavailable);
   }
 }
