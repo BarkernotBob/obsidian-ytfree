@@ -4044,7 +4044,12 @@ body.ytfree-immersive-open .ytfree-preview-close {
 .ytfree-controls-youtube {
   display: none;
 }
-.is-youtube .ytfree-controls-transport {
+/* Every control of ours drives the hidden <video>, so none shows: YouTube's
+   player has its own, and "Back to our player" is the way out. */
+.is-youtube .ytfree-controls {
+  grid-template-columns: 1fr;
+}
+.is-youtube .ytfree-controls > :not(.ytfree-controls-youtube) {
   display: none;
 }
 .is-youtube .ytfree-controls-youtube {

@@ -2777,6 +2777,7 @@ export class YtFreePlayer {
     this.ytOpening = true;
     this.setPendingPlay(false);
     this.video.pause();
+    this.togglePanel(false);
     try {
       const embed = await open(this.stage, at, this.playbackRate, (st) => this.onYouTubeStatus(st));
       if (this.destroyed) {
