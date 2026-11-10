@@ -115,6 +115,7 @@ import {
 import { DEFAULT_TIDY_DAYS, notesToTidy, sweepNote } from "./tidy";
 import type { SweepHub, TidyCandidate } from "./tidy";
 import { YtFreePlayer } from "./player";
+import { AllTiersFailedError, resolveByTier, TierFailures } from "./tier-failures";
 import type { NowPlaying } from "./player";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 import {
@@ -124,6 +125,7 @@ import {
   StreamCache,
   YtDlpMissingError,
 } from "./stream";
+import type { StreamProvider } from "./stream";
 
 /**
  * The single door into the desktop-only code.
@@ -745,6 +747,8 @@ export default class YtFreePlugin extends Plugin {
   /** yt-dlp was looked for and is not on this machine. Reset with `ytDlpPath`. */
   private ytDlpUnavailable = false;
   private noYtDlpNoticeShown = false;
+  /** Desktop stream tiers that failed per video (#43 part 1). */
+  private tierFailures = new TierFailures();
   private resumeTimer: number | null = null;
   private downloads = new Map<string, DownloadHandle>();
   /** undefined = not probed yet; null = probed and absent. */
@@ -5117,8 +5121,8 @@ export default class YtFreePlugin extends Plugin {
    * answer, or an HLS variant from it. InnerTube is asked for HD only on a
    * desktop without yt-dlp: its files mostly stop serving at about a minute.
    */
-  private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
-    return async (mode, forceRefresh) => {
+  private desktopProvider(videoId: string): StreamProvider {
+    return async (mode, forceRefresh, deadLink = false) => {
       const offline = this.settings.devOfflineHd?.trim();
       if (offline) return this.offlineStream(videoId, offline, mode);
       // HD lookups and recovery retries are automatic: none while paused. The
@@ -5127,6 +5131,11 @@ export default class YtFreePlugin extends Plugin {
       if (mode === "quality" || forceRefresh) botCheck.guard();
       else botCheck.guardPlay();
       if (forceRefresh) {
+        // A 360p link still inside its lifetime that is being replaced did not
+        // play: that tier failed for this video, and the next try moves on
+        // (#43 part 1). An expired link is just re-resolved on the same tier.
+        const live = this.cache.get(videoId, "fast");
+        if (deadLink && mode === "fast" && live?.tier) this.tierFailures.mark(videoId, live.tier);
         this.cache.invalidate(videoId);
         this.ytInfo.invalidate(videoId);
         forgetPlayer(videoId);
@@ -5158,38 +5167,42 @@ export default class YtFreePlugin extends Plugin {
     return { ...stream, expiresAt: forever };
   }
 
-  private async desktopFast(videoId: string): Promise<ResolvedStream> {
-    let ytDlpError: unknown = null;
-    if (!this.ytDlpUnavailable) {
-      try {
-        return fastStreamFromInfo(await this.ytDlpInfo(videoId));
-      } catch (err) {
-        // Tried once. Asking InnerTube next is more of what flagged the network.
-        if (isBotCheck(err)) throw err;
-        ytDlpError = err;
+  /**
+   * 360p on the desktop: the next stream tier that has not failed for this
+   * video (`choosePlayer`): yt-dlp if it is here, then our own stream. When
+   * both have failed, `AllTiersFailedError` (YouTube's player is #43 part 2).
+   */
+  private desktopFast(videoId: string): Promise<ResolvedStream> {
+    return resolveByTier({
+      videoId,
+      tiers: () => (this.ytDlpUnavailable ? ["own"] : ["yt-dlp", "own"]),
+      failures: this.tierFailures,
+      resolve: async (tier) =>
+        tier === "yt-dlp" ? fastStreamFromInfo(await this.ytDlpInfo(videoId)) : this.ownFast(videoId),
+      stop: isBotCheck,
+      onError: (_tier, err) => {
         // Probing four paths on every video is not worth it once it is known
-        // to be absent. A resolve failure is per-video, so it is not cached.
-        if (err instanceof YtDlpMissingError) this.ytDlpUnavailable = true;
-      }
-    }
+        // to be absent. Absence is not this video's failure, so not marked.
+        if (!(err instanceof YtDlpMissingError)) return true;
+        this.ytDlpUnavailable = true;
+        return false;
+      },
+    });
+  }
 
-    try {
-      const { resolveMobileStream } = await import("./mobile/innertube.ts");
-      const stream = await resolveMobileStream(videoId);
-      if (this.ytDlpUnavailable && !this.noYtDlpNoticeShown) {
-        this.noYtDlpNoticeShown = true;
-        new Notice(
-          "YT Free: yt-dlp isn't installed here, so videos play the way they do on the phone. " +
-            "Downloads and Smart Speed need yt-dlp.",
-          8000,
-        );
-      }
-      return stream;
-    } catch (fallbackError) {
-      // Report the yt-dlp failure when there was one: its message is the one
-      // the error box knows how to explain.
-      throw ytDlpError ?? fallbackError;
+  /** Our own stream's 360p, with the one-time "no yt-dlp" notice. */
+  private async ownFast(videoId: string): Promise<ResolvedStream> {
+    const { resolveMobileStream } = await import("./mobile/innertube.ts");
+    const stream = await resolveMobileStream(videoId);
+    if (this.ytDlpUnavailable && !this.noYtDlpNoticeShown) {
+      this.noYtDlpNoticeShown = true;
+      new Notice(
+        "YT Free: yt-dlp isn't installed here, so videos play the way they do on the phone. " +
+          "Downloads and Smart Speed need yt-dlp.",
+        8000,
+      );
     }
+    return stream;
   }
 
   /**
@@ -5212,8 +5225,11 @@ export default class YtFreePlugin extends Plugin {
       (d) => d.streamingWithFallback(fetchRange),
       () => fetchRange,
     );
-    // No yt-dlp: InnerTube is the only source there is.
-    if (this.ytDlpUnavailable) return resolveHdStream(videoId, undefined, fetch);
+    // No yt-dlp, or its links would not play for this video (#43 part 1):
+    // InnerTube is the source.
+    if (this.ytDlpUnavailable || this.tierFailures.failed(videoId).has("yt-dlp")) {
+      return resolveHdStream(videoId, undefined, fetch);
+    }
 
     const info = await this.ytDlpInfo(videoId);
     try {
@@ -5426,16 +5442,15 @@ export default class YtFreePlugin extends Plugin {
     const paused = isBotCheck(err) || err instanceof BotCheckPausedError ? botCheck.message() : null;
     const detail = paused
       ? paused
-      : err instanceof YtDlpMissingError
-        ? "yt-dlp is not installed here, and the phone's way of playing did not work for this video either. Install it with: brew install yt-dlp"
+      : err instanceof AllTiersFailedError || err instanceof YtDlpMissingError
+        ? new AllTiersFailedError().message
       : kind === "login"
         ? "This video needs a signed-in account — age-restricted or members-only."
         : kind === "network"
           ? "Could not reach YouTube. Check your connection and try again."
           : kind === "no-format"
             ? "YouTube offered no single-file format for this video."
-            : `Could not resolve this video. ${err instanceof Error ? err.message : String(err)}` +
-              (Platform.isDesktopApp ? " Updating yt-dlp (brew upgrade yt-dlp) usually fixes it." : "");
+            : `Could not resolve this video. ${err instanceof Error ? err.message : String(err)}`;
 
     const box = media.createDiv({ cls: "ytfree-fallback" });
     box.createDiv({ cls: "ytfree-fallback-text", text: detail });

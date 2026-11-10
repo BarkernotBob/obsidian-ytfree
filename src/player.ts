@@ -2990,7 +2990,7 @@ export class YtFreePlayer {
     if (Date.now() - this.lastRecoveryAt > 60_000) this.recoveries = 0;
 
     if (this.recoveries >= MAX_CONSECUTIVE_RECOVERIES) {
-      this.onStatus("Playback failed repeatedly. Reopen this note; if it keeps happening, try `brew upgrade yt-dlp`.");
+      this.onStatus("Playback failed repeatedly. Reopen this note to try again.");
       return;
     }
 
@@ -3008,7 +3008,9 @@ export class YtFreePlayer {
       }
       // Recover in whatever quality is currently playing, so a refresh never
       // silently downgrades the picture.
-      const stream = await this.provider(this.upgraded ? "quality" : "fast", true);
+      // HD dropping back to 360p is not the 360p link's failure.
+      const deadLink = !this.upgraded && !reason.startsWith("HD unavailable");
+      const stream = await this.provider(this.upgraded ? "quality" : "fast", true, deadLink);
       this.attach(stream, resumeAt, wasPlaying);
       this.onStatus(null);
     } catch (err) {

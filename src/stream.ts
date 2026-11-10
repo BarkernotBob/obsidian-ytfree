@@ -8,6 +8,8 @@
  * load on iOS. Nothing in here may import a Node builtin or `obsidian`.
  */
 
+import type { StreamTier } from "./youtube-player-rule";
+
 /** Treat a URL as expired this far ahead of its stated expiry. */
 export const EXPIRY_SAFETY_MARGIN_MS = 10 * 60 * 1000;
 
@@ -43,6 +45,8 @@ export interface ResolvedStream {
   virtual?: VirtualPlaylist;
   /** The picture height, when the resolver knows it. */
   height?: number;
+  /** Which stream tier gave this link (desktop 360p), for `TierFailures`. */
+  tier?: StreamTier;
 }
 
 /**
@@ -72,6 +76,11 @@ export interface VirtualPlaylist {
 export type StreamProvider = (
   mode: ResolveMode,
   forceRefresh: boolean,
+  /**
+   * The 360p link now playing failed (not HD dropping back): the tier that
+   * gave it is skipped for this video if the link had not expired (#43).
+   */
+  deadLink?: boolean,
 ) => Promise<ResolvedStream>;
 
 export class YtDlpMissingError extends Error {

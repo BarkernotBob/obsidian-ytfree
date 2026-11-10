@@ -19,6 +19,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-09 nightly: Subscribe inside YT Free on the channel screen and a search card's ⋯ menu,
   and step-by-step Takeout steps in the import dialog (#65, `src/subscribe.ts`).
 
+- 2026-11-10 (#43): a dead yt-dlp link now moves playback to our own stream; brew messages gone.
+  YouTube's player as the last tier waits for Isaiah's OK ([V1-SCOPE-PLAYER-FALLBACK](docs/V1-SCOPE-PLAYER-FALLBACK.md)).
+
 ## Shipped on main (scope doc = manual test)
 
 - HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));
