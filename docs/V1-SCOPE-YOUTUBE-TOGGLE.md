@@ -25,10 +25,9 @@ only once a sound autoplay is shown to be impossible. Visual mockup reviewed in 
    fallback tier (#43), as the way back ("Try our stream again").
 3. **State is kept both ways.** Same second (±1 s, YouTube reports once a second), same speed,
    same playing/paused state.
-   - Ours → YouTube, paused: the hosted page starts it muted, then on the first frame pauses,
-     goes back to that second and unmutes. Every start is scripted: the reader never has to make
-     the first tap on YouTube's own play button (a native click-to-play is what YouTube's embed
-     ad rules ask for, so it may bring ads; inference from Google's embed ad docs, not tested).
+   - Ours → YouTube, paused: YouTube's player opens cued at that second and does not start.
+     (A muted start-then-hold was tried to avoid a native first tap for ads reasons; dropped
+     2026-11-10 when the ads finding was retracted: cause of no ads in YT Free still unknown.)
    - Ours → YouTube, playing: it starts. If iOS refuses sound autoplay from a tap outside the
      frame, try to fix it first (the old way in was a Quality `<select>`, which may not count as
      a tap). Built: if not playing after 1.5 s, the page starts it muted, then unmutes once it plays.

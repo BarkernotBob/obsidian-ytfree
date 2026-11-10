@@ -20,7 +20,7 @@
  * and takes play, pause, seek and speed from it. Nothing is stored or sent
  * anywhere else.
  *
- *   ?v=<videoId>&t=<seconds>&rate=<speed>&play=0   (play=0: start, then hold paused)
+ *   ?v=<videoId>&t=<seconds>&rate=<speed>&play=0   (play=0: cue, don't start)
  */
 (function () {
   "use strict";
@@ -61,7 +61,7 @@
       videoId: id,
       width: "100%",
       height: "100%",
-      playerVars: { playsinline: 1, start: start, rel: 0, autoplay: 1, mute: hold ? 1 : 0 },
+      playerVars: { playsinline: 1, start: start, rel: 0, autoplay: autoplay ? 1 : 0 },
       events: {
         onReady: function () {
           if (rate !== 1) player.setPlaybackRate(rate);
@@ -79,21 +79,15 @@
   };
 
   /*
-   * Every start is scripted, never a tap on YouTube's own play button
-   * (Isaiah, 2026-11-10: the reader shouldn't have to tap it, and a scripted
-   * start is the player as he uses it today).
-   *
-   * - play=0 (the reader was paused): start muted, and on the first frame
-   *   pause, go back to the start second and unmute. A later tap on YouTube's
-   *   play only resumes it.
-   * - Otherwise: start with sound. If iOS refuses that (still not playing after
-   *   1.5 s), start muted, then unmute once it plays. Whether iOS lets the
-   *   unmute stand is what the iPhone test finds out; each step is logged.
+   * play=0 (the reader was paused): cued at the start second, nothing more.
+   * Otherwise start with sound. If iOS refuses that (still not playing after
+   * 1.5 s), start muted, then unmute once it plays, so the reader doesn't have
+   * to tap YouTube's play (Isaiah, 2026-11-10). Whether iOS lets the unmute
+   * stand is what the iPhone test finds out; each step is logged.
    */
-  var hold = !autoplay;
   var mutedStart = false;
   function startScripted() {
-    if (hold) { player.mute(); player.playVideo(); log("start muted to hold paused", {}); return; }
+    if (!autoplay) return;
     player.playVideo();
     setTimeout(function () {
       var st = player.getPlayerState();
@@ -105,14 +99,6 @@
     }, 1500);
   }
   function afterFirstFrame() {
-    if (hold) {
-      hold = false;
-      player.pauseVideo();
-      player.seekTo(start, true);
-      player.unMute();
-      log("held paused at start", {});
-      return true;
-    }
     if (mutedStart) {
       mutedStart = false;
       player.unMute();
