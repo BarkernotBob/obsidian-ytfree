@@ -102,7 +102,9 @@ import { governor } from "./request-governor.ts";
 import { pollIsDue } from "./subscriptions.ts";
 import type { VideoNote } from "./subscriptions.ts";
 import { offlineFormats } from "./offline-hd.ts";
-import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
+import { infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
+import { cachedProvider, desktopResolve } from "./play-provider.ts";
+import type { DesktopSources } from "./play-provider.ts";
 import type { YtDlpInfo } from "./ytdlp-info.ts";
 import type { NotePosition, SectionName } from "./sections";
 import {
@@ -5147,39 +5149,64 @@ export default class YtFreePlugin extends Plugin {
 
   /**
    * yt-dlp, via the stream cache, with the phone's path as the fallback.
-   * Desktop only.
-   *
-   * "fast" is yt-dlp when it is there. When it is missing, or fails, the
-   * desktop resolves the way the phone does (InnerTube, 360p) rather than
-   * showing an install message — a computer without Homebrew is still a
-   * computer that can play video.
-   *
-   * "quality" is the stitched HD stream built from the same `yt-dlp -J`
-   * answer, or an HLS variant from it. InnerTube is asked for HD only on a
-   * desktop without yt-dlp: its files mostly stop serving at about a minute.
+   * Desktop only. The rules live in `play-provider.ts`, where their request
+   * ceilings are tested (GitHub #66).
    */
   private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
-    return async (mode, forceRefresh) => {
-      const offline = this.settings.devOfflineHd?.trim();
-      if (offline) return this.offlineStream(videoId, offline, mode);
-      // HD lookups and recovery retries are automatic: none while paused. The
-      // first resolve is the reader pressing Play, and goes when a retry is
-      // due (GitHub #66: 1, 5, 10, 30 min, 1 h, 2 h, then every 6 h).
-      if (mode === "quality" || forceRefresh) botCheck.guard();
-      else botCheck.guardPlay();
-      if (forceRefresh) {
-        this.cache.invalidate(videoId);
+    const shared = cachedProvider(
+      videoId,
+      this.cache,
+      desktopResolve(videoId, this.desktopSources()),
+      () => {
         this.ytInfo.invalidate(videoId);
         forgetPlayer(videoId);
-      }
-      const cached = this.cache.get(videoId, mode);
-      if (cached) return cached;
+      },
+    );
+    return (mode, forceRefresh) => {
+      const offline = this.settings.devOfflineHd?.trim();
+      if (offline) return this.offlineStream(videoId, offline, mode);
+      return shared(mode, forceRefresh);
+    };
+  }
 
-      const stream = mode === "quality"
-        ? await this.desktopQuality(videoId)
-        : await this.desktopFast(videoId);
-      this.cache.set(videoId, stream);
-      return stream;
+  /** What `desktopResolve` asks: yt-dlp, InnerTube and the byte reader. */
+  private desktopSources(): DesktopSources {
+    return {
+      ytDlpInfo: (videoId) => this.ytDlpInfo(videoId),
+      ytDlpUnavailable: () => this.ytDlpUnavailable,
+      markYtDlpUnavailable: () => {
+        this.ytDlpUnavailable = true;
+      },
+      innertubeFast: async (videoId) => {
+        const { resolveMobileStream } = await import("./mobile/innertube.ts");
+        return resolveMobileStream(videoId);
+      },
+      innertubeHd: async (videoId, fetch) => {
+        const { resolveHdStream } = await import("./hd.ts");
+        return resolveHdStream(videoId, undefined, fetch);
+      },
+      ytDlpHd: async (videoId, formats, fetch) => {
+        const { resolveHdFromYtDlpFormats } = await import("./hd.ts");
+        return resolveHdFromYtDlpFormats(videoId, formats, undefined, fetch);
+      },
+      // Streamed and cancellable on desktop (GitHub #23); `requestUrl` if the
+      // desktop code will not load.
+      rangeFetch: async () => {
+        const { fetchRange } = await import("./hd.ts");
+        return desktop().then(
+          (d) => d.streamingWithFallback(fetchRange),
+          () => fetchRange,
+        );
+      },
+      onPlayingWithoutYtDlp: () => {
+        if (this.noYtDlpNoticeShown) return;
+        this.noYtDlpNoticeShown = true;
+        new Notice(
+          "YT Free: yt-dlp isn't installed here, so videos play the way they do on the phone. " +
+            "Downloads and Smart Speed need yt-dlp.",
+          8000,
+        );
+      },
     };
   }
 
@@ -5199,40 +5226,6 @@ export default class YtFreePlugin extends Plugin {
     return { ...stream, expiresAt: forever };
   }
 
-  private async desktopFast(videoId: string): Promise<ResolvedStream> {
-    let ytDlpError: unknown = null;
-    if (!this.ytDlpUnavailable) {
-      try {
-        return fastStreamFromInfo(await this.ytDlpInfo(videoId));
-      } catch (err) {
-        // Tried once. Asking InnerTube next is more of what flagged the network.
-        if (isBotCheck(err)) throw err;
-        ytDlpError = err;
-        // Probing four paths on every video is not worth it once it is known
-        // to be absent. A resolve failure is per-video, so it is not cached.
-        if (err instanceof YtDlpMissingError) this.ytDlpUnavailable = true;
-      }
-    }
-
-    try {
-      const { resolveMobileStream } = await import("./mobile/innertube.ts");
-      const stream = await resolveMobileStream(videoId);
-      if (this.ytDlpUnavailable && !this.noYtDlpNoticeShown) {
-        this.noYtDlpNoticeShown = true;
-        new Notice(
-          "YT Free: yt-dlp isn't installed here, so videos play the way they do on the phone. " +
-            "Downloads and Smart Speed need yt-dlp.",
-          8000,
-        );
-      }
-      return stream;
-    } catch (fallbackError) {
-      // Report the yt-dlp failure when there was one: its message is the one
-      // the error box knows how to explain.
-      throw ytDlpError ?? fallbackError;
-    }
-  }
-
   /**
    * The one `yt-dlp -J` for a video (GitHub #32), shared by 360p, HD, the
    * transcript and Smart Speed, and kept until its links expire. Always
@@ -5245,28 +5238,6 @@ export default class YtFreePlugin extends Plugin {
     return this.ytInfo.get(videoId, () => fetchYtDlpInfo(videoId, ytDlpPath), (info) => infoExpiresAt(info));
   }
 
-  private async desktopQuality(videoId: string): Promise<ResolvedStream> {
-    const { fetchRange, resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
-    // Streamed and cancellable on desktop (GitHub #23); `requestUrl` if the
-    // desktop code will not load.
-    const fetch = await desktop().then(
-      (d) => d.streamingWithFallback(fetchRange),
-      () => fetchRange,
-    );
-    // No yt-dlp: InnerTube is the only source there is.
-    if (this.ytDlpUnavailable) return resolveHdStream(videoId, undefined, fetch);
-
-    const info = await this.ytDlpInfo(videoId);
-    try {
-      return await resolveHdFromYtDlpFormats(videoId, info.formats ?? [], undefined, fetch);
-    } catch (err) {
-      // The odd video with an HLS ladder and no MP4 pair. No new request.
-      const hls = hlsStreamFromInfo(info);
-      if (hls) return hls;
-      throw err;
-    }
-  }
-
   /**
    * InnerTube, via the same cache. Mobile only.
    *
@@ -5274,27 +5245,19 @@ export default class YtFreePlugin extends Plugin {
    * this phone is turned on, and is the stitched stream (`adaptive.ts`).
    */
   private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
-    return async (mode, forceRefresh) => {
-      if (mode === "quality" || forceRefresh) botCheck.guard();
-      else botCheck.guardPlay();
-      if (forceRefresh) {
-        this.cache.invalidate(videoId);
-        forgetPlayer(videoId);
-      }
-      const cached = this.cache.get(videoId, mode);
-      if (cached) return cached;
-
-      let stream: ResolvedStream;
-      if (mode === "quality") {
-        const { resolvePhoneHdStream } = await import("./hd.ts");
-        stream = await resolvePhoneHdStream(videoId);
-      } else {
+    return cachedProvider(
+      videoId,
+      this.cache,
+      async (mode) => {
+        if (mode === "quality") {
+          const { resolvePhoneHdStream } = await import("./hd.ts");
+          return resolvePhoneHdStream(videoId);
+        }
         const { resolveMobileStream } = await import("./mobile/innertube.ts");
-        stream = await resolveMobileStream(videoId);
-      }
-      this.cache.set(videoId, stream);
-      return stream;
-    };
+        return resolveMobileStream(videoId);
+      },
+      () => forgetPlayer(videoId),
+    );
   }
 
   /**
