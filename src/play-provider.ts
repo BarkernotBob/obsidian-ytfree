@@ -46,6 +46,23 @@ export function cachedProvider(
   };
 }
 
+/**
+ * Where a phone stream comes from: InnerTube. "fast" is the 360p single file;
+ * "quality" is only asked for when HD on this phone is turned on, and is the
+ * stitched stream (`adaptive.ts`). Loaded on first use: neither module is
+ * needed until something plays.
+ */
+export function mobileResolve(videoId: string): (mode: ResolveMode) => Promise<ResolvedStream> {
+  return async (mode) => {
+    if (mode === "quality") {
+      const { resolvePhoneHdStream } = await import("./hd.ts");
+      return resolvePhoneHdStream(videoId);
+    }
+    const { resolveMobileStream } = await import("./mobile/innertube.ts");
+    return resolveMobileStream(videoId);
+  };
+}
+
 /** Where a desktop stream comes from. Supplied by the plugin; faked in tests. */
 export interface DesktopSources {
   /** The one kept `yt-dlp -J` answer for the video. */

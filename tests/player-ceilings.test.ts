@@ -137,9 +137,10 @@ registerHooks({
     return next(specifier, context);
   },
   // player.ts uses constructor parameter properties, which Node's type
-  // stripping refuses. esbuild (already the build tool) compiles that one file.
+  // stripping refuses. esbuild (already the build tool) compiles the plugin's
+  // own sources instead, so the next file to use one does not break this test.
   load(url, context, next) {
-    if (!url.endsWith("/src/player.ts")) return next(url, context);
+    if (!url.startsWith("file:") || !url.includes("/src/") || !url.endsWith(".ts")) return next(url, context);
     const source = readFileSync(new URL(url), "utf8");
     const { code } = transformSync(source, { loader: "ts", format: "esm", target: "es2022" });
     return { format: "module", source: code, shortCircuit: true };
@@ -147,13 +148,14 @@ registerHooks({
 });
 
 const { YtFreePlayer } = await import("../src/player.ts");
-const { cachedProvider, desktopResolve } = await import("../src/play-provider.ts");
+const { cachedProvider, desktopResolve, mobileResolve } = await import("../src/play-provider.ts");
 const { InfoCache } = await import("../src/info-cache.ts");
 const { StreamCache } = await import("../src/stream.ts");
 const { infoExpiresAt } = await import("../src/ytdlp-info.ts");
 const { resolveHdFromYtDlpFormats } = await import("../src/hd.ts");
-const { resolveMobileStream } = await import("../src/mobile/innertube.ts");
 const { forgetPlayer } = await import("../src/innertube.ts");
+const { resolveMobileStream } = await import("../src/mobile/innertube.ts");
+const { YtDlpMissingError } = await import("../src/stream.ts");
 const { botCheck } = await import("../src/bot-check.ts");
 const { replayFetch } = await import("../tools/fixture-format.ts");
 type YtDlpInfo = import("../src/ytdlp-info.ts").YtDlpInfo;
@@ -178,8 +180,10 @@ interface Count {
 }
 
 /** A desktop provider wired as the plugin wires it, with yt-dlp and the network faked. */
-function desktopRig(): { provider: StreamProvider; count: Count } {
+function desktopRig(withYtDlp = true): { provider: StreamProvider; count: Count; notices: () => number } {
   const count: Count = { ytDlp: 0, reads: 0, innertubeFast: 0, innertubeHd: 0 };
+  let unavailable = false;
+  let notices = 0;
   const infoCache = new InfoCache<YtDlpInfo>(() => Date.now(), 15);
   const replay = replayFetch(BYTES);
   const reads: FetchRange = (url, start, end, ua, io) => {
@@ -193,14 +197,19 @@ function desktopRig(): { provider: StreamProvider; count: Count } {
       ytDlpInfo: (id) =>
         infoCache.get(id, () => {
           count.ytDlp++;
+          if (!withYtDlp) return Promise.reject(new YtDlpMissingError());
           // A real run takes a while; concurrent asks must share it.
           return new Promise((resolve) => setTimeout(() => resolve(structuredClone(info)), 5));
         }, infoExpiresAt),
-      ytDlpUnavailable: () => false,
-      markYtDlpUnavailable: () => assert.fail("yt-dlp is there"),
+      ytDlpUnavailable: () => unavailable,
+      markYtDlpUnavailable: () => {
+        assert.equal(withYtDlp, false, "yt-dlp is there");
+        unavailable = true;
+      },
       innertubeFast: () => {
         count.innertubeFast++;
-        return Promise.reject(new Error("not on a desktop with yt-dlp"));
+        if (withYtDlp) return Promise.reject(new Error("not on a desktop with yt-dlp"));
+        return resolveMobileStream(VIDEO);
       },
       innertubeHd: () => {
         count.innertubeHd++;
@@ -208,11 +217,15 @@ function desktopRig(): { provider: StreamProvider; count: Count } {
       },
       ytDlpHd: (id, formats, fetch) => resolveHdFromYtDlpFormats(id, formats, undefined, fetch),
       rangeFetch: () => Promise.resolve(reads),
-      onPlayingWithoutYtDlp: () => assert.fail("yt-dlp is there"),
+      onPlayingWithoutYtDlp: () => {
+        assert.equal(withYtDlp, false, "yt-dlp is there");
+        notices++;
+      },
     }),
     () => infoCache.invalidate(VIDEO),
   );
-  return { provider, count };
+  activity = () => JSON.stringify([count, hlsCreated(), requestUrlSent.length]);
+  return { provider, count, notices: () => notices };
 }
 
 function mount(provider: StreamProvider): InstanceType<typeof YtFreePlayer> {
@@ -221,8 +234,23 @@ function mount(provider: StreamProvider): InstanceType<typeof YtFreePlayer> {
   return new YtFreePlayer(host as unknown as HTMLElement, provider, () => {}, undefined, {});
 }
 
-/** Let resolves, header reads and the player's follow-ups settle. */
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 60));
+/**
+ * Let resolves, header reads and the player's follow-ups settle: wait until
+ * nothing has been sent or attached for several ticks in a row, so a slow CI
+ * runner gets as long as it needs rather than a fixed sleep.
+ */
+let activity = (): string => "";
+async function settle(): Promise<void> {
+  const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
+  let last = activity();
+  let quiet = 0;
+  for (let i = 0; i < 250 && quiet < 4; i++) {
+    await tick();
+    const now = activity();
+    quiet = now === last ? quiet + 1 : 0;
+    last = now;
+  }
+}
 
 /** The poster tap: resolve, then play (main.ts `deferMobileLoad`). */
 async function pressPlay(player: InstanceType<typeof YtFreePlayer>, hd: boolean, startInHd = false): Promise<void> {
@@ -246,7 +274,7 @@ test.afterEach(() => {
   g.__ytfreeHls = 0;
   botCheck.clear();
 });
-test.after(() => void win.happyDOM.abort().then(() => win.close()));
+test.after(() => win.happyDOM.abort().then(() => win.close()));
 
 // ---- Desktop ----------------------------------------------------------------
 
@@ -334,20 +362,26 @@ test("toggling Quality before Play does not add a lookup", async () => {
   assert.ok(count.reads <= 2, `${count.reads} reads after toggles`);
 });
 
+test("Play on a desktop without yt-dlp: one InnerTube player call, asked once for yt-dlp", async () => {
+  forgetPlayer(VIDEO);
+  const { provider, count, notices } = desktopRig(false);
+  const player = track(mount(provider));
+  await settle();
+  assert.equal(requestUrlSent.length, 0, "mounting costs nothing");
+  await pressPlay(player, false);
+  assert.equal(count.ytDlp, 1, "yt-dlp looked for once");
+  assert.equal(count.innertubeFast, 1);
+  assert.equal(requestUrlSent.filter((u) => u.includes("/player")).length, 1);
+  assert.equal(notices(), 1, "says why it plays the phone's way");
+});
+
 // ---- Phone (own stream) ------------------------------------------------------
 
 test("Play on the phone, HD off: one InnerTube player call", async () => {
   g.__ytfreeMobile = true;
   forgetPlayer(VIDEO);
-  const provider = cachedProvider(
-    VIDEO,
-    new StreamCache(),
-    (mode) => {
-      assert.equal(mode, "fast", "HD on this phone is off");
-      return resolveMobileStream(VIDEO);
-    },
-    () => forgetPlayer(VIDEO),
-  );
+  const provider = cachedProvider(VIDEO, new StreamCache(), mobileResolve(VIDEO), () => forgetPlayer(VIDEO));
+  activity = () => JSON.stringify([hlsCreated(), requestUrlSent.length]);
   const player = track(mount(provider));
   await settle();
   assert.equal(requestUrlSent.length, 0, "mounting costs nothing");

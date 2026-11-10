@@ -66,11 +66,11 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
   To compare, extract `app.css` from two releases' `obsidian-X.asar.gz` (GitHub releases of
   obsidianmd/obsidian-releases) and render with `tools/preview-sheet-harness.mjs`.
 - `setup.sh` edits `community-plugins.json` only while Obsidian is closed (it rewrites it from memory).
-- `npm run smoke` is a once-a-day canary (`tools/smoke.mjs`, stamps in `~/.cache/ytfree/`).
-  Every live tool in `tools/` claims its own daily run through `tools/live-budget.mjs`.
+- `npm run smoke`: daily canary; every live tool claims its daily run via `tools/live-budget.mjs`.
 - A bot check pauses all automatic YouTube requests until a Play retry succeeds (retries at 1, 5,
   10, 30 min, 1 h, 2 h, then 6 h; `src/bot-check.ts`, stored in `localStorage` under
-  `ytfree-bot-check-until`). Clear that key to end a pause early.  Offline HD player: `"devOfflineHd": "<folder>"` in data.json, folder from `tools/make-offline-hd.mjs`.
+  `ytfree-bot-check-until`). Clear that key to end a pause early.
+- Offline HD player: `"devOfflineHd": "<folder>"` in data.json, folder from `tools/make-offline-hd.mjs`.
 - Kept answers: `localStorage` `ytfree-ytdlp-answers` / `ytfree-player-answers`. Requests: `src/request-governor.ts`.
 - `src/player.ts` uses constructor parameter properties, which Node's type stripping rejects; tests
   that import it compile it with esbuild in a load hook (see `tests/player-ceilings.test.ts`).

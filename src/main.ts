@@ -103,7 +103,7 @@ import { pollIsDue } from "./subscriptions.ts";
 import type { VideoNote } from "./subscriptions.ts";
 import { offlineFormats } from "./offline-hd.ts";
 import { infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
-import { cachedProvider, desktopResolve } from "./play-provider.ts";
+import { cachedProvider, desktopResolve, mobileResolve } from "./play-provider.ts";
 import type { DesktopSources } from "./play-provider.ts";
 import type { YtDlpInfo } from "./ytdlp-info.ts";
 import type { NotePosition, SectionName } from "./sections";
@@ -5153,7 +5153,9 @@ export default class YtFreePlugin extends Plugin {
    * ceilings are tested (GitHub #66).
    */
   private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
-    const shared = cachedProvider(
+    const offline = this.settings.devOfflineHd?.trim();
+    if (offline) return (mode) => this.offlineStream(videoId, offline, mode);
+    return cachedProvider(
       videoId,
       this.cache,
       desktopResolve(videoId, this.desktopSources()),
@@ -5162,11 +5164,6 @@ export default class YtFreePlugin extends Plugin {
         forgetPlayer(videoId);
       },
     );
-    return (mode, forceRefresh) => {
-      const offline = this.settings.devOfflineHd?.trim();
-      if (offline) return this.offlineStream(videoId, offline, mode);
-      return shared(mode, forceRefresh);
-    };
   }
 
   /** What `desktopResolve` asks: yt-dlp, InnerTube and the byte reader. */
@@ -5238,26 +5235,9 @@ export default class YtFreePlugin extends Plugin {
     return this.ytInfo.get(videoId, () => fetchYtDlpInfo(videoId, ytDlpPath), (info) => infoExpiresAt(info));
   }
 
-  /**
-   * InnerTube, via the same cache. Mobile only.
-   *
-   * "fast" is the 360p single file. "quality" is only asked for when HD on
-   * this phone is turned on, and is the stitched stream (`adaptive.ts`).
-   */
+  /** InnerTube, via the same cache. Mobile only. */
   private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
-    return cachedProvider(
-      videoId,
-      this.cache,
-      async (mode) => {
-        if (mode === "quality") {
-          const { resolvePhoneHdStream } = await import("./hd.ts");
-          return resolvePhoneHdStream(videoId);
-        }
-        const { resolveMobileStream } = await import("./mobile/innertube.ts");
-        return resolveMobileStream(videoId);
-      },
-      () => forgetPlayer(videoId),
-    );
+    return cachedProvider(videoId, this.cache, mobileResolve(videoId), () => forgetPlayer(videoId));
   }
 
   /**
