@@ -13,10 +13,15 @@ a scripted play" ([Ads on embedded videos](https://support.google.com/youtube/an
 The page sets `autoplay: 1` and also starts playback with `player.playVideo()` when the plugin
 asks. Neither is a click on YouTube's own play button.
 
-Status: **confirmed by device test (2026-11-10, one video).** Same hosted page, same video
-(`dQw4w9WgXcQ`): started by our page inside Obsidian, no ads; opened in Arc where the browser
-blocked autoplay so Isaiah clicked YouTube's play button, ads (with the ad blocker off). So the
-github.io site is ad-eligible, and the only difference was who started the video.
+Status: **open (2026-11-10, retracted the same day).** A device test looked like a match: on
+the same hosted page and video, a click on YouTube's play button in Arc showed ads, and Obsidian
+showed none. But Isaiah taps YouTube's play button inside Obsidian too, so "our page starts the
+video" doesn't explain Obsidian. github.io is ruled out (the page shows ads in Arc).
+
+Leading guess (unverified): inside Obsidian the page is framed by the app (`app://obsidian.md`
+on desktop, `capacitor://localhost` on iOS), not by a website, and YouTube may not serve ads when
+the top-level page isn't an https site. Next: read `youtube-player-log.txt` (state changes
+before the tap), then an A/B in Obsidian with autoplay off.
 
 ## Facts (sourced)
 
@@ -43,8 +48,8 @@ What our code does (checked in `main` 641e205):
 
 ## The three earlier guesses, re-rated
 
-1. **Scripted start (autoplay / playVideo): likely the cause.** F1 directly; F5 and F6 show
-   YouTube treats scripted plays differently from native-button plays.
+1. **Scripted start (autoplay / playVideo): doesn't explain Obsidian** (Isaiah taps play there).
+   May still matter where the start really is scripted.
 2. **github.io site rating: ruled out.** The same github.io page showed ads after a click on
    YouTube's play button (device test, 2026-11-10).
 3. **Safari / WebKit cookie blocking: unlikely to be the cause.** Per F7, losing cookies makes ads
@@ -94,6 +99,6 @@ Don't open `youtube.com/embed/<id>` directly: with no referrer it shows Error 15
 
 Reading the results:
 
-- Step 1 no ads, step 2 ads after a click: the scripted start is why (the 2026-11-10 result).
+- Step 1 no ads, step 2 ads after a click: the 2026-11-10 result. Cause still open (see Status).
 - Ads in step 1: something changed (Google's rules, or our page stopped starting the video). See
   the table above.
