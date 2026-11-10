@@ -6,7 +6,7 @@
  * hands back the second the reader left off when it closes.
  */
 
-import { App, Modal } from "obsidian";
+import { App, Modal, setIcon } from "obsidian";
 import { parsePlayerMessage, PLAYER_ORIGIN, playerErrorText, playerPageUrl, qualityLabel } from "../youtube-player.ts";
 import { formatTimestamp } from "../format.ts";
 
@@ -30,7 +30,14 @@ class YouTubePlayerModal extends Modal {
   onOpen(): void {
     this.modalEl.addClass("ytfree-ytplayer-modal");
     this.contentEl.empty();
-    this.line = this.contentEl.createDiv({ cls: "ytfree-ytplayer-line", text: "Opening YouTube's player…" });
+    // Our own ✕, in the row under the status bar. Obsidian's sits in the
+    // corner, under the clock and battery, and its class name has changed
+    // between releases (.modal-close-button → .modal-header-button).
+    const top = this.contentEl.createDiv({ cls: "ytfree-ytplayer-top" });
+    this.line = top.createDiv({ cls: "ytfree-ytplayer-line", text: "Opening YouTube's player…" });
+    const close = top.createEl("button", { cls: "ytfree-ytplayer-close", attr: { "aria-label": "Close YouTube's player" } });
+    setIcon(close, "x");
+    close.addEventListener("click", () => this.close());
     this.frame = this.contentEl.createEl("iframe", {
       cls: "ytfree-ytplayer-frame",
       attr: {

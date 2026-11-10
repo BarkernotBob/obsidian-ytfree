@@ -4028,15 +4028,35 @@ body.ytfree-immersive-open .ytfree-preview-close {
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
-.modal.ytfree-ytplayer-modal .modal-close-button {
-  top: calc(env(safe-area-inset-top) + 2px);
-  color: #fff;
+/* Obsidian's own ✕ sits under the status bar here; ours is in the top row. */
+.modal.ytfree-ytplayer-modal .modal-close-button,
+.modal.ytfree-ytplayer-modal .modal-header {
+  display: none;
+}
+.ytfree-ytplayer-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 12px;
 }
 .ytfree-ytplayer-line {
+  flex: 1;
   color: #bbb;
   font-size: var(--font-ui-smaller);
-  padding: 8px 48px 8px 12px;
   font-variant-numeric: tabular-nums;
+}
+.ytfree-ytplayer-close {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .ytfree-ytplayer-frame {
   flex: 1;
