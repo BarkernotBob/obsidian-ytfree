@@ -64,6 +64,10 @@ replay test runs the action against the fixtures and fails CI if the count goes 
 | Recovery after a stream dies | 1 fresh lookup per video per Play |
 | Takeout import of any size | 0 at import; then 1 feed per channel per poll (§3) |
 
+Where they are tested: single calls in `tests/request-ceilings.test.ts` and `tests/replay.test.ts`;
+the Play and HD flows end to end (the real player, provider and HD resolver, only the network
+faked) in `tests/player-ceilings.test.ts`, which drives the provider in `src/play-provider.ts`.
+
 ## 3. Feeds: measured, no pacing needed
 
 Isaiah asked to torture-test feeds before adding any pacing (2026-11-09). `tools/feed-torture.ts`
@@ -122,6 +126,9 @@ hourly cap still does not count feeds. One home IP on one day; a shared IP (VPN,
 - 4b: a bot check seen while still waiting (a request already in flight) does not move to the next
   wait. Until #43 lands, a Play between retries shows the pause message with the next retry time.
 - Older builds stored a plain end time for the pause; it is honoured until it passes.
+- The provider behind Play moved out of `main.ts` into `src/play-provider.ts` (no Obsidian
+  imports), so the Play/HD ceilings run against the code the plugin runs. The player test uses
+  happy-dom for the DOM and stubs hls.js, so segment loading during playback is not counted there.
 
 ## Manual test (for Isaiah)
 
