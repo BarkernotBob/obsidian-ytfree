@@ -210,7 +210,12 @@ export interface QuickPanelOptions {
    * Phone only (#25): YouTube's own player, full-screen, from the second given
    * at the speed given. Resolves with where the reader left off.
    */
-  youtubePlayer?: (at: number, rate: number) => Promise<number | null>;
+  youtubePlayer?: (host: HTMLElement, at: number, rate: number) => Promise<YouTubeEmbedHandle>;
+}
+
+/** YouTube's player mounted over the picture; `close` answers where it got to. */
+export interface YouTubeEmbedHandle {
+  close(): number;
 }
 
 /** The lock screen's three fields. */
@@ -370,6 +375,11 @@ export class YtFreePlayer {
    * `capacitor://localhost`, and the native player needs none.
    */
   private nativeHls = false;
+  /** Where the picture is: the host YouTube's player mounts over. */
+  private stage!: HTMLElement;
+  /** YouTube's own player, while it stands in for ours (#25). */
+  private ytEmbed: YouTubeEmbedHandle | null = null;
+  private ytOpening = false;
   /** Survives source swaps; the <video> element resets these on every load. */
   private playbackRate = 1;
   /** True only while playback is paused *by us* because the user is typing. */
@@ -530,6 +540,7 @@ export class YtFreePlayer {
     // to move the note. Mobile already has such a box (the fixed-aspect media
     // host); the desktop gets a bare one that is exactly the video's size.
     const stage = options.mediaHost ?? container.createDiv({ cls: "ytfree-stage" });
+    this.stage = stage;
     this.video = stage.createEl("video", {
       cls: "ytfree-video",
       attr: { controls: "", playsinline: "", preload: "metadata" },
@@ -1055,11 +1066,20 @@ export class YtFreePlayer {
     const groups = {
       left: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side ytfree-controls-left" }),
       mid: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-transport" }),
+      // Stands in for the transport while YouTube's player has the picture:
+      // its own controls are inside it, and ours would drive a hidden video.
+      yt: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-youtube" }),
       right: bar.createDiv({
         cls: "ytfree-controls-group ytfree-controls-side ytfree-controls-right",
       }),
     };
     const host = (side: "left" | "mid" | "right"): HTMLElement => groups[side];
+    const ytBack = groups.yt.createEl("button", {
+      cls: "ytfree-yt-back",
+      text: "Back to our player",
+      attr: { "aria-label": "Close YouTube's player and go back to ours" },
+    });
+    ytBack.addEventListener("click", () => this.closeYouTubePlayer());
 
     const button = (
       side: "left" | "mid" | "right",
@@ -1473,8 +1493,14 @@ export class YtFreePlayer {
       el.createEl("option", { text: "360p", value: "sd" });
       if (quick.youtubePlayer) el.createEl("option", { text: "YouTube player (HD)", value: "yt" });
       el.addEventListener("change", () => {
-        if (el.value === "yt") void this.openYouTubePlayer(quick.youtubePlayer!);
-        else this.setQuality(el.value === "hd");
+        if (el.value === "yt") {
+          void this.openYouTubePlayer(quick.youtubePlayer!);
+          return;
+        }
+        // Leaving YouTube's player is a quality pick too: back to ours, then
+        // at whatever was picked.
+        this.closeYouTubePlayer();
+        this.setQuality(el.value === "hd");
       });
       this.qualitySelect = el;
       this.paintQualityChoice();
@@ -2702,19 +2728,42 @@ export class YtFreePlayer {
    * Hand the video to YouTube's own player and take it back where the reader
    * left off. Not a quality pick: the row goes back to what it said.
    */
-  private async openYouTubePlayer(open: (at: number, rate: number) => Promise<number | null>): Promise<void> {
-    this.paintQualityChoice();
+  private async openYouTubePlayer(
+    open: (host: HTMLElement, at: number, rate: number) => Promise<YouTubeEmbedHandle>,
+  ): Promise<void> {
+    if (this.ytEmbed || this.ytOpening) return;
+    this.ytOpening = true;
     this.video.pause();
-    const at = await open(this.video.currentTime, this.playbackRate);
-    if (this.destroyed || at === null) return;
-    this.video.currentTime = at;
+    try {
+      const embed = await open(this.stage, this.video.currentTime, this.playbackRate);
+      if (this.destroyed) {
+        embed.close();
+        return;
+      }
+      this.ytEmbed = embed;
+      this.container.addClass("is-youtube");
+    } finally {
+      this.ytOpening = false;
+      this.paintQualityChoice();
+    }
+  }
+
+  /** Back to our player, paused where YouTube's got to. */
+  private closeYouTubePlayer(): void {
+    const embed = this.ytEmbed;
+    if (!embed) return;
+    this.ytEmbed = null;
+    this.container.removeClass("is-youtube");
+    const at = embed.close();
+    if (!this.destroyed && at > 0) this.video.currentTime = at;
+    this.paintQualityChoice();
   }
 
   /** The Quality row follows the player, including a pick it was rebuilt with. */
   private paintQualityChoice(): void {
     const el = this.qualitySelect;
     if (!el) return;
-    el.value = (this.wantHd ?? this.options.quick?.hdDefault ?? true) ? "hd" : "sd";
+    el.value = this.ytEmbed ? "yt" : (this.wantHd ?? this.options.quick?.hdDefault ?? true) ? "hd" : "sd";
     el.disabled = this.local;
     el.title = this.local ? "Playing the downloaded copy" : "";
   }
@@ -3218,6 +3267,8 @@ export class YtFreePlayer {
     // Before the flag, or the class stays on `document.body` — which outlives
     // this player — and every note in the vault keeps its scrolling locked.
     this.setImmersive(false);
+    this.ytEmbed?.close();
+    this.ytEmbed = null;
     this.destroyed = true;
     if (this.qualityTimer !== null) window.clearTimeout(this.qualityTimer);
     this.unhushNativeControls();
