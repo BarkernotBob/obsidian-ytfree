@@ -25,12 +25,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 - 2026-11-10: Notes button on the phone folds the video again (it was folding for the keyboard,
   then reopening it in the same tap). Next: Isaiah's phone test.
-- 2026-11-10: why YouTube's player shows no ads: cause OPEN (not autoplay: Isaiah taps play in Obsidian too;
-  github.io ruled out). Next: read youtube-player-log.txt, A/B autoplay off. Guard #91
-  ([RESEARCH-EMBED-ADS](docs/RESEARCH-EMBED-ADS.md)).
-
-## Shipped on main (scope doc = manual test)
-
+- 2026-11-10: why YouTube's player shows no ads: Obsidian's iOS app (Safari got ads on the same
+  page, Obsidian 0 in 10; github.io, autoplay, framing ruled out). Not our code, so can't be locked
+  in; detect it with an "ad seen" log line (#91). ([RESEARCH-EMBED-ADS](docs/RESEARCH-EMBED-ADS.md))
 - HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));
   ~55 s stutter and jumps ([V1-SCOPE-HD-STUTTER-AND-SEEK](docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md), #23/#24);
   desktop HD from yt-dlp's files; per-video quality switch ([V1-SCOPE-QUALITY-SWITCH](docs/V1-SCOPE-QUALITY-SWITCH.md)).
