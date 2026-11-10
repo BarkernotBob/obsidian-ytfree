@@ -4364,7 +4364,7 @@ export default class YtFreePlugin extends Plugin {
           // and on the phone also a Quality pick for HD on any video (#25).
           youtubePlayer: async (host, at, rate, onStatus) => {
             const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
-            return mountYouTubePlayer(host, videoId, at, rate, onStatus);
+            return mountYouTubePlayer(host, videoId, at, rate, onStatus, (line) => this.youtubeLog(line));
           },
           youtubeInMenu: mobile,
           forgetStreamFailures: () => this.tierFailures.clear(videoId),
@@ -5576,6 +5576,26 @@ export default class YtFreePlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  private youtubeLogWrites: Promise<void> = Promise.resolve();
+
+  /**
+   * One line of the YouTube-player log (GitHub #25), in the plugin's folder so
+   * it syncs off the phone: what iOS and YouTube did when the app went to the
+   * background. Writes go one at a time; the file is started over past 200 KB.
+   */
+  youtubeLog(line: string): void {
+    this.debug(`youtube player: ${line}`);
+    const path = `${this.manifest.dir ?? ".obsidian/plugins/ytfree"}/youtube-player-log.txt`;
+    const adapter = this.app.vault.adapter;
+    this.youtubeLogWrites = this.youtubeLogWrites
+      .then(async () => {
+        const stat = await adapter.stat(path);
+        if (!stat || stat.size > 200_000) await adapter.write(path, `${line}\n`);
+        else await adapter.append(path, `${line}\n`);
+      })
+      .catch(() => undefined);
   }
 
   /**

@@ -79,20 +79,44 @@
   /*
    * Keep playing when the app goes to the background or the phone locks
    * (GitHub #25). iOS pauses media as the page is hidden; a pause that lands
-   * within a second of that, while it was playing, is the system's and not the
-   * reader's, so it is undone. The same rule as our own player (keep-playing.ts).
-   * Whether WebKit lets a hidden page resume is up to iOS.
+   * within 3 seconds of that, while it was playing, is the system's and not the
+   * reader's, so it is undone. Every step is reported to the plugin as a "log"
+   * message, so a test on the iPhone shows what iOS and YouTube actually did.
    */
   var playing = false;
   var hiddenAt = 0;
+  var t0 = Date.now();
+  function log(event, extra) {
+    var d = { event: event, ms: Date.now() - t0, vis: document.visibilityState };
+    if (player && player.getPlayerState) d.state = player.getPlayerState();
+    for (var k in extra) d[k] = extra[k];
+    send("log", d);
+  }
+  function later(label, ms) {
+    setTimeout(function () { log(label, { after: ms }); }, ms);
+  }
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "hidden") hiddenAt = Date.now();
+    var hidden = document.visibilityState === "hidden";
+    if (hidden) hiddenAt = Date.now();
+    log(hidden ? "page hidden" : "page visible", { playing: playing });
+    if (hidden) { later("state after hide", 500); later("state after hide", 3000); }
   });
+  window.addEventListener("pagehide", function () { log("pagehide", {}); });
+  window.addEventListener("freeze", function () { log("freeze", {}); });
+  window.addEventListener("blur", function () { log("blur", {}); });
   function onState(e) {
     var s = e.data;
+    var sinceHide = hiddenAt ? Date.now() - hiddenAt : -1;
+    log("youtube state", { to: s, sinceHide: sinceHide });
     if (s === 1) { playing = true; return; }
-    if (s === 2 && playing && hiddenAt && Date.now() - hiddenAt < 1000) {
-      setTimeout(function () { player.playVideo(); }, 0);
+    if (s === 2 && playing && document.visibilityState === "hidden" && sinceHide < 3000) {
+      log("resuming a system pause", {});
+      setTimeout(function () {
+        try { player.playVideo(); log("playVideo called", {}); }
+        catch (err) { log("playVideo threw", { error: String(err) }); }
+        later("state after resume", 500);
+        later("state after resume", 2000);
+      }, 0);
       return;
     }
     if (s === 2 || s === 0) playing = false;

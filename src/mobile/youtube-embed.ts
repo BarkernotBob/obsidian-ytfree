@@ -7,10 +7,32 @@
  * Obsidian iOS can't frame the embed itself (error 153, issue 004).
  */
 
-import { parsePlayerMessage, PLAYER_ORIGIN, playerErrorText, playerPageUrl, qualityLabel } from "../youtube-player.ts";
+import { Platform } from "obsidian";
+import { logLine, parsePlayerMessage, PLAYER_ORIGIN, playerErrorText, playerPageUrl, qualityLabel } from "../youtube-player.ts";
 
 /** How long the quality chip stays after it changes. */
 const BADGE_MS = 4000;
+
+/** How long the first-time tip stays if it isn't tapped away. */
+const HINT_MS = 15000;
+const HINT_KEY = "ytfree-yt-player-hint-seen";
+
+/** Whether this device has already shown the tip. Storage can be refused; then it shows each time. */
+function hintSeen(): boolean {
+  try {
+    return window.localStorage.getItem(HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markHintSeen(): void {
+  try {
+    window.localStorage.setItem(HINT_KEY, "1");
+  } catch {
+    // Shown again next time; harmless.
+  }
+}
 
 export interface YouTubeEmbed {
   /** Takes the player down; answers the second the reader got to. */
@@ -31,7 +53,11 @@ export function mountYouTubePlayer(
   startAt: number,
   rate: number,
   onStatus?: (status: EmbedStatus) => void,
+  /** Each step of the background-play log (GitHub #25), as one line. */
+  onLog?: (line: string) => void,
 ): YouTubeEmbed {
+  const log = (from: "page" | "plugin", event: string, data?: Record<string, unknown>) =>
+    onLog?.(logLine(new Date(), from, event, data));
   let lastTime = startAt;
   let lastQuality = "";
   let timer: number | null = null;
@@ -58,11 +84,36 @@ export function mountYouTubePlayer(
   };
   flash("YouTube player");
 
+  // Once per device: iOS gives PiP and background play only to YouTube's
+  // fullscreen player, and no code of ours can open that (Isaiah, 2026-11-10).
+  let hint: HTMLElement | null = null;
+  let hintTimer: number | null = null;
+  const dropHint = () => {
+    if (hintTimer !== null) window.clearTimeout(hintTimer);
+    hintTimer = null;
+    hint?.remove();
+    hint = null;
+  };
+  if (Platform.isMobile && !hintSeen()) {
+    markHintSeen();
+    hint = box.createDiv({ cls: "ytfree-yt-embed-hint" });
+    hint.createSpan({ text: "For picture-in-picture or background play, tap YouTube's fullscreen button, then swipe home." });
+    hint.createEl("button", { text: "OK", attr: { type: "button" } }).addEventListener("click", dropHint);
+    hintTimer = window.setTimeout(dropHint, HINT_MS);
+  }
+
+  log("plugin", "opened", { video: videoId, at: Math.floor(startAt) });
+  const onVisibility = () => log("plugin", document.hidden ? "app hidden" : "app visible");
+  document.addEventListener("visibilitychange", onVisibility);
+
   const onMessage = (e: MessageEvent) => {
     if (e.origin !== PLAYER_ORIGIN || e.source !== frame.contentWindow) return;
     const msg = parsePlayerMessage(e.data);
     if (!msg) return;
-    if (msg.type === "error") {
+    if (msg.type === "log") {
+      log("page", msg.event, msg.data);
+    } else if (msg.type === "error") {
+      log("page", "error", { code: msg.code });
       flash(playerErrorText(msg.code), true);
     } else if (msg.type === "status") {
       if (msg.time > 0) lastTime = msg.time;
@@ -90,7 +141,10 @@ export function mountYouTubePlayer(
     pause: () => send({ cmd: "pause" }),
     close() {
       window.removeEventListener("message", onMessage);
+      document.removeEventListener("visibilitychange", onVisibility);
       if (timer !== null) window.clearTimeout(timer);
+      dropHint();
+      log("plugin", "closed", { at: Math.floor(lastTime) });
       // Stops YouTube's sound at once; a detached frame can play on briefly.
       frame.src = "about:blank";
       box.remove();
