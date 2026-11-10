@@ -55,7 +55,7 @@ export function mountYouTubePlayer(
   onStatus?: (status: EmbedStatus) => void,
   /** Each step of the background-play log (GitHub #25), as one line. */
   onLog?: (line: string) => void,
-  /** False: cued at `startAt` and left paused (the YouTube button from a paused player). */
+  /** False: started muted, then held paused at `startAt` by the hosted page (the YouTube button from a paused player). */
   play = true,
 ): YouTubeEmbed {
   const log = (from: "page" | "plugin", event: string, data?: Record<string, unknown>) =>
@@ -114,9 +114,6 @@ export function mountYouTubePlayer(
     if (!msg) return;
     if (msg.type === "log") {
       log("page", msg.event, msg.data);
-    } else if (msg.type === "ready") {
-      // A hosted page from before `play=0` autoplays regardless: hold it.
-      if (!play) send({ cmd: "pause" });
     } else if (msg.type === "error") {
       log("page", "error", { code: msg.code });
       flash(playerErrorText(msg.code), true);

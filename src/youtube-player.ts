@@ -23,7 +23,8 @@ export function playerPageUrl(
   const t = Math.max(0, Math.floor(startSeconds));
   if (t > 0) url.searchParams.set("t", String(t));
   if (rate !== 1) url.searchParams.set("rate", String(rate));
-  // Cued, not started: the reader was paused when they switched.
+  // The reader was paused: the page starts it muted, then holds it paused (a
+  // scripted start, never a tap on YouTube's play button).
   if (!play) url.searchParams.set("play", "0");
   return url.href;
 }

@@ -20,7 +20,7 @@
  * and takes play, pause, seek and speed from it. Nothing is stored or sent
  * anywhere else.
  *
- *   ?v=<videoId>&t=<seconds>&rate=<speed>&play=0   (play=0: cue, don't start)
+ *   ?v=<videoId>&t=<seconds>&rate=<speed>&play=0   (play=0: start, then hold paused)
  */
 (function () {
   "use strict";
@@ -61,13 +61,14 @@
       videoId: id,
       width: "100%",
       height: "100%",
-      playerVars: { playsinline: 1, start: start, rel: 0, autoplay: autoplay ? 1 : 0 },
+      playerVars: { playsinline: 1, start: start, rel: 0, autoplay: 1, mute: hold ? 1 : 0 },
       events: {
         onReady: function () {
           if (rate !== 1) player.setPlaybackRate(rate);
           send("ready", {});
           status();
           setInterval(status, 1000);
+          startScripted();
         },
         onStateChange: function (e) { onState(e); status(); },
         onPlaybackQualityChange: status,
@@ -76,6 +77,51 @@
       },
     });
   };
+
+  /*
+   * Every start is scripted, never a tap on YouTube's own play button
+   * (Isaiah, 2026-11-10: the reader shouldn't have to tap it, and a scripted
+   * start is the player as he uses it today).
+   *
+   * - play=0 (the reader was paused): start muted, and on the first frame
+   *   pause, go back to the start second and unmute. A later tap on YouTube's
+   *   play only resumes it.
+   * - Otherwise: start with sound. If iOS refuses that (still not playing after
+   *   1.5 s), start muted, then unmute once it plays. Whether iOS lets the
+   *   unmute stand is what the iPhone test finds out; each step is logged.
+   */
+  var hold = !autoplay;
+  var mutedStart = false;
+  function startScripted() {
+    if (hold) { player.mute(); player.playVideo(); log("start muted to hold paused", {}); return; }
+    player.playVideo();
+    setTimeout(function () {
+      var st = player.getPlayerState();
+      if (st === 1 || st === 3) return;
+      log("sound autoplay refused", { state: st });
+      mutedStart = true;
+      player.mute();
+      player.playVideo();
+    }, 1500);
+  }
+  function afterFirstFrame() {
+    if (hold) {
+      hold = false;
+      player.pauseVideo();
+      player.seekTo(start, true);
+      player.unMute();
+      log("held paused at start", {});
+      return true;
+    }
+    if (mutedStart) {
+      mutedStart = false;
+      player.unMute();
+      log("unmuted after muted start", {});
+      later("state after unmute", 500);
+      later("state after unmute", 2000);
+    }
+    return false;
+  }
 
   /*
    * Keep playing when the app goes to the background or the phone locks
@@ -109,7 +155,11 @@
     var s = e.data;
     var sinceHide = hiddenAt ? Date.now() - hiddenAt : -1;
     log("youtube state", { to: s, sinceHide: sinceHide });
-    if (s === 1) { playing = true; return; }
+    if (s === 1) {
+      if (afterFirstFrame()) return;
+      playing = true;
+      return;
+    }
     if (s === 2 && playing && document.visibilityState === "hidden" && sinceHide < 3000) {
       log("resuming a system pause", {});
       setTimeout(function () {

@@ -25,10 +25,14 @@ only once a sound autoplay is shown to be impossible. Visual mockup reviewed in 
    fallback tier (#43), as the way back ("Try our stream again").
 3. **State is kept both ways.** Same second (±1 s, YouTube reports once a second), same speed,
    same playing/paused state.
-   - Ours → YouTube, paused: YouTube's player opens cued at that second and does not start.
+   - Ours → YouTube, paused: the hosted page starts it muted, then on the first frame pauses,
+     goes back to that second and unmutes. Every start is scripted: the reader never has to make
+     the first tap on YouTube's own play button (a native click-to-play is what YouTube's embed
+     ad rules ask for, so it may bring ads; inference from Google's embed ad docs, not tested).
    - Ours → YouTube, playing: it starts. If iOS refuses sound autoplay from a tap outside the
      frame, try to fix it first (the old way in was a Quality `<select>`, which may not count as
-     a tap; a muted start then unmute is the next thing to try). Only if neither works: YouTube's
+     a tap). Built: if not playing after 1.5 s, the page starts it muted, then unmutes once it plays.
+     The iPhone test shows whether iOS lets the unmute stand. Only if neither works: YouTube's
      own play button shows and one tap starts it.
    - YouTube → ours: ours resumes at YouTube's second, playing if YouTube was playing (the tap
      is in our page, so autoplay is allowed). If ours had no stream yet (desktop resolves on
@@ -58,5 +62,6 @@ Phone (Obsidian iOS), any video note:
 Desktop: no YouTube button on the bar. Only when our stream fails and YouTube's player takes
 over does it appear, and tapping it tries our stream again.
 
-Until this is merged, GitHub Pages serves the old hosted page, which ignores `play=0`; the plugin
-then pauses it as soon as it is ready, so step 3 may show a brief start.
+The hosted page changes (paused hold, muted retry) go live only once this is merged to main,
+because GitHub Pages serves `docs/` from main. Before that, step 3 starts playing instead of
+staying paused.
