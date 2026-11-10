@@ -23,6 +23,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-10 (#43, PR #79): a dead stream link moves playback to the next tier, ending in
   YouTube's player in place ([V1-SCOPE-PLAYER-FALLBACK](docs/V1-SCOPE-PLAYER-FALLBACK.md)); brew messages gone.
 
+- 2026-11-10: Notes button on the phone folds the video again (it was folding for the keyboard,
+  then reopening it in the same tap). Next: Isaiah's phone test.
+
 ## Shipped on main (scope doc = manual test)
 
 - HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));

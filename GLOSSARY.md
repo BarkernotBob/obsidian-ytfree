@@ -309,3 +309,9 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   passed `strict`; the switch keeps it that way.
 - On Windows the plugin never rewrites the PATH it gives yt-dlp, and yt-dlp and ffmpeg are also
   looked for by bare name, last. Not tested on a Windows machine.
+
+### 2026-11-10 (Notes button)
+
+- **Notes button always folds the video** on the first press, as the reader's own fold: it stays
+  until they tap Show video or Notes again, and does not come back when the keyboard goes. A
+  fold the keyboard made does not count as folded, so Notes never reopens the video because of it.
