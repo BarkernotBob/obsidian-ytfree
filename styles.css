@@ -4010,60 +4010,48 @@ body.ytfree-immersive-open .ytfree-preview-close {
   text-decoration-color: currentColor;
 }
 
-/* YouTube's own player on the phone (#25, part 2): the whole screen, black. */
-.modal.ytfree-ytplayer-modal {
-  width: 100vw;
-  height: 100dvh;
-  max-width: none;
-  max-height: none;
-  padding: 0;
-  border-radius: 0;
-  border: 0;
+/* YouTube's own player on the phone (#25, part 2): over the picture, in place. */
+.ytfree-yt-embed {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
   background: #000;
 }
-.modal.ytfree-ytplayer-modal .modal-content {
-  display: flex;
-  flex-direction: column;
+.ytfree-yt-embed-frame {
+  width: 100%;
   height: 100%;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  border: 0;
+  display: block;
 }
-/* Obsidian's own ✕ sits under the status bar here; ours is in the top row. */
-.modal.ytfree-ytplayer-modal .modal-close-button,
-.modal.ytfree-ytplayer-modal .modal-header {
-  display: none;
-}
-.ytfree-ytplayer-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px 4px 12px;
-}
-.ytfree-ytplayer-line {
-  flex: 1;
-  color: #bbb;
+.ytfree-yt-embed-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
   font-size: var(--font-ui-smaller);
   font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s;
 }
-.ytfree-ytplayer-close {
-  flex: none;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  box-shadow: none;
+.ytfree-yt-embed-badge.is-visible {
+  opacity: 1;
+}
+/* While YouTube's player has the picture, its controls are the transport. */
+.ytfree-controls-youtube {
+  display: none;
+}
+.is-youtube .ytfree-controls-transport {
+  display: none;
+}
+.is-youtube .ytfree-controls-youtube {
   display: flex;
-  align-items: center;
   justify-content: center;
 }
-.ytfree-ytplayer-frame {
-  flex: 1;
-  width: 100%;
-  border: 0;
-  background: #000;
-}
+
 
 /* The desktop Now playing item in the status bar (see `setupNowPlayingButton`). */
 .ytfree-now-playing-status {
