@@ -119,7 +119,8 @@ import {
 } from "./sections";
 import { DEFAULT_TIDY_DAYS, notesToTidy, sweepNote } from "./tidy";
 import type { SweepHub, TidyCandidate } from "./tidy";
-import { YtFreePlayer } from "./player";
+import { needsYouTubePlayer, YtFreePlayer } from "./player";
+import { AllTiersFailedError, TierFailures } from "./tier-failures";
 import type { NowPlaying } from "./player";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 import {
@@ -129,6 +130,7 @@ import {
   StreamCache,
   YtDlpMissingError,
 } from "./stream";
+import type { StreamProvider } from "./stream";
 
 /**
  * The single door into the desktop-only code.
@@ -750,6 +752,8 @@ export default class YtFreePlugin extends Plugin {
   /** yt-dlp was looked for and is not on this machine. Reset with `ytDlpPath`. */
   private ytDlpUnavailable = false;
   private noYtDlpNoticeShown = false;
+  /** Desktop stream tiers that failed per video (#43 part 1). */
+  private tierFailures = new TierFailures();
   private resumeTimer: number | null = null;
   private downloads = new Map<string, DownloadHandle>();
   /** undefined = not probed yet; null = probed and absent. */
@@ -4356,13 +4360,14 @@ export default class YtFreePlugin extends Plugin {
           onQuality: (hd) => {
             session.hd = hd;
           },
-          // Phone only (#25): YouTube's own player, for HD on any video.
-          youtubePlayer: mobile
-            ? async (host, at, rate) => {
-                const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
-                return mountYouTubePlayer(host, videoId, at, rate);
-              }
-            : undefined,
+          // YouTube's own player: the last playback tier everywhere (#43),
+          // and on the phone also a Quality pick for HD on any video (#25).
+          youtubePlayer: async (host, at, rate, onStatus) => {
+            const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
+            return mountYouTubePlayer(host, videoId, at, rate, onStatus);
+          },
+          youtubeInMenu: mobile,
+          forgetStreamFailures: () => this.tierFailures.clear(videoId),
         },
         // Everything the reader set on this video that a rebuilt player would
         // otherwise throw away — see `VideoSession`.
@@ -5152,7 +5157,7 @@ export default class YtFreePlugin extends Plugin {
    * Desktop only. The rules live in `play-provider.ts`, where their request
    * ceilings are tested (GitHub #66).
    */
-  private desktopProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
+  private desktopProvider(videoId: string): StreamProvider {
     const offline = this.settings.devOfflineHd?.trim();
     if (offline) return (mode) => this.offlineStream(videoId, offline, mode);
     return cachedProvider(
@@ -5163,6 +5168,7 @@ export default class YtFreePlugin extends Plugin {
         this.ytInfo.invalidate(videoId);
         forgetPlayer(videoId);
       },
+      this.tierFailures,
     );
   }
 
@@ -5195,6 +5201,7 @@ export default class YtFreePlugin extends Plugin {
           () => fetchRange,
         );
       },
+      failures: this.tierFailures,
       onPlayingWithoutYtDlp: () => {
         if (this.noYtDlpNoticeShown) return;
         this.noYtDlpNoticeShown = true;
@@ -5236,8 +5243,14 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /** InnerTube, via the same cache. Mobile only. */
-  private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
-    return cachedProvider(videoId, this.cache, mobileResolve(videoId), () => forgetPlayer(videoId));
+  private mobileProvider(videoId: string): StreamProvider {
+    return cachedProvider(
+      videoId,
+      this.cache,
+      mobileResolve(videoId, this.tierFailures),
+      () => forgetPlayer(videoId),
+      this.tierFailures,
+    );
   }
 
   /**
@@ -5350,6 +5363,22 @@ export default class YtFreePlugin extends Plugin {
           // A Play pressed while this was resolving is waiting on a stream that
           // is not coming. Take it back, or the button sits at "starting".
           player.cancelPendingPlay();
+          // Every stream tier failed for this video, or a bot-check pause is
+          // on: YouTube's player plays it, in place (#43).
+          if (needsYouTubePlayer(err)) {
+            void player.handToYouTube().then((ok) => {
+              if (ok) {
+                uncover();
+                started = Promise.resolve();
+                return;
+              }
+              this.renderMobileFallback(media, entry, err, () => {
+                player.primeForGesture();
+                void activate();
+              });
+            });
+            return;
+          }
           this.renderMobileFallback(media, entry, err, () => {
             player.primeForGesture();
             void activate();
@@ -5410,16 +5439,15 @@ export default class YtFreePlugin extends Plugin {
     const paused = isBotCheck(err) || err instanceof BotCheckPausedError ? botCheck.message() : null;
     const detail = paused
       ? paused
-      : err instanceof YtDlpMissingError
-        ? "yt-dlp is not installed here, and the phone's way of playing did not work for this video either. Install it with: brew install yt-dlp"
+      : err instanceof AllTiersFailedError || err instanceof YtDlpMissingError
+        ? new AllTiersFailedError().message
       : kind === "login"
         ? "This video needs a signed-in account — age-restricted or members-only."
         : kind === "network"
           ? "Could not reach YouTube. Check your connection and try again."
           : kind === "no-format"
             ? "YouTube offered no single-file format for this video."
-            : `Could not resolve this video. ${err instanceof Error ? err.message : String(err)}` +
-              (Platform.isDesktopApp ? " Updating yt-dlp (brew upgrade yt-dlp) usually fixes it." : "");
+            : `Could not resolve this video. ${err instanceof Error ? err.message : String(err)}`;
 
     const box = media.createDiv({ cls: "ytfree-fallback" });
     box.createDiv({ cls: "ytfree-fallback-text", text: detail });

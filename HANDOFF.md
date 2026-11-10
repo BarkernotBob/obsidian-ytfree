@@ -20,6 +20,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-09: hub/watch-time sync fix merged (PR #76; docs/V1-SCOPE-SYNC.md). Next: Isaiah's
   Mac+iPhone test. Follow-up #75.
 
+- 2026-11-10 (#43, PR #79): a dead stream link moves playback to the next tier, ending in
+  YouTube's player in place ([V1-SCOPE-PLAYER-FALLBACK](docs/V1-SCOPE-PLAYER-FALLBACK.md)); brew messages gone.
+
 ## Shipped on main (scope doc = manual test)
 
 - HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));

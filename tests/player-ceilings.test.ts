@@ -149,6 +149,7 @@ registerHooks({
 
 const { YtFreePlayer } = await import("../src/player.ts");
 const { cachedProvider, desktopResolve, mobileResolve } = await import("../src/play-provider.ts");
+const { TierFailures } = await import("../src/tier-failures.ts");
 const { InfoCache } = await import("../src/info-cache.ts");
 const { StreamCache } = await import("../src/stream.ts");
 const { infoExpiresAt } = await import("../src/ytdlp-info.ts");
@@ -202,6 +203,7 @@ function desktopRig(withYtDlp = true): { provider: StreamProvider; count: Count;
           return new Promise((resolve) => setTimeout(() => resolve(structuredClone(info)), 5));
         }, infoExpiresAt),
       ytDlpUnavailable: () => unavailable,
+      failures: new TierFailures(),
       markYtDlpUnavailable: () => {
         assert.equal(withYtDlp, false, "yt-dlp is there");
         unavailable = true;
@@ -380,7 +382,7 @@ test("Play on a desktop without yt-dlp: one InnerTube player call, asked once fo
 test("Play on the phone, HD off: one InnerTube player call", async () => {
   g.__ytfreeMobile = true;
   forgetPlayer(VIDEO);
-  const provider = cachedProvider(VIDEO, new StreamCache(), mobileResolve(VIDEO), () => forgetPlayer(VIDEO));
+  const provider = cachedProvider(VIDEO, new StreamCache(), mobileResolve(VIDEO, new TierFailures()), () => forgetPlayer(VIDEO));
   activity = () => JSON.stringify([hlsCreated(), requestUrlSent.length]);
   const player = track(mount(provider));
   await settle();
@@ -388,4 +390,99 @@ test("Play on the phone, HD off: one InnerTube player call", async () => {
   await pressPlay(player, false);
   assert.equal(requestUrlSent.filter((u) => u.includes("/player")).length, 1);
   assert.equal(requestUrlSent.length, 1);
+});
+
+// ---- Fallback tiers (#43) ----------------------------------------------------
+
+test("a dead link: yt-dlp once, our own stream once, then YouTube's player; never a third resolve", async () => {
+  forgetPlayer(VIDEO);
+  const failures = new TierFailures();
+  let ytDlp = 0;
+  let own = 0;
+  const infoCache = new InfoCache<YtDlpInfo>(() => Date.now(), 15);
+  const provider = cachedProvider(
+    VIDEO,
+    new StreamCache(),
+    desktopResolve(VIDEO, {
+      ytDlpInfo: (id) => infoCache.get(id, () => (ytDlp++, Promise.resolve(structuredClone(info))), infoExpiresAt),
+      ytDlpUnavailable: () => false,
+      markYtDlpUnavailable: () => assert.fail("yt-dlp is there"),
+      failures,
+      // The fixture's links are long expired; these are live links that die.
+      innertubeFast: () => (own++, resolveMobileStream(VIDEO).then((st) => ({ ...st, expiresAt: Date.now() + 3600_000 }))),
+      innertubeHd: () => Promise.reject(new Error("HD is off")),
+      ytDlpHd: () => Promise.reject(new Error("HD is off")),
+      rangeFetch: () => Promise.reject(new Error("HD is off")),
+      onPlayingWithoutYtDlp: () => assert.fail("yt-dlp is there"),
+    }),
+    () => infoCache.invalidate(VIDEO),
+    failures,
+  );
+  const opened: number[] = [];
+  const statuses: (string | null)[] = [];
+  const progress: number[] = [];
+  const host = win.document.createElement("div");
+  win.document.body.appendChild(host);
+  let embedAt = 0;
+  let report: ((s: { time: number; duration: number; playing: boolean }) => void) | null = null;
+  const player = track(new YtFreePlayer(host as unknown as HTMLElement, provider, (m) => statuses.push(m), undefined, {
+    onProgress: (t) => progress.push(t),
+    quick: {
+      youtubePlayer: (_host, at, _rate, onStatus) => {
+        opened.push(at);
+        embedAt = at;
+        report = onStatus;
+        return Promise.resolve({
+          close: () => embedAt,
+          time: () => embedAt,
+          seek: (t: number) => { embedAt = t; },
+          play: () => {},
+          pause: () => {},
+        });
+      },
+    },
+  }));
+  activity = () => JSON.stringify([ytDlp, own, opened.length, statuses.length]);
+  const kill = (): void => {
+    Object.defineProperty(player.video, "error", { value: { code: 4, message: "refused" }, configurable: true });
+    player.video.dispatchEvent(new win.Event("error") as unknown as Event);
+  };
+
+  await pressPlay(player, false);
+  assert.deepEqual([ytDlp, own], [1, 0], "yt-dlp first");
+
+  const until = async (done: () => boolean): Promise<void> => {
+    for (let waited = 0; !done() && waited < 5000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+  };
+  kill(); // yt-dlp's link refused: the retry goes to our own stream, not yt-dlp again
+  await until(() => statuses.at(-1) === null); // the refresh finished
+  await settle();
+  assert.deepEqual([ytDlp, own], [1, 1]);
+  assert.equal(opened.length, 0);
+
+  kill(); // our own stream's link refused too: YouTube's player, after the cooldown
+  // The second retry waits out the player's 2 s cooldown first.
+  await until(() => opened.length > 0);
+  await settle();
+  assert.deepEqual([ytDlp, own], [1, 1], "no third resolve");
+  assert.equal(opened.length, 1, "YouTube's player took over");
+  assert.ok(host.classList.contains("is-youtube"), "in place, in the same player");
+  assert.ok(!statuses.some((m) => m && /brew|yt-dlp/i.test(m)), "never a yt-dlp message");
+
+  // Timestamps and progress follow YouTube's player.
+  player.seekTo(42);
+  assert.equal(player.currentTime, 42);
+  report!({ time: 42, duration: 100, playing: true });
+  assert.ok(progress.includes(42), "progress is reported from YouTube's player");
+});
+
+test("which failures go to YouTube's player: all tiers failed, a bot check, a bot-check pause", async () => {
+  const { needsYouTubePlayer } = await import("../src/player.ts");
+  const { AllTiersFailedError } = await import("../src/tier-failures.ts");
+  const { BotCheckPausedError } = await import("../src/bot-check.ts");
+  assert.ok(needsYouTubePlayer(new AllTiersFailedError()));
+  assert.ok(needsYouTubePlayer(new BotCheckPausedError("paused")));
+  assert.ok(needsYouTubePlayer(new Error("Sign in to confirm you’re not a bot")));
+  assert.ok(!needsYouTubePlayer(new Error("network")));
+  assert.ok(!needsYouTubePlayer(null));
 });

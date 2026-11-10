@@ -15,9 +15,23 @@ const BADGE_MS = 4000;
 export interface YouTubeEmbed {
   /** Takes the player down; answers the second the reader got to. */
   close(): number;
+  /** Where YouTube's player is now (its last report, about once a second). */
+  time(): number;
+  seek(seconds: number): void;
+  play(): void;
+  pause(): void;
 }
 
-export function mountYouTubePlayer(host: HTMLElement, videoId: string, startAt: number, rate: number): YouTubeEmbed {
+/** What the player reports, about once a second and on every change. */
+export type EmbedStatus = { time: number; duration: number; playing: boolean };
+
+export function mountYouTubePlayer(
+  host: HTMLElement,
+  videoId: string,
+  startAt: number,
+  rate: number,
+  onStatus?: (status: EmbedStatus) => void,
+): YouTubeEmbed {
   let lastTime = startAt;
   let lastQuality = "";
   let timer: number | null = null;
@@ -52,6 +66,8 @@ export function mountYouTubePlayer(host: HTMLElement, videoId: string, startAt: 
       flash(playerErrorText(msg.code), true);
     } else if (msg.type === "status") {
       if (msg.time > 0) lastTime = msg.time;
+      // YouTube's state 1 is playing; 3 (buffering) is not watch time.
+      onStatus?.({ time: lastTime, duration: msg.duration, playing: msg.state === 1 });
       if (msg.quality && msg.quality !== lastQuality) {
         lastQuality = msg.quality;
         flash(`YouTube player · ${qualityLabel(msg.quality)}`);
@@ -60,7 +76,18 @@ export function mountYouTubePlayer(host: HTMLElement, videoId: string, startAt: 
   };
   window.addEventListener("message", onMessage);
 
+  // The hosted page takes these (`docs/player/index.html`).
+  const send = (data: Record<string, unknown>) =>
+    frame.contentWindow?.postMessage({ source: "ytfree", ...data }, PLAYER_ORIGIN);
+
   return {
+    time: () => lastTime,
+    seek(seconds) {
+      lastTime = seconds;
+      send({ cmd: "seek", time: seconds });
+    },
+    play: () => send({ cmd: "play" }),
+    pause: () => send({ cmd: "pause" }),
     close() {
       window.removeEventListener("message", onMessage);
       if (timer !== null) window.clearTimeout(timer);

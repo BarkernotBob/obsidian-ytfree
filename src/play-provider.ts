@@ -13,6 +13,8 @@
 import type { FetchRange, YtDlpFormat } from "./adaptive.ts";
 import { botCheck, isBotCheck } from "./bot-check.ts";
 import { YtDlpMissingError } from "./stream.ts";
+import { resolveByTier } from "./tier-failures.ts";
+import type { TierFailures } from "./tier-failures.ts";
 import type { ResolveMode, ResolvedStream, StreamCache, StreamProvider } from "./stream.ts";
 import { fastStreamFromInfo, hlsStreamFromInfo } from "./ytdlp-info.ts";
 import type { YtDlpInfo } from "./ytdlp-info.ts";
@@ -30,11 +32,17 @@ export function cachedProvider(
   cache: StreamCache,
   resolve: (mode: ResolveMode) => Promise<ResolvedStream>,
   forget: () => void,
+  failures?: TierFailures,
 ): StreamProvider {
-  return async (mode, forceRefresh) => {
+  return async (mode, forceRefresh, deadLink = false) => {
     if (mode === "quality" || forceRefresh) botCheck.guard();
     else botCheck.guardPlay();
     if (forceRefresh) {
+      // A 360p link still inside its lifetime that is being replaced did not
+      // play: that tier failed for this video, and the next try moves on
+      // (#43). An expired link is just re-resolved on the same tier.
+      const live = cache.get(videoId, "fast");
+      if (deadLink && mode === "fast" && live?.tier) failures?.mark(videoId, live.tier);
       cache.invalidate(videoId);
       forget();
     }
@@ -52,14 +60,28 @@ export function cachedProvider(
  * stitched stream (`adaptive.ts`). Loaded on first use: neither module is
  * needed until something plays.
  */
-export function mobileResolve(videoId: string): (mode: ResolveMode) => Promise<ResolvedStream> {
+export function mobileResolve(
+  videoId: string,
+  failures: TierFailures,
+  innertubeFast: (videoId: string) => Promise<ResolvedStream> = async (id) => {
+    const { resolveMobileStream } = await import("./mobile/innertube.ts");
+    return resolveMobileStream(id);
+  },
+): (mode: ResolveMode) => Promise<ResolvedStream> {
   return async (mode) => {
     if (mode === "quality") {
       const { resolvePhoneHdStream } = await import("./hd.ts");
       return resolvePhoneHdStream(videoId);
     }
-    const { resolveMobileStream } = await import("./mobile/innertube.ts");
-    return resolveMobileStream(videoId);
+    // One tier on the phone: when it has failed, `AllTiersFailedError`, and
+    // the player hands the video to YouTube's (#43).
+    return resolveByTier({
+      videoId,
+      tiers: () => ["own"],
+      failures,
+      resolve: () => innertubeFast(videoId),
+      stop: isBotCheck,
+    });
   };
 }
 
@@ -80,6 +102,8 @@ export interface DesktopSources {
   rangeFetch(): Promise<FetchRange>;
   /** Called after a 360p stream came from InnerTube because yt-dlp is missing. */
   onPlayingWithoutYtDlp(): void;
+  /** Which tiers failed for which video (#43). */
+  failures: TierFailures;
 }
 
 /** A desktop resolver for `cachedProvider`. */
@@ -91,33 +115,32 @@ export function desktopResolve(
 }
 
 /**
- * yt-dlp when it is there. When it is missing, or fails, the desktop resolves
- * the way the phone does rather than showing an install message.
+ * 360p: the next stream tier that has not failed for this video
+ * (`choosePlayer`): yt-dlp if it is here, then our own stream. When both have
+ * failed, `AllTiersFailedError`, and the player hands the video to YouTube's
+ * (#43). Never an install or update message.
  */
-async function desktopFast(videoId: string, src: DesktopSources): Promise<ResolvedStream> {
-  let ytDlpError: unknown = null;
-  if (!src.ytDlpUnavailable()) {
-    try {
-      return fastStreamFromInfo(await src.ytDlpInfo(videoId));
-    } catch (err) {
-      // Tried once. Asking InnerTube next is more of what flagged the network.
-      if (isBotCheck(err)) throw err;
-      ytDlpError = err;
+function desktopFast(videoId: string, src: DesktopSources): Promise<ResolvedStream> {
+  return resolveByTier({
+    videoId,
+    tiers: () => (src.ytDlpUnavailable() ? ["own"] : ["yt-dlp", "own"]),
+    failures: src.failures,
+    resolve: async (tier) => {
+      if (tier === "yt-dlp") return fastStreamFromInfo(await src.ytDlpInfo(videoId));
+      const stream = await src.innertubeFast(videoId);
+      if (src.ytDlpUnavailable()) src.onPlayingWithoutYtDlp();
+      return stream;
+    },
+    // Tried once. Asking InnerTube next is more of what flagged the network.
+    stop: isBotCheck,
+    onError: (_tier, err) => {
       // Probing four paths on every video is not worth it once it is known
-      // to be absent. A resolve failure is per-video, so it is not kept.
-      if (err instanceof YtDlpMissingError) src.markYtDlpUnavailable();
-    }
-  }
-
-  try {
-    const stream = await src.innertubeFast(videoId);
-    if (src.ytDlpUnavailable()) src.onPlayingWithoutYtDlp();
-    return stream;
-  } catch (fallbackError) {
-    // Report the yt-dlp failure when there was one: its message is the one
-    // the error box knows how to explain.
-    throw ytDlpError ?? fallbackError;
-  }
+      // to be absent. Absence is not this video's failure, so not marked.
+      if (!(err instanceof YtDlpMissingError)) return true;
+      src.markYtDlpUnavailable();
+      return false;
+    },
+  });
 }
 
 /**
@@ -127,7 +150,10 @@ async function desktopFast(videoId: string, src: DesktopSources): Promise<Resolv
  */
 async function desktopQuality(videoId: string, src: DesktopSources): Promise<ResolvedStream> {
   const fetch = await src.rangeFetch();
-  if (src.ytDlpUnavailable()) return src.innertubeHd(videoId, fetch);
+  // No yt-dlp, or its links would not play for this video (#43).
+  if (src.ytDlpUnavailable() || src.failures.failed(videoId).has("yt-dlp")) {
+    return src.innertubeHd(videoId, fetch);
+  }
 
   const info = await src.ytDlpInfo(videoId);
   try {

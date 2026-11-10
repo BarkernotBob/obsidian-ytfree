@@ -280,6 +280,13 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - **Playback tiers** (Isaiah, 2026-11-09): yt-dlp (desktop, if installed) → our own stream →
   YouTube's embedded player. After a bot check, straight to the embed.
+- **Tier failure** (2026-11-10, #43 part 1): a tier fails for a video when it cannot resolve a
+  link or its 360p link will not play before expiry; that video skips the tier for 30 minutes.
+  Users are never told to install or update yt-dlp (Isaiah, 2026-11-10: "a user should never have
+  to update YT DLP themselves").
+- **YouTube's player as last tier** (#43, approved 2026-11-10): when every stream tier failed for
+  a video, or on a bot check, YouTube's player replaces ours in place (hosted page, GitHub Pages),
+  with "Try our stream again". Desktop never offers it as a menu choice.
 - **No sign-in** (Isaiah, 2026-11-09): YouTube cookies never reach the plugin; subscriptions by
   manual add or Takeout CSV (#64, #65).
 - **Subscribe in YT Free** (GitHub #65; details Claude's calls, open to change): adds the channel
