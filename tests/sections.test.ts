@@ -158,3 +158,20 @@ test("notesCursorTarget falls back to the line under the heading", () => {
 test("notesCursorTarget never points past the end of a note that is only a heading", () => {
   assert.deepEqual(notesCursorTarget("# Notes", 0, null), { line: 0, ch: 0 });
 });
+
+test("Notes button folds the video on the first press, as the reader's choice", async () => {
+  const { notesButtonCollapse } = await import("../src/sections.ts");
+  assert.equal(notesButtonCollapse(null, false), "manual");
+  assert.equal(notesButtonCollapse("keyboard", false), "manual");
+  assert.equal(notesButtonCollapse("manual", false), "manual");
+});
+
+test("Notes button pressed again in Notes toggles, and a keyboard fold is not a fold", async () => {
+  const { notesButtonCollapse } = await import("../src/sections.ts");
+  // The phone bug: focusing the editor folds for the keyboard inside the tap.
+  // The decision uses the state from before that, and even a keyboard fold seen
+  // there must not be undone, or the button shows the video again.
+  assert.equal(notesButtonCollapse(null, true), "manual");
+  assert.equal(notesButtonCollapse("keyboard", true), "manual");
+  assert.equal(notesButtonCollapse("manual", true), null);
+});

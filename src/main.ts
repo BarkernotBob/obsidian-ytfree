@@ -106,7 +106,7 @@ import { infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
 import { cachedProvider, desktopResolve, mobileResolve } from "./play-provider.ts";
 import type { DesktopSources } from "./play-provider.ts";
 import type { YtDlpInfo } from "./ytdlp-info.ts";
-import type { NotePosition, SectionName } from "./sections";
+import type { CollapseMode, NotePosition, SectionName } from "./sections";
 import {
   SECTION_HEADINGS,
   enclosingHeading,
@@ -114,6 +114,7 @@ import {
   foldsRevealing,
   headingLine,
   normaliseHeadings,
+  notesButtonCollapse,
   notesCursorTarget,
   sectionEnd,
 } from "./sections";
@@ -466,15 +467,12 @@ const DEFAULT_SETTINGS: YtFreeSettings = {
  * Known limitation: the same video embedded in two open notes collapses to one
  * entry, last render wins. Not worth a second index until it bites.
  */
-/**
- * Why the video is hidden, or null if it is not.
- *
- * The two reasons behave differently on the way back: a collapse the reader
- * asked for stays until they ask for the opposite, while one the keyboard
- * caused is undone by the keyboard going away. Neither ever unmounts the
- * player, so the position — and any audio still playing — survives both.
+/*
+ * `CollapseMode` (in sections.ts): why the video is hidden, or null if it is
+ * not. A collapse the reader asked for stays until they ask for the opposite,
+ * while one the keyboard caused is undone by the keyboard going away. Neither
+ * ever unmounts the player, so the position and any audio survive both.
  */
-type CollapseMode = "manual" | "keyboard" | null;
 
 interface PlayerEntry {
   player: YtFreePlayer;
@@ -2474,6 +2472,13 @@ export default class YtFreePlugin extends Plugin {
     // happens in the task which handled the gesture — one `await`, one
     // `setTimeout`, and the request is silently declined. Everything else the
     // button does can wait a tick; this cannot.
+    //
+    // The video's collapse state is read first, though: on a phone that focus
+    // fires `focusin`, which folds the video for the keyboard in this same tap,
+    // and the Notes button has to decide from what the reader saw, not from
+    // that. See `notesButtonCollapse`.
+    const notesEntry = section === "notes" && videoId ? this.players.get(videoId) : undefined;
+    const collapsedBefore = notesEntry?.collapsed ?? null;
     if (section === "notes") this.openForWriting(view);
 
     // The button's second job. Tapping Transcript when you are already reading
@@ -2489,7 +2494,7 @@ export default class YtFreePlugin extends Plugin {
       if (section === "notes") {
         // Already here and pressed again: the video is the toggle. The first
         // press folded it away (below), so this one is how it comes back.
-        if (videoId) this.toggleHeaderFor(videoId);
+        if (notesEntry) this.setCollapsed(notesEntry, notesButtonCollapse(collapsedBefore, true));
       } else {
         // Folding the transcript away is the end of reading it, so it is also
         // the end of the follow.
@@ -2511,7 +2516,7 @@ export default class YtFreePlugin extends Plugin {
     // Deliberately "manual", the same mode the second press toggles: this is
     // the reader's own decision about the picture, so it outlives the keyboard
     // rather than springing back the moment they put it away.
-    if (section === "notes" && videoId) this.collapseHeaderFor(videoId);
+    if (notesEntry) this.setCollapsed(notesEntry, notesButtonCollapse(collapsedBefore, false));
 
     // Leaving the transcript for another section ends the follow; arriving at
     // the transcript starts it, once the unfold below has been laid out.
@@ -2680,32 +2685,6 @@ export default class YtFreePlugin extends Plugin {
     // nothing is what Obsidian throws away on reload anyway.
     if (to <= line) return;
     this.setFolds(view, { folds: [...folds, { from: line, to }].sort((a, b) => a.from - b.from), lines });
-  }
-
-  /**
-   * Fold the video away, or bring it back — the section buttons' second tap.
-   *
-   * Like the collapse control it does not pause: the reader asked for room to
-   * read in, not for the video to stop.
-   */
-  private toggleHeaderFor(videoId: string): void {
-    const entry = this.players.get(videoId);
-    if (!entry) return;
-    this.setCollapsed(entry, entry.collapsed ? null : "manual");
-  }
-
-  /**
-   * Fold the video away and leave it folded — the Notes button's first tap.
-   *
-   * One direction only, unlike `toggleHeaderFor`: pressing Notes twice from
-   * elsewhere in the note should not flicker the picture in and out. A collapse
-   * already in force is left exactly as it is, including a keyboard one, whose
-   * own release still governs it.
-   */
-  private collapseHeaderFor(videoId: string): void {
-    const entry = this.players.get(videoId);
-    if (!entry || entry.collapsed) return;
-    this.setCollapsed(entry, "manual");
   }
 
   // -------------------------------------------------------- transcript auto
