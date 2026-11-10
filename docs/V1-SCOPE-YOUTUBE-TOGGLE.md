@@ -18,8 +18,8 @@ only once a sound autoplay is shown to be impossible. Visual mockup reviewed in 
 
 ## v1
 
-1. **One button on the controls bar**, right-hand group, first in it. Icon + "YouTube" label on
-   ours, "Our player" label while YouTube's is up. Same spot in both modes: while YouTube's
+1. **One button on the controls bar**, right-hand group, first in it: the YouTube icon, grey on
+   ours, red on a lit square while YouTube's is up (a toggle, on/off). Same spot in both modes: while YouTube's
    player is up, our other controls are hidden with `visibility`, not removed, so nothing moves.
 2. **Phone only.** On the desktop the button exists only while YouTube's player is up as the
    fallback tier (#43), as the way back ("Try our stream again").
@@ -34,7 +34,7 @@ only once a sound autoplay is shown to be impossible. Visual mockup reviewed in 
      is in our page, so autoplay is allowed). If ours had no stream yet (desktop resolves on
      Play), it resolves first, as Play does.
 4. **The fallback case (#43)** keeps its meaning: when YouTube's player is up because our stream
-   failed, the same button reads "Try our stream" and does what "Try our stream again" did.
+   failed, the same button does what "Try our stream again" did.
 5. **The Quality menu loses "YouTube player (HD)"**: the button replaces it.
 6. No new request to YouTube: the toggle only mounts the existing hosted page
    (`docs/player/`), which gains a `play=0` parameter (cue, don't start).
@@ -48,12 +48,12 @@ only once a sound autoplay is shown to be impossible. Visual mockup reviewed in 
 
 Phone (Obsidian iOS), any video note:
 
-1. Tap Play on ours, wait for it to play. Tap **YouTube** on the bar. Expect: YouTube's player at
-   the same second, playing (or its play button showing, see 3 above). The button stays where it was
-   and now reads **Our player**.
-2. Tap **Our player** while YouTube's is playing. Expect: ours at YouTube's second, playing.
-3. Pause ours, tap **YouTube**. Expect: YouTube's player at that second, paused.
-4. Pause YouTube's, tap **Our player**. Expect: ours at that second, paused.
+1. Tap Play on ours, wait for it to play. Tap the **YouTube icon** (first on the right of the bar).
+   Expect: YouTube's player at the same second, playing (or its play button showing, see 3 above).
+   The icon stays where it was and turns red; the rest of our bar fades out in place.
+2. Tap the red icon while YouTube's is playing. Expect: ours at YouTube's second, playing.
+3. Pause ours, tap the icon. Expect: YouTube's player at that second, paused.
+4. Pause YouTube's, tap the red icon. Expect: ours at that second, paused.
 
 Desktop: no YouTube button on the bar. Only when our stream fails and YouTube's player takes
 over does it appear, and tapping it tries our stream again.
