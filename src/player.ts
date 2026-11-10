@@ -2734,6 +2734,7 @@ export class YtFreePlayer {
     if (this.ytEmbed || this.ytOpening) return;
     this.ytOpening = true;
     this.video.pause();
+    this.togglePanel(false);
     try {
       const embed = await open(this.stage, this.video.currentTime, this.playbackRate);
       if (this.destroyed) {
