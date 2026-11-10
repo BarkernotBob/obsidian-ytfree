@@ -315,3 +315,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Notes button always folds the video** on the first press, as the reader's own fold: it stays
   until they tap Show video or Notes again, and does not come back when the keyboard goes. A
   fold the keyboard made does not count as folded, so Notes never reopens the video because of it.
+
+### 2026-11-10 (name)
+
+- **Display name is "YouTube for You"** (Isaiah, 2026-11-10). Only the name people see changed:
+  manifest `name`, README, in-app text. Kept on purpose: plugin id `ytfree`, repo name, CSS
+  classes, the `obsidian://ytfree` link, the default download folder `~/Movies/YT Free` (moving it
+  would orphan existing downloads) and the "YT Free video" template name. Capitalised "YouTube" to
+  match the trademark. Risk accepted by Isaiah: YouTube's branding guidelines ban "YouTube" in an
+  app's name; 16 community plugins already carry it (2026-11-10).

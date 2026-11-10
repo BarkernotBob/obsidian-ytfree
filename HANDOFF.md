@@ -26,6 +26,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-10: Notes button on the phone folds the video again (it was folding for the keyboard,
   then reopening it in the same tap). Next: Isaiah's phone test.
 
+- 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
+
 ## Shipped on main (scope doc = manual test)
 
 - HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));

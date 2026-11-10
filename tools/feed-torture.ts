@@ -1,5 +1,5 @@
 /**
- * Feed torture test (GitHub #66): how hard can YT Free hit YouTube's RSS
+ * Feed torture test (GitHub #66): how hard can YouTube for You hit YouTube's RSS
  * feeds before anything refuses, and does a feed burst make the next video
  * lookup get bot-checked? Isaiah, 2026-11-09: "planning around the real world,
  * not a phantom."

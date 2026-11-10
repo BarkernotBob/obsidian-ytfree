@@ -75,7 +75,7 @@ const panel = `
     ${panelRow("Pause while typing", panelSwitch)}
     ${panelRow("Player size", `<input type="range" class="ytfree-panel-range">`)}
     <div class="ytfree-panel-note">This video only</div>
-    <button type="button" class="ytfree-panel-link">All YT Free settings…</button>
+    <button type="button" class="ytfree-panel-link">All YouTube for You settings…</button>
   </div>`;
 
 /**

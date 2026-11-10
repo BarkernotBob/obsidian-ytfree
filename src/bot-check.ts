@@ -82,7 +82,7 @@ export function clockTime(ms: number): string {
  */
 export function pauseMessage(next: number, now: number = Date.now()): string {
   return (
-    "YouTube is asking this network to prove it isn't a bot. YT Free is pausing its requests" +
+    "YouTube is asking this network to prove it isn't a bot. YouTube for You is pausing its requests" +
     (next > now
       ? ` and will try again with the first video you play after ${clockTime(next)}.`
       : " and will try again with the next video you play.")

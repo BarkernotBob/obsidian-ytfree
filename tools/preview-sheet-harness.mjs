@@ -107,7 +107,7 @@ const sheet = (transcript, phone = true) => {
         ${panelRow("Smart Speed")}${panelRow("Skip music too")}${panelRow("Pause speed")}
         ${panelRow("Shortest pause")}${panelRow("Pause while typing")}
         <div class="ytfree-panel-note">This video only</div>
-        <button class="ytfree-panel-link">All YT Free settings…</button>
+        <button class="ytfree-panel-link">All YouTube for You settings…</button>
        </div>
        <div class="ytfree-controls-group ytfree-controls-side ytfree-controls-left">
         <select class="ytfree-speed"><option>1×</option></select>

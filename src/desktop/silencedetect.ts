@@ -216,7 +216,7 @@ export function detectSilenceChunked(opts: ChunkedSilenceOptions): SilenceDetect
       opts.onProgress?.(contiguousFrontier(covered, opts.duration), opts.duration);
     } catch (err) {
       failures++;
-      console.error(`YT Free: silence chunk ${chunk.start}–${chunk.end}s failed.`, err);
+      console.error(`YouTube for You: silence chunk ${chunk.start}–${chunk.end}s failed.`, err);
     } finally {
       running.delete(job);
     }
