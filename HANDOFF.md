@@ -6,22 +6,19 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 ## Status (2026-11-09)
 
-- The repo is public. History was rewritten with `git filter-repo` on 2026-09-10 (Obsidian's
-  `app.css`, the owner's first name and the vault name are gone from every commit).
+- Public repo; history rewritten 2026-09-10 (`git filter-repo`), never re-add `app.css`.
 - The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
 - Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md). New follow-ups are filed as GitHub issues, not as files in `issues/`.
 - 2026-11-09: YouTube sign-in, cookies and account sync removed (#64); see GLOSSARY.
 - 2026-11-09 (#66, PR #67): HD on Play and ceiling tests (#70); torture test showed no need for
   poll rounds; nothing before Play on desktop; bot-check retries on Play (1, 5, 10, 30 min, 1 h,
   2 h, 6 h); savings G1–G5; embed rule waits for #43 ([scope](docs/V1-SCOPE-BOT-SAFE.md)).
-- 2026-11-09: #48 watch history built (PR #74, [V1-SCOPE-WATCH-HISTORY](docs/V1-SCOPE-WATCH-HISTORY.md)):
-  History hub chip, `history.json`. Next: device test (manual test in the scope doc). #43 must feed it.
-- 2026-11-09 nightly: Subscribe inside YT Free on the channel screen and a search card's ⋯ menu,
-  and step-by-step Takeout steps in the import dialog (#65, `src/subscribe.ts`).
-
-- 2026-11-09: hub/watch-time sync fix (removals coming back between devices), PR on branch
-  `claude/project-thread-qrqemu`; scope + manual test in docs/V1-SCOPE-SYNC.md. Next: Isaiah's
-  Mac+iPhone test, then history.json (#48) adopts `src/synced-file.ts`. Follow-up #75.
+- 2026-11-10 nightly (#66): Play/HD ceilings tested end to end through the real player
+  (`tests/player-ceilings.test.ts`, provider now in `src/play-provider.ts`). #66 is blocked on #43 only.
+- #48 watch history (PR #74, #77; [scope](docs/V1-SCOPE-WATCH-HISTORY.md)). Next: device test. #43 must feed it.
+- 2026-11-09: Subscribe inside YT Free + Takeout steps (#65, `src/subscribe.ts`).
+- 2026-11-09: hub/watch-time sync fix merged (PR #76; docs/V1-SCOPE-SYNC.md). Next: Isaiah's
+  Mac+iPhone test. Follow-up #75.
 
 ## Shipped on main (scope doc = manual test)
 
@@ -32,10 +29,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   ([V1-SCOPE-PHONE-HD](docs/V1-SCOPE-PHONE-HD.md)). Part 2 needs GitHub Pages on, serving `/docs` from main.
 - Keep playing on the phone, resumable background pause, Now playing button
   ([V1-SCOPE-KEEP-PLAYING](docs/V1-SCOPE-KEEP-PLAYING.md)).
-- Halfway-point thumbnails (#41), paste/click a link to land in Preview
-  ([V1-SCOPE-PASTE-TO-PREVIEW](docs/V1-SCOPE-PASTE-TO-PREVIEW.md)), hub deep link
-  ([V1-SCOPE-HUB-DEEP-LINK](docs/V1-SCOPE-HUB-DEEP-LINK.md)), lock spike pasteable videos (#29),
-  request-volume research ([RESEARCH-YOUTUBE-REQUESTS](docs/RESEARCH-YOUTUBE-REQUESTS.md)).
+- Halfway thumbnails (#41), paste-to-Preview, hub deep link, pasteable videos (#29), request
+  research — each has a `docs/V1-SCOPE-*` / `docs/RESEARCH-*` doc.
 - **Parked:** 018 (Watch Later). Do not re-ask.
 
 ## Next step
@@ -70,15 +65,15 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
   out for the old sheet must size its own modal (see `.is-phone .modal.ytfree-preview-modal`).
   To compare, extract `app.css` from two releases' `obsidian-X.asar.gz` (GitHub releases of
   obsidianmd/obsidian-releases) and render with `tools/preview-sheet-harness.mjs`.
-- Obsidian rewrites `community-plugins.json` from memory while it's running, so `setup.sh` only
-  edits that file when Obsidian is closed.
-- `npm run smoke` is a once-a-day canary (`tools/smoke.mjs`, stamps in `~/.cache/ytfree/`).
-  Every live tool in `tools/` claims its own daily run through `tools/live-budget.mjs`.
+- `setup.sh` edits `community-plugins.json` only while Obsidian is closed (it rewrites it from memory).
+- `npm run smoke`: daily canary; every live tool claims its daily run via `tools/live-budget.mjs`.
 - A bot check pauses all automatic YouTube requests until a Play retry succeeds (retries at 1, 5,
   10, 30 min, 1 h, 2 h, then 6 h; `src/bot-check.ts`, stored in `localStorage` under
   `ytfree-bot-check-until`). Clear that key to end a pause early.
 - Offline HD player: `"devOfflineHd": "<folder>"` in data.json, folder from `tools/make-offline-hd.mjs`.
 - Kept answers: `localStorage` `ytfree-ytdlp-answers` / `ytfree-player-answers`. Requests: `src/request-governor.ts`.
+- `src/player.ts` uses constructor parameter properties, which Node's type stripping rejects; tests
+  that import it compile it with esbuild in a load hook (see `tests/player-ceilings.test.ts`).
 - Desktop HD byte ranges go over Node `https`, not `requestUrl`; a request Node cannot make at
   all (no status, no byte) switches that stream to `requestUrl` for good. The loader does not
   enforce `maxTimeToFirstByteMs` (only `maxLoadTimeMs`): `requestUrl` reports no first byte.
