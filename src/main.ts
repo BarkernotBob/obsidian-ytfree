@@ -51,6 +51,7 @@ import { YT_ICON, registerIcons } from "./icon";
 import { previewCloseAction } from "./preview";
 import { describeTestOutcome, describeWebhook } from "./notify";
 import type { NotificationFormat } from "./notify";
+import { appLocalCopy } from "./synced-file.ts";
 import { ProgressStore } from "./progress-store";
 import { HistoryStore } from "./history-store.ts";
 import type { HistoryMeta } from "./history.ts";
@@ -794,7 +795,11 @@ export default class YtFreePlugin extends Plugin {
     this.noHeatmap = new DeviceIdSet(localStore(NO_HEATMAP_KEY));
     this.ytInfo.attachStore(localStore(YTDLP_ANSWERS_KEY), (info) => trimYtDlpInfo(info, languages));
     attachPlayerStore(localStore(PLAYER_ANSWERS_KEY));
-    this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
+    this.progress = new ProgressStore(
+      this.app,
+      `${this.pluginDir()}/progress.json`,
+      appLocalCopy(this.app, "ytfree-sync-progress"),
+    );
     await this.progress.load();
     this.history = new HistoryStore(this.app, `${this.pluginDir()}/history.json`);
     await this.history.load();
@@ -4637,14 +4642,17 @@ export default class YtFreePlugin extends Plugin {
    * Both are a stat and nothing more when the file has not moved.
    */
   private watchProgressFile(): void {
-    this.registerDomEvent(window, "focus", () => {
+    // The hub file too (V1-SCOPE-SYNC): coming back to the app is exactly when
+    // the other device's Removes are waiting, and the hub may not be open.
+    const refresh = (): void => {
       void this.progress.refreshFromDisk();
       void this.history.refreshFromDisk();
-    });
+      void this.subscriptions?.refreshFromDisk();
+    };
+    this.registerDomEvent(window, "focus", refresh);
     this.registerDomEvent(document, "visibilitychange", () => {
       if (!document.hidden) {
-        void this.progress.refreshFromDisk();
-        void this.history.refreshFromDisk();
+        refresh();
         return;
       }
       void this.history.flush();

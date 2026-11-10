@@ -21,6 +21,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 
 - 2026-11-10 (#43): a dead yt-dlp link now moves playback to our own stream; brew messages gone.
   YouTube's player as the last tier waits for Isaiah's OK ([V1-SCOPE-PLAYER-FALLBACK](docs/V1-SCOPE-PLAYER-FALLBACK.md)).
+- 2026-11-09: hub/watch-time sync fix (removals coming back between devices), PR on branch
+  `claude/project-thread-qrqemu`; scope + manual test in docs/V1-SCOPE-SYNC.md. Next: Isaiah's
+  Mac+iPhone test, then history.json (#48) adopts `src/synced-file.ts`. Follow-up #75.
 
 ## Shipped on main (scope doc = manual test)
 

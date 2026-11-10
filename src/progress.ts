@@ -75,6 +75,14 @@ export interface ProgressState {
    */
   watched: Record<string, string>;
   /**
+   * When each video's position was last *cleared* — finished, or scrubbed back
+   * under `MIN_REMEMBER_SECONDS`. Without it a clear could not cross devices:
+   * an absence reads as "never seen", so the other device's older position came
+   * back and the video reopened near its end (V1-SCOPE-SYNC). A position newer
+   * than its clear wins, and the clear is dropped once it has lost.
+   */
+  cleared: Record<string, string>;
+  /**
    * Watch stamps already handed to `history.json` (GitHub #48), by the stamp
    * that was handed over. A stamp at or before its entry here is dropped on
    * every merge, so the other device's copy cannot hand it back and set off
@@ -84,7 +92,7 @@ export interface ProgressState {
 }
 
 export function emptyProgress(): ProgressState {
-  return { positions: {}, watched: {}, drained: {} };
+  return { positions: {}, watched: {}, cleared: {}, drained: {} };
 }
 
 /**
@@ -115,12 +123,13 @@ export function normalizeProgress(raw: unknown): ProgressState {
     }
   }
 
-  const drained = (raw as ProgressState | null)?.drained;
-  if (drained && typeof drained === "object" && !Array.isArray(drained)) {
-    for (const [videoId, value] of Object.entries(drained)) {
+  for (const key of ["cleared", "drained"] as const) {
+    const list = (raw as ProgressState | null)?.[key];
+    if (!list || typeof list !== "object" || Array.isArray(list)) continue;
+    for (const [videoId, value] of Object.entries(list)) {
       if (!VIDEO_ID_RE.test(videoId)) continue;
       const at = String(value ?? "");
-      if (Number.isFinite(Date.parse(at))) state.drained[videoId] = at;
+      if (Number.isFinite(Date.parse(at))) state[key][videoId] = at;
     }
   }
 
@@ -161,8 +170,18 @@ export function recordPosition(
   const at = Math.floor(seconds);
   if (!Number.isFinite(at)) return false;
 
-  if (at < MIN_REMEMBER_SECONDS || isFinished(at, duration)) {
-    return clearPosition(state, videoId);
+  const finished = isFinished(at, duration);
+  if (at < MIN_REMEMBER_SECONDS || finished) {
+    if (videoId in state.positions) return clearPosition(state, videoId, now);
+    // Finished here before the other device's position arrived: the clear
+    // still has to be said, or that older position wins when it lands. At
+    // most once a minute — the credits report every few seconds.
+    const lastClear = Date.parse(state.cleared[videoId] ?? "");
+    if (finished && !(now.getTime() - lastClear < CLEAR_RESTAMP_MS)) {
+      state.cleared[videoId] = now.toISOString();
+      return true;
+    }
+    return false;
   }
 
   const existing = state.positions[videoId];
@@ -173,6 +192,7 @@ export function recordPosition(
   if (existing && existing.seconds === at && (known === undefined || existing.duration === known)) {
     return false;
   }
+  delete state.cleared[videoId];
   state.positions[videoId] = {
     seconds: at,
     updatedAt: now.toISOString(),
@@ -252,15 +272,19 @@ export function watchedAt(state: ProgressState, videoId: string): string | null 
   return state.watched[videoId] ?? null;
 }
 
+/** How often a finish with nothing to clear may restamp its clear. */
+const CLEAR_RESTAMP_MS = 60_000;
+
 export function isFinished(seconds: number, duration: number): boolean {
   if (!Number.isFinite(duration) || duration <= 0) return false;
   const margin = Math.max(END_MARGIN_SECONDS, duration * END_MARGIN_FRACTION);
   return seconds >= duration - margin;
 }
 
-export function clearPosition(state: ProgressState, videoId: string): boolean {
+export function clearPosition(state: ProgressState, videoId: string, now = new Date()): boolean {
   if (!(videoId in state.positions)) return false;
   delete state.positions[videoId];
+  state.cleared[videoId] = now.toISOString();
   return true;
 }
 
@@ -283,21 +307,25 @@ export function resumePoint(state: ProgressState, videoId: string): number {
  * *watched* a video knows where it got to, and that is what `updatedAt`
  * records.
  *
- * The one thing it cannot do is carry a deletion. A finished video has its
- * position removed rather than zeroed, and an absence is indistinguishable from
- * "this device has never seen it" — so a video finished here while the other
- * device still holds an old position for it comes back with that position, and
- * reopens near the end instead of at the start. That is a scrub back, once,
- * against silently losing a position every time two devices disagree; the
- * cheaper of the two mistakes wins.
+ * A finished video's position is removed rather than zeroed, and an absence
+ * reads as "never seen" — so the clear is carried as its own dated entry in
+ * `cleared`, and wins against any position not newer than it.
  */
 export function mergeProgress(mine: ProgressState, theirs: ProgressState): ProgressState {
   const merged = emptyProgress();
 
+  // Ties broken by the larger second, so both devices pick the same entry and
+  // never rewrite the file back and forth over it (V1-SCOPE-SYNC).
   for (const [videoId, point] of Object.entries(mine.positions)) merged.positions[videoId] = point;
   for (const [videoId, point] of Object.entries(theirs.positions)) {
     const ours = merged.positions[videoId];
-    if (!ours || newer(point.updatedAt, ours.updatedAt)) merged.positions[videoId] = point;
+    if (
+      !ours ||
+      newer(point.updatedAt, ours.updatedAt) ||
+      (point.updatedAt === ours.updatedAt && pointKey(point) > pointKey(ours))
+    ) {
+      merged.positions[videoId] = point;
+    }
   }
 
   for (const [videoId, at] of Object.entries(mine.watched)) merged.watched[videoId] = at;
@@ -317,7 +345,26 @@ export function mergeProgress(mine: ProgressState, theirs: ProgressState): Progr
     if (stamp !== undefined && !newer(stamp, at)) delete merged.watched[videoId];
   }
 
+  // A clear beats any position it is not older than; a position recorded after
+  // it wins, and the clear has done its job.
+  for (const list of [mine.cleared ?? {}, theirs.cleared ?? {}]) {
+    for (const [videoId, at] of Object.entries(list)) {
+      const seen = merged.cleared[videoId];
+      if (!seen || newer(at, seen)) merged.cleared[videoId] = at;
+    }
+  }
+  for (const [videoId, at] of Object.entries(merged.cleared)) {
+    const point = merged.positions[videoId];
+    if (!point) continue;
+    if (newer(point.updatedAt, at)) delete merged.cleared[videoId];
+    else delete merged.positions[videoId];
+  }
+
   return merged;
+}
+
+function pointKey(point: WatchPoint): string {
+  return `${String(point.seconds).padStart(8, "0")}:${point.duration ?? ""}`;
 }
 
 /** Strictly later, with an unparseable stamp losing to anything readable. */
@@ -354,6 +401,24 @@ export function pruneProgress(state: ProgressState, now: Date, ttlDays = PROGRES
     }
   }
 
+  // The clears and hand-over marks, on the same terms as positions: one older
+  // than any stamp it could hold back is no longer holding anything back.
+  for (const key of ["cleared", "drained"] as const) {
+    for (const [videoId, at] of Object.entries(state[key])) {
+      if (Date.parse(at) >= cutoff) continue;
+      delete state[key][videoId];
+      changed = true;
+    }
+    const marks = Object.entries(state[key]);
+    if (marks.length > MAX_PROGRESS_ENTRIES) {
+      marks.sort((a, b) => Date.parse(a[1]) - Date.parse(b[1]));
+      for (const [videoId] of marks.slice(0, marks.length - MAX_PROGRESS_ENTRIES)) {
+        delete state[key][videoId];
+        changed = true;
+      }
+    }
+  }
+
   // The watch stamps, on the same terms. A year is a long time after the month
   // the tidy measures, so nothing that still matters is ever dropped here.
   const stamps = Object.entries(state.watched).filter(([videoId, at]) => {
@@ -370,13 +435,5 @@ export function pruneProgress(state: ProgressState, now: Date, ttlDays = PROGRES
       changed = true;
     }
   }
-  // The hand-over marks, on the same terms: one older than any stamp it could
-  // hold back is no longer holding anything back.
-  for (const [videoId, at] of Object.entries(state.drained)) {
-    if (Date.parse(at) >= cutoff) continue;
-    delete state.drained[videoId];
-    changed = true;
-  }
-
   return changed;
 }
