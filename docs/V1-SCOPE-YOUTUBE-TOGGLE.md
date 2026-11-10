@@ -21,8 +21,10 @@ only once a sound autoplay is shown to be impossible. Visual mockup reviewed in 
 1. **One button on the controls bar**, right-hand group, first in it: the YouTube icon, grey on
    ours, red on a lit square while YouTube's is up (a toggle, on/off). Same spot in both modes: while YouTube's
    player is up, our other controls are hidden with `visibility`, not removed, so nothing moves.
-2. **Phone only.** On the desktop the button exists only while YouTube's player is up as the
-   fallback tier (#43), as the way back ("Try our stream again").
+2. **Phone, and desktop without yt-dlp** (Isaiah, 2026-11-10 18:21: store desktop users have no
+   yt-dlp, and our own stream's HD likely stops at about a minute there as on the phone, #25).
+   The desktop looks for yt-dlp once at startup (`yt-dlp --version`, local). With yt-dlp, the
+   button exists only while YouTube's player is up as the fallback tier (#43), as the way back.
 3. **State is kept both ways.** Same second (±1 s, YouTube reports once a second), same speed,
    same playing/paused state.
    - Ours → YouTube, paused: YouTube's player opens cued at that second and does not start.
@@ -58,8 +60,9 @@ Phone (Obsidian iOS), any video note:
 3. Pause ours, tap the icon. Expect: YouTube's player at that second, paused.
 4. Pause YouTube's, tap the red icon. Expect: ours at that second, paused.
 
-Desktop: no YouTube button on the bar. Only when our stream fails and YouTube's player takes
-over does it appear, and tapping it tries our stream again.
+Desktop with yt-dlp (Isaiah's Mac): no YouTube button on the bar. Only when our stream fails and
+YouTube's player takes over does it appear, and tapping it tries our stream again.
+Desktop without yt-dlp (e.g. a work computer): the button is on the bar, same four steps.
 
 The hosted page changes (paused hold, muted retry) go live only once this is merged to main,
 because GitHub Pages serves `docs/` from main. Before that, step 3 starts playing instead of

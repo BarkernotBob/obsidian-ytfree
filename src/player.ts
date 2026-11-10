@@ -208,8 +208,9 @@ export interface QuickPanelOptions {
     play: boolean,
   ) => Promise<YouTubeEmbedHandle>;
   /**
-   * The YouTube button is for the reader (phone). Without it, the button only
-   * appears while YouTube's player is up as the fallback tier, as the way back.
+   * The YouTube button is for the reader: the phone, and a desktop without
+   * yt-dlp. Without it, the button only appears while YouTube's player is up
+   * as the fallback tier, as the way back. `setYouTubeToggle` changes it later.
    */
   youtubeToggle?: boolean;
   /**
@@ -2777,6 +2778,15 @@ export class YtFreePlayer {
       if (at > 0 && Math.abs(this.video.currentTime - at) > 1) this.video.currentTime = at;
       this.play();
     });
+  }
+
+  /**
+   * Offer the YouTube button or not: a desktop learns whether yt-dlp is there
+   * after the player is built. Off, it still shows as the way back from the
+   * fallback tier.
+   */
+  setYouTubeToggle(on: boolean): void {
+    this.ytToggle?.toggleClass("is-fallback-only", !on);
   }
 
   /** The YouTube button says which player tapping it goes to. */

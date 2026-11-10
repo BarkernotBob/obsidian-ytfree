@@ -1168,6 +1168,7 @@ export default class YtFreePlugin extends Plugin {
     // Registered only after layout is ready: during startup Obsidian fires
     // `create` for every file already in the vault, which would make the whole
     // vault look new and queue a transcript fetch for all of it.
+    this.app.workspace.onLayoutReady(() => void this.probeYtDlp());
     this.app.workspace.onLayoutReady(() => {
       this.registerEvent(
         this.app.vault.on("create", (file) => {
@@ -4331,8 +4332,9 @@ export default class YtFreePlugin extends Plugin {
             const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
             return mountYouTubePlayer(host, videoId, at, rate, onStatus, (line) => this.youtubeLog(line), play);
           },
-          // Phone only: the desktop has yt-dlp for HD (Isaiah, 2026-11-10).
-          youtubeToggle: mobile,
+          // The phone, and a desktop without yt-dlp: with yt-dlp the desktop
+          // gets HD from it (Isaiah, 2026-11-10).
+          youtubeToggle: mobile || this.ytDlpUnavailable,
           forgetStreamFailures: () => this.tierFailures.clear(videoId),
         },
         // Everything the reader set on this video that a rebuilt player would
@@ -5145,6 +5147,7 @@ export default class YtFreePlugin extends Plugin {
       ytDlpUnavailable: () => this.ytDlpUnavailable,
       markYtDlpUnavailable: () => {
         this.ytDlpUnavailable = true;
+        this.paintYouTubeToggles();
       },
       innertubeFast: async (videoId) => {
         const { resolveMobileStream } = await import("./mobile/innertube.ts");
@@ -5603,6 +5606,29 @@ export default class YtFreePlugin extends Plugin {
     this.ytDlpPath = null;
     this.ytDlpUnavailable = false;
     this.cache.clear();
+    void this.probeYtDlp();
+  }
+
+  /**
+   * Desktop: look for yt-dlp once, locally (`yt-dlp --version`, no network),
+   * so the YouTube button is on the bar from the start when it is missing.
+   */
+  private async probeYtDlp(): Promise<void> {
+    if (!Platform.isDesktopApp || this.ytDlpPath) return;
+    try {
+      const { findYtDlp } = await desktop();
+      this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
+      this.ytDlpUnavailable = false;
+    } catch {
+      this.ytDlpUnavailable = true;
+    }
+    this.paintYouTubeToggles();
+  }
+
+  /** Every open player's YouTube button follows whether yt-dlp is here. */
+  private paintYouTubeToggles(): void {
+    if (!Platform.isDesktopApp) return;
+    for (const entry of this.players.values()) entry.player.setYouTubeToggle(this.ytDlpUnavailable);
   }
 
 }
