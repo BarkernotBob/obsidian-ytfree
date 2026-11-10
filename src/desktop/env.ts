@@ -31,7 +31,10 @@ const HELPER_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "
  * user has arranged deliberately should keep winning, and this only has to make
  * the difference between "not found" and "found".
  */
-export function ytDlpEnv(ytDlpPath: string): NodeJS.ProcessEnv {
+export function ytDlpEnv(ytDlpPath: string, platform: string = process.platform): NodeJS.ProcessEnv {
+  // Windows: these are Unix directories, its PATH is split on `;` and its key
+  // is spelled `Path`. Rewriting it there could only break a PATH that works.
+  if (platform === "win32") return process.env;
   const own = ytDlpPath ? [path.dirname(ytDlpPath)] : [];
   const existing = process.env.PATH ? process.env.PATH.split(":") : [];
   const seen = new Set<string>();

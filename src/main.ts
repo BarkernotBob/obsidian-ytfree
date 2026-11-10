@@ -5619,13 +5619,6 @@ export default class YtFreePlugin extends Plugin {
     this.cache.clear();
   }
 
-  /** The yt-dlp binary, probed once and remembered until a setting changes it. */
-  private async resolveYtDlp(): Promise<string> {
-    if (this.ytDlpPath) return this.ytDlpPath;
-    const { findYtDlp } = await desktop();
-    this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-    return this.ytDlpPath;
-  }
 }
 
 class YtFreeSettingTab extends PluginSettingTab {

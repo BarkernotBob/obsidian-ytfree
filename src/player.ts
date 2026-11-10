@@ -12,7 +12,7 @@ import type { PlaybackWindow, SilenceSource } from "./silence.ts";
 // the whole resolver — and its `child_process` import — into every bundle that
 // touches the player, which is one of the two reasons the plugin could not load
 // on mobile.
-import type { ResolveMode, ResolvedStream, StreamProvider } from "./stream.ts";
+import type { ResolvedStream, StreamProvider } from "./stream.ts";
 import { fullscreenPress } from "./fullscreen.ts";
 import { dropOnJump, VIRTUAL_FRAG_POLICY, virtualLoader } from "./virtual-loader.ts";
 import { badgeText, bufferedAhead, HD_WAIT_MS, hdStartPhase, rungPhase, within } from "./hd-status.ts";

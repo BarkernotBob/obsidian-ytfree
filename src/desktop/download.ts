@@ -37,6 +37,8 @@ const FFMPEG_CANDIDATES = [
   "/usr/local/bin/ffmpeg",
   "/usr/bin/ffmpeg",
   "/opt/local/bin/ffmpeg",
+  // Last: whatever the app's own PATH finds (Windows, Linux).
+  "ffmpeg",
 ];
 
 /** Refuse to start a download with less than this much room left. */

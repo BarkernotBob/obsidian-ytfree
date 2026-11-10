@@ -90,7 +90,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - License is MIT (package.json said ISC; Obsidian needs a LICENSE file, and MIT is the common
   choice in its directory).
-- `minAppVersion` 1.6.6: `FileManager.trashFile` needs it. Obsidian's lint fails below that.
+- `minAppVersion` 1.6.6: `FileManager.trashFile` needs it. Obsidian's lint fails below that. Raised to 1.8.7 on 2026-11-10: see below.
 - TypeScript is pinned to 5.9: typescript-eslint, which Obsidian's lint runs on, does not
   support TypeScript 7.
 - Plugin logging is `console.debug` (Obsidian's rules allow only debug, warn and error), so the
@@ -300,3 +300,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - `PROGRESS_TTL_DAYS` stays 365 (2026-09-02).
 - In progress floor is `min(0.1 × duration, 120s)`, backed by `progress.json` (2026-08-06).
 - Subscribe opens the channel in the external browser; no authenticated writes (2026-08-06). Removed 2026-11-09 with sign-in (#64).
+
+### 2026-11-10 (hardening review; Claude's calls, open to change)
+
+- `minAppVersion` is 1.8.7: `App.loadLocalStorage`, which `onload` calls, is public from that
+  version ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md), H1).
+- TypeScript runs with `strict`, `noUnusedLocals` and `noUnusedParameters`. The code already
+  passed `strict`; the switch keeps it that way.
+- On Windows the plugin never rewrites the PATH it gives yt-dlp, and yt-dlp and ffmpeg are also
+  looked for by bare name, last. Not tested on a Windows machine.
