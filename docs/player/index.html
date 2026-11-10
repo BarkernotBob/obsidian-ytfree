@@ -68,13 +68,35 @@
           status();
           setInterval(status, 1000);
         },
-        onStateChange: status,
+        onStateChange: function (e) { onState(e); status(); },
         onPlaybackQualityChange: status,
         onPlaybackRateChange: status,
         onError: function (e) { send("error", { code: e.data }); },
       },
     });
   };
+
+  /*
+   * Keep playing when the app goes to the background or the phone locks
+   * (GitHub #25). iOS pauses media as the page is hidden; a pause that lands
+   * within a second of that, while it was playing, is the system's and not the
+   * reader's, so it is undone. The same rule as our own player (keep-playing.ts).
+   * Whether WebKit lets a hidden page resume is up to iOS.
+   */
+  var playing = false;
+  var hiddenAt = 0;
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") hiddenAt = Date.now();
+  });
+  function onState(e) {
+    var s = e.data;
+    if (s === 1) { playing = true; return; }
+    if (s === 2 && playing && hiddenAt && Date.now() - hiddenAt < 1000) {
+      setTimeout(function () { player.playVideo(); }, 0);
+      return;
+    }
+    if (s === 2 || s === 0) playing = false;
+  }
 
   window.addEventListener("message", function (e) {
     if (e.source !== window.parent || !player || !player.seekTo) return;

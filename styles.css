@@ -4010,40 +4010,53 @@ body.ytfree-immersive-open .ytfree-preview-close {
   text-decoration-color: currentColor;
 }
 
-/* YouTube's own player on the phone (#25, part 2): the whole screen, black. */
-.modal.ytfree-ytplayer-modal {
-  width: 100vw;
-  height: 100dvh;
-  max-width: none;
-  max-height: none;
-  padding: 0;
-  border-radius: 0;
-  border: 0;
+/* YouTube's own player on the phone (#25, part 2): over the picture, in place. */
+.ytfree-yt-embed {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
   background: #000;
 }
-.modal.ytfree-ytplayer-modal .modal-content {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-}
-.modal.ytfree-ytplayer-modal .modal-close-button {
-  top: calc(env(safe-area-inset-top) + 2px);
-  color: #fff;
-}
-.ytfree-ytplayer-line {
-  color: #bbb;
-  font-size: var(--font-ui-smaller);
-  padding: 8px 48px 8px 12px;
-  font-variant-numeric: tabular-nums;
-}
-.ytfree-ytplayer-frame {
-  flex: 1;
+.ytfree-yt-embed-frame {
   width: 100%;
+  height: 100%;
   border: 0;
-  background: #000;
+  display: block;
 }
+.ytfree-yt-embed-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.ytfree-yt-embed-badge.is-visible {
+  opacity: 1;
+}
+/* While YouTube's player has the picture, its controls are the transport. */
+.ytfree-controls-youtube {
+  display: none;
+}
+/* Every control of ours drives the hidden <video>, so none shows: YouTube's
+   player has its own, and "Back to our player" is the way out. */
+.is-youtube .ytfree-controls {
+  grid-template-columns: 1fr;
+}
+.is-youtube .ytfree-controls > :not(.ytfree-controls-youtube) {
+  display: none;
+}
+.is-youtube .ytfree-controls-youtube {
+  display: flex;
+  justify-content: center;
+}
+
 
 /* The desktop Now playing item in the status bar (see `setupNowPlayingButton`). */
 .ytfree-now-playing-status {

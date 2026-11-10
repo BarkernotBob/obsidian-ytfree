@@ -4358,9 +4358,9 @@ export default class YtFreePlugin extends Plugin {
           },
           // Phone only (#25): YouTube's own player, for HD on any video.
           youtubePlayer: mobile
-            ? async (at, rate) => {
-                const { openYouTubePlayer } = await import("./mobile/youtube-player-modal.ts");
-                return openYouTubePlayer(this.app, videoId, at, rate);
+            ? async (host, at, rate) => {
+                const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
+                return mountYouTubePlayer(host, videoId, at, rate);
               }
             : undefined,
         },

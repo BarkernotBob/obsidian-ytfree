@@ -57,9 +57,11 @@ fixes that.
    `postMessage`: it reports time, duration, state, speed, quality and errors once a second and
    takes play, pause, seek and speed. Nothing else, no storage, no analytics of its own.
 2. **Phone only: Quality → "YouTube player (HD)"** in the player's ⋯ pop-out. Picking it pauses
-   our player and opens YouTube's player full-screen at the same second and speed. A line at the
-   top shows what YouTube reports (quality, time). Closing it puts our player at the second you
-   left off, paused, and the Quality row back to what it was.
+   our player and puts YouTube's player in its place (same picture box, not full-screen; changed
+   2026-11-10 after Isaiah's test), at the same second and speed. YouTube's fullscreen button is
+   the only fullscreen. A chip shows YouTube's quality when it changes, then fades. The bar's
+   transport is replaced by **Back to our player**; that, or picking HD/360p in Quality, puts our
+   player at the second YouTube's got to, paused.
 3. The pure parts (the page URL, reading its messages) are tested; the page itself is not run here.
 
 What it costs (to be checked on the iPhone): YouTube may show its ads on monetized videos. Smart
@@ -70,6 +72,18 @@ Setup, once: GitHub → repo Settings → Pages → "Deploy from a branch" → t
 `/docs`. After merge, switch it to `main`.
 
 Not built (dropped from the options): HD through the Mac on the home network.
+
+Measured by Isaiah 2026-11-10 (first test): it plays, no ad on the video tried (several times),
+480p in portrait and 1080p in landscape. YouTube picks quality from the player's size.
+
+Second test (2026-11-10 17:10): still no ads. Our bar controls showed under YouTube's player (fixed:
+only Back to our player shows). No PiP button in the embed, but YouTube's fullscreen then leaving
+Obsidian goes to PiP by itself and keeps playing in the background (Isaiah). The hosted page also
+undoes a system pause within 1 s of the page going hidden (untested).
+
+Why no ads (inferred, not verified): Google's embed rules say ads show only on click-to-play
+embeds, not scripted plays (support.google.com/youtube/answer/132596). Our page starts with
+autoplay. The site's brand-safety rating and WebKit's third-party cookie blocking may also count.
 
 ## Out of scope
 
@@ -91,7 +105,8 @@ Not built (dropped from the options): HD through the Mac on the home network.
 1. GitHub Pages is on (see Setup above), and
    `https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ` opens in Safari and plays.
 2. Install the build; on the iPhone turn YT Free off and on.
-3. Open a long video (e.g. `aqz-KE-bpKQ`), play to about 0:30, open ⋯ → Quality → "YouTube player (HD)".
-4. YouTube's player opens at about 0:30. Note: does an ad play? Does the top line reach `hd720` or
-   `hd1080` within ~10 s? Is the picture sharp in fullscreen?
-5. Jump to about 5:00 in YouTube's player, then close it. Our player sits at about 5:00, paused.
+3. Open a long video, play to about 0:30, open ⋯ → Quality → "YouTube player (HD)".
+4. YouTube's player appears in the same picture box at about 0:30; the note stays where it is.
+   A "YouTube player · 480p"-style chip shows, then fades. The bar shows "Back to our player".
+5. YouTube's fullscreen button goes full-screen; rotating gives 1080p.
+6. Jump to about 5:00, tap "Back to our player". Our player is back at about 5:00, paused.
