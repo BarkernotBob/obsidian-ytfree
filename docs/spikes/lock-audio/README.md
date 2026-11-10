@@ -18,7 +18,7 @@ Its own plugin, sharing no code and no state with YT Free — installing it
 cannot disturb whatever is half-built in `src/`.
 
 ```
-cp -R spikes/lock-audio "$VAULT/.obsidian/plugins/ytfree-lockspike"
+cp -R docs/spikes/lock-audio "$VAULT/.obsidian/plugins/ytfree-lockspike"
 ```
 
 Then enable **YT Free Spike (lock audio)** under Community plugins, on the

@@ -1,22 +1,18 @@
 import { Prec } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
-  App,
   FileSystemAdapter,
   MarkdownPostProcessorContext,
   MarkdownRenderChild,
   MarkdownView,
   Menu,
-  Modal,
   Notice,
   editorInfoField,
   editorLivePreviewField,
   Platform,
   Plugin,
-  PluginSettingTab,
   requestUrl,
   setIcon,
-  Setting,
   TFile,
   type WorkspaceLeaf,
 } from "obsidian";
@@ -31,7 +27,6 @@ import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
 import { liveTimestampAt, liveTimestamps } from "./live-timestamps.ts";
 import {
   HANDOFF_ACTION,
-  HANDOFF_BOOKMARKLET,
   HANDOFF_VIEWS,
   handoffTarget,
   isYouTubeUrl,
@@ -46,13 +41,13 @@ import {
   HubView,
   PreviewHandle,
   ImportSubscriptionsModal,
-  SearchBlocklistModal,
   SubscriptionsStore,
 } from "./hub";
 import { YT_ICON, registerIcons } from "./icon";
 import { previewCloseAction } from "./preview";
-import { describeTestOutcome, describeWebhook } from "./notify";
-import type { NotificationFormat } from "./notify";
+import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings.ts";
+import { YtFreeSettingTab } from "./settings-tab.ts";
+import type { YtFreeSettings } from "./settings.ts";
 import { appLocalCopy } from "./synced-file.ts";
 import { ProgressStore } from "./progress-store";
 import { HistoryStore } from "./history-store.ts";
@@ -61,13 +56,10 @@ import { shareUrl } from "./share";
 import { SilenceStore } from "./silence-store";
 import {
   combineSilence,
-  FLOOR_MARGIN_DB,
   isStale,
   isWordTimed,
-  MIN_SILENCE_GAP,
   transcriptWindows,
   wordInstants,
-  WORD_PAD,
 } from "./silence";
 import type { SilenceMap, SilenceWindow } from "./silence";
 import type { CaptionTrack, Cue, VideoInfo } from "./transcript";
@@ -117,7 +109,7 @@ import {
   notesCursorTarget,
   sectionEnd,
 } from "./sections";
-import { DEFAULT_TIDY_DAYS, notesToTidy, sweepNote } from "./tidy";
+import { notesToTidy, sweepNote } from "./tidy";
 import type { SweepHub, TidyCandidate } from "./tidy";
 import { needsYouTubePlayer, YtFreePlayer } from "./player";
 import { AllTiersFailedError, TierFailures } from "./tier-failures";
@@ -153,154 +145,6 @@ function desktop(): Promise<DesktopApi> {
   return desktopApi;
 }
 
-interface YtFreeSettings {
-  ytDlpPath: string;
-  /**
-   * Developer only, set by hand in `data.json`: a folder made by
-   * `tools/make-offline-hd.mjs`. Every video then plays from it, 360p and HD,
-   * with no request to YouTube (GitHub #38). Not in the settings tab.
-   */
-  devOfflineHd?: string;
-  upgradeToHighQuality: boolean;
-  /** Stitched HD on the phone. Off by default: iOS 17.1+, and more data. */
-  phoneHighQuality: boolean;
-  /** Hold playback until HD is ready, and start it on the top rung. */
-  startInHd: boolean;
-  timestampFormat: string;
-  autoStampNewLine: boolean;
-  lookbackSeconds: number;
-  pauseWhileTyping: boolean;
-  resumeIdleMs: number;
-  pinnedPlayer: boolean;
-  pinnedHeightVh: number;
-  pinnedFrontmatterKeys: string;
-  /** YouTube links clicked in a note open in YT Free, not the browser (GitHub #3). */
-  openYouTubeLinksHere: boolean;
-  collapseProperties: boolean;
-  collapseSections: boolean;
-  linkifyTimestamps: boolean;
-  transcriptLanguage: string;
-  transcriptIntervalSeconds: number;
-  /**
-   * Whether the note's transcript keeps up with the video once you have gone to
-   * it — see `startFollowing`. Off means the jump is a jump and nothing moves
-   * afterwards, which is what this was before 035.
-   */
-  followTranscript: boolean;
-  autoFetchTranscript: boolean;
-  heatmapPeaks: number;
-  downloadFolder: string;
-  ffmpegPath: string;
-  subscriptionsPollMinutes: number;
-  subscriptionsExpiryDays: number;
-  subscriptionsIncludeShorts: boolean;
-  /**
-   * Where a poll POSTs when new videos land in the Inbox. Blank is the default
-   * and switches the whole feature off.
-   *
-   * Deliberately a bare URL rather than a provider integration: Obsidian mobile
-   * cannot raise an iOS notification itself, so *something* off-device has to,
-   * and which something is not ours to choose. ntfy.sh, Pushover, an Apple
-   * Shortcut — all of them take a plain POST. See
-   * `docs/V1-SCOPE-NOTIFICATIONS.md`.
-   */
-  notificationWebhook: string;
-  /** Pause the pushes without having to delete the URL to do it. */
-  notificationsEnabled: boolean;
-  /**
-   * `json` for anything that parses a body; `text` for ntfy.sh, which renders
-   * the request body verbatim on the lock screen.
-   */
-  notificationFormat: NotificationFormat;
-  /**
-   * Days a watched video note may sit with nothing written in it before it is
-   * moved to the trash. Zero switches the sweep off entirely. See `tidy.ts` for
-   * the four conditions a note has to meet before this number is even consulted.
-   */
-  tidyEmptyNoteDays: number;
-  watchLaterFolder: string;
-  /** Smart Speed's starting state on a freshly opened player. */
-  smartSpeed: boolean;
-  /**
-   * How fast non-speech audio plays, when Smart Speed is on.
-   *
-   * Since 017 this is no longer what happens to silence — silence is seeked
-   * over. It applies to music, and to the pauses a seek would make worse than
-   * it found them: shorter than `MIN_SKIP_SECONDS`, or past the buffer.
-   */
-  silenceSpeed: number;
-  /**
-   * How long a quiet stretch has to be before it counts as a skippable pause.
-   *
-   * One number for both producers, deliberately: it is the transcript
-   * producer's gap threshold *and* silencedetect's `d=`, so turning the dial
-   * changes the same thing whether or not ffmpeg happens to be installed. Two
-   * numbers here would mean the feature behaved differently on two machines for
-   * a reason the user never chose.
-   */
-  silenceMinGap: number;
-  /**
-   * A manual `silencedetect` threshold in dBFS, or `null` to measure the audio.
-   *
-   * `null` by default, and 022 is why: this was a fixed −30 dB, which is inside
-   * the words on a normally-mastered voice track, so the player skipped the
-   * gaps between syllables. Every recording has its own noise floor, so the
-   * threshold is now measured per video — see `pickThreshold`. The setting
-   * survives as an Advanced escape hatch for audio the measurement gets wrong.
-   */
-  silenceNoiseDb: number | null;
-  /**
-   * How far above the measured noise floor the threshold sits, in dB.
-   *
-   * Advanced. Raising it compresses more and risks clipping quiet speech;
-   * lowering it is the safe direction. See `FLOOR_MARGIN_DB`.
-   */
-  silenceFloorMargin: number;
-  /**
-   * How much room each spoken word is given, on both sides, before a skip is
-   * allowed to cross it. Seconds. See `vetoWords`.
-   *
-   * Advanced, and warned about: it is the one number here whose *lower* end
-   * makes the plugin skip more and clip words. Zero disables the veto.
-   */
-  silenceWordPad: number;
-  /**
-   * Compress everything with no *speech* in it, rather than only what is
-   * literally silent.
-   *
-   * The setting 015 did not have, and the one BarkernotBob asked for after using it:
-   * *"Musical interludes should still be cut … the idea is to let this get you
-   * straight to the content, cutting the fluff."* On, the two producers are
-   * unioned; off, ffmpeg's measurement wins where it has run, which is 015's
-   * behaviour and the answer for someone who wants the music left alone.
-   */
-  skipNonSpeech: boolean;
-  /**
-   * Print what the phone is actually doing, to the console.
-   *
-   * Off, and not a preference — a switch for one job. Two of the bugs this
-   * plugin has had (038, 041) are the same invisible failure: iOS declines a
-   * fullscreen or a keyboard because the user gesture has lapsed, and declines
-   * it *silently*. Nothing about that can be reasoned out from a screenshot, so
-   * the alternative to this toggle is guessing. See `debug`.
-   */
-  debugLogs: boolean;
-  /**
-   * Phone only: resolve the stream when the player mounts, instead of waiting
-   * for the first tap.
-   *
-   * `deferMobileLoad` exists because opening a note should not cost a video,
-   * and that is still true of the *video* — this fetches metadata, not the
-   * film. What it buys is 038: `webkitEnterFullscreen` is refused until there
-   * is loaded media, and the resolve cannot happen inside the tap that wants
-   * fullscreen, so the only way the first press can be the real thing is for
-   * the resolve to have already happened. Off by default since GitHub #66:
-   * a resolve on every note opened is a YouTube request nobody asked for, and
-   * keeping a user's IP unflagged outranks a first-press fullscreen. On for
-   * anyone who wants 038's behaviour back.
-   */
-  warmOnOpen: boolean;
-}
 
 /** Frontmatter key holding the path to a downloaded copy. */
 export const LOCAL_MEDIA_KEY = "local_media";
@@ -396,67 +240,6 @@ function withinTapSlop(origin: { x: number; y: number }, touch: Touch): boolean 
   );
 }
 
-const DEFAULT_SETTINGS: YtFreeSettings = {
-  ytDlpPath: "",
-  upgradeToHighQuality: true,
-  phoneHighQuality: false,
-  startInHd: false,
-  timestampFormat: "[{ts}]({link}) ",
-  autoStampNewLine: true,
-  lookbackSeconds: 5,
-  pauseWhileTyping: true,
-  resumeIdleMs: 2000,
-  pinnedPlayer: true,
-  pinnedHeightVh: 40,
-  pinnedFrontmatterKeys: "media_link, url",
-  openYouTubeLinksHere: true,
-  collapseProperties: true,
-  collapseSections: true,
-  linkifyTimestamps: true,
-  transcriptLanguage: "en",
-  // 20, not the 60 this shipped with: a peak's jump lands on a paragraph, so
-  // the paragraph is how close the jump can get. Notes written before this
-  // keep whatever they were built with.
-  transcriptIntervalSeconds: 20,
-  followTranscript: true,
-  // Stays on (GitHub #66 weighed it): one caption fetch per note you create,
-  // never per note opened, and it already waits out a bot-check pause and the
-  // hourly background cap.
-  autoFetchTranscript: true,
-  heatmapPeaks: 8,
-  // Blank means "wherever `defaultDownloadFolder()` says", which is
-  // ~/Movies/YT Free — deliberately outside the vault, because the vault is in
-  // iCloud and a 700MB video inside it would sync to every device. It cannot be
-  // spelled out here: `os.homedir()` is unreachable at module load on mobile.
-  downloadFolder: "",
-  ffmpegPath: "",
-  // Hourly. #66 weighed two hours and kept one: feed traffic was measured
-  // safe (tools/feed-torture.ts), and a feed only holds its last 15 videos.
-  subscriptionsPollMinutes: 60,
-  subscriptionsExpiryDays: 0,
-  subscriptionsIncludeShorts: false,
-  // Off, and blank. A plugin that starts POSTing somewhere on its own would be
-  // a different kind of software than this one.
-  notificationWebhook: "",
-  notificationsEnabled: false,
-  notificationFormat: "json",
-  tidyEmptyNoteDays: DEFAULT_TIDY_DAYS,
-  watchLaterFolder: "Watch Later",
-  // On by default. It is the feature, not an option about the feature — and it
-  // announces itself honestly: the toggle is lit in the control row and the
-  // time saved counts up inside it, so nobody has to wonder why a video sounds
-  // tighter than it did.
-  smartSpeed: true,
-  silenceSpeed: 3,
-  silenceMinGap: 0.5,
-  silenceNoiseDb: null,
-  silenceFloorMargin: FLOOR_MARGIN_DB,
-  silenceWordPad: WORD_PAD,
-  skipNonSpeech: true,
-  debugLogs: false,
-  // Off (GitHub #66): nothing goes to YouTube before Play. See the field.
-  warmOnOpen: false,
-};
 
 /**
  * Players are keyed by video ID because timestamp links (`ytfree:<id>:<secs>`)
@@ -1467,7 +1250,8 @@ export default class YtFreePlugin extends Plugin {
     this.addCommand({
       id: "show-youtube-requests",
       name: "Show YouTube requests this session",
-      callback: () => new Notice(`YT Free: ${governor.summary()}.`, 10000),
+      checkCallback: (checking) =>
+        this.developerCommand(checking, () => new Notice(`YT Free: ${governor.summary()}.`, 10000)),
     });
 
     this.addCommand({
@@ -1803,13 +1587,13 @@ export default class YtFreePlugin extends Plugin {
     this.addCommand({
       id: "diagnose-dock-badge",
       name: "Diagnose the dock badge",
-      callback: () => void this.writeDockDiagnostics(),
+      checkCallback: (checking) => this.developerCommand(checking, () => void this.writeDockDiagnostics()),
     });
 
     this.addCommand({
       id: "selftest-dock-badge",
       name: "Self-test the dock badge (plays a tone)",
-      callback: () => void this.selfTestDockBadge(),
+      checkCallback: (checking) => this.developerCommand(checking, () => void this.selfTestDockBadge()),
     });
 
     const badge = createDockAudioBadge();
@@ -2946,7 +2730,7 @@ export default class YtFreePlugin extends Plugin {
       info = await this.ytDlpInfo(videoId);
     } catch (err) {
       if (!(err instanceof YtDlpMissingError)) throw err;
-      new Notice("YT Free: yt-dlp not found. Install it, or set its path in settings.");
+      new Notice("YT Free: this needs yt-dlp, an optional desktop helper. See Settings → YT Free → Desktop helpers.");
       return null;
     }
     const track = pickCaptionTrack(info, this.transcriptLanguage());
@@ -3032,13 +2816,13 @@ export default class YtFreePlugin extends Plugin {
       const matches = findTimestamps(value);
       if (matches.length === 0) continue;
 
-      const fragment = document.createDocumentFragment();
+      const fragment = createFragment();
       let cursor = 0;
       for (const match of matches) {
         if (match.index > cursor) {
           fragment.appendChild(document.createTextNode(value.slice(cursor, match.index)));
         }
-        const link = document.createElement("a");
+        const link = createEl("a");
         link.className = "ytfree-timestamp-link";
         link.setAttribute("href", `ytfree:${videoId}:${match.seconds}`);
         link.textContent = match.text;
@@ -3162,7 +2946,7 @@ export default class YtFreePlugin extends Plugin {
       try {
         this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
       } catch {
-        new Notice("YT Free: yt-dlp is not installed, or Obsidian cannot find it.");
+        new Notice("YT Free: downloads need yt-dlp, an optional desktop helper. See Settings → YT Free → Desktop helpers.");
         return;
       }
     }
@@ -3208,7 +2992,7 @@ export default class YtFreePlugin extends Plugin {
       notice.setMessage(
         this.ffmpegPath
           ? "YT Free: downloaded. This note now plays the local copy."
-          : "YT Free: downloaded at 360p — that is the only quality available without ffmpeg. Streaming this note was higher quality. brew install ffmpeg, then re-download.",
+          : "YT Free: downloaded at 360p — that is the only quality available without ffmpeg. Streaming this note was higher quality. Install ffmpeg, then download again.",
       );
     } catch (err) {
       entry?.player.setDownloadState("idle");
@@ -5205,11 +4989,9 @@ export default class YtFreePlugin extends Plugin {
       onPlayingWithoutYtDlp: () => {
         if (this.noYtDlpNoticeShown) return;
         this.noYtDlpNoticeShown = true;
-        new Notice(
-          "YT Free: yt-dlp isn't installed here, so videos play the way they do on the phone. " +
-            "Downloads and Smart Speed need yt-dlp.",
-          8000,
-        );
+        // No Notice (2026-11-10): playing without yt-dlp is what a store user's
+        // computer does, every session. It is not news and nothing is wrong.
+        this.debug("playing without yt-dlp");
       },
     };
   }
@@ -5562,20 +5344,21 @@ export default class YtFreePlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const saved: unknown = await this.loadData();
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
-    // 022 raised the floor of "shortest pause to skip" to 0.4 s. Below that a
-    // pause is a breath between words rather than a gap between thoughts, and
-    // the map fills with fragments too short for the player to do anything with
-    // — which is what 022's chipmunk was made of. A user sitting on the old
-    // 0.2 or 0.3 is moved up rather than left on a setting the UI no longer offers.
-    if (this.settings.silenceMinGap < MIN_SILENCE_GAP) {
-      this.settings.silenceMinGap = MIN_SILENCE_GAP;
-    }
+    this.settings = sanitizeSettings(await this.loadData());
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  /**
+   * A command for diagnosing the plugin, not for using it: in the palette only
+   * while the debug switch is on, so a store user never meets it.
+   */
+  private developerCommand(checking: boolean, run: () => void): boolean {
+    if (!this.settings.debugLogs) return false;
+    if (!checking) run();
+    return true;
   }
 
   /**
@@ -5617,832 +5400,5 @@ export default class YtFreePlugin extends Plugin {
     this.ytDlpPath = null;
     this.ytDlpUnavailable = false;
     this.cache.clear();
-  }
-
-}
-
-class YtFreeSettingTab extends PluginSettingTab {
-  /** The reserved line under the webhook field — see `setNotifyStatus`. */
-  private notifyStatusEl: HTMLElement | null = null;
-
-  constructor(app: App, private plugin: YtFreePlugin) {
-    super(app, plugin);
-  }
-
-  hide(): void {
-    this.notifyStatusEl = null;
-  }
-
-  /**
-   * The push that tells your phone a video landed in the Inbox.
-   *
-   * Everything in here is drawn unconditionally — the toggle does not add or
-   * remove a row, and the button's label never changes width. A settings pane
-   * that reflows under the finger that clicked it is the one thing this section
-   * was not allowed to do.
-   *
-   * Shown on the phone as well as the Mac, even though the Mac is almost always
-   * the device that polls: the settings are one file synced by iCloud, and a
-   * section that is invisible on the device you happen to be holding reads as a
-   * missing feature rather than as a deliberate absence.
-   */
-  private displayNotifications(containerEl: HTMLElement): void {
-    const plugin = this.plugin;
-    new Setting(containerEl).setName("New-video notifications").setHeading();
-
-    const webhook = new Setting(containerEl)
-      .setName("Notification webhook")
-      .setDesc(
-        "An https URL this plugin POSTs to when a check finds new videos — one message per check, never one per video. " +
-          "Obsidian on iOS cannot raise a notification by itself, so the device running the check has to hand it to something that can: " +
-          "ntfy.sh, Pushover, an Apple Shortcuts automation, anything that accepts a POST. Blank switches this off entirely.",
-      );
-
-    // Its own reserved line. It says whether the URL parses, then what the last
-    // test did — three different lengths of text in the same fixed height.
-    this.notifyStatusEl = webhook.descEl.createDiv({ cls: "ytfree-notify-status" });
-    this.setNotifyStatus(describeWebhook(plugin.hubSettings().notifications));
-
-    webhook.addText((text) =>
-      text
-        .setPlaceholder("https://ntfy.sh/your-random-topic")
-        .setValue(plugin.settings.notificationWebhook)
-        .onChange(async (value) => {
-          plugin.settings.notificationWebhook = value.trim();
-          await plugin.saveSettings();
-          this.setNotifyStatus(describeWebhook(plugin.hubSettings().notifications));
-        }),
-    );
-
-    new Setting(containerEl)
-      .setName("Send notifications")
-      .setDesc("Pause the messages without losing the URL. Off by default.")
-      .addToggle((toggle) =>
-        toggle.setValue(plugin.settings.notificationsEnabled).onChange(async (value) => {
-          plugin.settings.notificationsEnabled = value;
-          await plugin.saveSettings();
-          this.setNotifyStatus(describeWebhook(plugin.hubSettings().notifications));
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Message format")
-      .setDesc(
-        "JSON carries the count, the channels, the titles and the video links — what a Shortcut or an automation wants. " +
-          "Text sends the sentence on its own: choose it for ntfy.sh, which shows whatever you POST as the notification body.",
-      )
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("json", "JSON")
-          .addOption("text", "Text")
-          .setValue(plugin.settings.notificationFormat)
-          .onChange(async (value) => {
-            plugin.settings.notificationFormat = value === "text" ? "text" : "json";
-            await plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Send a test notification")
-      .setDesc("Posts one message right now, so the URL can be proved without waiting for a channel to publish something.")
-      .addButton((button) => {
-        // Fixed width, and a label that never changes: the result is reported on
-        // the reserved line above, not by rewriting the thing that was pressed.
-        button.buttonEl.addClass("ytfree-notify-button");
-        button.setButtonText("Send test").onClick(async () => {
-          this.setNotifyStatus("Sending…");
-          const outcome = await plugin.subscriptions.sendTestNotification();
-          this.setNotifyStatus(describeTestOutcome(outcome));
-        });
-      });
-  }
-
-  /** The one line that reports on the webhook, kept at a constant height. */
-  private setNotifyStatus(text: string): void {
-    // A non-breaking space rather than an empty string: an empty div collapses,
-    // and this line sits between two settings rows that must not move.
-    this.notifyStatusEl?.setText(text || " ");
-  }
-
-  /** Under whichever HD switch this device has; one setting for both. */
-  private addStartInHd(containerEl: HTMLElement): void {
-    new Setting(containerEl)
-      .setName("Start in HD")
-      .setDesc(
-        "Wait for HD before the video starts, and start it at full quality instead of sharpening a few seconds in. " +
-          "If HD isn't ready within 15 seconds it starts at 360p and sharpens later. Only applies while HD is on.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.startInHd).onChange(async (value) => {
-          this.plugin.settings.startInHd = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-  }
-
-  display(): void {
-    const { containerEl } = this;
-    const desktopApp = Platform.isDesktopApp;
-    containerEl.empty();
-
-    if (desktopApp) {
-      new Setting(containerEl)
-        .setName("yt-dlp path")
-        .setDesc("Leave blank to auto-detect. Obsidian does not inherit your shell PATH, so a full path may be needed.")
-        .addText((text) =>
-          text
-            .setPlaceholder("/opt/homebrew/bin/yt-dlp")
-            .setValue(this.plugin.settings.ytDlpPath)
-            .onChange(async (value) => {
-              this.plugin.settings.ytDlpPath = value.trim();
-              this.plugin.resetResolver();
-              await this.plugin.saveSettings();
-            }),
-        );
-
-      new Setting(containerEl)
-        .setName("Upgrade to high quality")
-        .setDesc(
-          "Video always starts fast at 360p, then silently upgrades to HD (up to 1080p) a few seconds later, still streaming. Turn off to stay at 360p and save bandwidth.",
-        )
-        .addToggle((toggle) =>
-          toggle.setValue(this.plugin.settings.upgradeToHighQuality).onChange(async (value) => {
-            this.plugin.settings.upgradeToHighQuality = value;
-            await this.plugin.saveSettings();
-          }),
-        );
-
-      this.addStartInHd(containerEl);
-    } else {
-      // Saying this once, plainly, beats a mobile user wondering why the
-      // picture is soft and where the download button went.
-      new Setting(containerEl)
-        .setName("On this device")
-        .setDesc(
-          "Playback here resolves the stream in the plugin and plays it in a normal video element — ad-free, at 360p unless HD is on below. " +
-            "Transcripts and most-replayed moments both work here, read straight off YouTube. " +
-            "Downloading needs yt-dlp, which only exists on the desktop app.",
-        );
-
-      new Setting(containerEl)
-        .setName("HD on this phone (experimental)")
-        .setDesc(
-          "Starts at 360p, then switches to HD (up to 1080p) a few seconds in, still streaming. Needs iOS 17.1 or later, and uses several times the data.",
-        )
-        .addToggle((toggle) =>
-          toggle.setValue(this.plugin.settings.phoneHighQuality).onChange(async (value) => {
-            this.plugin.settings.phoneHighQuality = value;
-            await this.plugin.saveSettings();
-          }),
-        );
-
-      this.addStartInHd(containerEl);
-    }
-
-    new Setting(containerEl)
-      .setName("Timestamp format")
-      .setDesc(
-        "Placeholders: {ts} the time you wrote the line, {link} seek link, {seconds} raw seek seconds. {ts} shows where you were; {link} and {seconds} point Lookback seconds earlier, so clicking lands just before it.",
-      )
-      .addText((text) =>
-        text
-          .setValue(this.plugin.settings.timestampFormat)
-          .onChange(async (value) => {
-            this.plugin.settings.timestampFormat = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl).setName("Subscriptions hub").setHeading();
-
-    new Setting(containerEl)
-      .setName("Import subscriptions")
-      .setDesc(
-        "Google Takeout → YouTube and YouTube Music → subscriptions only. Importing again later adds new channels and removes nothing.",
-      )
-      .addButton((button) =>
-        button
-          .setButtonText("Import…")
-          .onClick(() =>
-            new ImportSubscriptionsModal(this.app, this.plugin.subscriptions, () =>
-              this.plugin.refreshHub(),
-            ).open(),
-          ),
-      );
-
-    new Setting(containerEl)
-      .setName("New-note folder")
-      .setDesc("Where clicking a video in the hub puts its note.")
-      .addText((text) =>
-        text
-          .setPlaceholder("Watch Later")
-          .setValue(this.plugin.settings.watchLaterFolder)
-          .onChange(async (value) => {
-            this.plugin.settings.watchLaterFolder = value.trim();
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Check every")
-      .setDesc(
-        "Minutes between checks, plus once when Obsidian starts. A channel feed only holds its last 15 videos, so a long gap between checks can lose the oldest of a burst for good.",
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(15, 360, 15)
-          .setValue(this.plugin.settings.subscriptionsPollMinutes)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.subscriptionsPollMinutes = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Forget unwatched videos after")
-      .setDesc(
-        "Days. Measured from the publish date. Only videos you never clicked are removed, and only from the hub — this never deletes a note. Zero keeps everything.",
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 180, 5)
-          .setValue(this.plugin.settings.subscriptionsExpiryDays)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.subscriptionsExpiryDays = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Tidy empty notes after")
-      .setDesc(
-        "Days. A video note goes to the trash when you have played the video, that long has passed since, and there is still nothing under its Notes heading. The frontmatter, the description, the transcript and the most-replayed moments do not count — the plugin wrote those. Notes you never played are left alone, and so is anything open in front of you. Zero switches this off.",
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 180, 5)
-          .setValue(this.plugin.settings.tidyEmptyNoteDays)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.tidyEmptyNoteDays = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Clear watch history")
-      .setDesc(
-        "Deletes every video in the hub's History list and its watch time, on all your devices. Your notes and the hub are not touched. This can't be undone.",
-      )
-      .addButton((button) =>
-        button
-          .setButtonText("Clear history…")
-          .setWarning()
-          .onClick(() => {
-            new ConfirmClearHistoryModal(this.app, () => void this.plugin.history.clear()).open();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Include Shorts")
-      .setDesc(
-        "The feed mixes Shorts with normal videos and marks neither, so each new video is checked once to tell them apart. Off by default.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.subscriptionsIncludeShorts).onChange(async (value) => {
-          this.plugin.settings.subscriptionsIncludeShorts = value;
-          await this.plugin.saveSettings();
-          this.plugin.refreshHub();
-        }),
-      );
-
-    const removedCount = this.plugin.subscriptions.removedSearchVideos().length;
-    new Setting(containerEl)
-      .setName("Removed from search")
-      .setDesc(
-        `${removedCount} ${removedCount === 1 ? "video" : "videos"}. Remove on a search result keeps it out of later searches on both devices. Undo any of them here.`,
-      )
-      .addButton((button) =>
-        button.setButtonText("Show list…").onClick(() =>
-          new SearchBlocklistModal(this.app, this.plugin.subscriptions, "videos", () =>
-            this.display(),
-          ).open(),
-        ),
-      );
-
-    const hiddenCount = this.plugin.subscriptions.hiddenSearchChannels().length;
-    new Setting(containerEl)
-      .setName("Hidden from search")
-      .setDesc(
-        `${hiddenCount} ${hiddenCount === 1 ? "channel" : "channels"}. Hidden with the ⋯ on a search result. Only search is affected; subscribing to one un-hides it.`,
-      )
-      .addButton((button) =>
-        button.setButtonText("Show list…").onClick(() =>
-          new SearchBlocklistModal(this.app, this.plugin.subscriptions, "channels", () =>
-            this.display(),
-          ).open(),
-        ),
-      );
-
-    new Setting(containerEl).setName("YouTube links").setHeading();
-
-    new Setting(containerEl)
-      .setName("Open YouTube links here")
-      .setDesc(
-        "A YouTube link clicked in a note opens in YT Free, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.openYouTubeLinksHere).onChange(async (value) => {
-          this.plugin.settings.openYouTubeLinksHere = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Browser bookmarklet")
-      .setDesc(
-        "Copies a bookmarklet that sends the YouTube tab you are on to YT Free. Make a new bookmark and paste this as its address.",
-      )
-      .addButton((button) =>
-        button.setButtonText("Copy").onClick(async () => {
-          await navigator.clipboard.writeText(HANDOFF_BOOKMARKLET);
-          new Notice("YT Free: bookmarklet copied.");
-        }),
-      );
-
-    this.displayNotifications(containerEl);
-
-    // Downloading needs yt-dlp and a filesystem, so on mobile this whole
-    // section would only be settings for something that cannot happen.
-    if (desktopApp) {
-      new Setting(containerEl).setName("Offline downloads").setHeading();
-
-      const folderSetting = new Setting(containerEl)
-        .setName("Download folder")
-        .addText((text) =>
-          text
-            .setPlaceholder("~/Movies/YT Free")
-            .setValue(this.plugin.settings.downloadFolder)
-            .onChange(async (value) => {
-              // Blank stays blank and means the default — which cannot be
-              // spelled out in the defaults, because it needs `os.homedir()`.
-              this.plugin.settings.downloadFolder = value.trim();
-              await this.plugin.saveSettings();
-              describeFolder();
-            }),
-        );
-
-      // A path inside the vault is the one mistake here that is expensive and
-      // hard to undo, because the vault syncs. Say so at the moment it is made.
-      const describeFolder = () => {
-        const vaultPath = this.plugin.vaultPath();
-        const chosen = this.plugin.settings.downloadFolder.trim();
-        const inVault = Boolean(chosen) && Boolean(vaultPath) && chosen.startsWith(vaultPath as string);
-        folderSetting.setDesc(
-          inVault
-            ? "⚠ This folder is inside your vault. Downloads will sync to every device and count against iCloud storage. Pick somewhere outside the vault."
-            : "Where downloaded videos are kept. Blank means ~/Movies/YT Free. Outside the vault on purpose — these files are a local cache, not vault content.",
-        );
-      };
-      describeFolder();
-
-      new Setting(containerEl)
-        .setName("ffmpeg path")
-        .setDesc(
-          "Leave blank to auto-detect. Required for downloads above 360p: YouTube only serves one pre-muxed format (itag 18, 360p) and everything better needs ffmpeg to merge separate video and audio. Streaming is unaffected — that reaches 1080p without ffmpeg.",
-        )
-        .addText((text) =>
-          text
-            .setPlaceholder("/opt/homebrew/bin/ffmpeg")
-            .setValue(this.plugin.settings.ffmpegPath)
-            .onChange(async (value) => {
-              this.plugin.settings.ffmpegPath = value.trim();
-              this.plugin.resetFfmpeg();
-              await this.plugin.saveSettings();
-            }),
-        );
-    }
-
-    new Setting(containerEl).setName("Pinned player").setHeading();
-
-    new Setting(containerEl)
-      .setName("Pin the player to the top of the note")
-      .setDesc(
-        "When a note's frontmatter points at a YouTube video, the full player — controls, speed, PiP, fullscreen — is mounted above the note body and stays there while you scroll. A ```ytfree block for the same video steps aside so you never get two players. Turned off, these notes keep a small Player button in the corner to bring it back.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.pinnedPlayer).onChange(async (value) => {
-          this.plugin.settings.pinnedPlayer = value;
-          await this.plugin.saveSettings();
-          this.plugin.refreshPinnedPlayers();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Frontmatter properties")
-      .setDesc("Comma-separated, tried in order. The first one holding a YouTube URL wins.")
-      .addText((text) =>
-        text
-          .setPlaceholder("media_link, url")
-          .setValue(this.plugin.settings.pinnedFrontmatterKeys)
-          .onChange(async (value) => {
-            this.plugin.settings.pinnedFrontmatterKeys = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshPinnedPlayers();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Pinned player height")
-      .setDesc(
-        "Percent of the window height. Fixed, so the note text below never moves. On a phone it is a ceiling: the picture keeps its shape and shrinks to fit, which is what stops a sideways phone handing the whole screen to the video.",
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(20, 70, 5)
-          .setValue(this.plugin.settings.pinnedHeightVh)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.pinnedHeightVh = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshPinnedPlayers();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Collapse properties on video notes")
-      .setDesc(
-        "Fold the properties table when you open a note whose frontmatter names a video, so the player and your notes start at the top. Expanding it by hand sticks until you open another note.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.collapseProperties).onChange(async (value) => {
-          this.plugin.settings.collapseProperties = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Collapse description and transcript")
-      .setDesc(
-        "Open a video note with Notes showing and the description, transcript and most-replayed sections folded. Unfolding one sticks until you open another note.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.collapseSections).onChange(async (value) => {
-          this.plugin.settings.collapseSections = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Link timestamps in the note body")
-      .setDesc(
-        "Render bare times like 1:02:03 — the chapter list in a pasted description — as clickable seek links. Only on notes that name a video.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.linkifyTimestamps).onChange(async (value) => {
-          this.plugin.settings.linkifyTimestamps = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl).setName("Smart Speed").setHeading();
-
-    new Setting(containerEl)
-      .setName("Compress pauses")
-      .setDesc(
-        "Silence is jumped over rather than played fast, so there is nothing to hear where a pause was. Audio that is not speech but is not silence either — music, a demo — plays fast instead of being cut. Works on any captioned video with nothing installed, on this machine and on the phone. Every player has its own toggle in the control row; this is the state it starts in.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.smartSpeed).onChange(async (value) => {
-          this.plugin.settings.smartSpeed = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Skip non-speech audio")
-      .setDesc(
-        "Compress anything nobody is talking over — musical intros, interludes, stings — and not only what is literally silent. On, the caption timing and the ffmpeg measurement are combined: a stretch both call quiet is skipped outright, and one only the captions call quiet plays at the pause speed below, because there is audio there to hear. Turn it off to leave music at normal speed, which needs ffmpeg to tell music from silence.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.skipNonSpeech).onChange(async (value) => {
-          this.plugin.settings.skipNonSpeech = value;
-          await this.plugin.saveSettings();
-          this.plugin.refreshSmartSpeed();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Pause speed")
-      .setDesc(
-        "How fast non-speech audio plays — music, and any pause too short or too far ahead of the buffer to jump over. Real silence is skipped instead, so this number never applies to it. Never slower than the speed you picked for the video itself.",
-      )
-      .addDropdown((dropdown) => {
-        for (const rate of [1.5, 2, 2.5, 3, 4]) {
-          dropdown.addOption(String(rate), `${rate}×`);
-        }
-        dropdown.setValue(String(this.plugin.settings.silenceSpeed)).onChange(async (value) => {
-          this.plugin.settings.silenceSpeed = Number(value);
-          await this.plugin.saveSettings();
-          this.plugin.refreshSmartSpeed();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("Shortest pause to skip")
-      .setDesc(
-        "A quiet stretch has to last at least this long to be compressed. Lower catches the breaths between sentences and saves more; higher only compresses the real gaps and is safer on a fast talker. One number for both engines — it is the caption-gap threshold, and it is exactly what ffmpeg's silence detection is given when ffmpeg is installed, so the setting means the same thing on every machine.",
-      )
-      .addDropdown((dropdown) => {
-        const options: Array<[number, string]> = [
-          [0.4, "0.4 s — aggressive"],
-          [0.5, "0.5 s — balanced"],
-          [0.75, "0.75 s"],
-          [1, "1 s"],
-          [1.5, "1.5 s"],
-          [2, "2 s — only long gaps"],
-        ];
-        for (const [value, label] of options) dropdown.addOption(String(value), label);
-        dropdown.setValue(String(this.plugin.settings.silenceMinGap)).onChange(async (value) => {
-          this.plugin.settings.silenceMinGap = Number(value);
-          await this.plugin.saveSettings();
-          this.plugin.refreshSmartSpeed();
-        });
-      });
-
-    // Everything below is a dial on the *safety margins*, and every one of them
-    // trades accuracy for aggressiveness in the direction that clips words.
-    // Collapsed, because the defaults are the answer and a user who opens this
-    // should have a reason. 022 was caused by one of these being a front-page
-    // setting with a wrong default.
-    const advanced = containerEl.createEl("details", { cls: "ytfree-advanced" });
-    advanced.createEl("summary", { text: "Advanced" });
-    advanced.createEl("p", {
-      text: "These trade accuracy for aggressiveness. Raising them can clip or skip real speech.",
-      cls: "setting-item-description",
-    });
-
-    new Setting(advanced)
-      .setName("Word protection")
-      .setDesc(
-        "How much room every spoken word is given, in seconds, before a skip is allowed to cross it. This is the guard that stops a word being swallowed when the volume-based detection is wrong about where the silence is. Zero turns it off.",
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 0.5, 0.05)
-          .setValue(this.plugin.settings.silenceWordPad)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.silenceWordPad = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshSmartSpeed();
-          }),
-      );
-
-    // Only meaningful where ffmpeg can exist. On a phone these would be dials
-    // attached to nothing.
-    if (desktopApp) {
-      new Setting(advanced)
-        .setName("Floor margin (ffmpeg)")
-        .setDesc(
-          "How far above each video's measured noise floor the silence threshold sits, in dB. The threshold itself is measured per video from the first minute of audio — this only moves it. Higher compresses more and starts eating quiet speech; lower is the safe direction.",
-        )
-        .addSlider((slider) =>
-          slider
-            .setLimits(2, 20, 1)
-            .setValue(this.plugin.settings.silenceFloorMargin)
-            .setDynamicTooltip()
-            .onChange(async (value) => {
-              this.plugin.settings.silenceFloorMargin = value;
-              await this.plugin.saveSettings();
-            }),
-        );
-
-      new Setting(advanced)
-        .setName("Manual silence threshold (ffmpeg)")
-        .setDesc(
-          "Overrides the measurement with a fixed dBFS value. Leave blank to measure each video, which is almost always better — a fixed number that suits one recording is inside the words on another. Enter a negative number, e.g. −40.",
-        )
-        .addText((text) =>
-          text
-            .setPlaceholder("measured")
-            .setValue(
-              this.plugin.settings.silenceNoiseDb === null
-                ? ""
-                : String(this.plugin.settings.silenceNoiseDb),
-            )
-            .onChange(async (value) => {
-              const parsed = Number(value.trim().replace(/[−–—]/g, "-"));
-              this.plugin.settings.silenceNoiseDb =
-                value.trim() === "" || !Number.isFinite(parsed) ? null : parsed;
-              await this.plugin.saveSettings();
-            }),
-        );
-    }
-
-    new Setting(containerEl).setName("Transcript").setHeading();
-
-    new Setting(containerEl)
-      .setName("Fetch automatically for new notes")
-      .setDesc(
-        "Notes created this session — from the template, the Web Clipper, or a tap in the hub — get their transcript without being asked, on the phone as well as the Mac. Replay peaks are added on the Mac only. Opening an older note never triggers it; use the command for those.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.autoFetchTranscript).onChange(async (value) => {
-          this.plugin.settings.autoFetchTranscript = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Section length")
-      .setDesc(
-        "How much transcript sits under each seek link. Shorter means more precise links and a longer note. Any whole number of seconds — timestamps land on that grid: 20 gives 0:00, 0:20, 0:40.",
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(5, 180, 1)
-          .setValue(this.plugin.settings.transcriptIntervalSeconds)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.transcriptIntervalSeconds = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Follow the video")
-      .setDesc(
-        "Once you have gone to the transcript — with This moment, the Transcript button, or a tap on a paragraph — the note keeps up with the video, tinting the paragraph being spoken. Scrolling, typing or a tap anywhere else hands control back; going to the transcript again takes it up where the video is.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.followTranscript).onChange(async (value) => {
-          this.plugin.settings.followTranscript = value;
-          // Off means off now, not at the next note: something may be following
-          // this second.
-          if (!value) this.plugin.stopFollowingTranscript();
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Most-replayed moments")
-      .setDesc(
-        "How many replay peaks to list above the transcript, labelled with what is being said there. Zero turns the section off.",
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 20, 1)
-          .setValue(this.plugin.settings.heatmapPeaks)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.heatmapPeaks = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Caption language")
-      .setDesc(
-        "Language code to look for. Uploader-written captions are preferred over auto-generated ones when both exist.",
-      )
-      .addText((text) =>
-        text
-          .setPlaceholder("en")
-          .setValue(this.plugin.settings.transcriptLanguage)
-          .onChange(async (value) => {
-            this.plugin.settings.transcriptLanguage = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl).setName("Flow capture").setHeading();
-
-    new Setting(containerEl)
-      .setName("Timestamp every new line")
-      .setDesc(
-        "Once a video in the note has been played, the first character you type on a line brings its timestamp in with it. Works on the first line of a note, and whether the video is playing or paused. Turn off to use the Insert timestamp command instead.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.autoStampNewLine).onChange(async (value) => {
-          this.plugin.settings.autoStampNewLine = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Lookback")
-      .setDesc(
-        "How far before the moment you wrote a line its timestamp link should land, because you decide something is worth noting after you hear it. The timestamp still displays the time you wrote at — only the click target moves back. Applies to auto-stamps and to the command.",
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 30, 1)
-          .setValue(this.plugin.settings.lookbackSeconds)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.lookbackSeconds = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Pause while typing")
-      .setDesc(
-        "Typing anywhere in a note with an active video pauses playback, so you never fall behind mid-sentence. A video you paused yourself is never resumed. The player's own pop-out can overrule this for one video without changing it here.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.pauseWhileTyping).onChange(async (value) => {
-          this.plugin.settings.pauseWhileTyping = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    // Seconds, because that is the unit the pause is felt in — "two seconds of
-    // quiet before it starts again" is the sentence in your head, and "2000"
-    // was a number you had to convert before you could judge it. Still stored
-    // in milliseconds, which is what `setTimeout` wants and what every existing
-    // `data.json` already holds.
-    const resume = new Setting(containerEl).setName("Resume after");
-    const describeResume = (ms: number): void => {
-      resume.setDesc(`${(ms / 1000).toFixed(2).replace(/\.?0+$/, "")}s of no typing before playback starts again.`);
-    };
-    describeResume(this.plugin.settings.resumeIdleMs);
-    resume.addSlider((slider) =>
-      slider
-        .setLimits(0.25, 5, 0.25)
-        .setValue(this.plugin.settings.resumeIdleMs / 1000)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-          this.plugin.settings.resumeIdleMs = Math.round(value * 1000);
-          describeResume(this.plugin.settings.resumeIdleMs);
-          await this.plugin.saveSettings();
-        }),
-    );
-
-    // Mobile only, and drawn only there: on a desktop the stream is resolved at
-    // mount already, so the control would do nothing at all.
-    if (!Platform.isDesktopApp) {
-      new Setting(containerEl)
-        .setName("Get the video ready when a note opens")
-        .setDesc(
-          "Fetches the stream (not the video) as soon as a player appears, so Full screen, PiP and the transport work on the first press rather than the second. Off, nothing is fetched until you tap — the phone's own full screen then needs the video playing first.",
-        )
-        .addToggle((toggle) =>
-          toggle.setValue(this.plugin.settings.warmOnOpen).onChange(async (value) => {
-            this.plugin.settings.warmOnOpen = value;
-            await this.plugin.saveSettings();
-          }),
-        );
-    }
-
-    new Setting(containerEl).setName("Troubleshooting").setHeading();
-
-    new Setting(containerEl)
-      .setName("Log what the player is doing")
-      .setDesc(
-        "Prints the fullscreen and keyboard decisions to the developer console (Verbose level), which is the only way to see them: iOS refuses both silently when the tap that asked for them has already finished. Turn on before reproducing a problem on the phone, and off afterwards.",
-      )
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.debugLogs).onChange(async (value) => {
-          this.plugin.settings.debugLogs = value;
-          await this.plugin.saveSettings();
-          this.plugin.refreshPinnedPlayers();
-        }),
-      );
-  }
-}
-
-/** "Clear history?" — asked once, because nothing brings it back (GitHub #48). */
-class ConfirmClearHistoryModal extends Modal {
-  constructor(
-    app: App,
-    private readonly onConfirm: () => void,
-  ) {
-    super(app);
-  }
-
-  onOpen(): void {
-    this.setTitle("Clear watch history?");
-    this.contentEl.createEl("p", {
-      text: "Delete your whole watch history and stats on all devices? This can't be undone.",
-    });
-    new Setting(this.contentEl)
-      .addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()))
-      .addButton((button) =>
-        button
-          .setButtonText("Clear history")
-          .setWarning()
-          .onClick(() => {
-            this.onConfirm();
-            this.close();
-          }),
-      );
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
   }
 }

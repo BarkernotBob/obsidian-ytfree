@@ -11,7 +11,7 @@
  * flattens every section, so those secondary results are already in the hub's
  * search list today, unsorted and unfiltered.
  *
- *   node spikes/search-filters/sections.mjs
+ *   node docs/spikes/search-filters/sections.mjs
  */
 
 const ANDROID = {

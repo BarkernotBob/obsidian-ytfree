@@ -2,7 +2,7 @@
  * The search parser, against recorded responses.
  *
  * Same reasoning as `innertube.test.ts`: the fixtures are real captures (see
- * `spikes/search/record.mjs`), because the only thing that can really break
+ * `docs/spikes/search/record.mjs`), because the only thing that can really break
  * this parser is YouTube changing the shape of the renderer tree, and a fixture
  * I wrote myself can only ever confirm my own idea of the shape.
  *

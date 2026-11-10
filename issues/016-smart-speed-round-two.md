@@ -86,7 +86,7 @@ expecting accuracy; item 1 is what changes the deal, not the install.
 
 ## What was proved before shipping
 
-`node --experimental-strip-types spikes/silence-chunks/run.mjs` runs the real chunked
+`node --experimental-strip-types docs/spikes/silence-chunks/run.mjs` runs the real chunked
 producer against a real audio URL and compares it with a single-stream analysis of the
 same stretch. 2026-07-29, first 240 s: **all 27 single-stream windows matched a chunked
 window within 0.5 s**, contiguous frontier 240 s, 48 s wall against 176 s (3.65× with four

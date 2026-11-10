@@ -6,8 +6,8 @@
  * Run this before writing any code in the next session; it takes a few seconds
  * and tells you whether the plan is still real.
  *
- *   node spikes/innertube/probe.mjs                 # the 10-video default set
- *   node spikes/innertube/probe.mjs dQw4w9WgXcQ     # specific ids
+ *   node docs/spikes/innertube/probe.mjs                 # the 10-video default set
+ *   node docs/spikes/innertube/probe.mjs dQw4w9WgXcQ     # specific ids
  *
  * No dependencies, no build step, nothing here ships in the plugin.
  *

@@ -32,7 +32,7 @@ not watch, whose timestamps do nothing, is the wrong half of the feature.
 
 ## Why the previous plan (a YouTube embed) is abandoned
 
-Two runs of [`spikes/mobile-iframe`](../spikes/mobile-iframe/README.md) on an iPhone,
+Two runs of [`docs/spikes/mobile-iframe`](../docs/spikes/mobile-iframe/README.md) on an iPhone,
 iOS 18.7:
 
 | | Result |
@@ -83,7 +83,7 @@ Measured against live YouTube on 2026-07-27:
 | `dashManifestUrl`, any client version 17.x–20.x | never present |
 | No API key in the request | works |
 
-Re-run the measurement any time with [`spikes/innertube/probe.mjs`](../spikes/innertube/probe.mjs).
+Re-run the measurement any time with [`docs/spikes/innertube/probe.mjs`](../docs/spikes/innertube/probe.mjs).
 **Do this first in the next session** — the whole issue rests on it, and it takes five seconds.
 
 ### Why this is the right trade, stated plainly

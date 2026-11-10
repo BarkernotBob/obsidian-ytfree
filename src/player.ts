@@ -1986,7 +1986,7 @@ export class YtFreePlayer {
    * is left alone; see `shouldResumeSystemPause`.
    *
    * Whether WebKit lets a play through while Obsidian is in the background is
-   * the open question (`spikes/lock-audio`). If it refuses, the pause stands
+   * the open question (`docs/spikes/lock-audio`). If it refuses, the pause stands
    * exactly as before and the background guard's flag is put back, so the
    * reader is no worse off: the lock screen's Play still works.
    */
@@ -2794,7 +2794,7 @@ export class YtFreePlayer {
       );
       this.container.addClass("is-youtube");
       return true;
-    } catch (e) {
+    } catch {
       return false;
     } finally {
       this.ytOpening = false;

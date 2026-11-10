@@ -27,7 +27,7 @@ in the response, including the ads and shelves that are demonstrably in there.
   `addSearchResult` (which fetches the description with one player call before storing).
 - `src/subscriptions.ts` — `origin: "search"`, `searchResultToItem`, and the expiry
   exemption.
-- `spikes/search/` — the recorder behind the two fixtures, and what the response actually
+- `docs/spikes/search/` — the recorder behind the two fixtures, and what the response actually
   contains.
 
 ## Acceptance criteria
