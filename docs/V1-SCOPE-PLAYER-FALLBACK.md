@@ -6,7 +6,8 @@ yt-dlp`", stuck on "360p · finding HD…". His words: "With the double fallback
 this should never happen. I also expect that a user should never have to update yt-dlp
 themselves."
 
-**Status:** Part 1 built (this PR). Part 2 waits for Isaiah's OK on this scope. Part of the store
+**Status:** Approved by Isaiah 2026-11-10 ("Go, as scoped"). Parts 1 and 2 built on PR #79,
+which includes PR #83 (the in-place YouTube player it reuses). Part of the store
 MVP ([V1-SCOPE-MVP](V1-SCOPE-MVP.md)); the rule is item 7 of [V1-SCOPE-BOT-SAFE](V1-SCOPE-BOT-SAFE.md).
 
 ## What went wrong (checked on main d39f7a5, the vault build)
@@ -33,7 +34,7 @@ MVP ([V1-SCOPE-MVP](V1-SCOPE-MVP.md)); the rule is item 7 of [V1-SCOPE-BOT-SAFE]
 7. **No message tells anyone to install or update yt-dlp.** The brew text is gone from the player
    and the error box.
 
-## Part 2: YouTube's player as the last tier (#43, needs OK)
+## Part 2: YouTube's player as the last tier (#43, built)
 
 8. When both stream tiers have failed for a video (or between bot-check retries, as already
    scoped), the player swaps to YouTube's own player in the same place, at the same time and speed.
@@ -53,14 +54,32 @@ MVP ([V1-SCOPE-MVP](V1-SCOPE-MVP.md)); the rule is item 7 of [V1-SCOPE-BOT-SAFE]
 13. Post-MVP (backlog issue): the plugin keeps its own yt-dlp current. Not built until Obsidian's
     store rules are checked (could not confirm whether a plugin may download and run a binary).
 
-## Manual test (desktop, Part 1)
+## Manual test
 
+Desktop:
 1. Open the note for the video that failed (Surviving The Oregon Trail) and press Play.
 2. Expected: it plays. If yt-dlp's link dies you may briefly see "Refreshing stream (playback
    error)…", then it plays from our own stream. You never see a brew message.
 3. Open any other video and press Play. Expected: plays as before (yt-dlp first, HD as usual).
 
+YouTube's player can't be forced from the app (never preemptive). It shows only when both streams
+fail. If it appears: the picture is YouTube's, the bar shows **Try our stream again**, a
+timestamp link in the note seeks it, and the hub's In progress shows where you stopped.
+
+Phone: unchanged unless our stream fails; then the same as above. Needs GitHub Pages on.
+
 ## Decided while building (Claude's calls, open to change)
+
+- A bot check answered on this Play also goes to YouTube's player (not only the pause after it),
+  per the MVP scope's "after a bot check, straight to the embed".
+- The desktop uses the same hosted page as the phone. Framing YouTube's embed directly from
+  Obsidian desktop was not tried: it would need a test Play from Isaiah's Mac, and the hosted page
+  already works. So the desktop also needs GitHub Pages on.
+- The Quality row's "YouTube player (HD)" stays phone-only. On the desktop YouTube's player is
+  only ever the fallback, never a menu choice.
+- In YouTube's player, watch time counts only while YouTube reports playing, and progress is
+  saved every 5 s, on play/pause changes, and on close.
+- "Try our stream again" forgets this video's failures and resolves from yt-dlp again.
 
 - The failure memory is 30 minutes, in memory only (a restart forgets it).
 - yt-dlp being absent is not counted as a video's failure; the "not installed" path is unchanged.

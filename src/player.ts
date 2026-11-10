@@ -1,5 +1,6 @@
 import Hls from "hls.js";
 import { Platform, setIcon } from "obsidian";
+import { isBotCheck } from "./bot-check.ts";
 import { formatTimestamp } from "./format.ts";
 import { playedSpanMs } from "./history.ts";
 import { SHARE_ICON } from "./icon.ts";
@@ -207,15 +208,42 @@ export interface QuickPanelOptions {
   /** What the setting will say, so the row reads right before `load` runs. */
   hdDefault?: boolean;
   /**
-   * Phone only (#25): YouTube's own player, full-screen, from the second given
-   * at the speed given. Resolves with where the reader left off.
+   * YouTube's own player over the picture, from the second given at the speed
+   * given. Every platform has it as the last playback tier (#43); the phone
+   * also offers it in the Quality row (#25), when `youtubeInMenu` is set.
    */
-  youtubePlayer?: (host: HTMLElement, at: number, rate: number) => Promise<YouTubeEmbedHandle>;
+  youtubePlayer?: (
+    host: HTMLElement,
+    at: number,
+    rate: number,
+    onStatus: (status: { time: number; duration: number; playing: boolean }) => void,
+  ) => Promise<YouTubeEmbedHandle>;
+  youtubeInMenu?: boolean;
+  /**
+   * "Try our stream again" from YouTube's player (#43): forget this video's
+   * failed stream tiers, so the next resolve starts from the top.
+   */
+  forgetStreamFailures?: () => void;
 }
 
 /** YouTube's player mounted over the picture; `close` answers where it got to. */
 export interface YouTubeEmbedHandle {
   close(): number;
+  time(): number;
+  seek(seconds: number): void;
+  play(): void;
+  pause(): void;
+}
+
+/**
+ * Errors after which YouTube's player plays the video (#43): every stream tier
+ * failed for it, YouTube just answered with a bot check, or a bot-check pause
+ * is on. Tier failure by name, so the player needs no provider import.
+ */
+export function needsYouTubePlayer(err: unknown): boolean {
+  if (err == null) return false;
+  const name = (err as { name?: unknown }).name;
+  return name === "AllTiersFailedError" || name === "BotCheckPausedError" || isBotCheck(err);
 }
 
 /** The lock screen's three fields. */
@@ -379,6 +407,12 @@ export class YtFreePlayer {
   private stage!: HTMLElement;
   /** YouTube's own player, while it stands in for ours (#25). */
   private ytEmbed: YouTubeEmbedHandle | null = null;
+  /** YouTube's player is there because our stream could not play (#43), not picked. */
+  private ytFallback = false;
+  private ytBack: HTMLButtonElement | null = null;
+  /** Last report from YouTube's player, for progress and watch time. */
+  private ytLast: { at: number; playing: boolean } | null = null;
+  private ytDuration = 0;
   private ytOpening = false;
   /** Survives source swaps; the <video> element resets these on every load. */
   private playbackRate = 1;
@@ -1079,7 +1113,11 @@ export class YtFreePlayer {
       text: "Back to our player",
       attr: { "aria-label": "Close YouTube's player and go back to ours" },
     });
-    ytBack.addEventListener("click", () => this.closeYouTubePlayer());
+    ytBack.addEventListener("click", () => {
+      if (this.ytFallback) void this.retryOurStream();
+      else this.closeYouTubePlayer();
+    });
+    this.ytBack = ytBack;
 
     const button = (
       side: "left" | "mid" | "right",
@@ -1491,10 +1529,12 @@ export class YtFreePlayer {
       });
       el.createEl("option", { text: "HD", value: "hd" });
       el.createEl("option", { text: "360p", value: "sd" });
-      if (quick.youtubePlayer) el.createEl("option", { text: "YouTube player (HD)", value: "yt" });
+      if (quick.youtubePlayer && quick.youtubeInMenu) {
+        el.createEl("option", { text: "YouTube player (HD)", value: "yt" });
+      }
       el.addEventListener("change", () => {
         if (el.value === "yt") {
-          void this.openYouTubePlayer(quick.youtubePlayer!);
+          void this.openYouTubePlayer(quick.youtubePlayer!, false);
           return;
         }
         // Leaving YouTube's player is a quality pick too: back to ours, then
@@ -2729,22 +2769,90 @@ export class YtFreePlayer {
    * left off. Not a quality pick: the row goes back to what it said.
    */
   private async openYouTubePlayer(
-    open: (host: HTMLElement, at: number, rate: number) => Promise<YouTubeEmbedHandle>,
-  ): Promise<void> {
-    if (this.ytEmbed || this.ytOpening) return;
+    open: NonNullable<QuickPanelOptions["youtubePlayer"]>,
+    fallback: boolean,
+    at = this.video.currentTime,
+  ): Promise<boolean> {
+    if (this.ytEmbed || this.ytOpening) return !!this.ytEmbed;
     this.ytOpening = true;
+    this.setPendingPlay(false);
     this.video.pause();
     try {
-      const embed = await open(this.stage, this.video.currentTime, this.playbackRate);
+      const embed = await open(this.stage, at, this.playbackRate, (st) => this.onYouTubeStatus(st));
       if (this.destroyed) {
         embed.close();
-        return;
+        return false;
       }
       this.ytEmbed = embed;
+      this.ytFallback = fallback;
+      this.ytLast = null;
+      this.ytBack?.setText(fallback ? "Try our stream again" : "Back to our player");
+      this.ytBack?.setAttr(
+        "aria-label",
+        fallback ? "Close YouTube's player and try our stream again" : "Close YouTube's player and go back to ours",
+      );
       this.container.addClass("is-youtube");
+      return true;
+    } catch (e) {
+      return false;
     } finally {
       this.ytOpening = false;
       this.paintQualityChoice();
+    }
+  }
+
+  /**
+   * The last playback tier (#43): YouTube's player in place of ours, at the
+   * second the reader is at. False when this player has no YouTube player to
+   * offer, and the caller shows its error as before.
+   */
+  async handToYouTube(): Promise<boolean> {
+    const open = this.options.quick?.youtubePlayer;
+    if (!open || this.destroyed) return false;
+    const at = this.video.currentTime > 0 ? this.video.currentTime : this.resumeSeconds();
+    const ok = await this.openYouTubePlayer(open, true, at);
+    if (ok) this.onStatus(null);
+    return ok;
+  }
+
+  /** Progress and watch time while YouTube's player has the video. */
+  private onYouTubeStatus(st: { time: number; duration: number; playing: boolean }): void {
+    if (this.destroyed || !this.ytEmbed) return;
+    const now = Date.now();
+    if (st.playing) this.started = true;
+    if (st.duration > 0) this.ytDuration = st.duration;
+    // Watch time is real time between two reports that both said playing.
+    if (this.ytLast?.playing && st.playing) this.playedMs += Math.min(now - this.ytLast.at, 5000);
+    const wasPlaying = this.ytLast?.playing ?? false;
+    this.ytLast = { at: now, playing: st.playing };
+    const due = now - this.lastProgressAt >= PROGRESS_INTERVAL_MS || wasPlaying !== st.playing;
+    if (!due || !this.started) return;
+    this.lastProgressAt = now;
+    if (this.playedMs >= 1000) {
+      const whole = Math.floor(this.playedMs / 1000);
+      this.playedMs -= whole * 1000;
+      this.options.onWatchTime?.(whole);
+    }
+    if (st.time > 0) this.options.onProgress?.(st.time, st.duration);
+  }
+
+  /** "Try our stream again": close YouTube's player and resolve from the top. */
+  private async retryOurStream(): Promise<void> {
+    const at = this.ytEmbed?.time() ?? 0;
+    this.closeYouTubePlayer();
+    this.options.quick?.forgetStreamFailures?.();
+    this.recoveries = 0;
+    this.onStatus("Trying our stream again…");
+    try {
+      const stream = await this.provider("fast", true);
+      if (this.destroyed) return;
+      this.upgraded = false;
+      this.attach(stream, at, true);
+      this.setHd(this.sdState(stream.height));
+      this.onStatus(null);
+    } catch (err) {
+      if (needsYouTubePlayer(err) && (await this.handToYouTube())) return;
+      this.onStatus(`Could not play this video: ${(err as Error).message}`);
     }
   }
 
@@ -2753,6 +2861,8 @@ export class YtFreePlayer {
     const embed = this.ytEmbed;
     if (!embed) return;
     this.ytEmbed = null;
+    this.ytFallback = false;
+    this.ytLast = null;
     this.container.removeClass("is-youtube");
     const at = embed.close();
     if (!this.destroyed && at > 0) this.video.currentTime = at;
@@ -3039,7 +3149,10 @@ export class YtFreePlayer {
     if (Date.now() - this.lastRecoveryAt > 60_000) this.recoveries = 0;
 
     if (this.recoveries >= MAX_CONSECUTIVE_RECOVERIES) {
-      this.onStatus("Playback failed repeatedly. Reopen this note to try again.");
+      // The last tier (#43) before giving up.
+      void this.handToYouTube().then((ok) => {
+        if (!ok) this.onStatus("Playback failed repeatedly. Reopen this note to try again.");
+      });
       return;
     }
 
@@ -3066,6 +3179,8 @@ export class YtFreePlayer {
       // There is no source to honour it against any more, and a button stuck at
       // "starting" over a dead stream says nothing true.
       this.setPendingPlay(false);
+      // Every stream tier failed, or a bot-check pause: YouTube's player (#43).
+      if (needsYouTubePlayer(err) && (await this.handToYouTube())) return;
       this.onStatus(`Could not refresh stream: ${(err as Error).message}`);
     } finally {
       this.recovering = false;
@@ -3073,6 +3188,11 @@ export class YtFreePlayer {
   }
 
   seekTo(seconds: number): void {
+    if (this.ytEmbed) {
+      this.ytEmbed.seek(seconds);
+      this.ytEmbed.play();
+      return;
+    }
     this.video.currentTime = seconds;
     void this.video.play().catch(() => { /* ignore */ });
   }
@@ -3088,6 +3208,7 @@ export class YtFreePlayer {
   /** `seekWhenReady` without the play: the media waits at `seconds`, paused. */
   cueWhenReady(seconds: number): void {
     if (this.destroyed) return;
+    if (this.ytEmbed) return this.ytEmbed.seek(seconds);
     if (this.video.readyState >= 1) {
       this.video.currentTime = seconds;
       return;
@@ -3097,6 +3218,7 @@ export class YtFreePlayer {
 
   seekWhenReady(seconds: number): void {
     if (this.destroyed) return;
+    if (this.ytEmbed) return this.seekTo(seconds);
     if (this.video.readyState >= 1) {
       this.seekTo(seconds);
       return;
@@ -3143,6 +3265,7 @@ export class YtFreePlayer {
     // lock-screen Play button, which arrives here while the document is hidden.
     this.pausedWhileHidden = false;
     this.resumeGuardUntil = 0;
+    if (this.ytEmbed) return this.ytEmbed.play();
     if (!this.hasSource) {
       this.setPendingPlay(true);
       return;
@@ -3164,6 +3287,7 @@ export class YtFreePlayer {
     // Including a Play that has not landed yet: "stop" means stop, whether the
     // video is playing or still on its way to playing.
     this.setPendingPlay(false);
+    this.ytEmbed?.pause();
     this.video.pause();
   }
 
@@ -3243,11 +3367,11 @@ export class YtFreePlayer {
    * "untouched", which is the one case the guard exists for.
    */
   get hasPlayed(): boolean {
-    return this.started || this.video.currentTime > 0;
+    return this.started || this.currentTime > 0;
   }
 
   get currentTime(): number {
-    return this.video.currentTime;
+    return this.ytEmbed ? this.ytEmbed.time() : this.video.currentTime;
   }
 
   private teardownHls(): void {
@@ -3263,7 +3387,12 @@ export class YtFreePlayer {
   destroy(): void {
     // Before the flag, or the report refuses itself: closing the note is the
     // most common way a session ends, and it is the position that matters most.
-    this.reportProgress?.();
+    if (this.ytEmbed) {
+      const t = this.ytEmbed.time();
+      if (this.started && t > 0) this.options.onProgress?.(t, this.ytDuration);
+    } else {
+      this.reportProgress?.();
+    }
     // Before the flag, or the class stays on `document.body` — which outlives
     // this player — and every note in the vault keeps its scrolling locked.
     this.setImmersive(false);

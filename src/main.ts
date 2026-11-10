@@ -119,7 +119,7 @@ import {
 } from "./sections";
 import { DEFAULT_TIDY_DAYS, notesToTidy, sweepNote } from "./tidy";
 import type { SweepHub, TidyCandidate } from "./tidy";
-import { YtFreePlayer } from "./player";
+import { needsYouTubePlayer, YtFreePlayer } from "./player";
 import { AllTiersFailedError, TierFailures } from "./tier-failures";
 import type { NowPlaying } from "./player";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
@@ -4360,13 +4360,14 @@ export default class YtFreePlugin extends Plugin {
           onQuality: (hd) => {
             session.hd = hd;
           },
-          // Phone only (#25): YouTube's own player, for HD on any video.
-          youtubePlayer: mobile
-            ? async (host, at, rate) => {
-                const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
-                return mountYouTubePlayer(host, videoId, at, rate);
-              }
-            : undefined,
+          // YouTube's own player: the last playback tier everywhere (#43),
+          // and on the phone also a Quality pick for HD on any video (#25).
+          youtubePlayer: async (host, at, rate, onStatus) => {
+            const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
+            return mountYouTubePlayer(host, videoId, at, rate, onStatus);
+          },
+          youtubeInMenu: mobile,
+          forgetStreamFailures: () => this.tierFailures.clear(videoId),
         },
         // Everything the reader set on this video that a rebuilt player would
         // otherwise throw away — see `VideoSession`.
@@ -5362,6 +5363,22 @@ export default class YtFreePlugin extends Plugin {
           // A Play pressed while this was resolving is waiting on a stream that
           // is not coming. Take it back, or the button sits at "starting".
           player.cancelPendingPlay();
+          // Every stream tier failed for this video, or a bot-check pause is
+          // on: YouTube's player plays it, in place (#43).
+          if (needsYouTubePlayer(err)) {
+            void player.handToYouTube().then((ok) => {
+              if (ok) {
+                uncover();
+                started = Promise.resolve();
+                return;
+              }
+              this.renderMobileFallback(media, entry, err, () => {
+                player.primeForGesture();
+                void activate();
+              });
+            });
+            return;
+          }
           this.renderMobileFallback(media, entry, err, () => {
             player.primeForGesture();
             void activate();
