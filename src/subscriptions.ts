@@ -13,6 +13,7 @@
 
 import { escapeDescription, linkifyTimestamps } from "./description.ts";
 import { mergeNotified } from "./notify.ts";
+import { canonical } from "./synced-file.ts";
 import { historyMatches } from "./history.ts";
 import { DESCRIPTION_HEADING, NOTES_HEADING } from "./sections.ts";
 import type { SearchResult } from "./search.ts";
@@ -327,8 +328,13 @@ function mergeOrigin(a: ItemOrigin | undefined, b: ItemOrigin | undefined): Item
 function mergeItem(mine: HubItem, theirs: HubItem): HubItem {
   const a = decisionTime(mine);
   const b = decisionTime(theirs);
+  // Last resort on a full tie: content, so both devices pick the same copy.
   const mineWins =
-    a !== b ? a > b : DECISION_RANK[mine.state] >= DECISION_RANK[theirs.state];
+    a !== b
+      ? a > b
+      : DECISION_RANK[mine.state] !== DECISION_RANK[theirs.state]
+        ? DECISION_RANK[mine.state] > DECISION_RANK[theirs.state]
+        : canonical(mine) >= canonical(theirs);
   const winner = mineWins ? mine : theirs;
   const loser = mineWins ? theirs : mine;
 
@@ -461,10 +467,19 @@ export function mergeStates(
   const latestAdded = new Map<string, string>();
   for (const channel of [...theirs.channels, ...mine.channels]) {
     const existing = channels.get(channel.id);
-    // Mine second, so a fresher title and a fresher error win; the earlier
-    // `addedAt` is the true one either way.
+    // The copy checked more recently carries the fresher title and error. Ties
+    // are broken on content, never on which side is "mine": both devices must
+    // pick the same copy, or each writes its own back and the file never
+    // settles (V1-SCOPE-SYNC).
+    const fresher =
+      !existing ||
+      (channel.polledAt ?? "") > (existing.polledAt ?? "") ||
+      ((channel.polledAt ?? "") === (existing.polledAt ?? "") &&
+        canonical(channel) > canonical(existing));
+    const base = fresher ? channel : existing;
+    // The earlier `addedAt` is the true one either way.
     const merged: Channel = {
-      ...channel,
+      ...base,
       addedAt:
         existing?.addedAt && existing.addedAt < channel.addedAt ? existing.addedAt : channel.addedAt,
     };
@@ -525,7 +540,13 @@ export function mergeStates(
   // keeping it would drop the video again the next time the clocks disagree.
   const live = new Set(kept.map((item) => item.videoId));
   // The later poll wins, and so does the device that made it.
-  const later = (theirs.lastPolledAt ?? "") > (mine.lastPolledAt ?? "") ? theirs : mine;
+  // On a tie, by name, so both devices agree (V1-SCOPE-SYNC).
+  const theirAt = theirs.lastPolledAt ?? "";
+  const myAt = mine.lastPolledAt ?? "";
+  const later =
+    theirAt !== myAt
+      ? theirAt > myAt ? theirs : mine
+      : (theirs.lastPolledBy ?? "") > (mine.lastPolledBy ?? "") ? theirs : mine;
   return {
     version: 1,
     channels: [...channels.values()],
@@ -542,9 +563,11 @@ export function mergeStates(
     // you have already been told about is still a video you have already been
     // told about.
     notifiedVideos: mergeNotified(mine.notifiedVideos ?? [], theirs.notifiedVideos ?? []),
+    // Sorted before the cap, so both devices keep the same newest ones.
     deletedVideos: [...deletions]
       .filter(([id]) => !live.has(id))
       .map(([id, at]) => ({ id, at }))
+      .sort((x, y) => (x.at !== y.at ? (x.at < y.at ? -1 : 1) : x.id < y.id ? -1 : x.id > y.id ? 1 : 0))
       .slice(-DELETED_LIMIT),
     // Newest decision per ID, undo included. Not pruned against anything: a
     // search result is never stored, so there is nothing for these to lose to.

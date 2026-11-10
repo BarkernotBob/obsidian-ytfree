@@ -31,7 +31,11 @@ function fakeApp() {
       mtime += 1;
       files.set(path, data);
     },
-    stat: async (path: string) => (files.has(path) ? { mtime } : null),
+    stat: async (path: string) => (files.has(path) ? { mtime, size: files.get(path)?.length } : null),
+    list: async (folder: string) => ({ files: [...files.keys()].filter((f) => f.startsWith(`${folder}/`)) }),
+    remove: async (path: string) => {
+      files.delete(path);
+    },
   };
   return { app: { vault: { adapter } } as unknown as App, disk };
 }
@@ -43,7 +47,7 @@ function onDisk(disk: { files: Map<string, string> }) {
 test("a file that exists but cannot be read is never written over", async () => {
   const { app, disk } = fakeApp();
   disk.files.set(PATH, JSON.stringify({ entries: { [OTHER]: { title: "Precious", lastAt: "2025-01-01T00:00:00.000Z", watch: {} } }, removed: {} }));
-  const store = new HistoryStore(app, PATH, "mac");
+  const store = new HistoryStore(app, PATH, null, "mac");
   disk.unreadable = true;
   await store.load();
   store.record(ID, 300, 600, { title: "New" }, true);
@@ -60,7 +64,7 @@ test("a file that exists but cannot be read is never written over", async () => 
 
 test("old stamps are confirmed only once history is on disk with them", async () => {
   const { app, disk } = fakeApp();
-  const store = new HistoryStore(app, PATH, "mac");
+  const store = new HistoryStore(app, PATH, null, "mac");
   await store.load();
 
   disk.files.set(PATH, "{ half a file");
@@ -75,7 +79,7 @@ test("old stamps are confirmed only once history is on disk with them", async ()
 
 test("time played before the floor counts once the video enters history", async () => {
   const { app } = fakeApp();
-  const store = new HistoryStore(app, PATH, "mac");
+  const store = new HistoryStore(app, PATH, null, "mac");
   await store.load();
   store.addWatch(ID, 25);
   store.record(ID, 25, 300, {}, true);
@@ -88,8 +92,8 @@ test("time played before the floor counts once the video enters history", async 
 
 test("a removal on one device reaches the other through the file", async () => {
   const { app } = fakeApp();
-  const mac = new HistoryStore(app, PATH, "mac");
-  const phone = new HistoryStore(app, PATH, "phone");
+  const mac = new HistoryStore(app, PATH, null, "mac");
+  const phone = new HistoryStore(app, PATH, null, "phone");
   await mac.load();
   await phone.load();
   mac.record(ID, 300, 600, { title: "A" }, true);
@@ -110,7 +114,7 @@ test("a removal on one device reaches the other through the file", async () => {
 
 test("a file that lost this device's watch is written back", async () => {
   const { app, disk } = fakeApp();
-  const mac = new HistoryStore(app, PATH, "mac");
+  const mac = new HistoryStore(app, PATH, null, "mac");
   await mac.load();
   mac.record(ID, 300, 600, { title: "A" }, true);
   await mac.flush();
@@ -121,4 +125,36 @@ test("a file that lost this device's watch is written back", async () => {
   await mac.flush();
   assert.equal(disk.writes, before + 1);
   assert.ok(ID in onDisk(disk).entries);
+});
+
+test("a watch the app was killed before writing comes back from the local copy", async () => {
+  const { app, disk } = fakeApp();
+  let kept: string | null = null;
+  const local = { read: () => kept, write: (v: string) => void (kept = v) };
+  const first = new HistoryStore(app, PATH, local, "phone");
+  await first.load();
+  disk.files.set(PATH, "{ half");
+  disk.unreadable = true;
+  first.record(ID, 300, 600, { title: "A" }, true);
+  await first.flush(); // refused: the file could not be read
+  assert.equal(disk.writes, 0);
+
+  // Relaunch with a readable file.
+  disk.unreadable = false;
+  disk.files.delete(PATH);
+  const second = new HistoryStore(app, PATH, local, "phone");
+  await second.load();
+  assert.equal(second.stats().videos, 1);
+  await second.flush();
+  assert.ok(ID in onDisk(disk).entries);
+});
+
+test("a history too big for local storage is not kept there", async () => {
+  const { cappedLocalCopy } = await import("../src/history-store.ts");
+  let kept: string | null = "old";
+  const capped = cappedLocalCopy({ read: () => kept, write: (v) => void (kept = v) }, 10);
+  capped.write("short");
+  assert.equal(kept, "short");
+  capped.write("much too long for it");
+  assert.equal(kept, "");
 });

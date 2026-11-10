@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { escapeDescription, findTimestamps, linkifyTimestamps, seekLinkAt } from "../src/description.ts";
+import { escapeDescription, findTimestamps, linkifyTimestamps, noteTimestamps, seekLinkAt } from "../src/description.ts";
 
 const ID = "dQw4w9WgXcQ";
 
@@ -106,4 +106,44 @@ test("escapeDescription keeps description text out of the note's heading structu
 test("escapeDescription leaves ordinary text, links and lists alone", () => {
   const plain = "Get a free audio book! http://www.audible.com/Smarter\n- one\n1. two\n#SmarterEveryDay";
   assert.equal(escapeDescription(plain), plain);
+});
+
+// GitHub #72: Live Preview draws these as links, so they must be exactly what
+// Reading view links — no more (frontmatter, code) and no less.
+test("noteTimestamps finds description times by document offset", () => {
+  const doc = "## Description\n0:00 - Hot summer living\n1:02:44 - When Dusty went to jail";
+  const found = noteTimestamps(doc);
+  assert.deepEqual(
+    found.map((t) => [doc.slice(t.from, t.to), t.seconds]),
+    [
+      ["0:00", 0],
+      ["1:02:44", 3764],
+    ],
+  );
+});
+
+test("noteTimestamps skips the frontmatter", () => {
+  const doc = '---\nlength: "01:58:43"\npublished: 2026-07-22\n---\n3:55 - special';
+  const found = noteTimestamps(doc);
+  assert.deepEqual(found.map((t) => doc.slice(t.from, t.to)), ["3:55"]);
+});
+
+test("noteTimestamps skips fenced blocks, inline code and markdown links", () => {
+  const doc = [
+    "```ytfree",
+    "https://www.youtube.com/watch?v=x 1:00",
+    "```",
+    "~~~~",
+    "2:00",
+    "~~~~",
+    "run `3:00` here, 4:00 there",
+    "[5:00](ytfree:abc:300) 6:00",
+  ].join("\n");
+  const found = noteTimestamps(doc);
+  assert.deepEqual(found.map((t) => doc.slice(t.from, t.to)), ["4:00", "6:00"]);
+});
+
+test("noteTimestamps: a lone --- later in the note is not frontmatter", () => {
+  const doc = "1:00 intro\n---\n2:00 outro";
+  assert.equal(noteTimestamps(doc).length, 2);
 });

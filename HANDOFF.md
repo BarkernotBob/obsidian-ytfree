@@ -19,6 +19,10 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-09 nightly: Subscribe inside YT Free on the channel screen and a search card's ⋯ menu,
   and step-by-step Takeout steps in the import dialog (#65, `src/subscribe.ts`).
 
+- 2026-11-09: hub/watch-time sync fix (removals coming back between devices), PR on branch
+  `claude/project-thread-qrqemu`; scope + manual test in docs/V1-SCOPE-SYNC.md. Next: Isaiah's
+  Mac+iPhone test, then history.json (#48) adopts `src/synced-file.ts`. Follow-up #75.
+
 ## Shipped on main (scope doc = manual test)
 
 - HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));

@@ -9,6 +9,7 @@ import {
   Menu,
   Modal,
   Notice,
+  editorInfoField,
   editorLivePreviewField,
   Platform,
   Plugin,
@@ -27,6 +28,7 @@ import {
 } from "./capture";
 import type { DownloadHandle } from "./desktop/download.ts";
 import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
+import { liveTimestampAt, liveTimestamps } from "./live-timestamps.ts";
 import {
   HANDOFF_ACTION,
   HANDOFF_BOOKMARKLET,
@@ -51,6 +53,7 @@ import { YT_ICON, registerIcons } from "./icon";
 import { previewCloseAction } from "./preview";
 import { describeTestOutcome, describeWebhook } from "./notify";
 import type { NotificationFormat } from "./notify";
+import { appLocalCopy } from "./synced-file.ts";
 import { ProgressStore } from "./progress-store";
 import { HistoryStore } from "./history-store.ts";
 import type { HistoryMeta } from "./history.ts";
@@ -790,9 +793,17 @@ export default class YtFreePlugin extends Plugin {
     this.noHeatmap = new DeviceIdSet(localStore(NO_HEATMAP_KEY));
     this.ytInfo.attachStore(localStore(YTDLP_ANSWERS_KEY), (info) => trimYtDlpInfo(info, languages));
     attachPlayerStore(localStore(PLAYER_ANSWERS_KEY));
-    this.progress = new ProgressStore(this.app, `${this.pluginDir()}/progress.json`);
+    this.progress = new ProgressStore(
+      this.app,
+      `${this.pluginDir()}/progress.json`,
+      appLocalCopy(this.app, "ytfree-sync-progress"),
+    );
     await this.progress.load();
-    this.history = new HistoryStore(this.app, `${this.pluginDir()}/history.json`);
+    this.history = new HistoryStore(
+      this.app,
+      `${this.pluginDir()}/history.json`,
+      appLocalCopy(this.app, "ytfree-sync-history"),
+    );
     await this.history.load();
     // The old watch stamps move from progress.json into history (GitHub #48).
     this.progress.drainStampsTo((stamps) => this.history.importStamps(stamps));
@@ -816,6 +827,13 @@ export default class YtFreePlugin extends Plugin {
     // a line, so `inputHandler` — which sees real typing and not programmatic
     // edits — is the right hook. Enter is left entirely alone.
     this.registerEditorExtension([
+      // Plain timestamps drawn as links in Live Preview (GitHub #72). Taps on
+      // them arrive through `editorSeekLinkAt` below, like markdown seek links.
+      liveTimestamps((view) => {
+        if (!this.settings.linkifyTimestamps) return null;
+        if (!view.state.field(editorLivePreviewField, false)) return null;
+        return this.videoIdForNote(view.state.field(editorInfoField, false)?.file?.path);
+      }),
       Prec.highest(
         EditorView.inputHandler.of((view, from, to, text) =>
           this.handleInput(view, from, to, text),
@@ -3927,7 +3945,7 @@ export default class YtFreePlugin extends Plugin {
 
     const line = view.state.doc.lineAt(pos);
     const link = seekLinkAt(line.text, pos - line.from);
-    if (!link) return null;
+    if (!link) return this.editorPlainTimestampAt(at, view, guardSelection);
 
     if (guardSelection) {
       const linkFrom = line.from + link.from;
@@ -3942,6 +3960,26 @@ export default class YtFreePlugin extends Plugin {
       mode: link.mode,
       transcript: isRenderedCueLine(line.text),
     };
+  }
+
+  /**
+   * A plain timestamp drawn as a link by `liveTimestamps` (GitHub #72), under
+   * a pointer. Same selection guard as a markdown seek link: while you are
+   * editing that text, a tap places the cursor.
+   */
+  private editorPlainTimestampAt(
+    at: { clientX: number; clientY: number },
+    view: EditorView,
+    guardSelection: boolean,
+  ): SeekTarget | null {
+    const stamp = liveTimestampAt(view.dom.ownerDocument.elementFromPoint(at.clientX, at.clientY), view);
+    if (!stamp) return null;
+    if (guardSelection) {
+      for (const range of view.state.selection.ranges) {
+        if (range.from <= stamp.to && range.to >= stamp.from) return null;
+      }
+    }
+    return { videoId: stamp.videoId, seconds: stamp.seconds, mode: "seek", transcript: false };
   }
 
   /** Timestamp clicks in Live Preview, armed by the matching mousedown. */
@@ -4633,14 +4671,17 @@ export default class YtFreePlugin extends Plugin {
    * Both are a stat and nothing more when the file has not moved.
    */
   private watchProgressFile(): void {
-    this.registerDomEvent(window, "focus", () => {
+    // The hub file too (V1-SCOPE-SYNC): coming back to the app is exactly when
+    // the other device's Removes are waiting, and the hub may not be open.
+    const refresh = (): void => {
       void this.progress.refreshFromDisk();
       void this.history.refreshFromDisk();
-    });
+      void this.subscriptions?.refreshFromDisk();
+    };
+    this.registerDomEvent(window, "focus", refresh);
     this.registerDomEvent(document, "visibilitychange", () => {
       if (!document.hidden) {
-        void this.progress.refreshFromDisk();
-        void this.history.refreshFromDisk();
+        refresh();
         return;
       }
       void this.history.flush();

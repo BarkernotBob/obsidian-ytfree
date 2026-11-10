@@ -5,6 +5,16 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Terms
 
+- **Synced file** (`src/synced-file.ts`): a JSON file both devices write through a sync
+  service. Merge on save, write back on read when the file is missing something, a
+  device-local copy (`ytfree-sync-*` in app local storage), conflict copies merged then deleted.
+- **Write-back**: a device re-saving because a read showed the file lost one of its decisions
+  (a sync collision). Backs off from 15 s to 5 min if writes keep crossing.
+- **Cleared** (`progress.json`): dated mark that a video's position was finished/reset, so the
+  other device's older position cannot bring it back.
+- **Drained** (`progress.json`): watch stamps already handed to `history.json` (#48), so a
+  merge with an older copy cannot bring them back and restart the hand-over every save.
+
 - **Hub**: the subscriptions screen. Chips: Inbox, In progress, Saved, Hidden, Everything.
 - **Inbox**: hub items not yet opened, kept or hidden.
 - **Saved** (chip; `kept` in code): hub items you opened or saved. Not the same as "has a note" (see 017).
@@ -42,6 +52,22 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   rung, with a 15s fallback to 360p.
 
 ## Decisions
+
+### 2026-11-10 (Isaiah: #72 is MVP, "Live Preview links")
+
+- Plain times in a video note are drawn as seek links in Live Preview too, by a CodeMirror mark
+  (`src/live-timestamps.ts`); the note text is never rewritten. Frontmatter, code and markdown
+  links are skipped. Same setting as Reading view's links.
+
+### 2026-11-09 (Isaiah, hub sync between devices; docs/V1-SCOPE-SYNC.md)
+
+- Cross-device sync bugs are MVP. Target: edits ≥10 s apart end identical on both devices
+  (hub status, watch time); nothing removed comes back. Delivery speed is the sync service's.
+- Fix approved: write back what the file is missing, device-local copy, conflict-copy merge,
+  5 s hub refresh + refresh on foreground, same rules for `progress.json`; `history.json`
+  (#48) to use the same `src/synced-file.ts`.
+- Other sync tools (Obsidian Sync, Drive, Syncthing): same fix; hidden-folder gap is a README
+  note for MVP, visible folder post-MVP (#75).
 
 ### 2026-11-09 (Isaiah, watch history and stats, #48)
 
