@@ -27,7 +27,7 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   then reopening it in the same tap). Next: Isaiah's phone test.
 - 2026-11-10: why YouTube's player shows no ads: confirmed (device test): our page starts the video itself
   (Google requires click-to-play for embed ads). Keep every start scripted; guard test is #91
-  [RESEARCH-EMBED-ADS](docs/RESEARCH-EMBED-ADS.md)).
+  ([RESEARCH-EMBED-ADS](docs/RESEARCH-EMBED-ADS.md)).
 
 ## Shipped on main (scope doc = manual test)
 
