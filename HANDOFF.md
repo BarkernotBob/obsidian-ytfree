@@ -47,6 +47,8 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
 2. #43 fallback; GitHub Pages must serve the hosted player page (phone needs it).
 3. #61 store compliance (LICENSE, versions.json, `x.y.z` tags, Obsidian lint: 32 errors).
 4. #62 device test of merged-but-untested features; #25, #5, #46, #48; bugs Isaiah lists.
+5. Hardening review ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md)): Batch 0 built; Batches 1–3
+   wait for Isaiah's answers to D1–D4 there.
 
 ## How to ship and test
 

@@ -235,6 +235,11 @@ test("ytDlpEnv puts the helper directories on PATH without dropping the real one
   }
 });
 
+test("ytDlpEnv leaves a Windows environment alone", () => {
+  // Unix helper directories joined with ":" would corrupt a `;`-separated PATH.
+  assert.equal(ytDlpEnv("C:\\tools\\yt-dlp.exe", "win32"), process.env);
+});
+
 test("ytDlpEnv lists no directory twice and survives an empty PATH", () => {
   const before = process.env.PATH;
   process.env.PATH = "/opt/homebrew/bin";

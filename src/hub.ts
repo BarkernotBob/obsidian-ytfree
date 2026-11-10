@@ -286,7 +286,7 @@ export class SubscriptionsStore {
 
   constructor(
     private app: App,
-    private statePath: string,
+    statePath: string,
     private settings: () => HubSettings,
   ) {
     this.file = new SyncedFile(
@@ -1324,7 +1324,6 @@ export class HubView extends ItemView {
   private channel: ChannelState | null = null;
   /** Same job as `searchToken`, for channel pages. */
   private channelToken = 0;
-  private channelInputEl: HTMLInputElement | null = null;
   private channelFactsEl: HTMLElement | null = null;
   private channelSubscribeEl: HTMLButtonElement | null = null;
 
@@ -1455,7 +1454,6 @@ export class HubView extends ItemView {
     this.primaryEl = null;
     this.relatedEl = null;
     this.searchInputEl = null;
-    this.channelInputEl = null;
     this.channelFactsEl = null;
     this.channelSubscribeEl = null;
     this.menuEl = null;
@@ -1884,7 +1882,6 @@ export class HubView extends ItemView {
         "aria-label": label,
       },
     });
-    this.channelInputEl = input;
     input.value = channel?.query ?? "";
     input.addEventListener("keydown", (evt) => {
       if (evt.key === "Enter") {
@@ -2028,8 +2025,7 @@ export class HubView extends ItemView {
         channel.results = [...channel.results, ...fresh];
         channel.continuation = page.continuation;
         channel.state = "idle";
-        const now = new Date();
-        for (const result of fresh) this.renderResult(result, now);
+        for (const result of fresh) this.renderResult(result);
         button.setText("More videos");
         if (!page.continuation || fresh.length === 0) button.remove();
         this.renderStatus();
@@ -2066,8 +2062,7 @@ export class HubView extends ItemView {
     }
 
     this.primaryEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
-    const now = new Date();
-    for (const result of channel.results) this.renderResult(result, now);
+    for (const result of channel.results) this.renderResult(result);
 
     if (channel.continuation) {
       const more = list.createEl("button", {
@@ -2168,7 +2163,7 @@ export class HubView extends ItemView {
       return;
     }
 
-    const { channels, items, lastPolledAt } = this.store.state;
+    const { channels, lastPolledAt } = this.store.state;
     const shown = this.currentItems().length;
     const parts: string[] = [];
     const paused = botCheck.message();
@@ -2524,8 +2519,7 @@ export class HubView extends ItemView {
         this.searchContinuation = page.continuation;
         this.searchSkipped += page.skipped;
         this.searchState = "idle";
-        const now = new Date();
-        for (const result of page.results) this.renderResult(result, now);
+        for (const result of page.results) this.renderResult(result);
         button.setText("More results");
         // The end of the road: YouTube stopped offering a token, or answered
         // with nothing new. Either way there is no page after this one.
@@ -2562,8 +2556,7 @@ export class HubView extends ItemView {
     this.primaryEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
     this.relatedEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
 
-    const now = new Date();
-    for (const result of this.searchResults) this.renderResult(result, now);
+    for (const result of this.searchResults) this.renderResult(result);
 
     if (this.searchContinuation) {
       const more = list.createEl("button", {
@@ -2667,7 +2660,7 @@ export class HubView extends ItemView {
    * it out of the results rather than out of the hub. There is still no link,
    * no anchor and no `<video>` here — see `docs/V1-SCOPE-BROWSE.md`.
    */
-  private renderResult(result: SearchResult, now: Date): void {
+  private renderResult(result: SearchResult): void {
     const host = this.resultHost(result);
     if (!host) return;
     if (this.removedResults.has(result.videoId)) {
@@ -2831,7 +2824,7 @@ export class HubView extends ItemView {
       const marker = strip.nextSibling;
       strip.remove();
       this.results.delete(result.videoId);
-      this.renderResult(result, new Date());
+      this.renderResult(result);
       // `renderResult` appends; put it back where the strip was.
       const rebuilt = this.results.get(result.videoId);
       if (rebuilt && marker) host.insertBefore(rebuilt, marker);
@@ -3490,7 +3483,6 @@ class PreviewModal extends Modal {
   private tick: number | null = null;
   /** One row per paragraph, in order, so the highlight is an index and not a search. */
   private cueRows: HTMLElement[] = [];
-  private cues: Paragraph[] = [];
   /** The same paragraphs' start seconds, so the tick allocates nothing. */
   private cueStarts: number[] = [];
   private litRow = -1;
@@ -3894,7 +3886,6 @@ class PreviewModal extends Modal {
     void this.spec.fetchTranscript().then(
       (cues) => {
         if (this.closed) return;
-        this.cues = cues;
         if (cues.length === 0) {
           nothing("Transcript — none for this video");
           return;
