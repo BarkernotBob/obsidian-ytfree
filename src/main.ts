@@ -9,6 +9,7 @@ import {
   Menu,
   Modal,
   Notice,
+  editorInfoField,
   editorLivePreviewField,
   Platform,
   Plugin,
@@ -27,6 +28,7 @@ import {
 } from "./capture";
 import type { DownloadHandle } from "./desktop/download.ts";
 import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
+import { liveTimestampAt, liveTimestamps } from "./live-timestamps.ts";
 import {
   HANDOFF_ACTION,
   HANDOFF_BOOKMARKLET,
@@ -825,6 +827,13 @@ export default class YtFreePlugin extends Plugin {
     // a line, so `inputHandler` — which sees real typing and not programmatic
     // edits — is the right hook. Enter is left entirely alone.
     this.registerEditorExtension([
+      // Plain timestamps drawn as links in Live Preview (GitHub #72). Taps on
+      // them arrive through `editorSeekLinkAt` below, like markdown seek links.
+      liveTimestamps((view) => {
+        if (!this.settings.linkifyTimestamps) return null;
+        if (!view.state.field(editorLivePreviewField, false)) return null;
+        return this.videoIdForNote(view.state.field(editorInfoField, false)?.file?.path);
+      }),
       Prec.highest(
         EditorView.inputHandler.of((view, from, to, text) =>
           this.handleInput(view, from, to, text),
@@ -3936,7 +3945,7 @@ export default class YtFreePlugin extends Plugin {
 
     const line = view.state.doc.lineAt(pos);
     const link = seekLinkAt(line.text, pos - line.from);
-    if (!link) return null;
+    if (!link) return this.editorPlainTimestampAt(at, view, guardSelection);
 
     if (guardSelection) {
       const linkFrom = line.from + link.from;
@@ -3951,6 +3960,26 @@ export default class YtFreePlugin extends Plugin {
       mode: link.mode,
       transcript: isRenderedCueLine(line.text),
     };
+  }
+
+  /**
+   * A plain timestamp drawn as a link by `liveTimestamps` (GitHub #72), under
+   * a pointer. Same selection guard as a markdown seek link: while you are
+   * editing that text, a tap places the cursor.
+   */
+  private editorPlainTimestampAt(
+    at: { clientX: number; clientY: number },
+    view: EditorView,
+    guardSelection: boolean,
+  ): SeekTarget | null {
+    const stamp = liveTimestampAt(view.dom.ownerDocument.elementFromPoint(at.clientX, at.clientY), view);
+    if (!stamp) return null;
+    if (guardSelection) {
+      for (const range of view.state.selection.ranges) {
+        if (range.from <= stamp.to && range.to >= stamp.from) return null;
+      }
+    }
+    return { videoId: stamp.videoId, seconds: stamp.seconds, mode: "seek", transcript: false };
   }
 
   /** Timestamp clicks in Live Preview, armed by the matching mousedown. */
