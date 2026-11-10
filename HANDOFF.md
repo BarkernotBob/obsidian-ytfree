@@ -26,6 +26,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-10: one-tap YouTube player button on the phone bar
   ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)). Next: iPhone test; if YouTube
   needs a tap to start with sound, try a muted start then unmute in `docs/player/index.html`.
+- 2026-11-10: Notes button on the phone folds the video again (it was folding for the keyboard,
+  then reopening it in the same tap). Next: Isaiah's phone test.
 
 ## Shipped on main (scope doc = manual test)
 

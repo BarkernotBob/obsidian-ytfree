@@ -42,6 +42,8 @@ export interface PlayerStatus {
 export type PlayerMessage =
   | PlayerStatus
   | { type: "ready" }
+  /** A step the page saw (hidden, YouTube's state, a resume), for the background-play log. */
+  | { type: "log"; event: string; data: Record<string, unknown> }
   | { type: "error"; code: string | number };
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -54,6 +56,15 @@ export function parsePlayerMessage(data: unknown): PlayerMessage | null {
   switch (d.type) {
     case "ready":
       return { type: "ready" };
+    case "log": {
+      if (typeof d.event !== "string") return null;
+      const data: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(d)) {
+        if (k === "source" || k === "type" || k === "event") continue;
+        if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") data[k] = v;
+      }
+      return { type: "log", event: d.event.slice(0, 80), data };
+    }
     case "error":
       return { type: "error", code: typeof d.code === "number" || typeof d.code === "string" ? d.code : "unknown" };
     case "status":
@@ -104,4 +115,14 @@ export function playerErrorText(code: string | number): string {
     default:
       return `YouTube's player failed (${code}).`;
   }
+}
+
+/** One line of the background-play log: "17:40:01.234 page · youtube state to=2 sinceHide=420". */
+export function logLine(at: Date, from: "page" | "plugin", event: string, data: Record<string, unknown> = {}): string {
+  const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}.${pad(at.getMilliseconds(), 3)}`;
+  const rest = Object.entries(data)
+    .map(([k, v]) => `${k}=${String(v)}`)
+    .join(" ");
+  return `${time} ${from} · ${event}${rest ? ` ${rest}` : ""}`;
 }

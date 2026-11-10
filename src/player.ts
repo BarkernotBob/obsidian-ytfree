@@ -2046,6 +2046,14 @@ export class YtFreePlayer {
         return;
       }
       hiddenAt = Date.now();
+      // YouTube's player was playing: its video is in another frame we can't
+      // touch, so all we can do is keep the app's audio session open while
+      // the hosted page resumes it (GitHub #25, a test; see youtube-player-log.txt).
+      if (this.ytEmbed && this.ytLast?.playing && Platform.isMobile) {
+        this.options.debug?.("youtube player: app hidden while playing, holding the session");
+        startSilence(this.options.debug);
+        return;
+      }
       consider("background", hiddenAt);
     };
     document.addEventListener("visibilitychange", this.onKeepPlayingVisibility);
@@ -2773,6 +2781,8 @@ export class YtFreePlayer {
   ): Promise<boolean> {
     if (this.ytEmbed || this.ytOpening) return !!this.ytEmbed;
     this.ytOpening = true;
+    // The Quality pick is a tap: unlock the silent hold for the background test.
+    primeSilence();
     this.setPendingPlay(false);
     this.video.pause();
     this.togglePanel(false);
@@ -2901,6 +2911,7 @@ export class YtFreePlayer {
     this.ytFallback = false;
     this.ytLast = null;
     this.container.removeClass("is-youtube");
+    if (silencePlaying()) stopSilence();
     const at = embed.close();
     if (!this.destroyed && at > 0) this.video.currentTime = at;
     this.paintQualityChoice();
