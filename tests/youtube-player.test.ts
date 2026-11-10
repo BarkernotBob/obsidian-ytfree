@@ -33,3 +33,11 @@ test("quality and error text", () => {
   assert.match(playerErrorText(153), /153/);
   assert.match(playerErrorText("x"), /\(x\)/);
 });
+
+test("playerPageUrl asks for a cued, unstarted player only when told not to play", () => {
+  assert.equal(
+    playerPageUrl("aqz-KE-bpKQ", 12, 1, false),
+    "https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ&t=12&play=0",
+  );
+  assert.equal(playerPageUrl("aqz-KE-bpKQ", 12, 1, true), "https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ&t=12");
+});

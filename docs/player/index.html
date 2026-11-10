@@ -20,7 +20,7 @@
  * and takes play, pause, seek and speed from it. Nothing is stored or sent
  * anywhere else.
  *
- *   ?v=<videoId>&t=<seconds>&rate=<speed>
+ *   ?v=<videoId>&t=<seconds>&rate=<speed>&play=0   (play=0: cue, don't start)
  */
 (function () {
   "use strict";
@@ -28,6 +28,7 @@
   var id = params.get("v") || "";
   var start = Math.max(0, Math.floor(Number(params.get("t")) || 0));
   var rate = Number(params.get("rate")) || 1;
+  var autoplay = params.get("play") !== "0";
   var SOURCE = "ytfree-player";
   var player = null;
 
@@ -60,7 +61,7 @@
       videoId: id,
       width: "100%",
       height: "100%",
-      playerVars: { playsinline: 1, start: start, rel: 0, autoplay: 1 },
+      playerVars: { playsinline: 1, start: start, rel: 0, autoplay: autoplay ? 1 : 0 },
       events: {
         onReady: function () {
           if (rate !== 1) player.setPlaybackRate(rate);

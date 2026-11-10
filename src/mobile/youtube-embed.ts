@@ -31,6 +31,8 @@ export function mountYouTubePlayer(
   startAt: number,
   rate: number,
   onStatus?: (status: EmbedStatus) => void,
+  /** False: cued at `startAt` and left paused (the YouTube button from a paused player). */
+  play = true,
 ): YouTubeEmbed {
   let lastTime = startAt;
   let lastQuality = "";
@@ -40,7 +42,7 @@ export function mountYouTubePlayer(
   const frame = box.createEl("iframe", {
     cls: "ytfree-yt-embed-frame",
     attr: {
-      src: playerPageUrl(videoId, startAt, rate),
+      src: playerPageUrl(videoId, startAt, rate, play),
       allow: "autoplay; encrypted-media; picture-in-picture; fullscreen",
       allowfullscreen: "true",
       referrerpolicy: "strict-origin-when-cross-origin",
@@ -62,7 +64,10 @@ export function mountYouTubePlayer(
     if (e.origin !== PLAYER_ORIGIN || e.source !== frame.contentWindow) return;
     const msg = parsePlayerMessage(e.data);
     if (!msg) return;
-    if (msg.type === "error") {
+    if (msg.type === "ready") {
+      // A hosted page from before `play=0` autoplays regardless: hold it.
+      if (!play) send({ cmd: "pause" });
+    } else if (msg.type === "error") {
       flash(playerErrorText(msg.code), true);
     } else if (msg.type === "status") {
       if (msg.time > 0) lastTime = msg.time;

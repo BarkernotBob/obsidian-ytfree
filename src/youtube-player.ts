@@ -11,12 +11,20 @@
 export const PLAYER_PAGE = "https://barkernotbob.github.io/obsidian-ytfree/player/";
 export const PLAYER_ORIGIN = new URL(PLAYER_PAGE).origin;
 
-export function playerPageUrl(videoId: string, startSeconds: number, rate: number, base = PLAYER_PAGE): string {
+export function playerPageUrl(
+  videoId: string,
+  startSeconds: number,
+  rate: number,
+  play = true,
+  base = PLAYER_PAGE,
+): string {
   const url = new URL(base);
   url.searchParams.set("v", videoId);
   const t = Math.max(0, Math.floor(startSeconds));
   if (t > 0) url.searchParams.set("t", String(t));
   if (rate !== 1) url.searchParams.set("rate", String(rate));
+  // Cued, not started: the reader was paused when they switched.
+  if (!play) url.searchParams.set("play", "0");
   return url.href;
 }
 

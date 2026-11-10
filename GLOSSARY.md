@@ -309,3 +309,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   passed `strict`; the switch keeps it that way.
 - On Windows the plugin never rewrites the PATH it gives yt-dlp, and yt-dlp and ffmpeg are also
   looked for by bare name, last. Not tested on a Windows machine.
+
+### 2026-11-10 (one-tap YouTube player toggle, Isaiah)
+
+- MVP. A YouTube button on the phone's control bar, first on the right, swaps between our player
+  and YouTube's in one tap, keeping the second, speed and playing/paused. Phone only: the desktop
+  has yt-dlp for HD. It replaces "Back to our player" and the Quality menu's "YouTube player (HD)"
+  ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)).
+- If iOS won't start YouTube's player with sound from our button, a tap on its play button is
+  acceptable only once a fix is shown impossible; a muted start is not wanted.
