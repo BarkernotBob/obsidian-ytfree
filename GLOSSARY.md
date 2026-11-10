@@ -324,3 +324,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   would orphan existing downloads) and the "YT Free video" template name. Capitalised "YouTube" to
   match the trademark. Risk accepted by Isaiah: YouTube's branding guidelines ban "YouTube" in an
   app's name; 16 community plugins already carry it (2026-11-10).
+
+### 2026-11-10 (one-tap YouTube player toggle, Isaiah)
+
+- MVP. A YouTube button on the phone's control bar, first on the right, swaps between our player
+  and YouTube's in one tap, keeping the second, speed and playing/paused. Phone only: the desktop
+  has yt-dlp for HD. It replaces "Back to our player" and the Quality menu's "YouTube player (HD)"
+  ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)).
+- If iOS won't start YouTube's player with sound from our button, a tap on its play button is
+  acceptable only once a fix is shown impossible; a muted start is not wanted.

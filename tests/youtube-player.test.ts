@@ -34,6 +34,14 @@ test("quality and error text", () => {
   assert.match(playerErrorText("x"), /\(x\)/);
 });
 
+test("playerPageUrl asks for a cued, unstarted player only when told not to play", () => {
+  assert.equal(
+    playerPageUrl("aqz-KE-bpKQ", 12, 1, false),
+    "https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ&t=12&play=0",
+  );
+  assert.equal(playerPageUrl("aqz-KE-bpKQ", 12, 1, true), "https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ&t=12");
+});
+
 test("log messages keep plain values only, and print as one line", () => {
   assert.deepEqual(
     parsePlayerMessage({ source: "ytfree-player", type: "log", event: "youtube state", to: 2, vis: "hidden", obj: { x: 1 } }),
