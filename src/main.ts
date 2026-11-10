@@ -9,6 +9,7 @@ import {
   Menu,
   Modal,
   Notice,
+  editorInfoField,
   editorLivePreviewField,
   Platform,
   Plugin,
@@ -27,6 +28,7 @@ import {
 } from "./capture";
 import type { DownloadHandle } from "./desktop/download.ts";
 import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
+import { liveTimestampAt, liveTimestamps } from "./live-timestamps.ts";
 import {
   HANDOFF_ACTION,
   HANDOFF_BOOKMARKLET,
@@ -100,7 +102,9 @@ import { governor } from "./request-governor.ts";
 import { pollIsDue } from "./subscriptions.ts";
 import type { VideoNote } from "./subscriptions.ts";
 import { offlineFormats } from "./offline-hd.ts";
-import { fastStreamFromInfo, hlsStreamFromInfo, infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
+import { infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
+import { cachedProvider, desktopResolve, mobileResolve } from "./play-provider.ts";
+import type { DesktopSources } from "./play-provider.ts";
 import type { YtDlpInfo } from "./ytdlp-info.ts";
 import type { NotePosition, SectionName } from "./sections";
 import {
@@ -116,7 +120,7 @@ import {
 import { DEFAULT_TIDY_DAYS, notesToTidy, sweepNote } from "./tidy";
 import type { SweepHub, TidyCandidate } from "./tidy";
 import { YtFreePlayer } from "./player";
-import { AllTiersFailedError, resolveByTier, TierFailures } from "./tier-failures";
+import { AllTiersFailedError, TierFailures } from "./tier-failures";
 import type { NowPlaying } from "./player";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 import {
@@ -801,7 +805,11 @@ export default class YtFreePlugin extends Plugin {
       appLocalCopy(this.app, "ytfree-sync-progress"),
     );
     await this.progress.load();
-    this.history = new HistoryStore(this.app, `${this.pluginDir()}/history.json`);
+    this.history = new HistoryStore(
+      this.app,
+      `${this.pluginDir()}/history.json`,
+      appLocalCopy(this.app, "ytfree-sync-history"),
+    );
     await this.history.load();
     // The old watch stamps move from progress.json into history (GitHub #48).
     this.progress.drainStampsTo((stamps) => this.history.importStamps(stamps));
@@ -825,6 +833,13 @@ export default class YtFreePlugin extends Plugin {
     // a line, so `inputHandler` — which sees real typing and not programmatic
     // edits — is the right hook. Enter is left entirely alone.
     this.registerEditorExtension([
+      // Plain timestamps drawn as links in Live Preview (GitHub #72). Taps on
+      // them arrive through `editorSeekLinkAt` below, like markdown seek links.
+      liveTimestamps((view) => {
+        if (!this.settings.linkifyTimestamps) return null;
+        if (!view.state.field(editorLivePreviewField, false)) return null;
+        return this.videoIdForNote(view.state.field(editorInfoField, false)?.file?.path);
+      }),
       Prec.highest(
         EditorView.inputHandler.of((view, from, to, text) =>
           this.handleInput(view, from, to, text),
@@ -3936,7 +3951,7 @@ export default class YtFreePlugin extends Plugin {
 
     const line = view.state.doc.lineAt(pos);
     const link = seekLinkAt(line.text, pos - line.from);
-    if (!link) return null;
+    if (!link) return this.editorPlainTimestampAt(at, view, guardSelection);
 
     if (guardSelection) {
       const linkFrom = line.from + link.from;
@@ -3951,6 +3966,26 @@ export default class YtFreePlugin extends Plugin {
       mode: link.mode,
       transcript: isRenderedCueLine(line.text),
     };
+  }
+
+  /**
+   * A plain timestamp drawn as a link by `liveTimestamps` (GitHub #72), under
+   * a pointer. Same selection guard as a markdown seek link: while you are
+   * editing that text, a tap places the cursor.
+   */
+  private editorPlainTimestampAt(
+    at: { clientX: number; clientY: number },
+    view: EditorView,
+    guardSelection: boolean,
+  ): SeekTarget | null {
+    const stamp = liveTimestampAt(view.dom.ownerDocument.elementFromPoint(at.clientX, at.clientY), view);
+    if (!stamp) return null;
+    if (guardSelection) {
+      for (const range of view.state.selection.ranges) {
+        if (range.from <= stamp.to && range.to >= stamp.from) return null;
+      }
+    }
+    return { videoId: stamp.videoId, seconds: stamp.seconds, mode: "seek", transcript: false };
   }
 
   /** Timestamp clicks in Live Preview, armed by the matching mousedown. */
@@ -5118,44 +5153,63 @@ export default class YtFreePlugin extends Plugin {
 
   /**
    * yt-dlp, via the stream cache, with the phone's path as the fallback.
-   * Desktop only.
-   *
-   * "fast" is yt-dlp when it is there. When it is missing, or fails, the
-   * desktop resolves the way the phone does (InnerTube, 360p) rather than
-   * showing an install message — a computer without Homebrew is still a
-   * computer that can play video.
-   *
-   * "quality" is the stitched HD stream built from the same `yt-dlp -J`
-   * answer, or an HLS variant from it. InnerTube is asked for HD only on a
-   * desktop without yt-dlp: its files mostly stop serving at about a minute.
+   * Desktop only. The rules live in `play-provider.ts`, where their request
+   * ceilings are tested (GitHub #66).
    */
   private desktopProvider(videoId: string): StreamProvider {
-    return async (mode, forceRefresh, deadLink = false) => {
-      const offline = this.settings.devOfflineHd?.trim();
-      if (offline) return this.offlineStream(videoId, offline, mode);
-      // HD lookups and recovery retries are automatic: none while paused. The
-      // first resolve is the reader pressing Play, and goes when a retry is
-      // due (GitHub #66: 1, 5, 10, 30 min, 1 h, 2 h, then every 6 h).
-      if (mode === "quality" || forceRefresh) botCheck.guard();
-      else botCheck.guardPlay();
-      if (forceRefresh) {
-        // A 360p link still inside its lifetime that is being replaced did not
-        // play: that tier failed for this video, and the next try moves on
-        // (#43 part 1). An expired link is just re-resolved on the same tier.
-        const live = this.cache.get(videoId, "fast");
-        if (deadLink && mode === "fast" && live?.tier) this.tierFailures.mark(videoId, live.tier);
-        this.cache.invalidate(videoId);
+    const offline = this.settings.devOfflineHd?.trim();
+    if (offline) return (mode) => this.offlineStream(videoId, offline, mode);
+    return cachedProvider(
+      videoId,
+      this.cache,
+      desktopResolve(videoId, this.desktopSources()),
+      () => {
         this.ytInfo.invalidate(videoId);
         forgetPlayer(videoId);
-      }
-      const cached = this.cache.get(videoId, mode);
-      if (cached) return cached;
+      },
+      this.tierFailures,
+    );
+  }
 
-      const stream = mode === "quality"
-        ? await this.desktopQuality(videoId)
-        : await this.desktopFast(videoId);
-      this.cache.set(videoId, stream);
-      return stream;
+  /** What `desktopResolve` asks: yt-dlp, InnerTube and the byte reader. */
+  private desktopSources(): DesktopSources {
+    return {
+      ytDlpInfo: (videoId) => this.ytDlpInfo(videoId),
+      ytDlpUnavailable: () => this.ytDlpUnavailable,
+      markYtDlpUnavailable: () => {
+        this.ytDlpUnavailable = true;
+      },
+      innertubeFast: async (videoId) => {
+        const { resolveMobileStream } = await import("./mobile/innertube.ts");
+        return resolveMobileStream(videoId);
+      },
+      innertubeHd: async (videoId, fetch) => {
+        const { resolveHdStream } = await import("./hd.ts");
+        return resolveHdStream(videoId, undefined, fetch);
+      },
+      ytDlpHd: async (videoId, formats, fetch) => {
+        const { resolveHdFromYtDlpFormats } = await import("./hd.ts");
+        return resolveHdFromYtDlpFormats(videoId, formats, undefined, fetch);
+      },
+      // Streamed and cancellable on desktop (GitHub #23); `requestUrl` if the
+      // desktop code will not load.
+      rangeFetch: async () => {
+        const { fetchRange } = await import("./hd.ts");
+        return desktop().then(
+          (d) => d.streamingWithFallback(fetchRange),
+          () => fetchRange,
+        );
+      },
+      failures: this.tierFailures,
+      onPlayingWithoutYtDlp: () => {
+        if (this.noYtDlpNoticeShown) return;
+        this.noYtDlpNoticeShown = true;
+        new Notice(
+          "YT Free: yt-dlp isn't installed here, so videos play the way they do on the phone. " +
+            "Downloads and Smart Speed need yt-dlp.",
+          8000,
+        );
+      },
     };
   }
 
@@ -5176,44 +5230,6 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * 360p on the desktop: the next stream tier that has not failed for this
-   * video (`choosePlayer`): yt-dlp if it is here, then our own stream. When
-   * both have failed, `AllTiersFailedError` (YouTube's player is #43 part 2).
-   */
-  private desktopFast(videoId: string): Promise<ResolvedStream> {
-    return resolveByTier({
-      videoId,
-      tiers: () => (this.ytDlpUnavailable ? ["own"] : ["yt-dlp", "own"]),
-      failures: this.tierFailures,
-      resolve: async (tier) =>
-        tier === "yt-dlp" ? fastStreamFromInfo(await this.ytDlpInfo(videoId)) : this.ownFast(videoId),
-      stop: isBotCheck,
-      onError: (_tier, err) => {
-        // Probing four paths on every video is not worth it once it is known
-        // to be absent. Absence is not this video's failure, so not marked.
-        if (!(err instanceof YtDlpMissingError)) return true;
-        this.ytDlpUnavailable = true;
-        return false;
-      },
-    });
-  }
-
-  /** Our own stream's 360p, with the one-time "no yt-dlp" notice. */
-  private async ownFast(videoId: string): Promise<ResolvedStream> {
-    const { resolveMobileStream } = await import("./mobile/innertube.ts");
-    const stream = await resolveMobileStream(videoId);
-    if (this.ytDlpUnavailable && !this.noYtDlpNoticeShown) {
-      this.noYtDlpNoticeShown = true;
-      new Notice(
-        "YT Free: yt-dlp isn't installed here, so videos play the way they do on the phone. " +
-          "Downloads and Smart Speed need yt-dlp.",
-        8000,
-      );
-    }
-    return stream;
-  }
-
-  /**
    * The one `yt-dlp -J` for a video (GitHub #32), shared by 360p, HD, the
    * transcript and Smart Speed, and kept until its links expire. Always
    * signed out (GitHub #64).
@@ -5225,59 +5241,15 @@ export default class YtFreePlugin extends Plugin {
     return this.ytInfo.get(videoId, () => fetchYtDlpInfo(videoId, ytDlpPath), (info) => infoExpiresAt(info));
   }
 
-  private async desktopQuality(videoId: string): Promise<ResolvedStream> {
-    const { fetchRange, resolveHdFromYtDlpFormats, resolveHdStream } = await import("./hd.ts");
-    // Streamed and cancellable on desktop (GitHub #23); `requestUrl` if the
-    // desktop code will not load.
-    const fetch = await desktop().then(
-      (d) => d.streamingWithFallback(fetchRange),
-      () => fetchRange,
+  /** InnerTube, via the same cache. Mobile only. */
+  private mobileProvider(videoId: string): StreamProvider {
+    return cachedProvider(
+      videoId,
+      this.cache,
+      mobileResolve(videoId, this.tierFailures),
+      () => forgetPlayer(videoId),
+      this.tierFailures,
     );
-    // No yt-dlp, or its links would not play for this video (#43 part 1):
-    // InnerTube is the source.
-    if (this.ytDlpUnavailable || this.tierFailures.failed(videoId).has("yt-dlp")) {
-      return resolveHdStream(videoId, undefined, fetch);
-    }
-
-    const info = await this.ytDlpInfo(videoId);
-    try {
-      return await resolveHdFromYtDlpFormats(videoId, info.formats ?? [], undefined, fetch);
-    } catch (err) {
-      // The odd video with an HLS ladder and no MP4 pair. No new request.
-      const hls = hlsStreamFromInfo(info);
-      if (hls) return hls;
-      throw err;
-    }
-  }
-
-  /**
-   * InnerTube, via the same cache. Mobile only.
-   *
-   * "fast" is the 360p single file. "quality" is only asked for when HD on
-   * this phone is turned on, and is the stitched stream (`adaptive.ts`).
-   */
-  private mobileProvider(videoId: string): (m: ResolveMode, f: boolean) => Promise<ResolvedStream> {
-    return async (mode, forceRefresh) => {
-      if (mode === "quality" || forceRefresh) botCheck.guard();
-      else botCheck.guardPlay();
-      if (forceRefresh) {
-        this.cache.invalidate(videoId);
-        forgetPlayer(videoId);
-      }
-      const cached = this.cache.get(videoId, mode);
-      if (cached) return cached;
-
-      let stream: ResolvedStream;
-      if (mode === "quality") {
-        const { resolvePhoneHdStream } = await import("./hd.ts");
-        stream = await resolvePhoneHdStream(videoId);
-      } else {
-        const { resolveMobileStream } = await import("./mobile/innertube.ts");
-        stream = await resolveMobileStream(videoId);
-      }
-      this.cache.set(videoId, stream);
-      return stream;
-    };
   }
 
   /**

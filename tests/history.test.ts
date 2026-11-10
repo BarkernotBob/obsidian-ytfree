@@ -282,3 +282,31 @@ test("the History list is every video in history, newest first, searchable", () 
 test("a History card with no title says Unknown video", () => {
   assert.equal(historyOnlyItem(ID, { title: "", channel: "" }).title, "Unknown video");
 });
+
+test("mergeHistory means the same whichever device runs it", async () => {
+  const { canonical } = await import("../src/synced-file.ts");
+  const a = emptyHistory();
+  const b = emptyHistory();
+  // Same stamp, different words: the tie must not go to whoever is merging.
+  recordPlay(a, ID, 300, 600, { title: "Title A", channel: "C" }, T0, true);
+  recordPlay(b, ID, 300, 600, { title: "Title B", channel: "C" }, T0, false);
+  addWatchTime(a, ID, "mac", 40);
+  addWatchTime(b, ID, "phone", 70);
+  addWatchTime(b, ID, "mac", 10);
+  watched(a, OTHER, 5, "mac", 5);
+  removeFromHistory(b, OTHER, at(6));
+  const third = emptyHistory();
+  watched(third, "zzzzzzzzzzz", 1, "ipad", 9);
+  clearHistory(third, at(0.5));
+  for (const [x, y] of [
+    [a, b],
+    [a, third],
+    [b, third],
+    [mergeHistory(a, b), third],
+  ]) {
+    assert.equal(
+      canonical(mergeHistory(structuredClone(x), structuredClone(y))),
+      canonical(mergeHistory(structuredClone(y), structuredClone(x))),
+    );
+  }
+});
