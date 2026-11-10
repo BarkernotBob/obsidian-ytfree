@@ -151,6 +151,19 @@ cookies never reach the plugin.
 
 **Ads.** YT Free shows no ads of its own.
 
+## Using more than one device
+
+The hub, watch time and watch history are plain JSON files in
+`.obsidian/plugins/ytfree/`, synced by whatever syncs your vault (iCloud, Obsidian Sync,
+Google Drive, Dropbox, Syncthing). Each device merges the other's changes and re-sends
+anything a sync collision dropped, so two devices end up identical (docs/V1-SCOPE-SYNC.md).
+How fast a change crosses is up to your sync service; once the file arrives, an open hub
+shows it within 5 seconds.
+
+That folder is hidden. **Obsidian Sync** carries it only with *Settings → Sync → Installed
+community plugins* on, and some Google Drive and phone sync apps skip hidden folders unless
+told otherwise. If the hub never matches between devices, check that first.
+
 ## Known limitations
 
 - Breaks when YouTube changes how its streams are reached. This is a maintenance
