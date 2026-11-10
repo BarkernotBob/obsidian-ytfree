@@ -324,3 +324,6 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)).
 - If iOS won't start YouTube's player with sound from our button, a tap on its play button is
   acceptable only once a fix is shown impossible; a muted start is not wanted.
+- No pin button on the player's control bar (Isaiah, 2026-11-10): the collapse arrow is enough,
+  and the room goes to the YouTube button. The pinned player is still on/off from the command
+  palette and the settings tab.

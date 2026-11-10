@@ -2132,8 +2132,7 @@ export default class YtFreePlugin extends Plugin {
   }
 
   /**
-   * Pinned player on or off, from the command palette or from the pin on the
-   * control bar.
+   * Pinned player on or off, from the command palette or the settings tab.
    *
    * One place, because the button and the command have to mean the same thing —
    * and because turning it *on* has a second half the command never had: a
@@ -2146,9 +2145,6 @@ export default class YtFreePlugin extends Plugin {
     await this.saveSettings();
     this.syncPinnedPlayers();
     this.rerenderMarkdownViews();
-    // A fenced player that survives the switch keeps its own pin button, and a
-    // stale pin is worse than no pin: it says the opposite of what is true.
-    for (const entry of this.players.values()) entry.player.setPinned(this.settings.pinnedPlayer);
     new Notice(`YT Free: pinned player ${this.settings.pinnedPlayer ? "on" : "off"}.`);
   }
 
@@ -4301,16 +4297,6 @@ export default class YtFreePlugin extends Plugin {
         // Two ways out of the player and into its settings: the whole screen,
         // and the four dials you actually change while something is playing.
         onOpenSettings: () => this.openSettingsTab(),
-        // The pinned player, from the player itself. A global switch, so it is
-        // on the bar rather than in the pop-out, where everything is per-video.
-        // A preview has no note to pin to, so the control is absent rather than
-        // dead.
-        pin: preview
-          ? undefined
-          : {
-              pinned: this.settings.pinnedPlayer,
-              onToggle: () => void this.togglePinnedPlayer(),
-            },
         // Always. A preview has no note to pin to and nowhere to download to,
         // but it has a video ID, and that is all a link is made of.
         share: (anchor, seconds) => this.shareMenuFor(anchor, videoId, seconds),

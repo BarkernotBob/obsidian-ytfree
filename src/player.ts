@@ -101,12 +101,6 @@ export interface PlayerOptions {
    */
   onOpenSettings?: () => void;
   /**
-   * The pinned player — the copy that rides at the top of the note. A global
-   * setting rather than a per-video one, which is why it is on the bar and not
-   * in the pop-out: everything in there is "this video only".
-   */
-  pin?: PinOptions;
-  /**
    * Share this video. One button on the bar, not two — the choice between a
    * plain link and a link at this moment is made *after* pressing it, in a menu
    * the host draws. The player supplies the anchor to draw it against and the
@@ -161,12 +155,6 @@ export interface SessionOptions {
   muted?: boolean;
   onRate?: (rate: number) => void;
   onVolume?: (volume: number, muted: boolean) => void;
-}
-
-export interface PinOptions {
-  /** Whether the pinned player is on right now. Paints the button's state. */
-  pinned: boolean;
-  onToggle: () => void;
 }
 
 /**
@@ -519,7 +507,6 @@ export class YtFreePlayer {
    */
   private onPanelReflow: (() => void) | null = null;
   private smartSwitch: HTMLButtonElement | null = null;
-  private pinBtn: HTMLButtonElement | null = null;
   /** The plugin's own fullscreen — see `setImmersive`. */
   private immersive = false;
   /** Kept so it can be dimmed while there is nothing to show — see `paintFullscreen`. */
@@ -1215,7 +1202,7 @@ export class YtFreePlayer {
     }
     this.paintFullscreen();
 
-    // Right is what this player does to the *note*: keep a copy of it, pin it,
+    // Right is what this player does to the *note*: keep a copy of it,
     // fold it away — and the pop-out, last, because an overflow menu belongs at
     // the end of the run.
     //
@@ -1267,21 +1254,6 @@ export class YtFreePlayer {
         this.options.share?.(shareBtn, this.video.currentTime);
       });
       shareBtn.addClass("ytfree-btn-share");
-    }
-
-    if (this.options.pin) {
-      // A pin, on the bar rather than in the pop-out, because it is the one
-      // decision here that is not about this video: it turns the pinned player
-      // on for every note that has a video in it. It was reachable only from
-      // the command palette, which on a phone is three taps and a search.
-      this.pinBtn = button("right", "Pin", "pin", "Pinned player", () => {
-        // Deferred: turning the pin off unmounts this very player, and tearing
-        // down the element whose click is still being dispatched is how you get
-        // an event handler running against a detached tree.
-        window.setTimeout(() => this.options.pin?.onToggle(), 0);
-      });
-      this.pinBtn.addClass("ytfree-btn-pin");
-      this.paintPin(this.options.pin.pinned);
     }
 
     if (this.options.quick) {
@@ -1351,30 +1323,6 @@ export class YtFreePlayer {
    */
   private get hasSource(): boolean {
     return this.hls !== null || this.video.readyState > 0 || this.video.currentSrc !== "";
-  }
-
-  /**
-   * The pinned player was switched somewhere else — the command palette, or
-   * another note's copy of this bar. A player that outlives the switch has to
-   * be told, or its pin says the opposite of what is true.
-   */
-  setPinned(pinned: boolean): void {
-    if (this.destroyed || !this.options.pin) return;
-    this.options.pin.pinned = pinned;
-    this.paintPin(pinned);
-  }
-
-  /** The pin's two states, in one box: colour and wording, never size. */
-  private paintPin(pinned: boolean): void {
-    const el = this.pinBtn;
-    if (!el) return;
-    el.toggleClass("is-active", pinned);
-    const title = pinned
-      ? "Pinned player on — tap to unpin"
-      : "Pinned player off — tap to pin this video to the top of the note";
-    el.setAttribute("title", title);
-    el.setAttribute("aria-label", title);
-    el.setAttribute("aria-pressed", String(pinned));
   }
 
   /**
