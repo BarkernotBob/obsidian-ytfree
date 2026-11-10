@@ -53,6 +53,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 ## Decisions
 
+### 2026-11-10 (Isaiah: #72 is MVP, "Live Preview links")
+
+- Plain times in a video note are drawn as seek links in Live Preview too, by a CodeMirror mark
+  (`src/live-timestamps.ts`); the note text is never rewritten. Frontmatter, code and markdown
+  links are skipped. Same setting as Reading view's links.
+
 ### 2026-11-09 (Isaiah, hub sync between devices; docs/V1-SCOPE-SYNC.md)
 
 - Cross-device sync bugs are MVP. Target: edits ≥10 s apart end identical on both devices

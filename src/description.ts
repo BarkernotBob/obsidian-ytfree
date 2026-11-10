@@ -64,6 +64,67 @@ export function findTimestamps(text: string): TimestampMatch[] {
   return found;
 }
 
+/** A plain timestamp in a whole note, by document offset (see `noteTimestamps`). */
+export interface NoteTimestamp {
+  from: number;
+  to: number;
+  seconds: number;
+}
+
+/** Inline code spans on one line, as `[start, end)` offsets. */
+function inlineCodeSpans(line: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  const re = /(`+)[^`]*?\1/g;
+  for (let m = re.exec(line); m; m = re.exec(line)) spans.push([m.index, m.index + m[0].length]);
+  return spans;
+}
+
+/**
+ * Every plain timestamp in a note's markdown that Reading view would link,
+ * by offset into `doc` — Live Preview's half of `linkifyRendered` (GitHub #72).
+ *
+ * Reading view skips text inside links, code and pre; this skips the same
+ * things in the source: markdown links (via `findTimestamps`), inline code and
+ * fenced blocks (which include the `ytfree` block itself). It also skips the
+ * frontmatter, where `length: "01:58:43"` is a duration, not a place to seek.
+ */
+export function noteTimestamps(doc: string): NoteTimestamp[] {
+  const found: NoteTimestamp[] = [];
+  const lines = doc.split("\n");
+  let start = 0;
+  let fence: string | null = null;
+  let frontmatter = lines[0]?.trim() === "---";
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineStart = start;
+    start += line.length + 1;
+    if (frontmatter) {
+      if (i > 0 && (line.trim() === "---" || line.trim() === "...")) frontmatter = false;
+      continue;
+    }
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+      continue;
+    }
+    if (marker) {
+      fence = marker;
+      continue;
+    }
+    if (!line.includes(":")) continue;
+    const code = inlineCodeSpans(line);
+    for (const match of findTimestamps(line)) {
+      if (code.some(([a, b]) => match.index >= a && match.index < b)) continue;
+      found.push({
+        from: lineStart + match.index,
+        to: lineStart + match.index + match.text.length,
+        seconds: match.seconds,
+      });
+    }
+  }
+  return found;
+}
+
 /**
  * Rewrite bare timestamps in `text` as markdown seek links.
  *
