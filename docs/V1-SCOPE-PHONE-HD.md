@@ -76,6 +76,15 @@ Not built (dropped from the options): HD through the Mac on the home network.
 Measured by Isaiah 2026-11-10 (first test): it plays, no ad on the video tried (several times),
 480p in portrait and 1080p in landscape. YouTube picks quality from the player's size.
 
+Second test (2026-11-10 17:10): still no ads. Our bar controls showed under YouTube's player (fixed:
+only Back to our player shows). No PiP button in the embed, but YouTube's fullscreen then leaving
+Obsidian goes to PiP by itself and keeps playing in the background (Isaiah). The hosted page also
+undoes a system pause within 1 s of the page going hidden (untested).
+
+Why no ads (inferred, not verified): Google's embed rules say ads show only on click-to-play
+embeds, not scripted plays (support.google.com/youtube/answer/132596). Our page starts with
+autoplay. The site's brand-safety rating and WebKit's third-party cookie blocking may also count.
+
 ## Out of scope
 
 - PO token / BotGuard (see above).
