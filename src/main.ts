@@ -797,7 +797,11 @@ export default class YtFreePlugin extends Plugin {
       appLocalCopy(this.app, "ytfree-sync-progress"),
     );
     await this.progress.load();
-    this.history = new HistoryStore(this.app, `${this.pluginDir()}/history.json`);
+    this.history = new HistoryStore(
+      this.app,
+      `${this.pluginDir()}/history.json`,
+      appLocalCopy(this.app, "ytfree-sync-history"),
+    );
     await this.history.load();
     // The old watch stamps move from progress.json into history (GitHub #48).
     this.progress.drainStampsTo((stamps) => this.history.importStamps(stamps));

@@ -1,15 +1,15 @@
 /**
  * The file half of watch history (GitHub #48) — see `history.ts` for the rules.
  *
- * Same protocol as `ProgressStore`, with one rule made stricter because this
- * file is never pruned and holds years: a save always reads and merges first,
- * and a file that exists but cannot be read (an iCloud placeholder, a copy
- * caught mid-sync) means **no write**. Writing then would replace the whole
- * history with this device's copy. The change stays in memory and goes out
- * with the next save that can read the file.
+ * The file is a `SyncedFile` (`synced-file.ts`, GitHub #77), like the hub and
+ * progress files: every save reads and merges first, a file that cannot be
+ * read is never written over, a read that shows the file missing something
+ * this device knows writes it back, conflict copies are merged in, and a
+ * device-local copy survives the app being killed before a write landed.
  *
- * Writes are batched: a video entering history or a pause is at most a minute
- * from disk, and `flush` runs on teardown and when the app is backgrounded.
+ * Writes are batched: a video entering history is a few seconds from disk,
+ * watch time at most a minute, and `flush` runs on teardown and when the app is
+ * backgrounded.
  */
 
 import type { App } from "obsidian";
@@ -26,21 +26,32 @@ import {
   removeFromHistory,
 } from "./history.ts";
 import type { HistoryEntry, HistoryMeta, HistoryState, HistoryStats } from "./history.ts";
+import { SyncedFile, adapterDisk, canonical } from "./synced-file.ts";
+import type { LocalCopy, SyncDisk } from "./synced-file.ts";
 
 /** At most one write a minute while something plays. */
 const WRITE_DELAY_MS = 60_000;
+/** A video entering history, or old stamps arriving, goes out sooner. */
+const SOON_MS = 4000;
 
 /** This device's name in the per-device watch counters. Device-local, never synced. */
 const DEVICE_KEY = "ytfree-device-id";
 
-type DiskRead = { kind: "state"; state: HistoryState } | { kind: "absent" } | { kind: "unreadable" };
+/**
+ * The largest history kept in the device-local copy. History is never pruned,
+ * and local storage is a few MB shared with everything else the plugin keeps
+ * there (the bot-check pause among them), so past this the local copy is
+ * dropped rather than allowed to crowd those out. The synced file is still the
+ * record; only the kill-before-write safety net is lost, for very large
+ * histories.
+ */
+export const LOCAL_COPY_MAX_CHARS = 1_000_000;
 
-/** Entries, removals, total watch time, newest watch and the clear stamp. */
-function signatureOf(state: HistoryState): string {
-  const stats = historyStats(state);
-  let latest = 0;
-  for (const entry of Object.values(state.entries)) latest = Math.max(latest, Date.parse(entry.lastAt) || 0);
-  return `${stats.videos}:${Object.keys(state.removed).length}:${stats.seconds}:${latest}:${state.clearedAt ?? ""}`;
+export function cappedLocalCopy(inner: LocalCopy, max = LOCAL_COPY_MAX_CHARS): LocalCopy {
+  return {
+    read: () => inner.read(),
+    write: (value) => inner.write(value.length <= max ? value : ""),
+  };
 }
 
 export function deviceId(): string {
@@ -58,12 +69,9 @@ export function deviceId(): string {
 }
 
 export class HistoryStore {
-  private state: HistoryState = emptyHistory();
-  private saving: Promise<void> = Promise.resolve();
+  private file: SyncedFile<HistoryState>;
   private timer: number | null = null;
   private dirty = false;
-  private lastWriteOk = true;
-  private diskTime = 0;
   /**
    * Seconds played of videos not in history yet. A video counts from its first
    * second once it passes the floor, so the time before that is held here and
@@ -73,19 +81,31 @@ export class HistoryStore {
   private pending = new Map<string, number>();
   private listeners = new Set<() => void>();
   readonly device: string;
-  private readonly app: App;
-  private readonly path: string;
 
-  constructor(app: App, path: string, device: string = deviceId()) {
-    this.app = app;
-    this.path = path;
+  constructor(
+    app: App | null,
+    path: string,
+    local: LocalCopy | null = null,
+    device: string = deviceId(),
+    disk: SyncDisk | null = null,
+  ) {
     this.device = device;
+    const io = disk ?? (app ? adapterDisk(app.vault.adapter) : null);
+    if (!io) throw new Error("HistoryStore needs a vault or a disk");
+    this.file = new SyncedFile(
+      io,
+      path,
+      { empty: emptyHistory, parse: normalizeHistory, merge: mergeHistory },
+      local ? cappedLocalCopy(local) : null,
+    );
+  }
+
+  private get state(): HistoryState {
+    return this.file.state;
   }
 
   async load(): Promise<void> {
-    const read = await this.read();
-    if (read.kind === "state") this.state = read.state;
-    await this.noteDiskTime();
+    if (await this.file.load()) this.schedule(true);
   }
 
   /** Called when the visible history changes, from here or from the other device. */
@@ -94,53 +114,13 @@ export class HistoryStore {
     return () => this.listeners.delete(listener);
   }
 
-  /** Cheap fingerprint of what History shows, so a no-op merge redraws nothing. */
-  private signature(): string {
-    return signatureOf(this.state);
-  }
-
   private changed(): void {
     for (const listener of this.listeners) listener();
   }
 
-  private async read(): Promise<DiskRead> {
-    try {
-      if (!(await this.app.vault.adapter.exists(this.path))) return { kind: "absent" };
-      return { kind: "state", state: normalizeHistory(JSON.parse(await this.app.vault.adapter.read(this.path))) };
-    } catch (err) {
-      console.error("YT Free: watch history unreadable; not writing until it can be read.", err);
-      return { kind: "unreadable" };
-    }
-  }
-
-  private async noteDiskTime(): Promise<void> {
-    try {
-      this.diskTime = (await this.app.vault.adapter.stat(this.path))?.mtime ?? 0;
-    } catch {
-      // Leave the watermark.
-    }
-  }
-
-  /** Pick up what the other device wrote. A stat, and a read only if the file moved. */
+  /** Pick up what the other device wrote, and send back what it is missing. */
   async refreshFromDisk(): Promise<void> {
-    let mtime: number;
-    try {
-      mtime = (await this.app.vault.adapter.stat(this.path))?.mtime ?? 0;
-    } catch {
-      return;
-    }
-    if (mtime === this.diskTime) return;
-    const theirs = await this.read();
-    if (theirs.kind !== "state") return;
-    this.diskTime = mtime;
-    const before = this.signature();
-    this.state = mergeHistory(this.state, theirs.state);
-    if (this.signature() !== before) this.changed();
-    // Write back when the file is missing something this device knows. iCloud
-    // keeps one whole copy when both devices write before seeing each other,
-    // so a removal or a watch made here can vanish from the file; merging it
-    // back into memory is not enough, it has to go back to disk.
-    if (this.signature() !== signatureOf(theirs.state)) this.schedule(true);
+    if (await this.file.refresh()) this.changed();
   }
 
   // ------------------------------------------------------------- reading
@@ -174,7 +154,6 @@ export class HistoryStore {
       this.pending.delete(videoId);
       addWatchTime(this.state, videoId, this.device, held);
       this.changed();
-      // Entering history is worth a prompt write.
       this.schedule(true);
       return;
     }
@@ -193,16 +172,16 @@ export class HistoryStore {
 
   /**
    * The old watch stamps from `progress.json`, handed over by `ProgressStore`.
-   * Answers true only once history is on disk with them, which is when the
-   * progress file may drop them.
+   * Answers true only once the file holds them, which is when the progress
+   * file may drop them.
    */
   async importStamps(stamps: Record<string, string>): Promise<boolean> {
-    if (importStamps(this.state, stamps)) {
-      this.changed();
-      this.dirty = true;
-    }
-    await this.flush();
-    return !this.dirty && this.lastWriteOk;
+    if (importStamps(this.state, stamps)) this.changed();
+    this.cancelTimer();
+    this.dirty = false;
+    const outcome = await this.file.save();
+    if (!outcome.landed) this.schedule();
+    return outcome.landed;
   }
 
   async remove(videoId: string): Promise<void> {
@@ -221,54 +200,38 @@ export class HistoryStore {
     await this.flush();
   }
 
+  private cancelTimer(): void {
+    if (this.timer === null) return;
+    window.clearTimeout(this.timer);
+    this.timer = null;
+  }
+
   private schedule(soon = false): void {
     this.dirty = true;
-    if (soon && this.timer !== null) {
-      window.clearTimeout(this.timer);
-      this.timer = null;
-    }
+    if (soon) this.cancelTimer();
     if (this.timer !== null) return;
     this.timer = window.setTimeout(
       () => {
         this.timer = null;
         void this.flush();
       },
-      soon ? 4000 : WRITE_DELAY_MS,
+      soon ? SOON_MS : WRITE_DELAY_MS,
     );
   }
 
-  /** Write now, if there is anything to write. */
-  flush(): Promise<void> {
-    if (this.timer !== null) {
-      window.clearTimeout(this.timer);
-      this.timer = null;
+  /** Write now, if there is anything to write. A refused write stays owed. */
+  async flush(): Promise<void> {
+    this.cancelTimer();
+    if (!this.dirty) {
+      await this.file.settle();
+      return;
     }
-    if (!this.dirty) return this.saving;
     this.dirty = false;
-    this.saving = this.saving
-      .then(async () => {
-        const theirs = await this.read();
-        if (theirs.kind === "unreadable") {
-          // Keep the change and try again later; never write over a file we
-          // could not read.
-          this.lastWriteOk = false;
-          this.schedule();
-          return;
-        }
-        if (theirs.kind === "state") {
-          const before = this.signature();
-          this.state = mergeHistory(this.state, theirs.state);
-          if (this.signature() !== before) this.changed();
-        }
-        await this.app.vault.adapter.write(this.path, JSON.stringify(this.state));
-        this.lastWriteOk = true;
-        await this.noteDiskTime();
-      })
-      .catch((err) => {
-        this.dirty = true;
-        this.lastWriteOk = false;
-        console.error("YT Free: could not write watch history.", err);
-      });
-    return this.saving;
+    const before = canonical(historyStats(this.state)) + Object.keys(this.state.entries).length;
+    const outcome = await this.file.save();
+    if (!outcome.landed) this.schedule();
+    // The save merged in the file: the other device's watches may be new here.
+    const after = canonical(historyStats(this.state)) + Object.keys(this.state.entries).length;
+    if (after !== before) this.changed();
   }
 }

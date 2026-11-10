@@ -150,8 +150,21 @@ function later(a: string | undefined, b: string | undefined): string | undefined
   return time(a) >= time(b) ? a : b;
 }
 
+/**
+ * Which copy's words win. The later watch; on a tie, decided on content, never
+ * on which device is merging, or two devices with the same stamp and different
+ * titles would rewrite the file back and forth (`SyncCodec.merge`).
+ */
+function newerOf(a: HistoryEntry, b: HistoryEntry): HistoryEntry {
+  const ta = time(a.lastAt);
+  const tb = time(b.lastAt);
+  if (ta !== tb) return tb > ta ? b : a;
+  const key = (e: HistoryEntry) => JSON.stringify([e.title, e.channel, e.channelId ?? "", e.duration ?? 0]);
+  return key(b) > key(a) ? b : a;
+}
+
 function mergeEntry(a: HistoryEntry, b: HistoryEntry): HistoryEntry {
-  const newer = time(b.lastAt) > time(a.lastAt) ? b : a;
+  const newer = newerOf(a, b);
   const older = newer === a ? b : a;
   const watch: Record<string, number> = { ...a.watch };
   for (const [device, seconds] of Object.entries(b.watch)) {
