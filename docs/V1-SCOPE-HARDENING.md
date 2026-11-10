@@ -107,7 +107,7 @@ Batch 1, on the Mac and the phone, after the next vault build. Your settings mus
    headings, and a new last section on the Mac: **Desktop helpers (optional)** holding yt-dlp
    path, ffmpeg path and Download folder.
 2. Check two values you know: *Tidy empty notes after* still shows 30, and *Compress pauses*
-   is still on. (New installs start at 0 and off.)
+   is as you left it (off in Isaiah's vault on 2026-11-10). New installs start at 0 and off.
 3. Move one slider and flip one toggle, close settings, reopen. Expect both to have stuck.
    Put them back.
 4. In the settings search box (Obsidian 1.13+), type `lookback`. Expect YT Free's *Lookback*

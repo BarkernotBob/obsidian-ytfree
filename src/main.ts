@@ -4124,12 +4124,13 @@ export default class YtFreePlugin extends Plugin {
             session.hd = hd;
           },
           // YouTube's own player: the last playback tier everywhere (#43),
-          // and on the phone also a Quality pick for HD on any video (#25).
-          youtubePlayer: async (host, at, rate, onStatus) => {
+          // and on the phone the YouTube button on the bar.
+          youtubePlayer: async (host, at, rate, onStatus, play) => {
             const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
-            return mountYouTubePlayer(host, videoId, at, rate, onStatus, (line) => this.youtubeLog(line));
+            return mountYouTubePlayer(host, videoId, at, rate, onStatus, (line) => this.youtubeLog(line), play);
           },
-          youtubeInMenu: mobile,
+          // Phone only: the desktop has yt-dlp for HD (Isaiah, 2026-11-10).
+          youtubeToggle: mobile,
           forgetStreamFailures: () => this.tierFailures.clear(videoId),
         },
         // Everything the reader set on this video that a rebuilt player would

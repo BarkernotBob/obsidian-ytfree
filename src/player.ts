@@ -3,7 +3,7 @@ import { Platform, setIcon } from "obsidian";
 import { isBotCheck } from "./bot-check.ts";
 import { formatTimestamp } from "./format.ts";
 import { playedSpanMs } from "./history.ts";
-import { SHARE_ICON } from "./icon.ts";
+import { SHARE_ICON, YT_ICON } from "./icon.ts";
 import { anchorVisible, panelPlacement } from "./panel.ts";
 import type { SectionName } from "./sections.ts";
 import { compressibleWindows, moveFor, secondsSaved, secondsSkipped } from "./silence.ts";
@@ -209,16 +209,21 @@ export interface QuickPanelOptions {
   hdDefault?: boolean;
   /**
    * YouTube's own player over the picture, from the second given at the speed
-   * given. Every platform has it as the last playback tier (#43); the phone
-   * also offers it in the Quality row (#25), when `youtubeInMenu` is set.
+   * given, started or only cued (`play`). Every platform has it as the last
+   * playback tier (#43) and as the YouTube button on the bar.
    */
   youtubePlayer?: (
     host: HTMLElement,
     at: number,
     rate: number,
     onStatus: (status: { time: number; duration: number; playing: boolean }) => void,
+    play: boolean,
   ) => Promise<YouTubeEmbedHandle>;
-  youtubeInMenu?: boolean;
+  /**
+   * The YouTube button is for the reader (phone). Without it, the button only
+   * appears while YouTube's player is up as the fallback tier, as the way back.
+   */
+  youtubeToggle?: boolean;
   /**
    * "Try our stream again" from YouTube's player (#43): forget this video's
    * failed stream tiers, so the next resolve starts from the top.
@@ -409,7 +414,7 @@ export class YtFreePlayer {
   private ytEmbed: YouTubeEmbedHandle | null = null;
   /** YouTube's player is there because our stream could not play (#43), not picked. */
   private ytFallback = false;
-  private ytBack: HTMLButtonElement | null = null;
+  private ytToggle: HTMLButtonElement | null = null;
   /** Last report from YouTube's player, for progress and watch time. */
   private ytLast: { at: number; playing: boolean } | null = null;
   private ytDuration = 0;
@@ -1100,24 +1105,11 @@ export class YtFreePlayer {
     const groups = {
       left: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side ytfree-controls-left" }),
       mid: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-transport" }),
-      // Stands in for the transport while YouTube's player has the picture:
-      // its own controls are inside it, and ours would drive a hidden video.
-      yt: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-youtube" }),
       right: bar.createDiv({
         cls: "ytfree-controls-group ytfree-controls-side ytfree-controls-right",
       }),
     };
     const host = (side: "left" | "mid" | "right"): HTMLElement => groups[side];
-    const ytBack = groups.yt.createEl("button", {
-      cls: "ytfree-yt-back",
-      text: "Back to our player",
-      attr: { "aria-label": "Close YouTube's player and go back to ours" },
-    });
-    ytBack.addEventListener("click", () => {
-      if (this.ytFallback) void this.retryOurStream();
-      else this.closeYouTubePlayer();
-    });
-    this.ytBack = ytBack;
 
     const button = (
       side: "left" | "mid" | "right",
@@ -1231,6 +1223,21 @@ export class YtFreePlayer {
     // the command, on both platforms now: reaching for a button means taking
     // your hands off the note you were writing, which is the one thing the
     // stamp is supposed to save you.
+    if (this.options.quick?.youtubePlayer) {
+      // One tap between ours and YouTube's player, either way, keeping the
+      // second and whether it was playing. First on the right and the only
+      // control left showing while YouTube's player is up (the rest are
+      // hidden in place, not removed), so it never moves under the thumb.
+      const open = this.options.quick.youtubePlayer;
+      this.ytToggle = button("right", "YT", YT_ICON, "Switch to YouTube's player", () => {
+        if (this.ytFallback) void this.retryOurStream();
+        else if (this.ytEmbed) this.leaveYouTubePlayer();
+        else void this.enterYouTubePlayer(open);
+      });
+      this.ytToggle.addClass("ytfree-btn-youtube");
+      if (!this.options.quick.youtubeToggle) this.ytToggle.addClass("is-fallback-only");
+    }
+
     if (this.options.onToggleCollapse) {
       // Fixed size in CSS, because the content is the state: "Collapse" (or a
       // chevron pointing up) while the video is showing, the opposite while
@@ -1529,19 +1536,9 @@ export class YtFreePlayer {
       });
       el.createEl("option", { text: "HD", value: "hd" });
       el.createEl("option", { text: "360p", value: "sd" });
-      if (quick.youtubePlayer && quick.youtubeInMenu) {
-        el.createEl("option", { text: "YouTube player (HD)", value: "yt" });
-      }
-      el.addEventListener("change", () => {
-        if (el.value === "yt") {
-          void this.openYouTubePlayer(quick.youtubePlayer!, false);
-          return;
-        }
-        // Leaving YouTube's player is a quality pick too: back to ours, then
-        // at whatever was picked.
-        this.closeYouTubePlayer();
-        this.setQuality(el.value === "hd");
-      });
+      // YouTube's player is not on this list any more: the YouTube button on
+      // the bar is one tap where this was three (Isaiah, 2026-11-10).
+      el.addEventListener("change", () => this.setQuality(el.value === "hd"));
       this.qualitySelect = el;
       this.paintQualityChoice();
     }
@@ -2780,6 +2777,7 @@ export class YtFreePlayer {
     open: NonNullable<QuickPanelOptions["youtubePlayer"]>,
     fallback: boolean,
     at = this.video.currentTime,
+    play = true,
   ): Promise<boolean> {
     if (this.ytEmbed || this.ytOpening) return !!this.ytEmbed;
     this.ytOpening = true;
@@ -2789,7 +2787,7 @@ export class YtFreePlayer {
     this.video.pause();
     this.togglePanel(false);
     try {
-      const embed = await open(this.stage, at, this.playbackRate, (st) => this.onYouTubeStatus(st));
+      const embed = await open(this.stage, at, this.playbackRate, (st) => this.onYouTubeStatus(st), play);
       if (this.destroyed) {
         embed.close();
         return false;
@@ -2797,19 +2795,55 @@ export class YtFreePlayer {
       this.ytEmbed = embed;
       this.ytFallback = fallback;
       this.ytLast = null;
-      this.ytBack?.setText(fallback ? "Try our stream again" : "Back to our player");
-      this.ytBack?.setAttr(
-        "aria-label",
-        fallback ? "Close YouTube's player and try our stream again" : "Close YouTube's player and go back to ours",
-      );
       this.container.addClass("is-youtube");
+      this.paintYouTubeToggle();
       return true;
     } catch {
       return false;
     } finally {
       this.ytOpening = false;
       this.paintQualityChoice();
+      this.paintYouTubeToggle();
     }
+  }
+
+  /**
+   * The YouTube button, from ours: YouTube's player at this second, started
+   * only if ours was playing (or a Play was pending).
+   */
+  private async enterYouTubePlayer(open: NonNullable<QuickPanelOptions["youtubePlayer"]>): Promise<void> {
+    const playing = this.pendingPlay || (!this.video.paused && !this.video.ended);
+    const at = this.video.currentTime > 0 ? this.video.currentTime : this.resumeSeconds();
+    await this.openYouTubePlayer(open, false, at, playing);
+  }
+
+  /**
+   * The YouTube button, from YouTube's player: ours at YouTube's second,
+   * playing if YouTube's was. The tap is in our page, so ours may start.
+   */
+  private leaveYouTubePlayer(): void {
+    const playing = this.ytLast?.playing ?? false;
+    const at = this.closeYouTubePlayer();
+    if (!playing || this.destroyed) return;
+    void this.withMedia(() => {
+      if (at > 0 && Math.abs(this.video.currentTime - at) > 1) this.video.currentTime = at;
+      this.play();
+    });
+  }
+
+  /** The YouTube button says which player tapping it goes to. */
+  private paintYouTubeToggle(): void {
+    const el = this.ytToggle;
+    if (!el) return;
+    const on = !!this.ytEmbed;
+    const title = !on
+      ? "Switch to YouTube's player"
+      : this.ytFallback
+        ? "Close YouTube's player and try our stream again"
+        : "Back to our player";
+    this.paint(el, "YT", YT_ICON, title);
+    el.toggleClass("is-active", on);
+    el.setAttr("aria-pressed", on ? "true" : "false");
   }
 
   /**
@@ -2850,6 +2884,8 @@ export class YtFreePlayer {
   /** "Try our stream again": close YouTube's player and resolve from the top. */
   private async retryOurStream(): Promise<void> {
     const at = this.ytEmbed?.time() ?? 0;
+    // Playing or paused, as YouTube's player was (one tap, same state).
+    const playing = this.ytLast?.playing ?? true;
     this.closeYouTubePlayer();
     this.options.quick?.forgetStreamFailures?.();
     this.recoveries = 0;
@@ -2858,7 +2894,7 @@ export class YtFreePlayer {
       const stream = await this.provider("fast", true);
       if (this.destroyed) return;
       this.upgraded = false;
-      this.attach(stream, at, true);
+      this.attach(stream, at, playing);
       this.setHd(this.sdState(stream.height));
       this.onStatus(null);
     } catch (err) {
@@ -2867,10 +2903,10 @@ export class YtFreePlayer {
     }
   }
 
-  /** Back to our player, paused where YouTube's got to. */
-  private closeYouTubePlayer(): void {
+  /** Back to our player, paused where YouTube's got to; answers that second. */
+  private closeYouTubePlayer(): number {
     const embed = this.ytEmbed;
-    if (!embed) return;
+    if (!embed) return 0;
     this.ytEmbed = null;
     this.ytFallback = false;
     this.ytLast = null;
@@ -2879,13 +2915,15 @@ export class YtFreePlayer {
     const at = embed.close();
     if (!this.destroyed && at > 0) this.video.currentTime = at;
     this.paintQualityChoice();
+    this.paintYouTubeToggle();
+    return at;
   }
 
   /** The Quality row follows the player, including a pick it was rebuilt with. */
   private paintQualityChoice(): void {
     const el = this.qualitySelect;
     if (!el) return;
-    el.value = this.ytEmbed ? "yt" : (this.wantHd ?? this.options.quick?.hdDefault ?? true) ? "hd" : "sd";
+    el.value = (this.wantHd ?? this.options.quick?.hdDefault ?? true) ? "hd" : "sd";
     el.disabled = this.local;
     el.title = this.local ? "Playing the downloaded copy" : "";
   }

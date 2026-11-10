@@ -4062,21 +4062,28 @@ body.ytfree-immersive-open .ytfree-preview-close {
 .ytfree-yt-embed-hint button {
   flex: none;
 }
-/* While YouTube's player has the picture, its controls are the transport. */
-.ytfree-controls-youtube {
+/* While YouTube's player has the picture, every control of ours would drive
+   the hidden <video>, so none shows: YouTube's player has its own. They are
+   hidden in place, not removed, so the YouTube button (the way back) stays
+   exactly where it was tapped. */
+.is-youtube .ytfree-controls * {
+  visibility: hidden;
+}
+.is-youtube .ytfree-controls .ytfree-btn-youtube,
+.is-youtube .ytfree-controls .ytfree-btn-youtube * {
+  visibility: visible;
+}
+/* Desktop: only the way back from the fallback tier, never a way in. */
+.ytfree-controls .ytfree-btn-youtube.is-fallback-only {
   display: none;
 }
-/* Every control of ours drives the hidden <video>, so none shows: YouTube's
-   player has its own, and "Back to our player" is the way out. */
-.is-youtube .ytfree-controls {
-  grid-template-columns: 1fr;
+.is-youtube .ytfree-controls .ytfree-btn-youtube.is-fallback-only {
+  display: inline-flex;
 }
-.is-youtube .ytfree-controls > :not(.ytfree-controls-youtube) {
-  display: none;
-}
-.is-youtube .ytfree-controls-youtube {
-  display: flex;
-  justify-content: center;
+/* Lit while YouTube's player is the one showing: the same button, on. */
+.ytfree-controls .ytfree-btn-youtube.is-active {
+  color: #ff0033;
+  background: var(--background-modifier-hover);
 }
 
 

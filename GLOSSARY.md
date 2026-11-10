@@ -316,6 +316,15 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   until they tap Show video or Notes again, and does not come back when the keyboard goes. A
   fold the keyboard made does not count as folded, so Notes never reopens the video because of it.
 
+### 2026-11-10 (one-tap YouTube player toggle, Isaiah)
+
+- MVP. A YouTube button on the phone's control bar, first on the right, swaps between our player
+  and YouTube's in one tap, keeping the second, speed and playing/paused. Phone only: the desktop
+  has yt-dlp for HD. It replaces "Back to our player" and the Quality menu's "YouTube player (HD)"
+  ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)).
+- If iOS won't start YouTube's player with sound from our button, a tap on its play button is
+  acceptable only once a fix is shown impossible; a muted start is not wanted.
+
 ### 2026-11-10 (store defaults and helpers; Isaiah)
 
 - **New installs start with the note tidy off and Smart Speed off.** An install that already

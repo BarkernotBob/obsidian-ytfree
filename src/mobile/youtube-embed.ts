@@ -55,6 +55,8 @@ export function mountYouTubePlayer(
   onStatus?: (status: EmbedStatus) => void,
   /** Each step of the background-play log (GitHub #25), as one line. */
   onLog?: (line: string) => void,
+  /** False: cued at `startAt` and left paused (the YouTube button from a paused player). */
+  play = true,
 ): YouTubeEmbed {
   const log = (from: "page" | "plugin", event: string, data?: Record<string, unknown>) =>
     onLog?.(logLine(new Date(), from, event, data));
@@ -66,7 +68,7 @@ export function mountYouTubePlayer(
   const frame = box.createEl("iframe", {
     cls: "ytfree-yt-embed-frame",
     attr: {
-      src: playerPageUrl(videoId, startAt, rate),
+      src: playerPageUrl(videoId, startAt, rate, play),
       allow: "autoplay; encrypted-media; picture-in-picture; fullscreen",
       allowfullscreen: "true",
       referrerpolicy: "strict-origin-when-cross-origin",
