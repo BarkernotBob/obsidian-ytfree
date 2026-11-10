@@ -4040,6 +4040,28 @@ body.ytfree-immersive-open .ytfree-preview-close {
 .ytfree-yt-embed-badge.is-visible {
   opacity: 1;
 }
+/* First time only: how to get PiP and background play from YouTube's player. */
+.ytfree-yt-embed-hint {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.3;
+}
+.ytfree-yt-embed-hint span {
+  flex: 1;
+}
+.ytfree-yt-embed-hint button {
+  flex: none;
+}
 /* While YouTube's player has the picture, its controls are the transport. */
 .ytfree-controls-youtube {
   display: none;
