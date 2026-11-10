@@ -13,9 +13,10 @@ a scripted play" ([Ads on embedded videos](https://support.google.com/youtube/an
 The page sets `autoplay: 1` and also starts playback with `player.playVideo()` when the plugin
 asks. Neither is a click on YouTube's own play button.
 
-Status: **likely, not confirmed.** Google lists click-to-play as a requirement for ads; it does
-not say in so many words that a scripted start never gets ads. The device test below confirms
-or rules it out.
+Status: **confirmed by device test (2026-11-10, one video).** Same hosted page, same video
+(`dQw4w9WgXcQ`): started by our page inside Obsidian, no ads; opened in Arc where the browser
+blocked autoplay so Isaiah clicked YouTube's play button, ads (with the ad blocker off). So the
+github.io site is ad-eligible, and the only difference was who started the video.
 
 ## Facts (sourced)
 
@@ -44,8 +45,8 @@ What our code does (checked in `main` 641e205):
 
 1. **Scripted start (autoplay / playVideo): likely the cause.** F1 directly; F5 and F6 show
    YouTube treats scripted plays differently from native-button plays.
-2. **github.io site rating: unknown.** F3 says ads need a brand-safe site, but Google doesn't
-   publish how github.io is rated. Can't be checked from outside; the device test separates it.
+2. **github.io site rating: ruled out.** The same github.io page showed ads after a click on
+   YouTube's play button (device test, 2026-11-10).
 3. **Safari / WebKit cookie blocking: unlikely to be the cause.** Per F7, losing cookies makes ads
    non-personalized, not absent. It could lower ad frequency, not remove ads.
 
@@ -79,20 +80,20 @@ the YouTube terms risk is his accepted risk; this note records the specific clau
    `gh-pages` copy differs.
 3. The device test below on every release that touches the YouTube player.
 
-## Device test (iPhone, about 10 plays, not bulk)
+## Device test (re-run when the YouTube player changes)
 
-Pick a popular music video that shows an ad in the YouTube app. Use the same video for all steps.
+Turn any browser ad blocker off first. Use the same video for both steps.
 
-1. In Obsidian, open the video, switch to YouTube's player. It starts by itself. Note: ad or no
-   ad. Close and repeat 3 times.
-2. In **Safari** (not Obsidian), open
-   `https://barkernotbob.github.io/obsidian-ytfree/player/?v=<videoId>`. Safari usually blocks
-   the sound autoplay, so you'll see YouTube's play button. Tap it. Note: ad or no ad. Repeat 3
-   times. (If it starts by itself, say so; that run doesn't count.)
-3. In Safari, open `https://www.youtube.com/embed/<videoId>` and tap play. Repeat 3 times.
+1. In Obsidian, open `dQw4w9WgXcQ` and switch to YouTube's player. It starts by itself. Note:
+   ad or no ad. Repeat 3 times. Expected: no ads.
+2. In a desktop browser, open
+   https://barkernotbob.github.io/obsidian-ytfree/player/?v=dQw4w9WgXcQ . If it doesn't start by
+   itself, click YouTube's play button. Repeat 3 times. Expected: ads after a click.
+
+Don't open `youtube.com/embed/<id>` directly: with no referrer it shows Error 153 (171780).
 
 Reading the results:
 
-- Step 1 no ads, step 2 ads: **confirmed**, the scripted start is why. github.io is not.
-- Steps 1 and 2 no ads, step 3 ads: the github.io page (site rating) matters, not autoplay.
-- No ads anywhere: the video isn't showing embed ads; pick another video.
+- Step 1 no ads, step 2 ads after a click: the scripted start is why (the 2026-11-10 result).
+- Ads in step 1: something changed (Google's rules, or our page stopped starting the video). See
+  the table above.
