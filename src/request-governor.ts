@@ -12,7 +12,7 @@
  *   such requests have gone out. Playing a video is never capped, only queued.
  *   RSS feeds are counted but not capped: they are the endpoint YouTube offers
  *   for polling, and capping them would leave most channels unchecked.
- * - **Count** everything, for "YT Free: Show YouTube requests this session".
+ * - **Count** everything, for "YouTube for You: Show YouTube requests this session".
  *
  * No `obsidian` import: tested directly.
  */

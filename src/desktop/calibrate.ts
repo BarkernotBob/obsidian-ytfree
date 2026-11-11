@@ -124,11 +124,11 @@ export async function calibrateThreshold(opts: CalibrateOptions): Promise<Thresh
     const peaks = await measurePeakLevels(opts);
     const choice = pickThreshold(peaks, opts.floorMargin);
     if (!choice.calibrated) {
-      console.warn(`YT Free: calibration read only ${choice.samples} windows; using fallback.`);
+      console.warn(`YouTube for You: calibration read only ${choice.samples} windows; using fallback.`);
     }
     return choice;
   } catch (err) {
-    console.error("YT Free: silence calibration failed; using fallback threshold.", err);
+    console.error("YouTube for You: silence calibration failed; using fallback threshold.", err);
     return { thresholdDb: UNCALIBRATED_NOISE_DB, calibrated: false, samples: 0 };
   }
 }

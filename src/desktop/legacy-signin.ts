@@ -57,12 +57,12 @@ export async function removeLegacySignIn(configuredCookieFile: string): Promise<
       deleted = true;
     }
   } catch (err) {
-    console.error("YT Free: could not delete the old YouTube cookie file.", err);
+    console.error("YouTube for You: could not delete the old YouTube cookie file.", err);
   }
   try {
     await getRemote()?.session.fromPartition(LEGACY_PARTITION).clearStorageData();
   } catch (err) {
-    console.error("YT Free: could not clear the old YouTube sign-in session.", err);
+    console.error("YouTube for You: could not clear the old YouTube sign-in session.", err);
   }
   return deleted;
 }

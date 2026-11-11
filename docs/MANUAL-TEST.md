@@ -7,7 +7,7 @@ inside Obsidian. Takes about 10 minutes.
 1. Open Obsidian.
 2. Go to Settings → Community plugins.
 3. Click the reload icon next to "Installed plugins".
-4. Find **YT Free** in the list and turn it on.
+4. Find **YouTube for You** in the list and turn it on.
 
 ## Test 1 — a video plays, with no ads
 1. Make a new note.
@@ -44,8 +44,8 @@ if it is not instant.
 4. Close the floating window.
 
 ## Test 4 — timestamps
-1. Open the command palette (Cmd-P) and run **YT Free: Insert timestamp at cursor**.
-   - First, give it a hotkey if you want: Settings → Hotkeys → search "YT Free".
+1. Open the command palette (Cmd-P) and run **YouTube for You: Insert timestamp at cursor**.
+   - First, give it a hotkey if you want: Settings → Hotkeys → search "YouTube for You".
 2. **Expect:** something like `[1:23](ytfree:dQw4w9WgXcQ:83)` appears in your note.
 3. Play the video further, insert two or three more timestamps.
 4. Switch to Reading view and click one of the timestamps.

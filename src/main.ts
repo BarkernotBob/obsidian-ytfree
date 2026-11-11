@@ -738,7 +738,7 @@ export default class YtFreePlugin extends Plugin {
         const path = ctx instanceof MarkdownView ? ctx.file?.path : undefined;
         const entry = this.playerForPath(path) ?? this.anyPlayer();
         if (!entry) {
-          new Notice("YT Free: no player in this note yet. Play a video first.");
+          new Notice("YouTube for You: no player in this note yet. Play a video first.");
           return;
         }
         editor.replaceSelection(this.stampFor(entry));
@@ -752,7 +752,7 @@ export default class YtFreePlugin extends Plugin {
         const clip = (await navigator.clipboard.readText()).trim();
         const id = extractVideoId(clip);
         if (!id) {
-          new Notice("YT Free: clipboard does not contain a YouTube URL.");
+          new Notice("YouTube for You: clipboard does not contain a YouTube URL.");
           return;
         }
         editor.replaceSelection("```ytfree\n" + id + "\n```\n");
@@ -835,7 +835,7 @@ export default class YtFreePlugin extends Plugin {
       { capture: true },
     );
 
-    // GitHub #3: YouTube links open in YT Free. The door every outside router
+    // GitHub #3: YouTube links open in YouTube for You. The door every outside router
     // (Finicky, the bookmarklet, the iPhone Shortcut) knocks on.
     // `view=` opens the hub itself, for a home-screen Shortcut.
     this.registerObsidianProtocolHandler(HANDOFF_ACTION, (params) => {
@@ -846,7 +846,7 @@ export default class YtFreePlugin extends Plugin {
         this.app.workspace.onLayoutReady(() => void this.openHub(target.screen));
       } else {
         new Notice(
-          `YT Free: no screen called "${target.view}". Try view=${Object.keys(HANDOFF_VIEWS).join(" or view=")}.`,
+          `YouTube for You: no screen called "${target.view}". Try view=${Object.keys(HANDOFF_VIEWS).join(" or view=")}.`,
         );
       }
     });
@@ -1060,7 +1060,7 @@ export default class YtFreePlugin extends Plugin {
       callback: () => {
         const entry = this.anyPlayer();
         if (!entry) {
-          new Notice("YT Free: no player in this note yet. Play a video first.");
+          new Notice("YouTube for You: no player in this note yet. Play a video first.");
           return;
         }
         this.jumpToTranscript(entry.player.currentTime);
@@ -1083,7 +1083,7 @@ export default class YtFreePlugin extends Plugin {
       callback: () => {
         const videoId = this.shareTargetVideoId();
         if (!videoId) {
-          new Notice("YT Free: no video in this note.");
+          new Notice("YouTube for You: no video in this note.");
           return;
         }
         void this.shareVideo(videoId, null);
@@ -1099,7 +1099,7 @@ export default class YtFreePlugin extends Plugin {
       callback: () => {
         const videoId = this.shareTargetVideoId();
         if (!videoId) {
-          new Notice("YT Free: no video in this note.");
+          new Notice("YouTube for You: no video in this note.");
           return;
         }
         void this.openVideoChannel(videoId);
@@ -1113,7 +1113,7 @@ export default class YtFreePlugin extends Plugin {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
         const entry = this.playerForPath(view?.file?.path) ?? this.anyPlayer();
         if (!entry) {
-          new Notice("YT Free: no player in this note yet. Play a video first.");
+          new Notice("YouTube for You: no player in this note yet. Play a video first.");
           return;
         }
         void this.shareVideo(entry.videoId, entry.player.currentTime);
@@ -1142,7 +1142,7 @@ export default class YtFreePlugin extends Plugin {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const file = view?.file;
     if (!file) {
-      new Notice("YT Free: open the note first.");
+      new Notice("YouTube for You: open the note first.");
       return;
     }
 
@@ -1152,7 +1152,7 @@ export default class YtFreePlugin extends Plugin {
       changed = next !== content;
       return next;
     });
-    new Notice(changed ? "YT Free: headings updated." : "YT Free: headings already current.");
+    new Notice(changed ? "YouTube for You: headings updated." : "YouTube for You: headings already current.");
   }
 
   // ---------------------------------------------------------- subscriptions
@@ -1199,7 +1199,7 @@ export default class YtFreePlugin extends Plugin {
     );
 
     registerIcons();
-    this.addRibbonIcon(YT_ICON, "YT Free subscriptions", () => void this.openHub());
+    this.addRibbonIcon(YT_ICON, "YouTube for You subscriptions", () => void this.openHub());
 
     this.addCommand({
       id: "open-subscriptions-hub",
@@ -1231,7 +1231,7 @@ export default class YtFreePlugin extends Plugin {
       name: "Check subscriptions for new videos",
       callback: () => {
         if (this.subscriptions.state.channels.length === 0) {
-          new Notice("YT Free: no channels yet. Run “Import YouTube subscriptions” first.");
+          new Notice("YouTube for You: no channels yet. Run “Import YouTube subscriptions” first.");
           return;
         }
         void this.subscriptions.poll().then(() => this.refreshHub());
@@ -1256,7 +1256,7 @@ export default class YtFreePlugin extends Plugin {
       id: "show-youtube-requests",
       name: "Show YouTube requests this session",
       checkCallback: (checking) =>
-        this.developerCommand(checking, () => new Notice(`YT Free: ${governor.summary()}.`, 10000)),
+        this.developerCommand(checking, () => new Notice(`YouTube for You: ${governor.summary()}.`, 10000)),
     });
 
     this.addCommand({
@@ -1328,7 +1328,7 @@ export default class YtFreePlugin extends Plugin {
     // exists to stop, pressed button or not (GitHub #31).
     const paused = botCheck.message();
     if (paused) {
-      new Notice(`YT Free: ${paused}`, 8000);
+      new Notice(`YouTube for You: ${paused}`, 8000);
       return;
     }
     // First, before anything goes out to YouTube: the button's job as anyone
@@ -1342,10 +1342,10 @@ export default class YtFreePlugin extends Plugin {
     const total = this.subscriptions.state.channels.length;
     new Notice(
       checked === 0 && total > 0
-        ? "YT Free: a check is already running."
+        ? "YouTube for You: a check is already running."
         : checked < total
-        ? `YT Free: checked ${checked} of ${total} channels — YouTube paused the rest.`
-        : `YT Free: checked ${total} channels.`,
+        ? `YouTube for You: checked ${checked} of ${total} channels — YouTube paused the rest.`
+        : `YouTube for You: checked ${total} channels.`,
     );
   }
 
@@ -1435,7 +1435,7 @@ export default class YtFreePlugin extends Plugin {
   async tidyEmptyNotes(quiet = true): Promise<number> {
     const days = this.settings.tidyEmptyNoteDays;
     if (days <= 0) {
-      if (!quiet) new Notice("YT Free: tidying empty video notes is switched off in settings.");
+      if (!quiet) new Notice("YouTube for You: tidying empty video notes is switched off in settings.");
       return 0;
     }
 
@@ -1496,7 +1496,7 @@ export default class YtFreePlugin extends Plugin {
       });
 
       if (outcome === "swept") {
-        console.debug(`YT Free: trashed empty video note ${candidate.path}`);
+        console.debug(`YouTube for You: trashed empty video note ${candidate.path}`);
         removed++;
       } else if (outcome === "refused") {
         refused++;
@@ -1505,16 +1505,16 @@ export default class YtFreePlugin extends Plugin {
 
     if (refused > 0) {
       console.warn(
-        `YT Free: left ${refused} empty video note${refused === 1 ? "" : "s"} alone — the hub state file could not be read, and the note and the hub item go together.`,
+        `YouTube for You: left ${refused} empty video note${refused === 1 ? "" : "s"} alone — the hub state file could not be read, and the note and the hub item go together.`,
       );
     }
 
     if (removed > 0) {
       new Notice(
-        `YT Free: moved ${removed} watched video note${removed === 1 ? "" : "s"} with nothing written in ${removed === 1 ? "it" : "them"} to the trash.`,
+        `YouTube for You: moved ${removed} watched video note${removed === 1 ? "" : "s"} with nothing written in ${removed === 1 ? "it" : "them"} to the trash.`,
       );
     } else if (!quiet) {
-      new Notice("YT Free: nothing to tidy.");
+      new Notice("YouTube for You: nothing to tidy.");
     }
     return removed;
   }
@@ -1564,10 +1564,10 @@ export default class YtFreePlugin extends Plugin {
       try {
         const { removeLegacySignIn } = await desktop();
         if (await removeLegacySignIn(cookieFile)) {
-          console.debug("YT Free: deleted the old YouTube cookie file. Sign-in has been removed.");
+          console.debug("YouTube for You: deleted the old YouTube cookie file. Sign-in has been removed.");
         }
       } catch (err) {
-        console.error("YT Free: could not remove the old YouTube sign-in.", err);
+        console.error("YouTube for You: could not remove the old YouTube sign-in.", err);
       }
     }
     for (const key of present) delete raw[key];
@@ -1653,7 +1653,7 @@ export default class YtFreePlugin extends Plugin {
 
     const path = `${this.pluginDir()}/dock-selftest.json`;
     await this.app.vault.adapter.write(path, JSON.stringify(log, null, 2));
-    new Notice("YT Free: dock self-test finished.");
+    new Notice("YouTube for You: dock self-test finished.");
   }
 
   /** The diagnostics, written where they can be read without a console. */
@@ -1662,8 +1662,8 @@ export default class YtFreePlugin extends Plugin {
     const report = diagnoseDockBadge();
     const path = `${this.pluginDir()}/dock-diagnostics.json`;
     await this.app.vault.adapter.write(path, JSON.stringify(report, null, 2));
-    console.debug("YT Free dock badge diagnostics", report);
-    new Notice(`YT Free: dock diagnostics written to ${path}`);
+    console.debug("YouTube for You dock badge diagnostics", report);
+    new Notice(`YouTube for You: dock diagnostics written to ${path}`);
   }
 
   /** Re-filter every open hub. Poll results can change what a filter matches. */
@@ -1724,7 +1724,7 @@ export default class YtFreePlugin extends Plugin {
     await new Promise<void>((resolve) => this.app.workspace.onLayoutReady(resolve));
     const link = parseYouTubeLink(url);
     if (!link) {
-      new Notice("YT Free: that is not a link to a YouTube video.");
+      new Notice("YouTube for You: that is not a link to a YouTube video.");
       return;
     }
     // Isaiah, 2026-10-19: the video's note if it has one, else its Preview.
@@ -1740,7 +1740,7 @@ export default class YtFreePlugin extends Plugin {
     if (leaf?.view instanceof HubView) {
       await leaf.view.previewVideo(link.videoId, link.seconds);
     } else {
-      new Notice("YT Free: could not open the hub to preview that video.");
+      new Notice("YouTube for You: could not open the hub to preview that video.");
     }
   }
 
@@ -1771,7 +1771,7 @@ export default class YtFreePlugin extends Plugin {
       }
       await new Promise((resolve) => window.setTimeout(resolve, 250));
     }
-    new Notice(`YT Free: opened the note, but could not start it at ${formatTimestamp(seconds)}.`);
+    new Notice(`YouTube for You: opened the note, but could not start it at ${formatTimestamp(seconds)}.`);
   }
 
   private async openVideoChannel(videoId: string): Promise<void> {
@@ -1784,7 +1784,7 @@ export default class YtFreePlugin extends Plugin {
       channelTitle = details.channelTitle;
     }
     if (!channelId) {
-      new Notice("YT Free: YouTube would not say whose video this is.");
+      new Notice("YouTube for You: YouTube would not say whose video this is.");
       return;
     }
     await this.openHub();
@@ -1936,7 +1936,7 @@ export default class YtFreePlugin extends Plugin {
     await this.saveSettings();
     this.syncPinnedPlayers();
     this.rerenderMarkdownViews();
-    new Notice(`YT Free: pinned player ${this.settings.pinnedPlayer ? "on" : "off"}.`);
+    new Notice(`YouTube for You: pinned player ${this.settings.pinnedPlayer ? "on" : "off"}.`);
   }
 
   /**
@@ -1952,7 +1952,7 @@ export default class YtFreePlugin extends Plugin {
         (view as unknown as { previewMode?: { rerender?: (full?: boolean) => void } }).previewMode
           ?.rerender?.(true);
       } catch (err) {
-        console.error("YT Free: could not redraw a note after toggling the pinned player.", err);
+        console.error("YouTube for You: could not redraw a note after toggling the pinned player.", err);
       }
     }
   }
@@ -2244,7 +2244,7 @@ export default class YtFreePlugin extends Plugin {
     }
     const line = headingLine(content, SECTION_HEADINGS[section]);
     if (line < 0) {
-      new Notice(`YT Free: this note has no ${SECTION_HEADINGS[section][0]} section.`);
+      new Notice(`YouTube for You: this note has no ${SECTION_HEADINGS[section][0]} section.`);
       return;
     }
 
@@ -2598,7 +2598,7 @@ export default class YtFreePlugin extends Plugin {
     // Same rule as the transcript it is being filed above: a section written
     // into a note you are already reading arrives folded.
     this.foldNewSections(file.path, [HEATMAP_ALIASES]);
-    new Notice(`YT Free: added ${peaks.length} replay peaks.`);
+    new Notice(`YouTube for You: added ${peaks.length} replay peaks.`);
   }
 
   // ------------------------------------------------------------- transcript
@@ -2617,7 +2617,7 @@ export default class YtFreePlugin extends Plugin {
   private async fetchTranscriptForActiveNote(): Promise<void> {
     const context = this.activeNoteVideo();
     if (!context) {
-      new Notice("YT Free: this note does not name a video.");
+      new Notice("YouTube for You: this note does not name a video.");
       return;
     }
     await this.fetchTranscriptInto(context.file, context.videoId, false);
@@ -2631,7 +2631,7 @@ export default class YtFreePlugin extends Plugin {
    * that has no captions, and telling those apart afterwards is guesswork.
    */
   private async fetchTranscriptInto(file: TFile, videoId: string, quiet: boolean): Promise<void> {
-    const progress = new Notice("YT Free: fetching transcript…", 0);
+    const progress = new Notice("YouTube for You: fetching transcript…", 0);
     try {
       const harvest = Platform.isDesktopApp
         ? await this.harvestWithYtDlp(videoId)
@@ -2652,8 +2652,8 @@ export default class YtFreePlugin extends Plugin {
         if (!quiet) {
           new Notice(
             track
-              ? "YT Free: captions were empty for this video."
-              : `YT Free: no ${this.settings.transcriptLanguage} captions for this video.`,
+              ? "YouTube for You: captions were empty for this video."
+              : `YouTube for You: no ${this.settings.transcriptLanguage} captions for this video.`,
             8000,
           );
         }
@@ -2690,11 +2690,11 @@ export default class YtFreePlugin extends Plugin {
       const parts: string[] = [];
       if (paragraphs.length) parts.push(`${paragraphs.length} transcript sections`);
       if (peaks.length) parts.push(`${peaks.length} replay peaks`);
-      new Notice(`YT Free: added ${parts.join(" and ")}.`);
+      new Notice(`YouTube for You: added ${parts.join(" and ")}.`);
     } catch (err) {
       progress.hide();
       const detail = err instanceof Error ? err.message : String(err);
-      new Notice(`YT Free: transcript failed — ${detail}`, 10000);
+      new Notice(`YouTube for You: transcript failed — ${detail}`, 10000);
     }
   }
 
@@ -2712,7 +2712,7 @@ export default class YtFreePlugin extends Plugin {
       info = await this.ytDlpInfo(videoId);
     } catch (err) {
       if (!(err instanceof YtDlpMissingError)) throw err;
-      new Notice("YT Free: this needs yt-dlp, an optional desktop helper. See Settings → YT Free → Desktop helpers.");
+      new Notice("YouTube for You: this needs yt-dlp, an optional desktop helper. See Settings → YouTube for You → Desktop helpers.");
       return null;
     }
     const track = pickCaptionTrack(info, this.transcriptLanguage());
@@ -2870,7 +2870,7 @@ export default class YtFreePlugin extends Plugin {
   private async downloadForActiveNote(): Promise<void> {
     const context = this.activeNoteVideo();
     if (!context) {
-      new Notice("YT Free: this note does not point at a YouTube video.");
+      new Notice("YouTube for You: this note does not point at a YouTube video.");
       return;
     }
     await this.startDownload(context.videoId, context.file);
@@ -2897,7 +2897,7 @@ export default class YtFreePlugin extends Plugin {
     if (this.downloads.has(videoId)) {
       this.downloads.get(videoId)?.cancel();
       this.downloads.delete(videoId);
-      new Notice("YT Free: download cancelled.");
+      new Notice("YouTube for You: download cancelled.");
       return;
     }
 
@@ -2905,7 +2905,7 @@ export default class YtFreePlugin extends Plugin {
     const existing = await this.localFileFor(file.path, videoId);
     if (existing) {
       await this.setLocalMedia(file, existing);
-      new Notice("YT Free: already downloaded.");
+      new Notice("YouTube for You: already downloaded.");
       entry?.player.setDownloadState("done");
       return;
     }
@@ -2914,13 +2914,13 @@ export default class YtFreePlugin extends Plugin {
     try {
       await ensureDir(dir);
     } catch (err) {
-      new Notice(`YT Free: cannot create ${dir} — ${(err as Error).message}`);
+      new Notice(`YouTube for You: cannot create ${dir} — ${(err as Error).message}`);
       return;
     }
 
     const free = await freeBytes(dir);
     if (free !== null && free < MIN_FREE_BYTES) {
-      new Notice(`YT Free: only ${formatBytes(free)} free. Downloading needs at least 2 GB.`);
+      new Notice(`YouTube for You: only ${formatBytes(free)} free. Downloading needs at least 2 GB.`);
       return;
     }
 
@@ -2928,7 +2928,7 @@ export default class YtFreePlugin extends Plugin {
       try {
         this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
       } catch {
-        new Notice("YT Free: downloads need yt-dlp, an optional desktop helper. See Settings → YT Free → Desktop helpers.");
+        new Notice("YouTube for You: downloads need yt-dlp, an optional desktop helper. See Settings → YouTube for You → Desktop helpers.");
         return;
       }
     }
@@ -2944,7 +2944,7 @@ export default class YtFreePlugin extends Plugin {
     const baseName = downloadBaseName(String(title), videoId);
 
     let warnedLarge = false;
-    const notice = new Notice("YT Free: starting download…", 0);
+    const notice = new Notice("YouTube for You: starting download…", 0);
     entry?.player.setDownloadState("running");
 
     const handle = downloadVideo({
@@ -2956,10 +2956,10 @@ export default class YtFreePlugin extends Plugin {
       onProgress: (percent, totalBytes) => {
         if (!warnedLarge && totalBytes !== null && totalBytes > LARGE_FILE_BYTES) {
           warnedLarge = true;
-          new Notice(`YT Free: this one is ${formatBytes(totalBytes)}.`);
+          new Notice(`YouTube for You: this one is ${formatBytes(totalBytes)}.`);
         }
         const size = totalBytes === null ? "" : ` of ${formatBytes(totalBytes)}`;
-        notice.setMessage(`YT Free: downloading ${percent.toFixed(1)}%${size} — run the command again to cancel`);
+        notice.setMessage(`YouTube for You: downloading ${percent.toFixed(1)}%${size} — run the command again to cancel`);
         entry?.player.setDownloadState("running", percent);
       },
     });
@@ -2973,14 +2973,14 @@ export default class YtFreePlugin extends Plugin {
       entry?.player.setDownloadState("done");
       notice.setMessage(
         this.ffmpegPath
-          ? "YT Free: downloaded. This note now plays the local copy."
-          : "YT Free: downloaded at 360p — that is the only quality available without ffmpeg. Streaming this note was higher quality. Install ffmpeg, then download again.",
+          ? "YouTube for You: downloaded. This note now plays the local copy."
+          : "YouTube for You: downloaded at 360p — that is the only quality available without ffmpeg. Streaming this note was higher quality. Install ffmpeg, then download again.",
       );
     } catch (err) {
       entry?.player.setDownloadState("idle");
       const message = (err as Error).message;
       notice.setMessage(
-        message === "cancelled" ? "YT Free: download cancelled." : `YT Free: download failed — ${message}`,
+        message === "cancelled" ? "YouTube for You: download cancelled." : `YouTube for You: download failed — ${message}`,
       );
     } finally {
       this.downloads.delete(videoId);
@@ -2991,24 +2991,24 @@ export default class YtFreePlugin extends Plugin {
   private async deleteLocalCopy(): Promise<void> {
     const context = this.activeNoteVideo();
     if (!context) {
-      new Notice("YT Free: this note does not point at a YouTube video.");
+      new Notice("YouTube for You: this note does not point at a YouTube video.");
       return;
     }
     const local = await this.localFileFor(context.file.path, context.videoId);
     if (!local) {
       await this.setLocalMedia(context.file, null);
-      new Notice("YT Free: no local copy on this Mac.");
+      new Notice("YouTube for You: no local copy on this Mac.");
       return;
     }
     const { removeFile } = await desktop();
     try {
       await removeFile(local);
     } catch (err) {
-      new Notice(`YT Free: could not delete the file — ${(err as Error).message}`);
+      new Notice(`YouTube for You: could not delete the file — ${(err as Error).message}`);
       return;
     }
     await this.setLocalMedia(context.file, null);
-    new Notice("YT Free: local copy deleted. This note streams again from now on.");
+    new Notice("YouTube for You: local copy deleted. This note streams again from now on.");
   }
 
   /**
@@ -3265,7 +3265,7 @@ export default class YtFreePlugin extends Plugin {
       });
       return true;
     } catch (err) {
-      console.error("YT Free: auto-stamp failed; typing the character normally.", err);
+      console.error("YouTube for You: auto-stamp failed; typing the character normally.", err);
       return false;
     }
   }
@@ -3323,7 +3323,7 @@ export default class YtFreePlugin extends Plugin {
         entry.player.resumeAfterTyping();
       }, Math.max(0, this.settings.resumeIdleMs));
     } catch (err) {
-      console.error("YT Free: pause-while-typing failed.", err);
+      console.error("YouTube for You: pause-while-typing failed.", err);
     }
   }
 
@@ -3368,7 +3368,7 @@ export default class YtFreePlugin extends Plugin {
 
     const entry = this.players.get(videoId);
     if (!entry) {
-      new Notice("YT Free: that video is not open in this note.");
+      new Notice("YouTube for You: that video is not open in this note.");
       return;
     }
     this.lastActiveVideoId = videoId;
@@ -3407,7 +3407,7 @@ export default class YtFreePlugin extends Plugin {
     const content = view.data;
     const line = transcriptLineFor(content, seconds);
     if (line === null) {
-      new Notice("YT Free: this note has no transcript to jump to yet.");
+      new Notice("YouTube for You: this note has no transcript to jump to yet.");
       return;
     }
 
@@ -3466,7 +3466,7 @@ export default class YtFreePlugin extends Plugin {
         // Reading view's own scroll-to-line, which puts the block at the top.
         foldableMode(view).applyScroll?.(line);
       } catch (err) {
-        console.error("YT Free: could not scroll reading view to the transcript.", err);
+        console.error("YouTube for You: could not scroll reading view to the transcript.", err);
       }
       return;
     }
@@ -3870,9 +3870,9 @@ export default class YtFreePlugin extends Plugin {
     try {
       await navigator.clipboard.writeText(url);
       const at = seconds === null ? "" : ` at ${formatTimestamp(Math.max(0, Math.floor(seconds)))}`;
-      new Notice(`YT Free: link${at} copied.`);
+      new Notice(`YouTube for You: link${at} copied.`);
     } catch (err) {
-      new Notice(`YT Free: could not copy the link — ${String(err)}`);
+      new Notice(`YouTube for You: could not copy the link — ${String(err)}`);
     }
   }
 
@@ -4571,10 +4571,10 @@ export default class YtFreePlugin extends Plugin {
     try {
       setting?.open?.();
       setting?.openTabById?.(this.manifest.id);
-      if (!setting?.open) new Notice("YT Free: open Settings → Community plugins → YT Free.");
+      if (!setting?.open) new Notice("YouTube for You: open Settings → Community plugins → YouTube for You.");
     } catch (err) {
-      console.error("YT Free: could not open the settings tab.", err);
-      new Notice("YT Free: open Settings → Community plugins → YT Free.");
+      console.error("YouTube for You: could not open the settings tab.", err);
+      new Notice("YouTube for You: open Settings → Community plugins → YouTube for You.");
     }
   }
 
@@ -4625,7 +4625,7 @@ export default class YtFreePlugin extends Plugin {
           );
         }
       } catch (err) {
-        console.error("YT Free: caption timing unavailable for Smart Speed.", err);
+        console.error("YouTube for You: caption timing unavailable for Smart Speed.", err);
         player.setSmartSpeedUnavailable("captions could not be fetched");
       }
     }
@@ -4752,7 +4752,7 @@ export default class YtFreePlugin extends Plugin {
       if (!audio) throw new Error("yt-dlp offered no audio-only format");
       input = audio;
     } catch (err) {
-      console.error("YT Free: no audio to analyse for Smart Speed.", err);
+      console.error("YouTube for You: no audio to analyse for Smart Speed.", err);
       return;
     }
 
@@ -4761,7 +4761,7 @@ export default class YtFreePlugin extends Plugin {
     // gets the old single-stream treatment rather than nothing.
     const duration = Number.isFinite(player.video.duration) ? player.video.duration : 0;
     if (duration <= 0) {
-      console.debug("YT Free: Smart Speed analysing without chunking — no duration yet.");
+      console.debug("YouTube for You: Smart Speed analysing without chunking — no duration yet.");
     }
 
     // Where silence is on *this* recording, measured once and handed to every
@@ -4774,7 +4774,7 @@ export default class YtFreePlugin extends Plugin {
     });
     const noiseDb = this.settings.silenceNoiseDb ?? choice.thresholdDb;
     console.debug(
-      `YT Free: Smart Speed threshold ${noiseDb} dB for ${videoId}` +
+      `YouTube for You: Smart Speed threshold ${noiseDb} dB for ${videoId}` +
         (this.settings.silenceNoiseDb !== null
           ? " (manual override)"
           : choice.calibrated
@@ -4801,7 +4801,7 @@ export default class YtFreePlugin extends Plugin {
     };
 
     console.debug(
-      `YT Free: Smart Speed analysing ${videoId} with ffmpeg` +
+      `YouTube for You: Smart Speed analysing ${videoId} with ffmpeg` +
         (duration > 0 ? ` (${Math.round(duration)}s, from ${Math.round(frontier)}s)` : ""),
     );
 
@@ -4856,7 +4856,7 @@ export default class YtFreePlugin extends Plugin {
     } catch (err) {
       // The transcript map is still in place and still working. This is the
       // enhancer failing, which by design costs the user nothing.
-      console.error("YT Free: ffmpeg silence analysis failed.", err);
+      console.error("YouTube for You: ffmpeg silence analysis failed.", err);
     } finally {
       if (this.silenceJobs.get(videoId) === job) this.silenceJobs.delete(videoId);
     }
@@ -5313,7 +5313,7 @@ export default class YtFreePlugin extends Plugin {
   private renderError(parent: HTMLElement, message: string, detail: string): void {
     parent.empty();
     const box = parent.createDiv({ cls: "ytfree-error" });
-    box.createEl("strong", { text: "YT Free" });
+    box.createEl("strong", { text: "YouTube for You" });
     box.createEl("p", { text: message });
     if (detail) box.createEl("pre", { text: detail });
   }
@@ -5367,8 +5367,8 @@ export default class YtFreePlugin extends Plugin {
    */
   debug(message: string, extra?: unknown): void {
     if (!this.settings.debugLogs) return;
-    if (extra === undefined) console.debug(`YT Free [debug]: ${message}`);
-    else console.debug(`YT Free [debug]: ${message}`, extra);
+    if (extra === undefined) console.debug(`YouTube for You [debug]: ${message}`);
+    else console.debug(`YouTube for You [debug]: ${message}`, extra);
   }
 
   /**

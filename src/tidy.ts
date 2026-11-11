@@ -143,7 +143,7 @@ export async function sweepNote(
   try {
     await trash(note.path);
   } catch (err) {
-    console.error(`YT Free: could not trash ${note.path}.`, err);
+    console.error(`YouTube for You: could not trash ${note.path}.`, err);
     if (marked === "tombstoned") await hub.untombstone(note.videoId);
     return "kept";
   }

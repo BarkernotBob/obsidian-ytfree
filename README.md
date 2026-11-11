@@ -1,20 +1,20 @@
-# YT Free
+# YouTube for You
 
 Watch YouTube videos inside your Obsidian notes, in a plain video player, and take notes
 against them with clickable timestamps. Works on desktop and mobile. Nothing else to install.
 
-YT Free does not strip ads out of YouTube's player. It skips that player: it asks YouTube for
+YouTube for You does not strip ads out of YouTube's player. It skips that player: it asks YouTube for
 the video's stream and plays it in a normal `<video>` element. When a video's stream can't be
 reached, it falls back to YouTube's own embedded player in the same place.
 
 ## Install
 
-In Obsidian: **Settings → Community plugins → Browse**, search for **YT Free**, then
+In Obsidian: **Settings → Community plugins → Browse**, search for **YouTube for You**, then
 **Install** and **Enable**.
 
 Until the plugin is listed there, install by hand: download `main.js`, `manifest.json` and
 `styles.css` from the [latest release](https://github.com/BarkernotBob/obsidian-ytfree/releases/latest)
-into `<your vault>/.obsidian/plugins/ytfree/`, then enable **YT Free** under Community plugins.
+into `<your vault>/.obsidian/plugins/ytfree/`, then enable **YouTube for You** under Community plugins.
 
 ## Use
 
@@ -48,7 +48,7 @@ whole point of taking notes against a video.
   updating.
 
 ### YouTube links open in Obsidian
-Any YouTube video link can open its note in YT Free instead of youtube.com, at the link's
+Any YouTube video link can open its note in YouTube for You instead of youtube.com, at the link's
 timestamp. An existing note for the video is reused (the hub's, or any note whose `url` /
 `media_link` names it); otherwise the note is made the way the hub makes one.
 
@@ -59,20 +59,20 @@ timestamp. An existing note for the video is reused (the hub's, or any note whos
   Video links go to Obsidian; everything else goes to the browser as before.
 - **Inside the browser:** Settings → YouTube links → *Browser bookmarklet* → Copy. Make a
   bookmark and paste that as its address. Click it on a YouTube video tab.
-- **iPhone:** build a Shortcut named *Open in YT Free*:
+- **iPhone:** build a Shortcut named *Open in YouTube for You*:
   1. Shortcuts → + → tap the (i) → turn on **Show in Share Sheet**; accept **URLs** and **Text**.
   2. Add **URL Encode** with *Shortcut Input*.
   3. Add **Text**: `obsidian://ytfree?url=` followed by the *URL Encoded Text* variable.
   4. Add **Open URLs** with that Text.
 
-  Share any YouTube link (from the YouTube app, Messages, Safari) → *Open in YT Free*.
+  Share any YouTube link (from the YouTube app, Messages, Safari) → *Open in YouTube for You*.
 - **Anything else:** copy the link and run *Open YouTube URL from clipboard*.
 
 ## Quality
 
 A video starts at 360p within a few seconds of pressing Play, then switches to HD (up to
 1080p) while it keeps playing. Nothing is requested from YouTube before you press Play.
-Settings → YT Free has switches for HD and for waiting until HD is ready before starting.
+Settings → YouTube for You has switches for HD and for waiting until HD is ready before starting.
 
 ## Smart Speed
 
@@ -86,35 +86,35 @@ and never wrote in is moved to Obsidian's trash after that many days.
 
 ## Network use and privacy
 
-YT Free talks to these services. Nothing else, and no telemetry: it sends no data about you
+YouTube for You talks to these services. Nothing else, and no telemetry: it sends no data about you
 or your vault to its author or anyone else.
 
 - **YouTube** (`youtube.com`, `i.ytimg.com`, `*.googlevideo.com`): video pages, streams,
   thumbnails, search, channel pages, transcripts and the RSS feeds of channels you subscribe
   to. The subscriptions hub checks those feeds on a timer while Obsidian is open (hourly by
   default; Settings → *Check every*). Requests are always signed out.
-- **The YT Free player page** (`barkernotbob.github.io/obsidian-ytfree/player/`, served by
+- **The YouTube for You player page** (`barkernotbob.github.io/obsidian-ytfree/player/`, served by
   GitHub Pages): only when a video plays in YouTube's own embedded player, which then loads
   from YouTube as usual.
 - **A notification address you enter** (optional, blank by default): when you fill it in, new
   videos are POSTed there.
 
-**Optional desktop helpers.** YT Free needs nothing installed. If
-[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) or `ffmpeg` is already on your computer, YT Free
+**Optional desktop helpers.** YouTube for You needs nothing installed. If
+[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) or `ffmpeg` is already on your computer, YouTube for You
 runs them on desktop for offline downloads and finer Smart Speed. They are separate programs
-you install yourself; YT Free never downloads or installs them
+you install yourself; YouTube for You never downloads or installs them
 ([details](docs/DESKTOP-HELPERS.md)).
 
 **Files outside your vault.** Only if you use offline downloads (desktop, needs yt-dlp):
 downloaded videos go to a `YT Free` folder in Movies (Videos on Windows and Linux), or the folder
 you choose in settings. (Versions before
 sign-in was removed kept a cookie file in `~/Library/Application Support/obsidian-ytfree/`;
-YT Free deletes it on first load.)
+YouTube for You deletes it on first load.)
 
 **Accounts and payments.** No account and no sign-in; nothing is paid for. Your YouTube
 cookies never reach the plugin.
 
-**Ads.** YT Free shows no ads of its own.
+**Ads.** YouTube for You shows no ads of its own.
 
 ## Using more than one device
 
@@ -131,7 +131,7 @@ told otherwise. If the hub never matches between devices, check that first.
 
 ## Known limitations
 
-- YT Free reads YouTube through interfaces YouTube does not document. When YouTube changes
+- YouTube for You reads YouTube through interfaces YouTube does not document. When YouTube changes
   them, playback through our own stream can stop until the plugin is updated. Until then
   videos play in YouTube's embedded player.
 - Pop-out windows (a note dragged out to its own Obsidian window on desktop) are not supported

@@ -32,6 +32,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   page, Obsidian 0 in 10; github.io, autoplay, framing ruled out). Not our code, so can't be locked
   in; detect it with an "ad seen" log line (#91). ([RESEARCH-EMBED-ADS](docs/RESEARCH-EMBED-ADS.md))
 
+- 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
+
 ## Shipped on main (scope doc = manual test)
 
 - HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));

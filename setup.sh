@@ -70,7 +70,7 @@ fi
 
 # ── 3. Download the plugin ───────────────────────────────────────────────────
 DEST="$VAULT/.obsidian/plugins/ytfree"
-say "Installing YT Free into $(basename "$VAULT")…"
+say "Installing YouTube for You into $(basename "$VAULT")…"
 mkdir -p "$DEST"
 for f in "${FILES[@]}"; do
   curl -fsSL "$RELEASE/$f" -o "$DEST/$f" || die "Download failed: $RELEASE/$f"
@@ -82,7 +82,7 @@ done
 LIST="$VAULT/.obsidian/community-plugins.json"
 if pgrep -xq Obsidian; then
   say "Done. Last step, in Obsidian:"
-  echo "  Settings → Community plugins → click the reload icon next to “Installed plugins” → turn on YT Free."
+  echo "  Settings → Community plugins → click the reload icon next to “Installed plugins” → turn on YouTube for You."
   echo "  (If it says Restricted mode, click “Turn on community plugins” first.)"
 else
   python3 - "$LIST" <<'EOF'
@@ -97,7 +97,7 @@ if "ytfree" not in ids:
 os.makedirs(os.path.dirname(p), exist_ok=True)
 json.dump(ids, open(p, "w"))
 EOF
-  say "Done. Open Obsidian — YT Free is switched on."
+  say "Done. Open Obsidian — YouTube for You is switched on."
   echo "  (If Obsidian says Restricted mode: Settings → Community plugins → “Turn on community plugins”.)"
 fi
 echo
