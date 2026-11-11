@@ -98,16 +98,14 @@ import { infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
 import { cachedProvider, desktopResolve, mobileResolve } from "./play-provider.ts";
 import type { DesktopSources } from "./play-provider.ts";
 import type { YtDlpInfo } from "./ytdlp-info.ts";
-import type { CollapseMode, NotePosition, SectionName } from "./sections";
+import type { CollapseMode, SectionName } from "./sections";
 import {
   SECTION_HEADINGS,
-  enclosingHeading,
   foldableRanges,
   foldsRevealing,
   headingLine,
   normaliseHeadings,
-  notesButtonCollapse,
-  notesCursorTarget,
+  notesWriteTarget,
   sectionEnd,
 } from "./sections";
 import { notesToTidy, sweepNote } from "./tidy";
@@ -467,14 +465,6 @@ export default class YtFreePlugin extends Plugin {
    * can mean "I'm already here" — see `jumpToSection`.
    */
   private lastJump = new Map<string, SectionName>();
-  /**
-   * Where the writing was, per note — what the Notes button goes back to.
-   *
-   * Only ever written when the cursor is under that note's `# Notes`, so a
-   * click in the transcript or a stamp typed into the description cannot
-   * overwrite the place you were working. See `rememberNotesCursor`.
-   */
-  private lastNotesCursor = new Map<string, NotePosition>();
   /** The note whose transcript is keeping up with its video, if any. */
   private follow: TranscriptFollow | null = null;
   /** Scroll listeners pinning a docked view at the top — see holdDockedLayout. */
@@ -585,21 +575,35 @@ export default class YtFreePlugin extends Plugin {
       `${this.pluginDir()}/progress.json`,
       appLocalCopy(this.app, "ytfree-sync-progress"),
     );
-    await this.progress.load();
     this.history = new HistoryStore(
       this.app,
       `${this.pluginDir()}/history.json`,
       appLocalCopy(this.app, "ytfree-sync-history"),
     );
-    await this.history.load();
+    this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
+    this.subscriptions = new SubscriptionsStore(
+      this.app,
+      `${this.pluginDir()}/subscriptions.json`,
+      () => this.hubSettings(),
+    );
+    // Read together, not one after another: Obsidian waits on `onload`, and
+    // each of these is a file a sync service may have to fetch first. Nothing
+    // below is registered until all four are in, so no code sees a store that
+    // is still loading. Each `load` survives an unreadable file by itself.
+    const loadStarted = Date.now();
+    await Promise.all([
+      this.progress.load(),
+      this.history.load(),
+      this.silence.load(),
+      this.subscriptions.load(),
+    ]);
+    this.debug(`stores loaded in ${Date.now() - loadStarted} ms`);
     // The old watch stamps move from progress.json into history (GitHub #48).
     this.progress.drainStampsTo((stamps) => this.history.importStamps(stamps));
     this.register(this.history.onChange(() => this.refreshHistoryViews()));
     this.watchProgressFile();
     this.setupNowPlayingButton();
-    this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
-    await this.silence.load();
-    await this.setupSubscriptions();
+    this.setupSubscriptions();
     await this.removeLegacySignIn();
     await this.setupDockBadge();
 
@@ -1155,15 +1159,7 @@ export default class YtFreePlugin extends Plugin {
    * index is thousands of rows, and settings should not be rewritten every time
    * a poll lands.
    */
-  private async setupSubscriptions(): Promise<void> {
-    const dir = this.pluginDir();
-    this.subscriptions = new SubscriptionsStore(
-      this.app,
-      `${dir}/subscriptions.json`,
-      () => this.hubSettings(),
-    );
-    await this.subscriptions.load();
-
+  private setupSubscriptions(): void {
     this.registerView(
       HUB_VIEW_TYPE,
       (leaf) =>
@@ -2226,7 +2222,7 @@ export default class YtFreePlugin extends Plugin {
    * target is dropped first, and only that one: the other sections stay as the
    * reader left them.
    */
-  private jumpToSection(file: TFile, section: SectionName, videoId?: string): void {
+  private jumpToSection(file: TFile, section: SectionName): void {
     const view = this.viewForPath(file.path);
     if (!view) return;
 
@@ -2242,24 +2238,16 @@ export default class YtFreePlugin extends Plugin {
       return;
     }
 
-    // Before anything moves: if the cursor is sitting in the Notes section
-    // right now, that is where the writing was, and it is what the Notes button
-    // has to come back to later. Every other button leaves the cursor alone, so
-    // this is the last moment the answer is still true.
-    this.rememberNotesCursor(view, content);
-
-    // And before anything is deferred: the keyboard (041). This is inside the
+    // Before anything is deferred: the keyboard (041). This is inside the
     // tap that called us, and iOS raises a keyboard only for a focus that
     // happens in the task which handled the gesture — one `await`, one
     // `setTimeout`, and the request is silently declined. Everything else the
     // button does can wait a tick; this cannot.
     //
-    // The video's collapse state is read first, though: on a phone that focus
-    // fires `focusin`, which folds the video for the keyboard in this same tap,
-    // and the Notes button has to decide from what the reader saw, not from
-    // that. See `notesButtonCollapse`.
-    const notesEntry = section === "notes" && videoId ? this.players.get(videoId) : undefined;
-    const collapsedBefore = notesEntry?.collapsed ?? null;
+    // On a phone that focus is also what folds the video: `focusin` folds it
+    // for the keyboard, and it comes back when the keyboard goes (Isaiah,
+    // 2026-11-11). The Notes button adds no fold of its own, and on a desktop,
+    // with no on-screen keyboard, it leaves the video where it is.
     if (section === "notes") this.openForWriting(view);
 
     // The button's second job. Tapping Transcript when you are already reading
@@ -2267,37 +2255,16 @@ export default class YtFreePlugin extends Plugin {
     // instead — a five-thousand-line transcript is exactly what you want gone
     // once you are done with it — and the tap after that opens it again.
     //
-    // Notes is the exception: it is where the writing happens and folding it
-    // away mid-sentence is never what was meant, so there the second tap still
-    // folds the video and gives back the room that way.
-    if (this.inSection(file.path, view, content, section, line)) {
+    // Notes has no second job: every press goes to the bottom of the writing.
+    if (section !== "notes" && this.inSection(file.path, view, content, section, line)) {
       this.lastJump.set(file.path, section);
-      if (section === "notes") {
-        // Already here and pressed again: the video is the toggle. The first
-        // press folded it away (below), so this one is how it comes back.
-        if (notesEntry) this.setCollapsed(notesEntry, notesButtonCollapse(collapsedBefore, true));
-      } else {
-        // Folding the transcript away is the end of reading it, so it is also
-        // the end of the follow.
-        this.stopFollowing();
-        this.toggleSectionFold(view, content, line);
-      }
+      // Folding the transcript away is the end of reading it, so it is also
+      // the end of the follow.
+      this.stopFollowing();
+      this.toggleSectionFold(view, content, line);
       return;
     }
     this.lastJump.set(file.path, section);
-
-    // Pressing Notes is asking for room to write in, so the picture goes now —
-    // on the *first* press, not the second. A 16:9 player above a note leaves
-    // about two lines of text visible, so a cursor placed correctly under
-    // `# Notes` was still a cursor you could not see. The phone had half of
-    // this already, off the keyboard, and the keyboard is not the trigger: a
-    // desktop has no keyboard event to hang it on, and on a phone the raise is
-    // the one thing iOS is entitled to decline.
-    //
-    // Deliberately "manual", the same mode the second press toggles: this is
-    // the reader's own decision about the picture, so it outlives the keyboard
-    // rather than springing back the moment they put it away.
-    if (notesEntry) this.setCollapsed(notesEntry, notesButtonCollapse(collapsedBefore, false));
 
     // Leaving the transcript for another section ends the follow; arriving at
     // the transcript starts it, once the unfold below has been laid out.
@@ -2317,22 +2284,16 @@ export default class YtFreePlugin extends Plugin {
         /* nothing to do but leave the reader where they were */
       }
       // Tapping Notes is how you start writing, so put the cursor where the
-      // typing goes. Only there: a cursor parked in the transcript would send
-      // the next thing you type into someone else's words.
-      //
-      // *Where* the typing goes is the last place it went, not the top of the
-      // section — a note with a page of writing in it would otherwise send you
-      // to the first line every time and leave you scrolling to the end of your
-      // own paragraph. The line under the heading is the fallback, for a note
-      // never written in and for a remembered spot that has since been deleted.
+      // typing goes: the first empty line under the last thing written in
+      // Notes, adding one if there is none (Isaiah, 2026-11-11). Only there: a
+      // cursor parked in the transcript would send the next thing you type
+      // into someone else's words.
       if (section === "notes" && view.getMode() === "source") {
         try {
-          const target = notesCursorTarget(content, line, this.lastNotesCursor.get(file.path) ?? null);
-          view.editor.setCursor(target);
+          const target = notesWriteTarget(view.editor.getValue(), line);
+          if (target.insertAt) view.editor.replaceRange("\n", target.insertAt);
+          view.editor.setCursor(target.cursor);
           view.editor.focus();
-          // Written back, so a second visit goes to the same place: `setCursor`
-          // is not typing and nothing else would record it.
-          this.lastNotesCursor.set(file.path, target);
         } catch {
           /* reading mode, or no editor: the scroll was the point anyway */
         }
@@ -2386,33 +2347,6 @@ export default class YtFreePlugin extends Plugin {
     } catch (err) {
       // No editor at all. The scroll below is still worth doing.
       this.debug("notes: could not focus", err);
-    }
-  }
-
-  /**
-   * Record the cursor, if it is under this note's `# Notes`.
-   *
-   * The guard is the whole point: this is called from places where the cursor
-   * could be anywhere — a click in the transcript leaves it in the transcript —
-   * and remembering one of those would send the Notes button somewhere the
-   * reader has never written a word.
-   *
-   * `enclosingHeading` scans upwards and gives up after a few hundred lines, so
-   * a cursor deep inside a transcript costs a bounded scan rather than a read
-   * of the whole document.
-   */
-  private rememberNotesCursor(view: MarkdownView, content: string): void {
-    const path = view.file?.path;
-    if (!path || view.getMode() !== "source") return;
-    try {
-      const cursor = view.editor.getCursor();
-      const lines = content.split("\n");
-      const heading = enclosingHeading((line) => lines[line], cursor.line);
-      if (heading && SECTION_HEADINGS.notes.includes(heading)) {
-        this.lastNotesCursor.set(path, { line: cursor.line, ch: cursor.ch });
-      }
-    } catch {
-      /* no editor: there is no cursor to remember */
     }
   }
 
@@ -3225,9 +3159,6 @@ export default class YtFreePlugin extends Plugin {
     // keymap command rather than an input, so it never reaches here — which is
     // the point: breaking a line is not typing, and must not stop the video.
     this.handleTyping();
-    // The other thing every keystroke says: this is where the writing is. It is
-    // what the Notes button comes back to — see `notesCursorTarget`.
-    this.rememberTypedSpot(view, from, text);
 
     try {
       if (!this.settings.autoStampNewLine) return false;
@@ -3261,35 +3192,6 @@ export default class YtFreePlugin extends Plugin {
     } catch (err) {
       console.error("YouTube for You: auto-stamp failed; typing the character normally.", err);
       return false;
-    }
-  }
-
-  /**
-   * Remember where a typed character landed, when it landed under `# Notes`.
-   *
-   * The honest answer to "where was I writing?", recorded at the one event that
-   * can only be a person writing. Runs on every keystroke, so it does no work
-   * beyond a bounded upward scan for the enclosing heading, and it never throws
-   * into the input path: a lost cursor memory is a button that goes to the top
-   * of the section, and an exception here would eat the character.
-   */
-  private rememberTypedSpot(view: EditorView, from: number, text: string): void {
-    try {
-      const path = this.app.workspace.getActiveViewOfType(MarkdownView)?.file?.path;
-      if (!path) return;
-      const doc = view.state.doc;
-      const line = doc.lineAt(from);
-      const heading = enclosingHeading(
-        (n) => (n >= 0 && n < doc.lines ? doc.line(n + 1).text : undefined),
-        line.number - 1,
-      );
-      if (!heading || !SECTION_HEADINGS.notes.includes(heading)) return;
-      this.lastNotesCursor.set(path, {
-        line: line.number - 1,
-        ch: from - line.from + text.length,
-      });
-    } catch {
-      /* the memory is a convenience; the keystroke is not */
     }
   }
 
@@ -3985,6 +3887,28 @@ export default class YtFreePlugin extends Plugin {
     // the same attribute Obsidian's own canvas uses for the same reason.
     if (mobile) wrapper.dataset.ignoreSwipe = "true";
 
+    // A YT Free button pressed while you are typing is you leaving the writing
+    // for a moment, so the keyboard goes and the video comes back with it
+    // (Isaiah, 2026-11-11). iOS does not blur the editor for a tap on a button,
+    // so without this the keyboard stays up over whatever the button opened.
+    // Notes is the exception: it is the button that brings the keyboard.
+    // Capture phase, so the blur lands before the button's own handler runs.
+    if (mobile) {
+      wrapper.addEventListener(
+        "click",
+        (evt) => {
+          const target = evt.target instanceof HTMLElement ? evt.target : null;
+          const btn = target?.closest("button");
+          if (!btn || btn.dataset.ytfreeSection === "notes") return;
+          const active = document.activeElement;
+          if (!(active instanceof HTMLElement) || !active.closest(".markdown-source-view")) return;
+          active.blur();
+          this.releaseKeyboardCollapse();
+        },
+        { capture: true },
+      );
+    }
+
     // Desktop: a reserved, fixed-height row, so showing or clearing a status
     // message never shifts the player or the note content around it.
     //
@@ -4054,7 +3978,7 @@ export default class YtFreePlugin extends Plugin {
         // outside a file — a preview, an export — has no sections.
         onJump:
           noteFile instanceof TFile
-            ? (section) => this.jumpToSection(noteFile, section, videoId)
+            ? (section) => this.jumpToSection(noteFile, section)
             : undefined,
         // Same condition as the section links: a jump needs a note to scroll.
         // No lookback here, unlike a stamp or a shared link: the target is a

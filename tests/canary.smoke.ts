@@ -9,7 +9,7 @@
  *   npm run smoke            (once per 24 h per machine)
  *   npm run smoke -- --force
  *
- * Run through `tools/smoke.mjs`, which keeps the daily limit and prints the
+ * Run through `scripts/smoke.mjs`, which keeps the daily limit and prints the
  * request count. The old full suite is parked in `tests/live/`.
  */
 import { test } from "node:test";

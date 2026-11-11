@@ -1,9 +1,9 @@
 /**
  * Replay tests (GitHub #38): the paths that used to need YouTube, run against
  * recorded fixtures with no network. Every folder under
- * `tests/fixtures/replay/` is replayed; `node tools/record-fixtures.ts
+ * `tests/fixtures/replay/` is replayed; `node scripts/record-fixtures.ts
  * <videoId>` adds one from a real video. `synthetic` is recorded from files
- * `tools/make-offline-hd.mjs` made, so these tests run before anyone records.
+ * `scripts/make-offline-hd.mjs` made, so these tests run before anyone records.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -21,7 +21,7 @@ import { parseJson3, pickCaptionTrack, pickPlayerCaptionTrack, topPeaks } from "
 import type { CaptionedPlayerResponse } from "../src/transcript.ts";
 import { fastStreamFromInfo, infoExpiresAt, pickAudioUrl } from "../src/ytdlp-info.ts";
 import type { YtDlpInfo } from "../src/ytdlp-info.ts";
-import { FIXTURE_HOST, replayFetch, rewriteUrl, rewriteUrls } from "../tools/fixture-format.ts";
+import { FIXTURE_HOST, replayFetch, rewriteUrl, rewriteUrls } from "../scripts/fixture-format.ts";
 
 const ROOT = new URL("./fixtures/replay/", import.meta.url).pathname;
 const FIXTURES = new URL("./fixtures/", import.meta.url).pathname;

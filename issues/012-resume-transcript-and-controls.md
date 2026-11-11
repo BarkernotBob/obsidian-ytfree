@@ -30,7 +30,7 @@ The line is two elements rather than one string, because they fail differently:
 A joined string can only cut from the right, which cut exactly the wrong one.
 `phoneSub()` is now a thin wrapper over `phoneSubParts()`, which the card uses.
 
-Measured with `tools/phone-hub-harness.mjs` against the vault's longest real
+Measured with `scripts/phone-hub-harness.mjs` against the vault's longest real
 channel names ("Technology Connections Extra") and longest ages ("11 months
 ago"): **0 of 12 cards clip the channel, the age or the duration**.
 
@@ -105,7 +105,7 @@ undivided run of nine targets and the button next to Play was as easy to hit as
 Play. The gap between groups is now twice the gap inside them, and the phone —
 where the fat-fingering was — stops shrinking its buttons: 36pt targets with 4pt
 between them become **40pt targets with 8pt between them**, paid for out of the
-speed picker's width. `tools/controls-harness.mjs` is new and measures it at
+speed picker's width. `scripts/controls-harness.mjs` is new and measures it at
 375, 390, 430 and 700pt: no overflow anywhere, smallest target 40pt, smallest
 gap 8pt, Play 0px off centre.
 

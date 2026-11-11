@@ -31,7 +31,7 @@ One layout consequence, measured not guessed: Smart Speed is a ninth control, an
 single-row bar was already spending 340 of the 347pt a docked 375pt phone has. Rather
 than shrink targets back to the 36pt that caused earlier fat-fingering, **below 460pt
 the bar is now two rows** — transport centred on its own row, side controls beneath.
-Every target keeps 40pt, gaps keep 8pt, Play is dead-centre. `tools/controls-harness.mjs`
+Every target keeps 40pt, gaps keep 8pt, Play is dead-centre. `scripts/controls-harness.mjs`
 verifies overflow 0 at 375/390/430/700.
 
 **One sentence:** like Overcast's Smart Speed — pauses in speech play fast, speech plays

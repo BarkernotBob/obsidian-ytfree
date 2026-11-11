@@ -1,0 +1,25 @@
+# One grouped pull request a month per ecosystem, so updates arrive as a single
+# thing to test rather than a stream. Security updates still open on their own.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      npm:
+        patterns: ["*"]
+    ignore:
+      # Pinned on purpose: typescript-eslint, which Obsidian's lint runs on, does
+      # not support TypeScript 7 (GLOSSARY, 2026-11-09).
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ["*"]

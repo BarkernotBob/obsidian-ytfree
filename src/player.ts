@@ -1369,6 +1369,9 @@ export class YtFreePlayer {
         attr: { title: `Go to ${label}`, "aria-label": `Go to ${label}` },
       });
       el.type = "button";
+      // main.ts tells Notes apart by this: it is the one button that keeps the
+      // keyboard up rather than putting it away.
+      el.dataset.ytfreeSection = section;
       el.addEventListener("click", (e) => {
         e.preventDefault();
         jump(section);

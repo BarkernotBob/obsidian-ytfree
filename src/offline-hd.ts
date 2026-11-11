@@ -4,7 +4,7 @@
  * quality switch and Start in HD can be tried in Obsidian with no request to
  * YouTube at all.
  *
- * `node tools/make-offline-hd.mjs <any video> <folder>` writes the folder:
+ * `node scripts/make-offline-hd.mjs <any video> <folder>` writes the folder:
  * fragmented MP4s with a `sidx` up front (the layout YouTube serves), one per
  * height, an M4A for the sound, a 360p single file, and `offline.json`
  * describing them. Turned on by `"devOfflineHd": "<folder>"` in the plugin's

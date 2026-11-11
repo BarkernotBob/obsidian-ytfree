@@ -65,8 +65,8 @@ retired). That spread is the part most likely to look like a bot.
   yt-dlp resolves (each up to 3 clients + a range read), 4 InnerTube calls as ANDROID and WEB,
   and a full HD resolve with deep checks as ANDROID and IOS. Project memory says to run it on
   the Mac before shipping, so every PR cycle sent this from the home IP.
-- `tools/client-probe.mjs`, `tools/hls-probe.mjs`, `tools/hd-probe.ts`,
-  `tools/ytdlp-hd-probe.ts`: 2–6 identities per video × several videos × reads at 0/30/60/90/180 s.
+- `scripts/client-probe.mjs`, `scripts/hls-probe.mjs`, `scripts/hd-probe.ts`,
+  `scripts/ytdlp-hd-probe.ts`: 2–6 identities per video × several videos × reads at 0/30/60/90/180 s.
   These were the biggest single source on 2026-11-04.
 - Manual test passes: each test build reloads the plugin, so each reopen is a fresh resolve.
 - `npm test` (682 unit tests) is already offline. Fixtures exist for player responses, search
@@ -138,7 +138,7 @@ day per machine unless forced. Everything else in `live.smoke.ts` moves to repla
 Do not move live tests to GitHub Actions as the fix: datacenter IPs are commonly bot-checked by
 YouTube (inference from yt-dlp's issue tracker), so it would fail for unrelated reasons.
 
-**T4. Retire multi-client probing.** Mark `tools/client-probe.mjs` and `tools/hls-probe.mjs`
+**T4. Retire multi-client probing.** Mark `scripts/client-probe.mjs` and `scripts/hls-probe.mjs`
 as retired, and give any remaining live tool the same budget guard as T3 and a printed request
 count. No probe runs from Isaiah's network as part of routine work.
 

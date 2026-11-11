@@ -26,8 +26,8 @@ Built in four parts, one PR each, in this order. Each part is useful alone.
 4. **Smoke canary (#39).** `npm run smoke` becomes one video, yt-dlp only, one resolve and one
    range read, about 5 requests. A stamp file in `~/.cache/ytfree/` allows one run per 24 h;
    `npm run smoke -- --force` overrides. The other live tests move to Part 4's fixtures.
-5. **Probes retired.** `tools/client-probe.mjs` and `tools/hls-probe.mjs` are deleted (their
-   findings are in the scope docs). Other live tools in `tools/` get the same stamp guard and
+5. **Probes retired.** `scripts/client-probe.mjs` and `scripts/hls-probe.mjs` are deleted (their
+   findings are in the scope docs). Other live tools in `scripts/` get the same stamp guard and
    print their request count at the end.
 
 Decided while building Part 1 (2026-11-07, Claude; open to change):
@@ -107,7 +107,7 @@ Decided while building Part 3 (2026-11-07, Claude; open to change):
 
 ## Part 4: tests without YouTube (#38)
 
-15. **Recorder.** `node tools/record-fixtures.mjs <videoId>`: human-run, guarded like the
+15. **Recorder.** `node scripts/record-fixtures.mjs <videoId>`: human-run, guarded like the
     canary, saves the `yt-dlp -J` output, the ANDROID player response, and the first 64 KB plus
     `sidx` of each HD file to `tests/fixtures/`. URLs in fixtures are rewritten to a fake host.
 16. **Replay tests.** 360p, HD stitching, captions, heatmap and the breaker run against those
@@ -117,17 +117,17 @@ Decided while building Part 3 (2026-11-07, Claude; open to change):
     Start in HD can be tested in Obsidian with no YouTube requests.
 
 Decided while building Part 4 (2026-11-07, Claude; open to change):
-- The recorder is `node tools/record-fixtures.ts <videoId>` (TypeScript, so it reuses the plugin's own
+- The recorder is `node scripts/record-fixtures.ts <videoId>` (TypeScript, so it reuses the plugin's own
   picking and trimming code), about 10 requests once a day at most. Fixtures live in
-  `tests/fixtures/replay/<name>/`; the format is in `tools/fixture-format.ts`.
+  `tests/fixtures/replay/<name>/`; the format is in `scripts/fixture-format.ts`.
 - Only each HD file's opening through its `sidx` is stored (about 1 KB each). A replayed read past
   it, a media segment or the 90 s check, answers zeros of the asked length.
 - No real video is recorded yet: that needs a run from Isaiah's network, which this build does not
-  do. `tests/fixtures/replay/synthetic` is recorded from files `tools/make-offline-hd.mjs` made
+  do. `tests/fixtures/replay/synthetic` is recorded from files `scripts/make-offline-hd.mjs` made
   with ffmpeg (same box layout as YouTube's: `ftyp`, `moov`, `sidx`, then fragments), so every
   replay test runs today. A real recording, when there is one, is replayed by the same tests.
 - The offline HD player is `"devOfflineHd": "<folder>"` in `data.json`, the folder made by
-  `node tools/make-offline-hd.mjs <any video> <folder>` (1080/720/480 + sound + 360p). It plays
+  `node scripts/make-offline-hd.mjs <any video> <folder>` (1080/720/480 + sound + 360p). It plays
   every video from that folder; Smart Speed analyses its sound file. Transcripts and the hub still
   talk to YouTube.
 
@@ -160,7 +160,7 @@ Part 3:
    about 1 yt-dlp call and a handful of range reads.
 
 Part 4 (optional, for trying HD without YouTube):
-8. On the Mac, `node tools/make-offline-hd.mjs ~/Movies/any-video.mp4 ~/ytfree-offline` (needs
+8. On the Mac, `node scripts/make-offline-hd.mjs ~/Movies/any-video.mp4 ~/ytfree-offline` (needs
    ffmpeg; a minute or two). Add `"devOfflineHd": "/Users/<you>/ytfree-offline"` to the plugin's
    `data.json`, reload, open any video note: it plays the local file, the badge climbs to 1080p,
    scrubbing and the quality switch work. Remove the line to go back to YouTube.

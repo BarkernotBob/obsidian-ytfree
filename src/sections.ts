@@ -135,29 +135,48 @@ export interface NotePosition {
 }
 
 /**
- * Where the cursor goes when the Notes button is pressed.
+ * Where the cursor goes when the Notes button is pressed, and the line break
+ * to add first if there is nowhere to go (Isaiah, 2026-11-11).
  *
- * `remembered` — the last place typing happened under this note's `# Notes` —
- * when it is still inside the section, and the line under the heading when it
- * is not. Coming back to a note should put you at the end of the sentence you
- * left, not at the top of a page of writing you then have to scroll through.
+ * Always the bottom of the writing: the first empty line after the last line
+ * with text in it. An empty line with text somewhere beneath it is a gap
+ * inside the notes, not the place to write next. If no empty line follows the
+ * last text, `insertAt` says where to add one: a newline at the end of the
+ * last text line (or of the heading, in a note never written in), which puts
+ * the cursor on a new line directly under it.
  *
- * The column is clamped to the line it lands on: notes are edited between
- * visits, and a `ch` past the end of a shortened line is a cursor Obsidian
- * puts somewhere of its own choosing.
+ * Notes ends at the next section this plugin owns (Description, Most
+ * replayed, Transcript) or the end of the note, so headings the reader writes
+ * inside their own notes are still part of Notes.
  */
-export function notesCursorTarget(
+export function notesWriteTarget(
   content: string,
   headingLine: number,
-  remembered: NotePosition | null,
-): NotePosition {
+): { cursor: NotePosition; insertAt: NotePosition | null } {
   const lines = content.split("\n");
-  const end = sectionEnd(content, headingLine);
-  const start = { line: Math.min(headingLine + 1, lines.length - 1), ch: 0 };
-  if (!remembered) return start;
-  if (remembered.line <= headingLine || remembered.line > end) return start;
-  const text = lines[remembered.line] ?? "";
-  return { line: remembered.line, ch: Math.min(Math.max(0, remembered.ch), text.length) };
+  const owned = new Set([
+    ...SECTION_HEADINGS.description,
+    ...SECTION_HEADINGS.transcript,
+    ...HEATMAP_ALIASES,
+  ]);
+  let end = lines.length - 1;
+  for (let i = headingLine + 1; i < lines.length; i++) {
+    if (owned.has(lines[i].trim())) {
+      end = i - 1;
+      break;
+    }
+  }
+  let lastText = headingLine;
+  for (let i = end; i > headingLine; i--) {
+    if (lines[i].trim() !== "") {
+      lastText = i;
+      break;
+    }
+  }
+  const next = lastText + 1;
+  if (next <= end) return { cursor: { line: next, ch: lines[next].length }, insertAt: null };
+  const at = { line: lastText, ch: lines[lastText].length };
+  return { cursor: { line: next, ch: 0 }, insertAt: at };
 }
 
 /**
@@ -189,26 +208,8 @@ export function normaliseHeadings(content: string): string {
 /**
  * Why the video is hidden, or null if it is not. A "manual" collapse is the
  * reader's own choice and stays until they undo it; a "keyboard" one is
- * undone by the keyboard going away.
+ * undone by the keyboard going away. The Notes button only ever causes the
+ * keyboard kind (Isaiah, 2026-11-11): the video comes back when you put the
+ * keyboard away.
  */
 export type CollapseMode = "manual" | "keyboard" | null;
-
-/**
- * What the Notes button does to the video.
- *
- * `before` must be read *before* the button focuses the editor. On a phone
- * that focus fires `focusin`, which folds the video for the keyboard inside the
- * same tap; reading the state afterwards saw that keyboard collapse, took it
- * for the reader's own, and the "already here" toggle opened the video again —
- * the button looked like it did nothing (2026-11-10).
- *
- * - Away from Notes: always fold, as the reader's own choice ("manual"), so it
- *   outlives the keyboard.
- * - Already in Notes: toggle, but only a manual collapse counts as folded. A
- *   keyboard collapse is not something the reader asked for, so it is promoted
- *   to manual rather than undone.
- */
-export function notesButtonCollapse(before: CollapseMode, alreadyInNotes: boolean): CollapseMode {
-  if (alreadyInNotes && before === "manual") return null;
-  return "manual";
-}

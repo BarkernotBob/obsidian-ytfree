@@ -6,7 +6,7 @@ phone now, as everything else seems to be working correctly."
 **Status:** Part 1 built 2026-11-04, awaiting manual test. Part 2 (YouTube's own player) picked by
 Isaiah 2026-11-06 as a test; built 2026-11-07, awaiting manual test.
 
-## What was measured (2026-11-04, Isaiah's Mac, signed out, `tools/hls-probe.mjs`)
+## What was measured (2026-11-04, Isaiah's Mac, signed out, `scripts/hls-probe.mjs`)
 
 | Video | IOS HLS manifest | Other clients |
 |---|---|---|
