@@ -310,11 +310,14 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - On Windows the plugin never rewrites the PATH it gives yt-dlp, and yt-dlp and ffmpeg are also
   looked for by bare name, last. Not tested on a Windows machine.
 
-### 2026-11-10 (Notes button)
+### 2026-11-11 (Notes button, replaces 2026-11-10)
 
-- **Notes button always folds the video** on the first press, as the reader's own fold: it stays
-  until they tap Show video or Notes again, and does not come back when the keyboard goes. A
-  fold the keyboard made does not count as folded, so Notes never reopens the video because of it.
+- **Notes button folds the video only while the keyboard is up** (phone). Putting the keyboard
+  away brings the video back. On desktop, Notes never hides the video.
+- **Notes button cursor** goes to the first empty line after the last text in Notes, adding a
+  new line directly under the last text if there is none. Notes runs to the Description / Most
+  replayed / Transcript heading. Replaces "back to where I last typed". Notes has no second-tap toggle.
+- **Any other YT Free button** pressed while typing closes the keyboard and shows the video.
 
 ### 2026-11-10 (name)
 
