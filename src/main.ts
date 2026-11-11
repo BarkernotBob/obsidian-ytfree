@@ -585,21 +585,35 @@ export default class YtFreePlugin extends Plugin {
       `${this.pluginDir()}/progress.json`,
       appLocalCopy(this.app, "ytfree-sync-progress"),
     );
-    await this.progress.load();
     this.history = new HistoryStore(
       this.app,
       `${this.pluginDir()}/history.json`,
       appLocalCopy(this.app, "ytfree-sync-history"),
     );
-    await this.history.load();
+    this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
+    this.subscriptions = new SubscriptionsStore(
+      this.app,
+      `${this.pluginDir()}/subscriptions.json`,
+      () => this.hubSettings(),
+    );
+    // Read together, not one after another: Obsidian waits on `onload`, and
+    // each of these is a file a sync service may have to fetch first. Nothing
+    // below is registered until all four are in, so no code sees a store that
+    // is still loading. Each `load` survives an unreadable file by itself.
+    const loadStarted = Date.now();
+    await Promise.all([
+      this.progress.load(),
+      this.history.load(),
+      this.silence.load(),
+      this.subscriptions.load(),
+    ]);
+    this.debug(`stores loaded in ${Date.now() - loadStarted} ms`);
     // The old watch stamps move from progress.json into history (GitHub #48).
     this.progress.drainStampsTo((stamps) => this.history.importStamps(stamps));
     this.register(this.history.onChange(() => this.refreshHistoryViews()));
     this.watchProgressFile();
     this.setupNowPlayingButton();
-    this.silence = new SilenceStore(this.app, `${this.pluginDir()}/silence-maps.json`);
-    await this.silence.load();
-    await this.setupSubscriptions();
+    this.setupSubscriptions();
     await this.removeLegacySignIn();
     await this.setupDockBadge();
 
@@ -1155,15 +1169,7 @@ export default class YtFreePlugin extends Plugin {
    * index is thousands of rows, and settings should not be rewritten every time
    * a poll lands.
    */
-  private async setupSubscriptions(): Promise<void> {
-    const dir = this.pluginDir();
-    this.subscriptions = new SubscriptionsStore(
-      this.app,
-      `${dir}/subscriptions.json`,
-      () => this.hubSettings(),
-    );
-    await this.subscriptions.load();
-
+  private setupSubscriptions(): void {
     this.registerView(
       HUB_VIEW_TYPE,
       (leaf) =>

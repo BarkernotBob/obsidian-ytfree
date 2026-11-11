@@ -27,7 +27,7 @@ rows of content:
 └──────────────────────────────┴────┘
 ```
 
-Measured with `tools/phone-hub-harness.mjs` at 390×844: **4 cards fully
+Measured with `scripts/phone-hub-harness.mjs` at 390×844: **4 cards fully
 visible, a fifth partly**, every card exactly 148px.
 
 The three facts asked for:

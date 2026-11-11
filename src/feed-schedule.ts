@@ -4,7 +4,7 @@
  *
  * Every poll fetches every channel, 5 at a time, stalest first. Rounds,
  * spacing and an hourly feed ceiling were built and then dropped on
- * 2026-11-09: `tools/feed-torture.ts` sent 3,710 feed requests from Isaiah's
+ * 2026-11-09: `scripts/feed-torture.ts` sent 3,710 feed requests from Isaiah's
  * home IP (300 at once, 900 back to back, 1,800 over 30 minutes) with no
  * failure and no bot check, and he wants the Sync button to bring in every new
  * video. A shared IP (VPN, school) may differ; this is one home IP on one day.

@@ -8,6 +8,10 @@ on:
 
 permissions:
   contents: write
+  # For the build provenance below: proof these three files were built by this
+  # workflow from this commit, checkable with `gh attestation verify`.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -30,6 +34,13 @@ jobs:
           ' "$tag"
       - run: npm run lint
       - run: npm run check
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

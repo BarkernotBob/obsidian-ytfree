@@ -5,7 +5,7 @@
 **The repo went public today.** History was rewritten with `git filter-repo`
 first: Obsidian's `app.css` is gone from every commit (the harnesses read it
 from `/tmp/ytfree-harness/app.css`, as they always did — extract it there with
-the `asar` command in `tools/phone-hub-harness.mjs`), the owner's first name and
+the `asar` command in `scripts/phone-hub-harness.mjs`), the owner's first name and
 vault name are replaced throughout, and the author field is the GitHub handle.
 The `prototype/signin-spike` remote branch carried the old history and was
 deleted. `/app.css` is gitignored so it cannot come back.
@@ -319,7 +319,7 @@ straight from BarkernotBob as a list of five.
   Speed, skip non-speech, pause while typing) outside the player's lifetime and
   seeds the new player from it.
 
-Numbers, from `tools/preview-sheet-harness.mjs` (which now renders the wrapper
+Numbers, from `scripts/preview-sheet-harness.mjs` (which now renders the wrapper
 and both sheet flags): portrait 390×844 — reading region 325pt, transcript 277,
 the shut header not drawn, sheet does not scroll. Landscape 844×390 — reading
 region 264 of a 358pt sheet, and opening the description no longer scrolls the
@@ -343,7 +343,7 @@ sheet at all.
 ## Previous — 2026-08-08 (later): the Preview sheet, measured
 
 **The first pass at the two Preview items was wrong on both platforms, and the
-harness says so.** `tools/preview-sheet-harness.mjs` now renders the laptop sheet
+harness says so.** `scripts/preview-sheet-harness.mjs` now renders the laptop sheet
 as well as the two phone ones, and does the region swap the way the plugin does
 rather than by adding a class.
 
@@ -467,7 +467,7 @@ exactly what they are.
   one, written as flex on the element that scrolls. The description is a shut
   disclosure; the transcript takes what is left. Landscape is a two-column grid
   below 520pt of height — stacked does not fit at any picture size worth
-  watching. `tools/preview-sheet-harness.mjs` measures every claim in that
+  watching. `scripts/preview-sheet-harness.mjs` measures every claim in that
   sentence at 390×844 and 844×390.
 - **040** one rule, `restingScrollTop`, for both surfaces: line offset minus a
   margin, clamped, so the end of a transcript bottoms out instead of asking for
@@ -653,7 +653,7 @@ never run on a device, and iOS implements none of the standard PiP API on a
   The hand-off is a `close()` override, not `onClose`, so it runs while the
   `<video>` is still in the page.
 - `src/panel.ts` and `src/preview.ts` hold the two decisions as pure functions
-  (9 new tests). `tools/preview-sheet-harness.mjs` measures the layout claims in
+  (9 new tests). `scripts/preview-sheet-harness.mjs` measures the layout claims in
   headless Chromium at 390×844 — it is not part of `npm test`.
 ## Previous — 2026-08-03: the search button says Search, and the screen looks like one (033)
 
@@ -677,7 +677,7 @@ then run the manual test in [033](issues/033-search-clarity.md).
   and the block behind it can no longer describe the same moment differently.
   They did: `Nothing found for "x".` versus `No results.`
 - **Nothing moves on a click**, and this is measured rather than argued:
-  `tools/search-screen-harness.mjs` renders the screen under Obsidian's own
+  `scripts/search-screen-harness.mjs` renders the screen under Obsidian's own
   `app.css` at 390×844 and desktop size, sets filters, swaps all five states,
   and reports any box that moved. It found the run button at 36px — the only
   control under 40pt — which is fixed.
@@ -755,7 +755,7 @@ install was left to whoever merges. Next: the manual test in
   `lastNotesCursor` map fed from `handleInput`.
 - **The progress line runs the full width of the picture.** 021's 16px inset is
   now 0 at both ends; `--ytfree-progress-inset` still overrides. Verified at
-  375/390/430/700 and in immersive landscape with `tools/controls-harness.mjs`.
+  375/390/430/700 and in immersive landscape with `scripts/controls-harness.mjs`.
 ## Previous — 2026-08-03: a notification when a video lands in the Inbox (036)
 
 **459 unit tests pass, `tsc` clean, build clean. Not installed to the vault**
@@ -1364,7 +1364,7 @@ music too, pause speed, shortest pause, player size. **None of them writes a set
 `PlayerEntry.skipNonSpeech` is a per-player override, the height is set on the wrapper's
 CSS variable, and both die with the note. The panel is built at construction, hidden with
 `visibility`, and absolutely positioned off the control row;
-`tools/controls-harness.mjs` now measures the bar open and shut and reports 0 growth at
+`scripts/controls-harness.mjs` now measures the bar open and shut and reports 0 growth at
 375 / 390 / 430 / 700 pt, with no overflow and 8 pt between every target.
 
 **Next:** BarkernotBob's manual tests for 017 (step 9, the lock screen) and 019 (step 4, the
@@ -1502,7 +1502,7 @@ the single-row bar was already spending 340 of the 347pt a docked 375pt phone
 has. Rather than shrink targets back to the 36pt that caused the fat-fingering
 this codebase already fixed once, **below 460pt the control bar is now two
 rows** — transport centred on top, side controls beneath. Targets stay 40pt,
-gaps stay 8pt, Play is dead-centre, `tools/controls-harness.mjs` reports
+gaps stay 8pt, Play is dead-centre, `scripts/controls-harness.mjs` reports
 overflow 0 at 375/390/430/700. The cost is ~48px of vertical chrome on phones.
 If BarkernotBob dislikes it, the alternatives are dropping a control on mobile or
 going back to 36pt targets.
@@ -1647,11 +1647,11 @@ the manual test. Five asks from BarkernotBob.
    the chevrons shifted up 4px. Spacing was one flat 6px between all nine
    targets; the between-group gap is now double the in-group gap, and the phone
    **stops shrinking its buttons** (36pt/4pt → **40pt/8pt**), paid for out of the
-   speed picker. New `tools/controls-harness.mjs` measures it at 375/390/430/700:
+   speed picker. New `scripts/controls-harness.mjs` measures it at 375/390/430/700:
    `overflow: 0, smallestTarget: 40, smallestGap: 8, playOffCentre: 0,
    badgeOffCentre: [0, 0]` at every width.
 
-`tools/phone-hub-harness.mjs` now renders a result card too and reports byline
+`scripts/phone-hub-harness.mjs` now renders a result card too and reports byline
 width and per-card clipping: `{cardHeight: 100, fullyVisible: 7, heights: [100],
 bylineWidth: 269, agesClipped: 0, channelsClipped: 0, durationsClipped: 0,
 resultHeights: [100], resultBylineWidth: 372, tailRoom: 88}`.
@@ -1695,7 +1695,7 @@ undo parts of 010, which is the point: 010 guessed what a card should carry.
 it is the only list where an already-watched video appears and the only place one
 search covers kept and undecided at once. Four lines to remove if neither lands.
 
-`tools/phone-hub-harness.mjs` reports `titleWidth`/`titleLines`/`titleClipped`
+`scripts/phone-hub-harness.mjs` reports `titleWidth`/`titleLines`/`titleClipped`
 and `dismissWidth` now instead of the description numbers. Measured after the
 change: `{cardHeight: 92, fullyVisible: 7, heights: [92], titleWidth: 131,
 titleLines: 3, dismissWidth: 112, dismissFullHeight: true, overflows: false}`.
@@ -1714,7 +1714,7 @@ manual test. Seven asks from BarkernotBob, one change set.
 1. **Four cards a screen, not seven.** The phone card is a 148px grid — thumb +
    title + `channel · age` on row one, three clamped lines of description on row
    two, delete column spanning both. Measured with the new
-   `tools/phone-hub-harness.mjs` at 390×844: **4 fully visible, a 5th partly,
+   `scripts/phone-hub-harness.mjs` at 390×844: **4 fully visible, a 5th partly,
    every card exactly 148px**. Video length is the badge on the thumbnail, and it
    is the one fact that needed new data — **a channel RSS feed carries no
    duration**, so `HubItem.durationSeconds` is backfilled from the InnerTube

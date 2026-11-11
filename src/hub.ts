@@ -532,7 +532,7 @@ export class SubscriptionsStore {
     const quiet = new Set<string>();
     // Every channel, stalest first (GitHub #66). Rounds and spacing were tried
     // and dropped: 3,710 feeds from one home IP, 300 at once and 1,800 over half
-    // an hour, met no failure and no bot check (2026-11-09, tools/feed-torture.ts).
+    // an hour, met no failure and no bot check (2026-11-09, scripts/feed-torture.ts).
     const round = stalestFirst(this.state.channels);
     // Channels whose whole feed window rolled since the last poll (048), with
     // what the hub knew before this poll merged anything.

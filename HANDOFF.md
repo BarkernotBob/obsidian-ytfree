@@ -58,8 +58,8 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
 2. #43 fallback; GitHub Pages must serve the hosted player page (phone needs it).
 3. #61 store compliance (LICENSE, versions.json, `x.y.z` tags, Obsidian lint: 32 errors).
 4. #62 device test of merged-but-untested features; #25, #5, #46, #48; bugs Isaiah lists.
-5. Hardening ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md)): Batch 1 built and
-   device-tested (PR #93); next is Batch 2 (#86).
+5. Hardening ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md)): Batches 0–2 built;
+   Batch 3 (#87) waits until after release. Still open: a Windows or Linux test.
 
 ## How to ship and test
 
@@ -73,20 +73,20 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
 ## Gotchas
 
 - The phone harnesses read Obsidian's `app.css` from `/tmp/ytfree-harness/app.css`. Extract it with
-  the `asar` command in `tools/phone-hub-harness.mjs`. `/app.css` is gitignored; never commit it.
+  the `asar` command in `scripts/phone-hub-harness.mjs`. `/app.css` is gitignored; never commit it.
 - `position: fixed` does not mean the viewport inside a note on a phone: `.workspace-leaf` has
   `contain: strict` and Live Preview embeds have `contain: paint`, which clip fixed children.
   Anything that must float over a note goes on `document.body` (see #52, `liftPanel`).
 - Obsidian 1.10+ draws a phone modal as an inset card, not a full-width sheet. Anything laid
   out for the old sheet must size its own modal (see `.is-phone .modal.ytfree-preview-modal`).
   To compare, extract `app.css` from two releases' `obsidian-X.asar.gz` (GitHub releases of
-  obsidianmd/obsidian-releases) and render with `tools/preview-sheet-harness.mjs`.
+  obsidianmd/obsidian-releases) and render with `scripts/preview-sheet-harness.mjs`.
 - `setup.sh` edits `community-plugins.json` only while Obsidian is closed (it rewrites it from memory).
-- `npm run smoke`: daily canary; every live tool claims its daily run via `tools/live-budget.mjs`.
+- `npm run smoke`: daily canary; every live tool claims its daily run via `scripts/live-budget.mjs`.
 - A bot check pauses all automatic YouTube requests until a Play retry succeeds (retries at 1, 5,
   10, 30 min, 1 h, 2 h, then 6 h; `src/bot-check.ts`, stored in `localStorage` under
   `ytfree-bot-check-until`). Clear that key to end a pause early.
-- Offline HD player: `"devOfflineHd": "<folder>"` in data.json, folder from `tools/make-offline-hd.mjs`.
+- Offline HD player: `"devOfflineHd": "<folder>"` in data.json, folder from `scripts/make-offline-hd.mjs`.
 - Kept answers: `localStorage` `ytfree-ytdlp-answers` / `ytfree-player-answers`. Requests: `src/request-governor.ts`.
 - `src/player.ts` uses constructor parameter properties, which Node's type stripping rejects; tests
   that import it compile it with esbuild in a load hook (see `tests/player-ceilings.test.ts`).

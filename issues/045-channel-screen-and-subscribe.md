@@ -132,9 +132,9 @@ in-channel search against live YouTube, which the cloud build machine cannot rea
 - **The hub card reaches the channel through Preview** (card → Preview → channel
   name). The card body is already Preview, and a fifth button would break the
   four-button layout; the extra tap is the price of not doing that.
-- Not run under `tools/search-screen-harness.mjs` yet: it needs Obsidian's
+- Not run under `scripts/search-screen-harness.mjs` yet: it needs Obsidian's
   `app.css` on the build machine. The screen reuses the search screen's
   classes and `renderResult`, so the no-reflow contract is the same code.
-- `tools/search-screen-harness.mjs` renders the search screen under Obsidian's
+- `scripts/search-screen-harness.mjs` renders the search screen under Obsidian's
   own `app.css` and reports any box that moved on a click. Point it at this
   screen too rather than arguing criterion 5 on paper.

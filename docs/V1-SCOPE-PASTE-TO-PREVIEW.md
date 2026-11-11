@@ -22,7 +22,7 @@ Most of item 4's plumbing is built; see [V1-SCOPE-URL-HANDOFF.md](V1-SCOPE-URL-H
 
 - `obsidian://ytfree?url=…`, the door every outside route uses.
 - Links clicked inside Obsidian are intercepted (one setting, on by default).
-- Mac, other apps: Finicky (`tools/finicky.js`). Mac, inside the browser: a bookmarklet.
+- Mac, other apps: Finicky (`scripts/finicky.js`). Mac, inside the browser: a bookmarklet.
 - iPhone: a four-action share-sheet Shortcut.
 - Command *Open YouTube URL from clipboard*.
 

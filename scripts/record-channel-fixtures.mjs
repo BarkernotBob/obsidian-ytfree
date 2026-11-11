@@ -1,6 +1,6 @@
 // Records raw InnerTube responses for the channel screen (045) and the collab
 // catch (GitHub #2). Run on a machine that can reach youtube.com:
-//   node tools/record-channel-fixtures.mjs
+//   node scripts/record-channel-fixtures.mjs
 // Writes to tests/fixtures/raw-channel/ (not committed as-is; trimmed later).
 import { mkdirSync, writeFileSync } from "node:fs";
 import { liveGuard } from "./live-budget.mjs";

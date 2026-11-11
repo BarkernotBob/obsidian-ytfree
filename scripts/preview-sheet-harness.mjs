@@ -22,7 +22,7 @@
  * Not part of `npm test`: it needs Playwright and a few seconds. `app.css` is
  * in the repo, so unlike the hub harness this one needs no Obsidian install.
  *
- *   node tools/preview-sheet-harness.mjs
+ *   node scripts/preview-sheet-harness.mjs
  */
 
 import { execFileSync } from "node:child_process";

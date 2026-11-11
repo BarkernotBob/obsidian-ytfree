@@ -330,7 +330,7 @@ So on a phone, inside Preview, the panel stops being a popover:
   ancestor chain has a `transform`, `filter`, `perspective` or `contain` —
   any of those would pull the containing block back into the modal. Obsidian's
   `.modal-container` and `.modal` set none today; if that changes, this breaks
-  silently, and `tools/preview-sheet-harness.mjs` is what catches it.
+  silently, and `scripts/preview-sheet-harness.mjs` is what catches it.
 - The docked player keeps its popover. A fixed bottom sheet is right inside
   `.modal-container`, which sits above Obsidian's mobile toolbar; in a note it
   would risk being covered by that toolbar, and the docked bar has room above it

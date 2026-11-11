@@ -96,7 +96,13 @@ harmless.
   settings tab moved to `src/settings-tab.ts` as data drawn two ways; the once-a-session
   "yt-dlp isn't installed" Notice removed; download folder is Videos on Windows and Linux;
   `spikes/` moved to `docs/spikes/` so the scanner skips it.
-- **Batch 2 (#86):** rest of H6, H9, H13; move `tools/*.ts` where the scanner skips them.
+- **Batch 2 (built 2026-11-11):** H9: the four data files load together instead of one after
+  another, and nothing is registered until all are in (the gain is not measured: it depends on
+  the sync service; *Log what the player is doing* prints the time). H13: releases carry build
+  provenance (`gh attestation verify main.js --repo BarkernotBob/obsidian-ytfree`), and
+  Dependabot opens one grouped update a month. `tools/` is now `scripts/`, which Obsidian's
+  scanner skips. H6: the hls.js `timeout` fallback stays; it only runs if hls.js hands the
+  loader no load policy, and removing it would remove the timeout in that case.
 - **Batch 3 (#87, after release):** H10, H11, pop-out windows.
 
 ## Manual test
@@ -118,3 +124,7 @@ Batch 1, on the Mac and the phone, after the next vault build. Your settings mus
    player is doing*, look again: it is there. Turn the log back off.
 7. Play a video on the Mac. Expect no "yt-dlp isn't installed" pop-up on any machine.
 8. On the phone: open settings, expect the same rows as before and no Desktop helpers section.
+
+Batch 2 has one check: reload Obsidian (or turn YT Free off and on) on the Mac and the phone.
+Expect the hub to show the same videos, a note's resume position to be where you left it, and
+the History list to be intact.

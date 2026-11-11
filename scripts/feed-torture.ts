@@ -4,9 +4,9 @@
  * lookup get bot-checked? Isaiah, 2026-11-09: "planning around the real world,
  * not a phantom."
  *
- *   node tools/feed-torture.ts --state "<vault>/.obsidian/plugins/ytfree/subscriptions.json"
- *   node tools/feed-torture.ts --channels ids.txt        (one channel ID per line)
- *   node tools/feed-torture.ts --gather 300              (a big import, see below)
+ *   node scripts/feed-torture.ts --state "<vault>/.obsidian/plugins/ytfree/subscriptions.json"
+ *   node scripts/feed-torture.ts --channels ids.txt        (one channel ID per line)
+ *   node scripts/feed-torture.ts --gather 300              (a big import, see below)
  *
  * `--gather N` stands in for a Takeout import of N channels: yt-dlp searches a
  * spread of everyday topics (flat, no video pages; about 1 request per 20
@@ -86,7 +86,7 @@ function loadChannels(budget: { ytDlp: () => void }): string[] {
   }
   const list = flag("--channels");
   if (list) return readFileSync(list, "utf8").split(/\s+/).filter((l) => /^UC[\w-]{22}$/.test(l));
-  console.log("usage: node tools/feed-torture.ts --state <subscriptions.json> | --channels <file> | --gather <N>");
+  console.log("usage: node scripts/feed-torture.ts --state <subscriptions.json> | --channels <file> | --gather <N>");
   process.exit(1);
 }
 

@@ -70,7 +70,7 @@ faked) in `tests/player-ceilings.test.ts`, which drives the provider in `src/pla
 
 ## 3. Feeds: measured, no pacing needed
 
-Isaiah asked to torture-test feeds before adding any pacing (2026-11-09). `tools/feed-torture.ts`
+Isaiah asked to torture-test feeds before adding any pacing (2026-11-09). `scripts/feed-torture.ts`
 ran on his Mac on home Wi-Fi, with a video lookup (the call Play makes) after each scenario:
 
 | Run | Scenario | Feeds | Failed | Slowest | Video lookup after |

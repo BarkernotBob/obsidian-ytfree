@@ -1,7 +1,7 @@
 /**
  * What the stitched HD stream does over a whole video, measured outside the app.
  *
- *   node tools/hd-probe.ts [videoId ...]
+ *   node scripts/hd-probe.ts [videoId ...]
  *
  * For each video: how long the HD resolve takes, then one video and one audio
  * segment fetched at several points through the file (with the time each took

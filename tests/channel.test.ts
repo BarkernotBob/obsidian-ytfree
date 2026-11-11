@@ -1,6 +1,6 @@
 /**
  * The channel parser (issue 045), against responses recorded on 2026-10-13
- * with `tools/record-channel-fixtures.mjs` and trimmed of tracking and menu
+ * with `scripts/record-channel-fixtures.mjs` and trimmed of tracking and menu
  * noise (the parser's output is identical on the raw and trimmed files).
  *
  * The channel is Ward on Words, `UCKRmL7BMyCeLE4KUo73RDzw`: one of the

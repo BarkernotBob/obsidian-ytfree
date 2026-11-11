@@ -11,7 +11,7 @@
  * a few seconds. Run it when the card layout changes.
  *
  *   npx asar extract-file /Applications/Obsidian.app/Contents/Resources/obsidian.asar app.css > /tmp/ytfree-harness/app.css
- *   node tools/phone-hub-harness.mjs
+ *   node scripts/phone-hub-harness.mjs
  */
 
 import { execFileSync } from "node:child_process";

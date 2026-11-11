@@ -12,11 +12,11 @@
  * below), so `controlRows` is 2 on the phone widths and 1 on the desktop, and
  * the gaps are reported per row.
  *
- * Same setup as `tools/phone-hub-harness.mjs`, and not part of `npm test` for
+ * Same setup as `scripts/phone-hub-harness.mjs`, and not part of `npm test` for
  * the same reasons. Run it when the control bar changes.
  *
  *   npx asar extract-file /Applications/Obsidian.app/Contents/Resources/obsidian.asar app.css > /tmp/ytfree-harness/app.css
- *   node tools/controls-harness.mjs
+ *   node scripts/controls-harness.mjs
  */
 
 import { execFileSync } from "node:child_process";
