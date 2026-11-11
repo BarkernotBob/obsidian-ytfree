@@ -7,7 +7,7 @@ import {
   foldsRevealing,
   headingLine,
   normaliseHeadings,
-  notesCursorTarget,
+  notesWriteTarget,
   sectionEnd,
 } from "../src/sections.ts";
 
@@ -139,39 +139,32 @@ test("enclosingHeading gives up rather than reading a whole transcript backwards
   assert.equal(enclosingHeading(reader(long), 300, 400), "# Video Transcript");
 });
 
-test("notesCursorTarget returns to where the typing was", () => {
-  assert.deepEqual(notesCursorTarget(NOTE, 4, { line: 6, ch: 0 }), { line: 6, ch: 0 });
+test("notesWriteTarget goes to the first empty line after the last text", () => {
+  // NOTE: heading at 4, blank 5 and 6, Description at 7. Never written in.
+  assert.deepEqual(notesWriteTarget(NOTE, 4), { cursor: { line: 5, ch: 0 }, insertAt: null });
+  const note = "# Notes\nfirst\n\nsecond\n\n\n# Video Description\nx";
+  // The gap at line 2 has text beneath it, so it is skipped.
+  assert.deepEqual(notesWriteTarget(note, 0), { cursor: { line: 4, ch: 0 }, insertAt: null });
 });
 
-test("notesCursorTarget clamps a column past the end of a line that has shrunk", () => {
-  const note = "# Notes\nshort\n\n# Video Transcript\nwords";
-  assert.deepEqual(notesCursorTarget(note, 0, { line: 1, ch: 99 }), { line: 1, ch: 5 });
+test("notesWriteTarget adds a line when every line under Notes has text", () => {
+  const note = "# Notes\nfirst\nsecond\n# Video Description\nx";
+  assert.deepEqual(notesWriteTarget(note, 0), {
+    cursor: { line: 3, ch: 0 },
+    insertAt: { line: 2, ch: 6 },
+  });
+  // A note that ends inside Notes, and a note that is only the heading.
+  assert.deepEqual(notesWriteTarget("# Notes\nlast", 0), {
+    cursor: { line: 2, ch: 0 },
+    insertAt: { line: 1, ch: 4 },
+  });
+  assert.deepEqual(notesWriteTarget("# Notes", 0), {
+    cursor: { line: 1, ch: 0 },
+    insertAt: { line: 0, ch: 7 },
+  });
 });
 
-test("notesCursorTarget falls back to the line under the heading", () => {
-  // Nothing remembered, remembered above the section, and remembered below it.
-  assert.deepEqual(notesCursorTarget(NOTE, 4, null), { line: 5, ch: 0 });
-  assert.deepEqual(notesCursorTarget(NOTE, 4, { line: 1, ch: 0 }), { line: 5, ch: 0 });
-  assert.deepEqual(notesCursorTarget(NOTE, 4, { line: 14, ch: 2 }), { line: 5, ch: 0 });
-});
-
-test("notesCursorTarget never points past the end of a note that is only a heading", () => {
-  assert.deepEqual(notesCursorTarget("# Notes", 0, null), { line: 0, ch: 0 });
-});
-
-test("Notes button folds the video on the first press, as the reader's choice", async () => {
-  const { notesButtonCollapse } = await import("../src/sections.ts");
-  assert.equal(notesButtonCollapse(null, false), "manual");
-  assert.equal(notesButtonCollapse("keyboard", false), "manual");
-  assert.equal(notesButtonCollapse("manual", false), "manual");
-});
-
-test("Notes button pressed again in Notes toggles, and a keyboard fold is not a fold", async () => {
-  const { notesButtonCollapse } = await import("../src/sections.ts");
-  // The phone bug: focusing the editor folds for the keyboard inside the tap.
-  // The decision uses the state from before that, and even a keyboard fold seen
-  // there must not be undone, or the button shows the video again.
-  assert.equal(notesButtonCollapse(null, true), "manual");
-  assert.equal(notesButtonCollapse("keyboard", true), "manual");
-  assert.equal(notesButtonCollapse("manual", true), null);
+test("notesWriteTarget treats the reader's own headings as part of Notes", () => {
+  const note = "# Notes\nintro\n## Key points\n- one\n\n# Video Transcript\nwords";
+  assert.deepEqual(notesWriteTarget(note, 0), { cursor: { line: 4, ch: 0 }, insertAt: null });
 });
