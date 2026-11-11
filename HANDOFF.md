@@ -32,6 +32,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   page, Obsidian 0 in 10; github.io, autoplay, framing ruled out). Not our code, so can't be locked
   in; detect it with an "ad seen" log line (#91). ([RESEARCH-EMBED-ADS](docs/RESEARCH-EMBED-ADS.md))
 
+- 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
+
 ## Shipped on main (scope doc = manual test)
 
 - HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));
@@ -56,8 +58,8 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
 2. #43 fallback; GitHub Pages must serve the hosted player page (phone needs it).
 3. #61 store compliance (LICENSE, versions.json, `x.y.z` tags, Obsidian lint: 32 errors).
 4. #62 device test of merged-but-untested features; #25, #5, #46, #48; bugs Isaiah lists.
-5. Hardening review ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md)): Batch 0 built; Batches 1–3
-   wait for Isaiah's answers to D1–D4 there.
+5. Hardening ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md)): Batch 1 built and
+   device-tested (PR #93); next is Batch 2 (#86).
 
 ## How to ship and test
 

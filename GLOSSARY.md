@@ -316,11 +316,43 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   until they tap Show video or Notes again, and does not come back when the keyboard goes. A
   fold the keyboard made does not count as folded, so Notes never reopens the video because of it.
 
+### 2026-11-10 (name)
+
+- **Display name is "YouTube for You"** (Isaiah, 2026-11-10). Only the name people see changed:
+  manifest `name`, README, in-app text. Kept on purpose: plugin id `ytfree`, repo name, CSS
+  classes, the `obsidian://ytfree` link, the default download folder `~/Movies/YT Free` (moving it
+  would orphan existing downloads) and the "YT Free video" template name. Capitalised "YouTube" to
+  match the trademark. Risk accepted by Isaiah: YouTube's branding guidelines ban "YouTube" in an
+  app's name; 16 community plugins already carry it (2026-11-10).
+
 ### 2026-11-10 (one-tap YouTube player toggle, Isaiah)
 
 - MVP. A YouTube button on the phone's control bar, first on the right, swaps between our player
-  and YouTube's in one tap, keeping the second, speed and playing/paused. Phone only: the desktop
-  has yt-dlp for HD. It replaces "Back to our player" and the Quality menu's "YouTube player (HD)"
+  and YouTube's in one tap, keeping the second, speed and playing/paused. Phone, and desktop only
+  when yt-dlp is missing (18:21: with yt-dlp the desktop gets HD from it). It replaces "Back to our player" and the Quality menu's "YouTube player (HD)"
   ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)).
 - If iOS won't start YouTube's player with sound from our button, a tap on its play button is
   acceptable only once a fix is shown impossible; a muted start is not wanted.
+- No pin button on the player's control bar (Isaiah, 2026-11-10): the collapse arrow is enough,
+  and the room goes to the YouTube button. The pinned player is still on/off from the command
+  palette and the settings tab.
+- iPhone: YouTube's player can't be started from our button (measured 2026-11-11, even muted),
+  so the first switch per video needs one tap on its play button; after that its frame is kept
+  loaded behind ours so later switches start by themselves. Pages serves `gh-pages`, not `docs/`.
+
+
+
+### 2026-11-10 (store defaults and helpers; Isaiah)
+
+- **New installs start with the note tidy off and Smart Speed off.** An install that already
+  has a `data.json` keeps what it was running with (`sanitizeSettings` in `src/settings.ts`).
+- **Desktop helpers:** yt-dlp and ffmpeg. Hidden, not removed: nobody is asked to install
+  anything, their settings sit in a folded section, and the instructions are in
+  `docs/DESKTOP-HELPERS.md`. No Notice says yt-dlp is missing. Removing them is revisited
+  after launch.
+- **Pop-out windows** (a note dragged to its own desktop window) are not supported in the MVP.
+- **Settings search** (Obsidian 1.13+) is MVP: the tab is data in `src/settings-tab.ts`,
+  drawn by `getSettingDefinitions()` on 1.13+ and by `display()` before it.
+- Lint warnings do not block a store release; only errors do
+  ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md), section 3).
+

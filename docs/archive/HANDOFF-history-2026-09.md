@@ -1445,7 +1445,7 @@ now goes through `combineSilence`, where a partial ffmpeg map can only ever *add
 measured **~10×** against 1.9× for one stream. `detectSilenceChunked` runs a pool of six,
 60 s chunks with 3 s overlap, ordered **outward from the playhead**. Two traps, both
 handled and both tested: silencedetect reports timestamps **relative to `-ss`** (a wrong
-offset yields a completely plausible wrong map — `spikes/silence-chunks/run.mjs` is the
+offset yields a completely plausible wrong map — `docs/spikes/silence-chunks/run.mjs` is the
 end-to-end check, and matched 27/27 windows against a single-stream run), and a pause on
 a chunk boundary would be split into two sub-threshold halves without the overlap.
 
@@ -1818,7 +1818,7 @@ test. Four asks from BarkernotBob, one change set.
    panel is one opaque base64url `params` field, so `src/search-params.ts`
    encodes it: upload date, duration, sort and one feature, with type pinned to
    `video` on every search. It is pure and has no `obsidian` import, so
-   `spikes/search-filters/` sends exactly what the plugin sends — which mattered,
+   `docs/spikes/search-filters/` sends exactly what the plugin sends — which mattered,
    because **a wrong `params` is ignored rather than rejected**, so the only
    proof is asserting on the content of the results. Measured live: duration,
    upload date, type and the feature bools all apply, and **filters survive
@@ -2292,11 +2292,11 @@ by deliberately introducing a leak — the build failed with the right message.
 ### Fixtures
 
 `tests/fixtures/*.json` are real captures, re-recordable with
-`node spikes/innertube/record.mjs`. The `ip=` parameter is redacted in both the
+`node docs/spikes/innertube/record.mjs`. The `ip=` parameter is redacted in both the
 query form and the `/ip/…` path form used by manifest URLs. The signed URLs
 expire in about six hours, which is fine — nothing in the tests fetches them.
 
-`node spikes/innertube/probe.mjs` remains the load-bearing measurement: green
+`node docs/spikes/innertube/probe.mjs` remains the load-bearing measurement: green
 means InnerTube still hands out unciphered, playable URLs. Run it first if mobile
 playback ever stops working.
 
@@ -2397,7 +2397,7 @@ throws at module load. That work should not wait behind a media-engine project.
 
 ### Next step
 
-1. `node spikes/innertube/probe.mjs` — five seconds, and the entire plan rests on
+1. `node docs/spikes/innertube/probe.mjs` — five seconds, and the entire plan rests on
    it. Baseline 2026-07-27 is 10/10 PASS.
 2. Then §1 of issue 004: `src/desktop/`, the new `src/stream.ts`, drop
    `isDesktopOnly`. Desktop must not change behaviour.

@@ -11,7 +11,7 @@
  * result by any field on the renderer? If yes, sort can ship clean. If no, sort
  * either ships approximate or does not ship.
  *
- *   node spikes/search-filters/injected.mjs
+ *   node docs/spikes/search-filters/injected.mjs
  */
 
 const ANDROID = {

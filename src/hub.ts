@@ -22,6 +22,7 @@ import {
   TFile,
   TFolder,
   WorkspaceLeaf,
+  normalizePath,
   requestUrl,
   setIcon,
 } from "obsidian";
@@ -225,6 +226,15 @@ const postWebhook: Post = async ({ url, body, contentType, headers }) => {
   });
 };
 
+/**
+ * A vault folder as the user typed it, in the form the vault API wants: one
+ * kind of slash, none at either end. Blank stays blank (the vault root).
+ */
+function vaultFolder(typed: string): string {
+  const folder = normalizePath(typed.trim());
+  return folder === "/" ? "" : folder;
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -346,7 +356,7 @@ export class SubscriptionsStore {
     const before = listFingerprint(this.state);
     const outcome = await this.file.save();
     if (!outcome.landed) {
-      console.error("YT Free: state file unreadable, not overwriting it. Will retry.");
+      console.error("YouTube for You: state file unreadable, not overwriting it. Will retry.");
       this.scheduleRetry();
       return { written: false, disk: null };
     }
@@ -466,7 +476,7 @@ export class SubscriptionsStore {
     if (lifted.length === 0) return;
     this.state.searchHiddenChannels = list;
     const names = lifted.map((entry) => entry.title || entry.id).join(", ");
-    new Notice(`YT Free: subscribed, so ${names} is no longer hidden from search.`);
+    new Notice(`YouTube for You: subscribed, so ${names} is no longer hidden from search.`);
   }
 
   /**
@@ -593,7 +603,7 @@ export class SubscriptionsStore {
           const filled = await this.backfillChannel(gap.channel, gap.knownBefore, horizon, now);
           added.push(...filled);
         } catch (err) {
-          console.error(`YT Free: backfill for ${gap.channel.title} failed.`, err);
+          console.error(`YouTube for You: backfill for ${gap.channel.title} failed.`, err);
         }
       }
 
@@ -682,7 +692,7 @@ export class SubscriptionsStore {
     const present = new Set(this.state.items.map((item) => item.videoId));
     const fresh = items.filter((item) => !present.has(item.videoId));
     this.state.items.push(...fresh);
-    if (fresh.length) new Notice(`YT Free: ${backfillMessage(channel.title, fresh)}`, 10000);
+    if (fresh.length) new Notice(`YouTube for You: ${backfillMessage(channel.title, fresh)}`, 10000);
     return fresh;
   }
 
@@ -887,7 +897,7 @@ export class SubscriptionsStore {
       : null;
     if (existing instanceof TFile) return { file: existing, created: false };
 
-    const folder = this.settings().watchLaterFolder.replace(/^\/+|\/+$/g, "");
+    const folder = vaultFolder(this.settings().watchLaterFolder);
     if (folder && !(this.app.vault.getAbstractFileByPath(folder) instanceof TFolder)) {
       try {
         await this.app.vault.createFolder(folder);
@@ -1391,7 +1401,7 @@ export class HubView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "YT Free subscriptions";
+    return "YouTube for You subscriptions";
   }
 
   getIcon(): string {
@@ -1925,7 +1935,7 @@ export class HubView extends ItemView {
     el.toggleClass("is-subscribed", copy.disabled);
   }
 
-  /** Subscribe inside YT Free (GitHub #65), from the channel screen or a search card. */
+  /** Subscribe inside YouTube for You (GitHub #65), from the channel screen or a search card. */
   private subscribeToChannel(channelId: string, title: string): void {
     if (!channelId) return;
     if (!this.store.isSubscribed(channelId)) {
@@ -2034,7 +2044,7 @@ export class HubView extends ItemView {
         if (token !== this.channelToken || this.channel !== channel) return;
         channel.state = "idle";
         button.setText("More videos");
-        new Notice(`YT Free: could not load more videos — ${String(err)}`);
+        new Notice(`YouTube for You: could not load more videos — ${String(err)}`);
       },
     );
   }
@@ -2530,7 +2540,7 @@ export class HubView extends ItemView {
         if (token !== this.searchToken) return;
         this.searchState = "idle";
         button.setText("More results");
-        new Notice(`YT Free: could not load more results — ${String(err)}`);
+        new Notice(`YouTube for You: could not load more results — ${String(err)}`);
       },
     );
   }
@@ -2746,7 +2756,7 @@ export class HubView extends ItemView {
       this.results.get(other.videoId)?.remove();
       this.results.delete(other.videoId);
     }
-    new Notice(`YT Free: ${title} is hidden from search. Undo it in Settings → Subscriptions hub.`);
+    new Notice(`YouTube for You: ${title} is hidden from search. Undo it in Settings → Subscriptions hub.`);
   }
 
   /**
@@ -2940,7 +2950,7 @@ export class HubView extends ItemView {
       return "Nothing watched yet. A video lands here once you have watched 2 minutes or a tenth of it.";
     }
     return this.store.state.channels.length === 0
-      ? "Run “YT Free: Import YouTube subscriptions” to get started."
+      ? "Run “YouTube for You: Import YouTube subscriptions” to get started."
       : "Nothing here. Try Everything, or check for new videos.";
   }
 
@@ -2975,7 +2985,7 @@ export class HubView extends ItemView {
       .onClick((evt) => {
         evt.stopPropagation();
         void this.store.restore(item).catch((err: unknown) => {
-          new Notice(`YT Free: could not restore that video — ${String(err)}`);
+          new Notice(`YouTube for You: could not restore that video — ${String(err)}`);
         });
         // It is no longer hidden, so it no longer belongs in this list. Same
         // as removing one from the Inbox: the row you acted on goes, and
@@ -3184,7 +3194,7 @@ export class HubView extends ItemView {
     // `buildAction`.
     card.addEventListener("click", () => {
       void Promise.resolve(spec.run("preview", repaint)).then(repaint, (err: unknown) => {
-        new Notice(`YT Free: ${String(err)}`);
+        new Notice(`YouTube for You: ${String(err)}`);
       });
     });
 
@@ -3250,7 +3260,7 @@ export class HubView extends ItemView {
         (err: unknown) => {
           button.removeClass("is-busy");
           repaint();
-          new Notice(`YT Free: ${String(err)}`);
+          new Notice(`YouTube for You: ${String(err)}`);
         },
       );
     });
@@ -3328,7 +3338,7 @@ export class HubView extends ItemView {
     if (!known) {
       const details = await fetchVideoDetails(videoId);
       if (!details.title) {
-        new Notice("YT Free: YouTube would not say what that video is. It may be private or removed.");
+        new Notice("YouTube for You: YouTube would not say what that video is. It may be private or removed.");
         return;
       }
       this.linkedResult = {
@@ -3631,7 +3641,7 @@ class PreviewModal extends Modal {
           (err: unknown) => {
             button.removeClass("is-busy");
             repaint();
-            new Notice(`YT Free: ${String(err)}`);
+            new Notice(`YouTube for You: ${String(err)}`);
           },
         );
       });
@@ -3695,7 +3705,7 @@ class PreviewModal extends Modal {
         if (this.spec.startAt) handle.cue(this.spec.startAt);
       },
       (err: unknown) => {
-        console.error("YT Free: preview player could not be built.", err);
+        console.error("YouTube for You: preview player could not be built.", err);
         stage.setText("This video could not be played here.");
         stage.addClass("ytfree-preview-player-failed");
         // `setText` took the close button with everything else.
@@ -3895,7 +3905,7 @@ class PreviewModal extends Modal {
         if (section.hasClass("is-open")) this.startTicking();
       },
       (err: unknown) => {
-        console.error("YT Free: preview transcript could not be fetched.", err);
+        console.error("YouTube for You: preview transcript could not be fetched.", err);
         if (this.closed) return;
         nothing("Transcript — could not be fetched");
       },

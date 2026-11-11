@@ -7,12 +7,12 @@
  * real thing and checks the shifted windows against a single-stream analysis of
  * the same stretch — if the offset were wrong, the two would not line up.
  *
- *   node spikes/silence-chunks/run.mjs [videoId]
+ *   node docs/spikes/silence-chunks/run.mjs [videoId]
  */
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { detectSilence, detectSilenceChunked } from "../../src/desktop/silencedetect.ts";
+import { detectSilence, detectSilenceChunked } from "../../../src/desktop/silencedetect.ts";
 
 const pExecFile = promisify(execFile);
 const FFMPEG = "/opt/homebrew/bin/ffmpeg";

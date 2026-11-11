@@ -74,7 +74,7 @@ export function badgeText(state: HdState): BadgeText {
       };
     case "off":
     default:
-      return { text: p(state.height), title: state.reason ?? "HD is off in Settings → YT Free.", settled: true };
+      return { text: p(state.height), title: state.reason ?? "HD is off in Settings → YouTube for You.", settled: true };
   }
 }
 

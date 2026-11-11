@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- The embed needs a real https referrer; Obsidian iOS (capacitor://localhost) gives it none. -->
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<title>YT Free player</title>
+<title>YouTube for You player</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   #player { position: fixed; inset: 0; width: 100%; height: 100%; }
@@ -15,7 +15,7 @@
 <div id="player"></div>
 <script>
 /*
- * YT Free (GitHub #25): YouTube's own IFrame player, hosted on an https page so
+ * YouTube for You (GitHub #25): YouTube's own IFrame player, hosted on an https page so
  * Obsidian on the iPhone can frame it. It reports to the plugin that framed it
  * and takes play, pause, seek and speed from it. Nothing is stored or sent
  * anywhere else.
@@ -66,6 +66,7 @@
         onReady: function () {
           if (rate !== 1) player.setPlaybackRate(rate);
           send("ready", {});
+          logEnvironment();
           status();
           setInterval(status, 1000);
           startScripted();
@@ -124,6 +125,36 @@
     if (player && player.getPlayerState) d.state = player.getPlayerState();
     for (var k in extra) d[k] = extra[k];
     send("log", d);
+  }
+  /*
+   * What this page can see of where it runs, logged once per open: the one
+   * known difference between the iPhone app (no ads so far) and desktop or
+   * Safari (ads) is the environment, so the log records it side by side.
+   * Read-only; nothing is changed or sent anywhere but the plugin.
+   */
+  function logEnvironment() {
+    var anc = [];
+    try {
+      var ao = location.ancestorOrigins;
+      for (var i = 0; ao && i < ao.length; i++) anc.push(ao[i]);
+    } catch (err) { anc.push("unreadable"); }
+    var env = {
+      ua: navigator.userAgent,
+      ancestors: anc.join(" > ") || "none",
+      referrer: document.referrer || "none",
+      cookies: navigator.cookieEnabled,
+      touch: navigator.maxTouchPoints || 0,
+      lang: navigator.language || "",
+    };
+    if (document.hasStorageAccess) {
+      document.hasStorageAccess().then(
+        function (ok) { env.storageAccess = ok; log("environment", env); },
+        function () { env.storageAccess = "error"; log("environment", env); }
+      );
+    } else {
+      env.storageAccess = "n/a";
+      log("environment", env);
+    }
   }
   function later(label, ms) {
     setTimeout(function () { log(label, { after: ms }); }, ms);
