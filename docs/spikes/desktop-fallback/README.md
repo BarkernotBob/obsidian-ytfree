@@ -45,7 +45,7 @@ sign-in modal in `src/desktop/signin.ts`. So the questions are not about playbac
 | W7 | Is an ad distinguishable from the video? | `AD SHOWING` appears during a pre-roll |
 
 **W5 and W6 are the ones that decide the feature.** `executeJavaScript` is async and the
-stamp handler runs on a keystroke ([capture.ts](../../src/capture.ts)), so the position
+stamp handler runs on a keystroke ([capture.ts](../../../src/capture.ts)), so the position
 has to be polled and dead-reckoned between ticks; the spike reports its own error rather
 than assuming it is small. And if clicking the video hands the keyboard to the webview,
 there is nothing to stamp into — that outcome kills the in-note route and leaves "stop and

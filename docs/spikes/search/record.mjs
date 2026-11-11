@@ -2,9 +2,9 @@
 /**
  * Record InnerTube *search* responses as test fixtures.
  *
- *   node spikes/search/record.mjs
+ *   node docs/spikes/search/record.mjs
  *
- * Same reasoning as `spikes/innertube/record.mjs`: the only thing that can
+ * Same reasoning as `docs/spikes/innertube/record.mjs`: the only thing that can
  * really break `src/search.ts` is YouTube changing the shape of the renderer
  * tree, and a fixture I wrote myself can only ever confirm my own idea of the
  * shape. So these are real captures.

@@ -13,7 +13,7 @@
  * params string is ignored rather than rejected, so "it returned results" is
  * exactly the failure mode to guard against.
  *
- *   node spikes/search-filters/probe.mjs
+ *   node docs/spikes/search-filters/probe.mjs
  */
 
 const ANDROID = {

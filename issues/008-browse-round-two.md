@@ -36,7 +36,7 @@ already syncs.
 
 YouTube's filter panel is not a set of query arguments. It is one opaque
 `params` string on the search request, and that string is a base64url protobuf.
-`spikes/search-filters/` encodes it ourselves and measures what comes back —
+`docs/spikes/search-filters/` encodes it ourselves and measures what comes back —
 asserting on the *content* of the results, because a wrong `params` is ignored
 rather than rejected, so "it returned results" is precisely the failure to guard
 against.
@@ -158,7 +158,7 @@ also means it works on the Hidden list, which is where you will actually need it
 Covered automatically: 2–6 in `tests/search-params.test.ts` and
 `tests/search.test.ts`; 10, 12, 14 in `tests/subscriptions.test.ts`; 15 in
 `tests/subscriptions.test.ts` via `hubItemMatches`; the live behaviour of the
-filters in `spikes/search-filters/probe.mjs` and `npm run smoke`.
+filters in `docs/spikes/search-filters/probe.mjs` and `npm run smoke`.
 
 ## Manual test (for BarkernotBob)
 

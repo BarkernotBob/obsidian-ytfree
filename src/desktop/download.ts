@@ -18,7 +18,8 @@ import { ytDlpEnv } from "./env.ts";
  * module load on mobile.
  */
 export function defaultDownloadFolder(): string {
-  return join(homedir(), "Movies", "YT Free");
+  // macOS keeps films in Movies; Windows and Linux call the same folder Videos.
+  return join(homedir(), process.platform === "darwin" ? "Movies" : "Videos", "YT Free");
 }
 
 /** `mkdir -p`, so `main.ts` does not need its own `fs/promises` import. */

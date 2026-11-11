@@ -8,7 +8,7 @@
  * exactly like a bug and would have to be fixed by re-sending `params` with the
  * token, or by filtering page two ourselves.
  *
- *   node spikes/search-filters/continuation.mjs
+ *   node docs/spikes/search-filters/continuation.mjs
  */
 
 const ANDROID = {

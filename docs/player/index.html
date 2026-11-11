@@ -66,6 +66,7 @@
         onReady: function () {
           if (rate !== 1) player.setPlaybackRate(rate);
           send("ready", {});
+          logEnvironment();
           status();
           setInterval(status, 1000);
           startScripted();
@@ -124,6 +125,36 @@
     if (player && player.getPlayerState) d.state = player.getPlayerState();
     for (var k in extra) d[k] = extra[k];
     send("log", d);
+  }
+  /*
+   * What this page can see of where it runs, logged once per open: the one
+   * known difference between the iPhone app (no ads so far) and desktop or
+   * Safari (ads) is the environment, so the log records it side by side.
+   * Read-only; nothing is changed or sent anywhere but the plugin.
+   */
+  function logEnvironment() {
+    var anc = [];
+    try {
+      var ao = location.ancestorOrigins;
+      for (var i = 0; ao && i < ao.length; i++) anc.push(ao[i]);
+    } catch (err) { anc.push("unreadable"); }
+    var env = {
+      ua: navigator.userAgent,
+      ancestors: anc.join(" > ") || "none",
+      referrer: document.referrer || "none",
+      cookies: navigator.cookieEnabled,
+      touch: navigator.maxTouchPoints || 0,
+      lang: navigator.language || "",
+    };
+    if (document.hasStorageAccess) {
+      document.hasStorageAccess().then(
+        function (ok) { env.storageAccess = ok; log("environment", env); },
+        function () { env.storageAccess = "error"; log("environment", env); }
+      );
+    } else {
+      env.storageAccess = "n/a";
+      log("environment", env);
+    }
   }
   function later(label, ms) {
     setTimeout(function () { log(label, { after: ms }); }, ms);

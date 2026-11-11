@@ -2,7 +2,7 @@
  * The InnerTube parser, against recorded responses.
  *
  * These fixtures are real captures, not hand-written JSON — see
- * `spikes/innertube/record.mjs`. That matters because the only thing that can
+ * `docs/spikes/innertube/record.mjs`. That matters because the only thing that can
  * really break this parser is YouTube changing the shape of the response, and a
  * fixture I wrote myself can only ever confirm my own idea of the shape.
  *

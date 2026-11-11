@@ -22,6 +22,7 @@ import {
   TFile,
   TFolder,
   WorkspaceLeaf,
+  normalizePath,
   requestUrl,
   setIcon,
 } from "obsidian";
@@ -224,6 +225,15 @@ const postWebhook: Post = async ({ url, body, contentType, headers }) => {
     throw: true,
   });
 };
+
+/**
+ * A vault folder as the user typed it, in the form the vault API wants: one
+ * kind of slash, none at either end. Blank stays blank (the vault root).
+ */
+function vaultFolder(typed: string): string {
+  const folder = normalizePath(typed.trim());
+  return folder === "/" ? "" : folder;
+}
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -887,7 +897,7 @@ export class SubscriptionsStore {
       : null;
     if (existing instanceof TFile) return { file: existing, created: false };
 
-    const folder = this.settings().watchLaterFolder.replace(/^\/+|\/+$/g, "");
+    const folder = vaultFolder(this.settings().watchLaterFolder);
     if (folder && !(this.app.vault.getAbstractFileByPath(folder) instanceof TFolder)) {
       try {
         await this.app.vault.createFolder(folder);

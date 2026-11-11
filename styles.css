@@ -465,23 +465,6 @@
   transform: translateY(-4px);
 }
 
-/*
- * The pinned player, on and off.
- *
- * Obsidian's accent rather than the purple: this one is a switch belonging to
- * the plugin — it turns the pinned player on for every note with a video in it
- * — and the purple is reserved for the two things that describe the video.
- */
-.ytfree-controls .ytfree-btn-pin.is-active {
-  color: var(--interactive-accent);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .ytfree-controls .ytfree-btn-pin.is-active:hover {
-    color: var(--interactive-accent-hover);
-  }
-}
-
 /* Same pill as a button, and wide enough for "1.75×" so choosing a speed can
    never re-measure the row. `text-align-last` is what centres the closed state
    of a select in WebKit. */
@@ -4016,6 +3999,11 @@ body.ytfree-immersive-open .ytfree-preview-close {
   inset: 0;
   z-index: 5;
   background: #000;
+}
+/* Kept loaded behind ours after the YouTube button went back (see `ytParked`). */
+.ytfree-yt-embed.is-parked {
+  visibility: hidden;
+  pointer-events: none;
 }
 .ytfree-yt-embed-frame {
   width: 100%;
