@@ -185,3 +185,30 @@ export function normaliseHeadings(content: string): string {
     })
     .join("\n");
 }
+
+/**
+ * Why the video is hidden, or null if it is not. A "manual" collapse is the
+ * reader's own choice and stays until they undo it; a "keyboard" one is
+ * undone by the keyboard going away.
+ */
+export type CollapseMode = "manual" | "keyboard" | null;
+
+/**
+ * What the Notes button does to the video.
+ *
+ * `before` must be read *before* the button focuses the editor. On a phone
+ * that focus fires `focusin`, which folds the video for the keyboard inside the
+ * same tap; reading the state afterwards saw that keyboard collapse, took it
+ * for the reader's own, and the "already here" toggle opened the video again —
+ * the button looked like it did nothing (2026-11-10).
+ *
+ * - Away from Notes: always fold, as the reader's own choice ("manual"), so it
+ *   outlives the keyboard.
+ * - Already in Notes: toggle, but only a manual collapse counts as folded. A
+ *   keyboard collapse is not something the reader asked for, so it is promoted
+ *   to manual rather than undone.
+ */
+export function notesButtonCollapse(before: CollapseMode, alreadyInNotes: boolean): CollapseMode {
+  if (alreadyInNotes && before === "manual") return null;
+  return "manual";
+}

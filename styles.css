@@ -4010,40 +4010,82 @@ body.ytfree-immersive-open .ytfree-preview-close {
   text-decoration-color: currentColor;
 }
 
-/* YouTube's own player on the phone (#25, part 2): the whole screen, black. */
-.modal.ytfree-ytplayer-modal {
-  width: 100vw;
-  height: 100dvh;
-  max-width: none;
-  max-height: none;
-  padding: 0;
-  border-radius: 0;
-  border: 0;
+/* YouTube's own player on the phone (#25, part 2): over the picture, in place. */
+.ytfree-yt-embed {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
   background: #000;
 }
-.modal.ytfree-ytplayer-modal .modal-content {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-}
-.modal.ytfree-ytplayer-modal .modal-close-button {
-  top: calc(env(safe-area-inset-top) + 2px);
-  color: #fff;
-}
-.ytfree-ytplayer-line {
-  color: #bbb;
-  font-size: var(--font-ui-smaller);
-  padding: 8px 48px 8px 12px;
-  font-variant-numeric: tabular-nums;
-}
-.ytfree-ytplayer-frame {
-  flex: 1;
+.ytfree-yt-embed-frame {
   width: 100%;
+  height: 100%;
   border: 0;
-  background: #000;
+  display: block;
 }
+.ytfree-yt-embed-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.ytfree-yt-embed-badge.is-visible {
+  opacity: 1;
+}
+/* First time only: how to get PiP and background play from YouTube's player. */
+.ytfree-yt-embed-hint {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.3;
+}
+.ytfree-yt-embed-hint span {
+  flex: 1;
+}
+.ytfree-yt-embed-hint button {
+  flex: none;
+}
+/* While YouTube's player has the picture, every control of ours would drive
+   the hidden <video>, so none shows: YouTube's player has its own. They are
+   hidden in place, not removed, so the YouTube button (the way back) stays
+   exactly where it was tapped. */
+.is-youtube .ytfree-controls * {
+  visibility: hidden;
+}
+.is-youtube .ytfree-controls .ytfree-btn-youtube,
+.is-youtube .ytfree-controls .ytfree-btn-youtube * {
+  visibility: visible;
+}
+/* Desktop: only the way back from the fallback tier, never a way in. */
+.ytfree-controls .ytfree-btn-youtube.is-fallback-only {
+  display: none;
+}
+.is-youtube .ytfree-controls .ytfree-btn-youtube.is-fallback-only {
+  display: inline-flex;
+}
+/* Lit while YouTube's player is the one showing: the same button, on. */
+.ytfree-controls .ytfree-btn-youtube.is-active {
+  color: #ff0033;
+  background: var(--background-modifier-hover);
+}
+
 
 /* The desktop Now playing item in the status bar (see `setupNowPlayingButton`). */
 .ytfree-now-playing-status {
@@ -4065,4 +4107,13 @@ body.ytfree-immersive-open .ytfree-preview-close {
 .ytfree-stage.has-poster .ytfree-video {
   aspect-ratio: 16 / 9;
   width: 100%;
+}
+
+/* YouTube's player as the last tier on the desktop (#43): our <video> may have
+   no media at all, so the stage keeps the picture's shape on its own. */
+.is-youtube .ytfree-stage {
+  aspect-ratio: 16 / 9;
+}
+.is-youtube .ytfree-stage > .ytfree-video {
+  visibility: hidden;
 }

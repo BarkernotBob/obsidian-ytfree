@@ -90,7 +90,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - License is MIT (package.json said ISC; Obsidian needs a LICENSE file, and MIT is the common
   choice in its directory).
-- `minAppVersion` 1.6.6: `FileManager.trashFile` needs it. Obsidian's lint fails below that.
+- `minAppVersion` 1.6.6: `FileManager.trashFile` needs it. Obsidian's lint fails below that. Raised to 1.8.7 on 2026-11-10: see below.
 - TypeScript is pinned to 5.9: typescript-eslint, which Obsidian's lint runs on, does not
   support TypeScript 7.
 - Plugin logging is `console.debug` (Obsidian's rules allow only debug, warn and error), so the
@@ -280,6 +280,13 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 
 - **Playback tiers** (Isaiah, 2026-11-09): yt-dlp (desktop, if installed) → our own stream →
   YouTube's embedded player. After a bot check, straight to the embed.
+- **Tier failure** (2026-11-10, #43 part 1): a tier fails for a video when it cannot resolve a
+  link or its 360p link will not play before expiry; that video skips the tier for 30 minutes.
+  Users are never told to install or update yt-dlp (Isaiah, 2026-11-10: "a user should never have
+  to update YT DLP themselves").
+- **YouTube's player as last tier** (#43, approved 2026-11-10): when every stream tier failed for
+  a video, or on a bot check, YouTube's player replaces ours in place (hosted page, GitHub Pages),
+  with "Try our stream again". Desktop never offers it as a menu choice.
 - **No sign-in** (Isaiah, 2026-11-09): YouTube cookies never reach the plugin; subscriptions by
   manual add or Takeout CSV (#64, #65).
 - **Subscribe in YT Free** (GitHub #65; details Claude's calls, open to change): adds the channel
@@ -293,3 +300,27 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - `PROGRESS_TTL_DAYS` stays 365 (2026-09-02).
 - In progress floor is `min(0.1 × duration, 120s)`, backed by `progress.json` (2026-08-06).
 - Subscribe opens the channel in the external browser; no authenticated writes (2026-08-06). Removed 2026-11-09 with sign-in (#64).
+
+### 2026-11-10 (hardening review; Claude's calls, open to change)
+
+- `minAppVersion` is 1.8.7: `App.loadLocalStorage`, which `onload` calls, is public from that
+  version ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md), H1).
+- TypeScript runs with `strict`, `noUnusedLocals` and `noUnusedParameters`. The code already
+  passed `strict`; the switch keeps it that way.
+- On Windows the plugin never rewrites the PATH it gives yt-dlp, and yt-dlp and ffmpeg are also
+  looked for by bare name, last. Not tested on a Windows machine.
+
+### 2026-11-10 (Notes button)
+
+- **Notes button always folds the video** on the first press, as the reader's own fold: it stays
+  until they tap Show video or Notes again, and does not come back when the keyboard goes. A
+  fold the keyboard made does not count as folded, so Notes never reopens the video because of it.
+
+### 2026-11-10 (one-tap YouTube player toggle, Isaiah)
+
+- MVP. A YouTube button on the phone's control bar, first on the right, swaps between our player
+  and YouTube's in one tap, keeping the second, speed and playing/paused. Phone only: the desktop
+  has yt-dlp for HD. It replaces "Back to our player" and the Quality menu's "YouTube player (HD)"
+  ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)).
+- If iOS won't start YouTube's player with sound from our button, a tap on its play button is
+  acceptable only once a fix is shown impossible; a muted start is not wanted.

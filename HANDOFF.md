@@ -20,6 +20,18 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-09: hub/watch-time sync fix merged (PR #76; docs/V1-SCOPE-SYNC.md). Next: Isaiah's
   Mac+iPhone test. Follow-up #75.
 
+- 2026-11-10 (#43, PR #79): a dead stream link moves playback to the next tier, ending in
+  YouTube's player in place ([V1-SCOPE-PLAYER-FALLBACK](docs/V1-SCOPE-PLAYER-FALLBACK.md)); brew messages gone.
+
+- 2026-11-10: one-tap YouTube player button on the phone bar
+  ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)). Next: iPhone test; if YouTube
+  needs a tap to start with sound, try a muted start then unmute in `docs/player/index.html`.
+- 2026-11-10: Notes button on the phone folds the video again (it was folding for the keyboard,
+  then reopening it in the same tap). Next: Isaiah's phone test.
+- 2026-11-10: why YouTube's player shows no ads: Obsidian's iOS app (Safari got ads on the same
+  page, Obsidian 0 in 10; github.io, autoplay, framing ruled out). Not our code, so can't be locked
+  in; detect it with an "ad seen" log line (#91). ([RESEARCH-EMBED-ADS](docs/RESEARCH-EMBED-ADS.md))
+
 ## Shipped on main (scope doc = manual test)
 
 - HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));
@@ -44,6 +56,8 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
 2. #43 fallback; GitHub Pages must serve the hosted player page (phone needs it).
 3. #61 store compliance (LICENSE, versions.json, `x.y.z` tags, Obsidian lint: 32 errors).
 4. #62 device test of merged-but-untested features; #25, #5, #46, #48; bugs Isaiah lists.
+5. Hardening review ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md)): Batch 0 built; Batches 1–3
+   wait for Isaiah's answers to D1–D4 there.
 
 ## How to ship and test
 

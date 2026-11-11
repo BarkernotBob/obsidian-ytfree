@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePlayerMessage, playerErrorText, playerPageUrl, qualityLabel } from "../src/youtube-player.ts";
+import { logLine, parsePlayerMessage, playerErrorText, playerPageUrl, qualityLabel } from "../src/youtube-player.ts";
 
 test("playerPageUrl carries the video, a whole-second start and a non-1 speed", () => {
   assert.equal(
@@ -32,4 +32,23 @@ test("quality and error text", () => {
   assert.match(playerErrorText(150), /doesn't allow/);
   assert.match(playerErrorText(153), /153/);
   assert.match(playerErrorText("x"), /\(x\)/);
+});
+
+test("playerPageUrl asks for a cued, unstarted player only when told not to play", () => {
+  assert.equal(
+    playerPageUrl("aqz-KE-bpKQ", 12, 1, false),
+    "https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ&t=12&play=0",
+  );
+  assert.equal(playerPageUrl("aqz-KE-bpKQ", 12, 1, true), "https://barkernotbob.github.io/obsidian-ytfree/player/?v=aqz-KE-bpKQ&t=12");
+});
+
+test("log messages keep plain values only, and print as one line", () => {
+  assert.deepEqual(
+    parsePlayerMessage({ source: "ytfree-player", type: "log", event: "youtube state", to: 2, vis: "hidden", obj: { x: 1 } }),
+    { type: "log", event: "youtube state", data: { to: 2, vis: "hidden" } },
+  );
+  assert.equal(parsePlayerMessage({ source: "ytfree-player", type: "log" }), null);
+  const at = new Date(2026, 10, 10, 17, 4, 5, 7);
+  assert.equal(logLine(at, "page", "youtube state", { to: 2, vis: "hidden" }), "17:04:05.007 page · youtube state to=2 vis=hidden");
+  assert.equal(logLine(at, "plugin", "opened"), "17:04:05.007 plugin · opened");
 });

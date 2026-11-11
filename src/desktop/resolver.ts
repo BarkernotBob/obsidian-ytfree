@@ -61,6 +61,9 @@ const CANDIDATE_PATHS = [
   "/usr/local/bin/yt-dlp",
   "/usr/bin/yt-dlp",
   "/opt/local/bin/yt-dlp",
+  // Last: whatever the app's own PATH finds. The only candidate that can match
+  // on Windows, and the one that finds `~/.local/bin` on Linux.
+  "yt-dlp",
 ];
 
 export async function findYtDlp(configuredPath: string): Promise<string> {

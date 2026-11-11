@@ -2,10 +2,8 @@
   "name": "obsidian-ytfree",
   "version": "0.1.0",
   "description": "Ad-free YouTube playback inside Obsidian notes",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "main": "main.js",
+  "private": true,
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
@@ -17,7 +15,7 @@
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
   "keywords": [],
-  "author": "",
+  "author": "BarkernotBob",
   "license": "MIT",
   "type": "module",
   "devDependencies": {
