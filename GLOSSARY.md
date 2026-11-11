@@ -330,3 +330,20 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - iPhone: YouTube's player can't be started from our button (measured 2026-11-11, even muted),
   so the first switch per video needs one tap on its play button; after that its frame is kept
   loaded behind ours so later switches start by themselves. Pages serves `gh-pages`, not `docs/`.
+
+
+
+### 2026-11-10 (store defaults and helpers; Isaiah)
+
+- **New installs start with the note tidy off and Smart Speed off.** An install that already
+  has a `data.json` keeps what it was running with (`sanitizeSettings` in `src/settings.ts`).
+- **Desktop helpers:** yt-dlp and ffmpeg. Hidden, not removed: nobody is asked to install
+  anything, their settings sit in a folded section, and the instructions are in
+  `docs/DESKTOP-HELPERS.md`. No Notice says yt-dlp is missing. Removing them is revisited
+  after launch.
+- **Pop-out windows** (a note dragged to its own desktop window) are not supported in the MVP.
+- **Settings search** (Obsidian 1.13+) is MVP: the tab is data in `src/settings-tab.ts`,
+  drawn by `getSettingDefinitions()` on 1.13+ and by `display()` before it.
+- Lint warnings do not block a store release; only errors do
+  ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md), section 3).
+

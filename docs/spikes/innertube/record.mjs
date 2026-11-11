@@ -7,7 +7,7 @@
  * YouTube's shape changing — and a hand-written fixture can only ever confirm
  * my own idea of the shape.
  *
- *   node spikes/innertube/record.mjs
+ *   node docs/spikes/innertube/record.mjs
  *
  * Writes into tests/fixtures/. Re-run it when a fixture starts looking stale;
  * the diff is the interesting part.

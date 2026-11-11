@@ -9,7 +9,7 @@ plugin no new relationship with YouTube.
 it when the fixtures start looking stale. The diff is the interesting part.
 
 ```
-node spikes/search/record.mjs
+node docs/spikes/search/record.mjs
 ```
 
 ## What the response actually contains (measured 2026-07-28)

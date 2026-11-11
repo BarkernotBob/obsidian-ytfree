@@ -22,7 +22,7 @@ Pure rule: `src/keep-playing.ts`, tested in `tests/keep-playing.test.ts`.
 ## The open question (cases 3 and 4)
 
 Whether WebKit inside the Obsidian iOS app accepts a `play()` while the app is in the background
-is not known. That is the same question `spikes/lock-audio` (GitHub #26) asks, and nobody has run it.
+is not known. That is the same question `docs/spikes/lock-audio` (GitHub #26) asks, and nobody has run it.
 This build answers it directly: if the sound keeps going after locking, it works. If iOS refuses,
 the pause stands exactly as before (the background guard still stops WebKit's surprise resume on
 the way back), and the lock screen's Play still resumes by hand.

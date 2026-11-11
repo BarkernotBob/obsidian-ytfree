@@ -3,8 +3,8 @@
 **Written:** 2026-11-10, from Isaiah's ask: review the project "to optimize, standardize, cleanup,
 simplify, and harden the code to make it ready to ship to obsidian users."
 
-**Status:** review done on main `f7472ea` (after #79 and #83). Batch 0 is built on this PR.
-Batches 1–3 wait for Isaiah's OK and his answers to the decisions in section 3.
+**Status:** review done on main `f7472ea`. Batch 0 merged (PR #85). Batch 1 built 2026-11-10 after
+Isaiah's answers (section 3); **manual test passed 2026-11-10** (Isaiah, Mac and phone: "All looks good"). Batches 2–3 are in #86 and #87.
 
 **Ground rule:** no behaviour change without a test or a decision. Nothing here probes YouTube.
 
@@ -58,31 +58,63 @@ defaults written for one Mac.
 - hls.js is 62% of the bundle. The light build drops alternate audio, which HD needs, so no easy
   saving. Leave.
 - Settings search (`getSettingDefinitions`, Obsidian 1.13+): one lint warning, new API.
-- Repo tidy: `issues/` (49 files, 472 KB) and `spikes/` are history; archive under `docs/archive/`.
+- Repo tidy: `issues/` (49 files, 472 KB) and `docs/spikes/` are history; archive under `docs/archive/`.
 
-## 3. Decisions for Isaiah
+## 3. Decisions (Isaiah, 2026-11-10)
 
-| # | Question | My recommendation |
+| # | Question | Answer |
 |---|---|---|
-| D1 | Should new installs auto-trash watched, unwritten video notes after 30 days? | **Off for new installs** (0 days), with the setting described in the README. Your own vault keeps 30: the value is already saved in your `data.json`. A plugin that removes notes nobody asked it to is the most likely one-star review, even though it only uses the trash |
-| D2 | Other defaults a stranger gets: *Open YouTube links here* on, transcript auto-fetch on (one more YouTube request per video opened), Smart Speed on, hourly feed checks | Keep all four. They are the product. Say each one in the README |
-| D3 | Support Obsidian pop-out windows in the MVP? | No. Fix timers now; file the 52 `document` uses as a post-MVP issue |
-| D4 | Keep `setup.sh` (installs Homebrew and yt-dlp) in the README? | Move it to `docs/DEVELOPING.md`. Store users install from Community plugins and need no yt-dlp |
+| D1 | Auto-trash watched, unwritten video notes after 30 days by default? | **Off for new installs.** Existing installs keep what they had |
+| D2 | Other defaults a stranger gets | **Smart Speed off for new installs.** Open YouTube links here, transcript auto-fetch and hourly feed checks stay on |
+| D3 | Pop-out windows in the MVP? | **No.** Post-MVP (#87) |
+| D4 | yt-dlp, ffmpeg and `setup.sh` | **Hide them.** Nobody is asked to install anything; the settings sit in a folded "Desktop helpers (optional)" section and the instructions live in [DESKTOP-HELPERS](DESKTOP-HELPERS.md). Removing yt-dlp outright is revisited after launch |
+| D5 | Settings search (Obsidian 1.13+) | **MVP.** Built in Batch 1 |
+
+### Lint warnings: do they block? (checked 2026-11-10)
+
+No. Obsidian's scanner downgrades almost every rule to an advisory warning; only errors stop a
+plugin being installable, and there are none. Six rules stay errors (`no-eval`,
+`no-implied-eval`, two `no-unsanitized` rules, `regex-lookbehind`, `no-forbidden-elements`).
+The scanner ignores the repo's ESLint config, honours inline disable comments, and lints
+everything outside its own exclusion list (which excludes `docs/`, tests, `*.mjs`, `scripts/`).
+Sources: [scanner configuration](https://github.com/obsidianmd/eslint-plugin/blob/master/docs/configuration.md),
+[submit your plugin](https://docs.obsidian.md/plugins/releasing/submit-plugin). How warnings
+map to the public scorecard is not documented.
+
+Of the 103 warnings on `f7472ea`: 52 `document` uses and 4 timers are real but only in pop-out
+windows (#87); 19 Node imports in `src/desktop/` are by design; 13 deprecated Obsidian calls
+have no replacement before 1.13 and stay while `minAppVersion` is 1.8.7; the rest are fixed or
+harmless.
 
 ## 4. Batches
 
-- **Batch 0 (this PR, built):** H1; H2's two code fixes; `strict`, `noUnusedLocals`,
-  `noUnusedParameters` on in `tsconfig.json`; 7 unused declarations removed; `package.json`
-  `main`/`author` corrected and marked private. No behaviour change on a Mac.
-- **Batch 1 (MVP):** H3, H4 per D1, H5, H7, H8, rest of H2.
-- **Batch 2 (MVP if time):** H6, H9, H13.
-- **Batch 3 (after release, or when no PR is open):** H10, H11.
+- **Batch 0 (PR #85, merged):** H1; H2's two code fixes; `strict`, `noUnusedLocals`,
+  `noUnusedParameters`; 7 unused declarations removed; `package.json` corrected.
+- **Batch 1 (built):** D1, D2, D4, D5; H3 store README, `docs/DEVELOPING.md`,
+  `docs/DESKTOP-HELPERS.md`; H5 developer commands only with *Debug logs* on; H7
+  `normalizePath` on the new-note folder; H8 `sanitizeSettings` (`src/settings.ts`, tested);
+  settings tab moved to `src/settings-tab.ts` as data drawn two ways; the once-a-session
+  "yt-dlp isn't installed" Notice removed; download folder is Videos on Windows and Linux;
+  `spikes/` moved to `docs/spikes/` so the scanner skips it.
+- **Batch 2 (#86):** rest of H6, H9, H13; move `tools/*.ts` where the scanner skips them.
+- **Batch 3 (#87, after release):** H10, H11, pop-out windows.
 
 ## Manual test
 
-Batch 0 changes nothing visible on a Mac or phone. One check, after the next vault build:
+Batch 1, on the Mac and the phone, after the next vault build. Your settings must not change.
 
-1. Open a video note on the Mac and press Play. Expect it to play as before.
-2. Settings → YT Free: the yt-dlp line still shows the version it found.
-
-Batches 1–3 add their own steps here as they land.
+1. Open **Settings → YT Free**. Expect the same settings as before, grouped under the same
+   headings, and a new last section on the Mac: **Desktop helpers (optional)** holding yt-dlp
+   path, ffmpeg path and Download folder.
+2. Check two values you know: *Tidy empty notes after* still shows 30, and *Compress pauses*
+   is as you left it (off in Isaiah's vault on 2026-11-10). New installs start at 0 and off.
+3. Move one slider and flip one toggle, close settings, reopen. Expect both to have stuck.
+   Put them back.
+4. In the settings search box (Obsidian 1.13+), type `lookback`. Expect YT Free's *Lookback*
+   row in the results.
+5. Under *Subscriptions hub*, press **Show list…** on *Removed from search*, close it. Expect
+   the settings page to redraw without errors.
+6. Command palette: type `dock`. Expect no "Diagnose the dock badge". Turn on *Log what the
+   player is doing*, look again: it is there. Turn the log back off.
+7. Play a video on the Mac. Expect no "yt-dlp isn't installed" pop-up on any machine.
+8. On the phone: open settings, expect the same rows as before and no Desktop helpers section.

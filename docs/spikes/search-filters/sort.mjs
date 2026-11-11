@@ -13,7 +13,7 @@
  * upload date; if WEB sorts and ANDROID does not, the encoding is right and (b)
  * is the answer.
  *
- *   node spikes/search-filters/sort.mjs
+ *   node docs/spikes/search-filters/sort.mjs
  */
 
 const CLIENTS = {

@@ -20,7 +20,7 @@
  *
  * The request lives in `innertube.ts`; this file is pure so it can be tested
  * against recorded fixtures with no app and no network — see
- * `spikes/search/record.mjs`.
+ * `docs/spikes/search/record.mjs`.
  */
 
 /** One search hit, before it becomes a `HubItem`. */
@@ -46,7 +46,7 @@ export interface SearchResult {
    *
    * The response is not one list. Only the first video-bearing item section is
    * the answer; the sections below it are loosely-related videos that no sort
-   * and no filter is applied to (measured — `spikes/search-filters/sections.mjs`
+   * and no filter is applied to (measured — `docs/spikes/search-filters/sections.mjs`
    * — a view-count-sorted response has a perfectly ordered first section and an
    * unordered one underneath). Flattening them together is what made a sorted
    * list look random, so the hub draws these under their own heading instead.

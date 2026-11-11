@@ -1,6 +1,6 @@
 # Spike — can Obsidian mobile host a YouTube iframe?
 
-Throwaway. Delete once [issue 004](../../issues/004-mobile-viewer.md) is answered.
+Throwaway. Delete once [issue 004](../../../issues/004-mobile-viewer.md) is answered.
 
 Plain JS, no build step, `isDesktopOnly: false`. Separate plugin id (`ytfree-spike`) so it
 cannot disturb the real plugin, which stays desktop-only until this comes back positive.

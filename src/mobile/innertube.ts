@@ -13,7 +13,7 @@
  * contexts get back formats with a plain `url` field. Measured 2026-07-27 over
  * ten videos — zero of twenty-seven formats needed signature descrambling, and
  * the URLs served bytes with no PO token. No `base.js`, no `eval`, no crypto.
- * Re-check with `spikes/innertube/probe.mjs`; if that goes red, this file is
+ * Re-check with `docs/spikes/innertube/probe.mjs`; if that goes red, this file is
  * what has to change.
  *
  * Everything below the fetch is a pure function over the JSON, and lives in

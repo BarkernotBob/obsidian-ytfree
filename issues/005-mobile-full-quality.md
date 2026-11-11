@@ -21,7 +21,7 @@ streams**.
 ## What the measurements already establish
 
 From the 2026-07-27 probe recorded in issue 004, re-runnable via
-[`spikes/innertube/probe.mjs`](../spikes/innertube/probe.mjs):
+[`docs/spikes/innertube/probe.mjs`](../docs/spikes/innertube/probe.mjs):
 
 | Fact | Consequence for this issue |
 |---|---|

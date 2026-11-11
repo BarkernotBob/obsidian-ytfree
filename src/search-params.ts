@@ -7,7 +7,7 @@
  * protobuf. So there is no way to offer YouTube's filters without encoding it,
  * and no library worth adding for what amounts to varints in two messages.
  *
- * This file is pure and has no `obsidian` import, so `spikes/search-filters/`
+ * This file is pure and has no `obsidian` import, so `docs/spikes/search-filters/`
  * can send exactly what the plugin sends. That mattered: a wrong `params` is
  * *ignored* by YouTube rather than rejected, so the only way to know an encoding
  * is right is to assert on the content of the results, which the spike does.

@@ -1,35 +1,20 @@
 # YT Free
 
-Play YouTube videos inside Obsidian notes without ads.
+Watch YouTube videos inside your Obsidian notes, in a plain video player, and take notes
+against them with clickable timestamps. Works on desktop and mobile. Nothing else to install.
 
-It does not strip ads out of YouTube's player — that is impossible, because YouTube
-stitches ads into the same stream as the content. Instead it skips the player entirely and
-plays the video's underlying stream in a plain HTML5 `<video>` element. On desktop with
-`yt-dlp` installed, yt-dlp finds that stream; otherwise (and always on mobile) YT Free asks
-YouTube for it directly. No install is needed. There is no ad in the bytes to begin with.
+YT Free does not strip ads out of YouTube's player. It skips that player: it asks YouTube for
+the video's stream and plays it in a normal `<video>` element. When a video's stream can't be
+reached, it falls back to YouTube's own embedded player in the same place.
 
-## Install (Mac)
+## Install
 
-Paste this into Terminal. It installs Homebrew and `yt-dlp` if you don't have
-them, downloads the latest release into your vault, and enables the plugin:
+In Obsidian: **Settings → Community plugins → Browse**, search for **YT Free**, then
+**Install** and **Enable**.
 
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/BarkernotBob/obsidian-ytfree/main/setup.sh)"
-```
-
-Run it again any time to update. If Obsidian was open while it ran, finish with
-Settings → Community plugins → reload → enable **YT Free**.
-
-Optional: `brew install ffmpeg` for downloads above 360p and better Smart Speed.
-
-## Install (from source)
-
-```bash
-echo "/path/to/your/vault" > .vault   # once
-./install.sh
-```
-
-Then: Obsidian → Settings → Community plugins → reload → enable **YT Free**.
+Until the plugin is listed there, install by hand: download `main.js`, `manifest.json` and
+`styles.css` from the [latest release](https://github.com/BarkernotBob/obsidian-ytfree/releases/latest)
+into `<your vault>/.obsidian/plugins/ytfree/`, then enable **YT Free** under Community plugins.
 
 ## Use
 
@@ -83,43 +68,21 @@ timestamp. An existing note for the video is reused (the hub's, or any note whos
   Share any YouTube link (from the YouTube app, Messages, Safari) → *Open in YT Free*.
 - **Anything else:** copy the link and run *Open YouTube URL from clipboard*.
 
-## How the expiry problem is handled
-
-Resolved stream URLs are time-limited **and** locked to your IP, so they die when the
-window lapses or you change networks. You never see this:
-
-- Notes store only the **video ID**, never a resolved URL. A note from a year ago works.
-- Resolution happens when the block renders, not when you paste.
-- URLs are cached in memory only, and treated as expired 10 minutes early.
-- If playback errors anyway, the player re-resolves, seeks back to where you were, and
-  resumes.
-
 ## Quality
 
-Playback starts at 360p within a few seconds, then silently upgrades to 1080p once the
-higher-quality stream resolves. The upgrade preserves your position. Turn it off in
-settings to stay at 360p.
+A video starts at 360p within a few seconds of pressing Play, then switches to HD (up to
+1080p) while it keeps playing. Nothing is requested from YouTube before you press Play.
+Settings → YT Free has switches for HD and for waiting until HD is ready before starting.
 
-Why: only the 360p progressive format plays in a bare `<video>` element. Higher
-resolutions are HLS, which needs `hls.js` (bundled) and a slower extraction path.
+## Smart Speed
 
-## Tests
+Skips the silences in a video and speeds through music, using the caption timing. Off by
+default; turn it on per video from the player's controls, or for every video in settings.
 
-```bash
-npm test
-```
+## Tidying
 
-Unit tests — URL parsing, expiry parsing, cache expiry. Fast, no network.
-
-```bash
-npm run smoke
-```
-
-A live canary against YouTube: one yt-dlp resolve and one byte read, about 5 requests.
-**Run this when playback breaks**: it tells you whether YouTube changed extraction. The usual
-fix is `brew upgrade yt-dlp`. It runs at most once per 24 hours per machine
-(`npm run smoke -- --force` overrides), because bursts of live requests got a home network
-bot-flagged once. The old full live suite is parked as `npm run smoke:full`.
+Off by default. If you turn on *Tidy empty notes after* in settings, a video note you played
+and never wrote in is moved to Obsidian's trash after that many days.
 
 ## Network use and privacy
 
@@ -136,13 +99,15 @@ or your vault to its author or anyone else.
 - **A notification address you enter** (optional, blank by default): when you fill it in, new
   videos are POSTed there.
 
-**Optional desktop helpers.** If you install [`yt-dlp`](https://github.com/yt-dlp/yt-dlp)
-(and optionally `ffmpeg`), YT Free runs them on desktop for HD, downloads and Smart Speed.
-They are separate programs you install yourself; YT Free never downloads or installs them.
-Without them it plays through its own stream on desktop and mobile.
+**Optional desktop helpers.** YT Free needs nothing installed. If
+[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) or `ffmpeg` is already on your computer, YT Free
+runs them on desktop for offline downloads and finer Smart Speed. They are separate programs
+you install yourself; YT Free never downloads or installs them
+([details](docs/DESKTOP-HELPERS.md)).
 
-**Files outside your vault.** On desktop, downloaded videos go to `~/Movies/YT Free` (or the
-folder you choose in settings). (Versions before
+**Files outside your vault.** Only if you use offline downloads (desktop, needs yt-dlp):
+downloaded videos go to a `YT Free` folder in Movies (Videos on Windows and Linux), or the folder
+you choose in settings. (Versions before
 sign-in was removed kept a cookie file in `~/Library/Application Support/obsidian-ytfree/`;
 YT Free deletes it on first load.)
 
@@ -166,10 +131,16 @@ told otherwise. If the hub never matches between devices, check that first.
 
 ## Known limitations
 
-- Breaks when YouTube changes how its streams are reached. This is a maintenance
-  treadmill, not set-and-forget. On desktop the usual fix is `brew upgrade yt-dlp`.
-- First resolve after a yt-dlp upgrade is slow (it recompiles its JS challenge solver);
-  later ones are much faster.
+- YT Free reads YouTube through interfaces YouTube does not document. When YouTube changes
+  them, playback through our own stream can stop until the plugin is updated. Until then
+  videos play in YouTube's embedded player.
+- Pop-out windows (a note dragged out to its own Obsidian window on desktop) are not supported
+  yet: play videos in the main window.
+- Offline downloads are desktop only and need yt-dlp ([details](docs/DESKTOP-HELPERS.md)).
+
+## Developing
+
+See [docs/DEVELOPING.md](docs/DEVELOPING.md).
 
 ## License
 

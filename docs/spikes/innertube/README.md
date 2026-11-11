@@ -1,12 +1,12 @@
 # Spike — InnerTube resolver
 
 Not throwaway, unlike `../mobile-iframe`. Keep this: it is the standing check on the one
-assumption [issue 004](../../issues/004-mobile-viewer.md) and
-[issue 005](../../issues/005-mobile-full-quality.md) are both built on, and that assumption
+assumption [issue 004](../../../issues/004-mobile-viewer.md) and
+[issue 005](../../../issues/005-mobile-full-quality.md) are both built on, and that assumption
 is YouTube's to revoke at any time.
 
 ```bash
-node spikes/innertube/probe.mjs
+node docs/spikes/innertube/probe.mjs
 ```
 
 Exits non-zero if anything regressed. Run it **before** touching mobile code, and again
