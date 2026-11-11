@@ -107,7 +107,7 @@ in the settings screen the button beside it opens. The footnote in the panel say
 
 The panel is built at construction and hidden with `visibility`, not created on
 the click and never `display: none`: it is absolutely positioned off the control
-row, so opening it moves nothing — `tools/controls-harness.mjs` now measures the
+row, so opening it moves nothing — `scripts/controls-harness.mjs` now measures the
 bar's height with the panel open and shut and reports the difference, which is
 0 at every width. It opens upwards over the video, because the video is the one
 thing on screen you are not reading while you are changing how it plays. A tap

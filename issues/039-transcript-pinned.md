@@ -94,7 +94,7 @@ picture, title, facts, a *readable* description and a full-height transcript do
 not all fit in 390 points. At rest the transcript wins; opening the description
 buys 30vh of text at the price of the sheet scrolling while it is open.
 
-Measured rather than reasoned about — `node tools/preview-sheet-harness.mjs`
+Measured rather than reasoned about — `node scripts/preview-sheet-harness.mjs`
 renders the real DOM against Obsidian's own `app.css` at 390×844 and 844×390 and
 reports every number above.
 

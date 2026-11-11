@@ -85,7 +85,7 @@ Every state change on this screen is colour-only or pre-reserved:
 - the status strip has a fixed height and does not wrap;
 - separators and the focus ring are box-shadows, which cost no layout.
 
-`tools/search-screen-harness.mjs` measures this rather than asserting it: it
+`scripts/search-screen-harness.mjs` measures this rather than asserting it: it
 renders the screen under Obsidian's own `app.css` at 390×844 and at desktop
 size, sets two filters, swaps the state block through all five messages, and
 reports anything whose box moved. It found the one real defect in the first
@@ -170,7 +170,7 @@ button, 16px on the input so iOS does not zoom on focus, dropdowns two-up at
 
 - **The card itself.** Result cards share `buildCard` with the whole hub;
   [023](023-card-controls-layout.md) settled its two-up phone layout, and
-  `tools/phone-hub-harness.mjs` measures it. Only `.ytfree-hub-result` spacing
+  `scripts/phone-hub-harness.mjs` measures it. Only `.ytfree-hub-result` spacing
   and the separators between cards were touched.
 - **The hub's own "Filter these videos" box**, which stays visually distinct on
   purpose.

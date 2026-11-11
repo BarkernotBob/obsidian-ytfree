@@ -23,7 +23,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   uploads by that channel only. Every channel, every 60 minutes, 5 at a time, stalest first;
   Sync now checks every channel too. A channel's first check after an import seeds its videos
   without sending a notification. Code: `src/feed-schedule.ts`.
-- **Feed torture test** (GitHub #66, 2026-11-09, Isaiah's ask): `tools/feed-torture.ts` on his Mac,
+- **Feed torture test** (GitHub #66, 2026-11-09, Isaiah's ask): `scripts/feed-torture.ts` on his Mac,
   home Wi-Fi. 3,710 feed requests (18 and 300 channels; 300 at once, 900 back to back, 1,800 over
   30 min, one feed ×100) with zero failures, no bot check, and video lookups fine after each. So
   the poll rounds and 120-feeds-an-hour ceiling built in #70 were removed, and the default poll
@@ -346,4 +346,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   drawn by `getSettingDefinitions()` on 1.13+ and by `display()` before it.
 - Lint warnings do not block a store release; only errors do
   ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md), section 3).
+
+### 2026-11-11 (hardening Batch 2; Claude's calls, open to change)
+
+- `tools/` is now `scripts/`: Obsidian's scanner skips a folder with that name, so developer
+  scripts stop counting against the plugin's scorecard.
+- Releases carry build provenance, and Dependabot opens one grouped update a month per
+  ecosystem. TypeScript stays pinned.
+- The plugin's four data files are read together at load, not in sequence.
 

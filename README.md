@@ -55,7 +55,7 @@ timestamp. An existing note for the video is reused (the hub's, or any note whos
 - **In a note:** on by default (Settings → YouTube links → *Open YouTube links here*).
 - **The door:** `obsidian://ytfree?url=<YouTube URL, URL-encoded>`. Everything below uses it.
 - **Other Mac apps** (Mail, Messages, Slack): install [Finicky](https://github.com/johnste/finicky),
-  copy `tools/finicky.js` to `~/.finicky.js`, and set `defaultBrowser` in it to your browser.
+  copy `scripts/finicky.js` to `~/.finicky.js`, and set `defaultBrowser` in it to your browser.
   Video links go to Obsidian; everything else goes to the browser as before.
 - **Inside the browser:** Settings → YouTube links → *Browser bookmarklet* → Copy. Make a
   bookmark and paste that as its address. Click it on a YouTube video tab.

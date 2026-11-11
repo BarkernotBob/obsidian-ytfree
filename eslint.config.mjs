@@ -4,7 +4,7 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import obsidianmd from "eslint-plugin-obsidianmd";
 
 export default defineConfig([
-  globalIgnores(["node_modules", "main.js", "esbuild.config.mjs", "version-bump.mjs", "tools", "tests", "docs", "templates"]),
+  globalIgnores(["node_modules", "main.js", "esbuild.config.mjs", "version-bump.mjs", "scripts", "tests", "docs", "templates"]),
   ...obsidianmd.configs.recommended,
   // `src/desktop/` is the one place Node is allowed: it is reached only through
   // `await import()` inside a `Platform.isDesktopApp` branch, and the build fails

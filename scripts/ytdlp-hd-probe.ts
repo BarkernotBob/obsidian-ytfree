@@ -1,7 +1,7 @@
 /**
  * The desktop HD path from yt-dlp's files, end to end outside the app.
  *
- *   node tools/ytdlp-hd-probe.ts [videoId ...]
+ *   node scripts/ytdlp-hd-probe.ts [videoId ...]
  *
  * Runs `yt-dlp -J`, builds the stitched stream exactly as the plugin does
  * (`resolveHdFromYtDlp`, including the check past the first minute), then

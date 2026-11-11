@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { LIVE_RUN_GAP_MS, mayRun, stamp } from "../tools/live-budget.mjs";
+import { LIVE_RUN_GAP_MS, mayRun, stamp } from "../scripts/live-budget.mjs";
 
 function freshStampDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "ytfree-stamps-"));
@@ -28,7 +28,7 @@ test("a live run is allowed once per 24 hours, and --force overrides", () => {
 test("npm run smoke stops before any request when today's run is spent", () => {
   const dir = freshStampDir();
   stamp("smoke");
-  const result = spawnSync(process.execPath, ["tools/smoke.mjs"], {
+  const result = spawnSync(process.execPath, ["scripts/smoke.mjs"], {
     env: { ...process.env, YTFREE_STAMP_DIR: dir },
     encoding: "utf8",
   });

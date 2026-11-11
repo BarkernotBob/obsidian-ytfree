@@ -3,7 +3,7 @@
  * budget (GitHub #39). The limit is checked here, before node's test runner
  * starts, because test files cannot see `--force` on the command line.
  *
- *   node tools/smoke.mjs [--full] [--force]
+ *   node scripts/smoke.mjs [--full] [--force]
  */
 import { spawnSync } from "node:child_process";
 import { mayRun, stamp } from "./live-budget.mjs";

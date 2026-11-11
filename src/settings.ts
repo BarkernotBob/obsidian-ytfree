@@ -14,7 +14,7 @@ export interface YtFreeSettings {
   ytDlpPath: string;
   /**
    * Developer only, set by hand in `data.json`: a folder made by
-   * `tools/make-offline-hd.mjs`. Every video then plays from it, 360p and HD,
+   * `scripts/make-offline-hd.mjs`. Every video then plays from it, 360p and HD,
    * with no request to YouTube (GitHub #38). Not in the settings tab.
    */
   devOfflineHd?: string;
@@ -194,7 +194,7 @@ export const DEFAULT_SETTINGS: YtFreeSettings = {
   downloadFolder: "",
   ffmpegPath: "",
   // Hourly. #66 weighed two hours and kept one: feed traffic was measured
-  // safe (tools/feed-torture.ts), and a feed only holds its last 15 videos.
+  // safe (scripts/feed-torture.ts), and a feed only holds its last 15 videos.
   subscriptionsPollMinutes: 60,
   subscriptionsExpiryDays: 0,
   subscriptionsIncludeShorts: false,

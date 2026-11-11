@@ -18,7 +18,7 @@ ladder applies: six tries up to 8 s apart, and up to two minutes per load.
 A jump past the refused point hits the same ladder before anything plays, which fits "sometimes
 really long": short jumps land inside what is buffered or what is served, and long ones don't.
 
-`tools/hd-probe.ts` measures this on a live video (resolve time, per-client segment status at 0
+`scripts/hd-probe.ts` measures this on a live video (resolve time, per-client segment status at 0
 to 180 s). It has not reported back yet. If it shows something else, this scope changes.
 
 ## v1

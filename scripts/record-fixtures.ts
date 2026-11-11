@@ -1,8 +1,8 @@
 /**
  * Record one video as a replay fixture (GitHub #38).
  *
- *   node tools/record-fixtures.ts <videoId> [--name <dir>]     from YouTube
- *   node tools/record-fixtures.ts --offline <folder> --name <dir>   from disk
+ *   node scripts/record-fixtures.ts <videoId> [--name <dir>]     from YouTube
+ *   node scripts/record-fixtures.ts --offline <folder> --name <dir>   from disk
  *
  * From YouTube it is human-run and guarded like the smoke canary: once a day
  * per machine (`--force` overrides), and it prints what it sent. One video
@@ -10,11 +10,11 @@
  * each HD file's opening (about 7): roughly 10 requests, once, after which
  * `npm test` replays them forever with none.
  *
- * `--offline` records a folder made by `tools/make-offline-hd.mjs` instead,
+ * `--offline` records a folder made by `scripts/make-offline-hd.mjs` instead,
  * with no network at all; that is how `tests/fixtures/replay/synthetic` was
  * made.
  *
- * The layout and the URL rewriting are in `tools/fixture-format.ts`.
+ * The layout and the URL rewriting are in `scripts/fixture-format.ts`.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -37,7 +37,7 @@ const flag = (name: string): string | undefined => {
 const offline = flag("--offline");
 const videoId = offline ? "synthetic" : args.find((a) => !a.startsWith("--") && a !== flag("--name"));
 if (!videoId) {
-  console.log("usage: node tools/record-fixtures.ts <videoId> | --offline <folder> --name <dir>");
+  console.log("usage: node scripts/record-fixtures.ts <videoId> | --offline <folder> --name <dir>");
   process.exit(1);
 }
 const name = flag("--name") ?? videoId;
@@ -143,7 +143,7 @@ if (player) writeFileSync(join(out, "player-android.json"), JSON.stringify(rewri
 if (captionText) writeFileSync(join(out, "captions", "en.json3"), captionText);
 writeFileSync(
   join(out, "about.json"),
-  JSON.stringify({ source: offline ? "tools/make-offline-hd.mjs (synthetic)" : `youtube:${videoId}`,
+  JSON.stringify({ source: offline ? "scripts/make-offline-hd.mjs (synthetic)" : `youtube:${videoId}`,
     recordedAt: new Date().toISOString().slice(0, 10), files: recorded }, null, 1) + "\n",
 );
 console.log(`Recorded ${name}: ${recorded.join(", ")}`);

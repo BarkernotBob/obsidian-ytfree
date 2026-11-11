@@ -7,7 +7,7 @@
 
 **Status:** **Built 2026-10-13** (GitHub #3) — awaiting manual test, below. Parsing in
 `src/handoff.ts` (tested in `tests/handoff.test.ts`), opening in `openYouTubeUrl` in `main.ts`,
-Finicky config in `tools/finicky.js`, setup in the README.
+Finicky config in `scripts/finicky.js`, setup in the README.
 
 Per the repo rule: the smallest version worth having. Everything under *Out of scope* is a v2
 ticket, not a stretch goal.
@@ -95,7 +95,7 @@ leads with.
    `obsidian://ytfree?url=https%3A%2F%2Fyoutu.be%2F-X4ZD3fisSs%3Ft%3D90`: same result as step 1.
 4. Open `obsidian://ytfree?url=https%3A%2F%2Fwww.youtube.com%2F%40wardonwords`: a Notice says
    it is not a video link, and no note is made.
-5. Mac: install Finicky, copy `tools/finicky.js` to `~/.finicky.js`, set `defaultBrowser`. Send
+5. Mac: install Finicky, copy `scripts/finicky.js` to `~/.finicky.js`, set `defaultBrowser`. Send
    yourself the link from step 1 in Mail or Messages and click it: same result. A non-YouTube link
    still opens in your browser.
 6. Copy the bookmarklet from Settings, save it as a bookmark, click it on a YouTube video tab.

@@ -19,14 +19,14 @@
  *
  * What it deliberately does not measure: the inside of a card. The card is
  * issue 023's two-up phone layout, shared with the rest of the hub, and
- * `tools/phone-hub-harness.mjs` already measures it. The cards here are
+ * `scripts/phone-hub-harness.mjs` already measures it. The cards here are
  * stand-ins of the right height, present so the headings, the separators and
  * the More button below them are measured in place.
  *
  * Not part of `npm test`: it needs Obsidian's app.css and a Playwright browser.
  * Run it when the search screen's layout changes.
  *
- *   node tools/search-screen-harness.mjs
+ *   node scripts/search-screen-harness.mjs
  */
 
 import { execFileSync } from "node:child_process";

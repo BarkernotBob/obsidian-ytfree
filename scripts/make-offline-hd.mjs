@@ -1,7 +1,7 @@
 /**
  * Make a folder the offline HD player plays from (GitHub #38). No network.
  *
- *   node tools/make-offline-hd.mjs <any local video> <output folder>
+ *   node scripts/make-offline-hd.mjs <any local video> <output folder>
  *
  * Writes what YouTube would serve for one video, from a file on disk:
  * fragmented MP4s with the `sidx` up front at 1080p, 720p and 480p (H.264,
@@ -20,7 +20,7 @@ import { join, resolve } from "node:path";
 
 const [input, outArg] = process.argv.slice(2);
 if (!input || !outArg) {
-  console.log("usage: node tools/make-offline-hd.mjs <video file> <output folder>");
+  console.log("usage: node scripts/make-offline-hd.mjs <video file> <output folder>");
   process.exit(1);
 }
 const out = resolve(outArg);

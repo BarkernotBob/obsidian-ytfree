@@ -13,7 +13,7 @@ playing.
    number measured against the wrong box. Inside Preview the panel's clipping
    ancestor is not the screen, it is `.modal-content`'s scroller, whose top edge
    is the top of the *video*. Measured on a 390×844 phone
-   (`tools/preview-sheet-harness.mjs`): the panel rendered at 30–280, the
+   (`scripts/preview-sheet-harness.mjs`): the panel rendered at 30–280, the
    scroller runs 76–768, so the first 46pt — the first two rows — were cut off.
    No `max-height` fixes this. A box cannot fit inside a shorter box.
 2. **The description scrolled sideways.** `overflow-y: auto` with `overflow-x`
