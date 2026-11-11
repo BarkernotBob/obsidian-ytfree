@@ -207,7 +207,7 @@ export class YtFreeSettingTab extends PluginSettingTab {
         heading: "Desktop helpers (optional)",
         advanced: {
           note:
-            "YT Free needs none of this. If yt-dlp is already on this computer, YT Free uses it for offline downloads; " +
+            "YouTube for You needs none of this. If yt-dlp is already on this computer, YouTube for You uses it for offline downloads; " +
             `ffmpeg adds downloads above 360p and finer Smart Speed. Setup steps: ${HELPERS_DOC}`,
         },
         rows: this.helperRows(),
@@ -367,16 +367,16 @@ export class YtFreeSettingTab extends PluginSettingTab {
       this.toggle(
         "openYouTubeLinksHere",
         "Open YouTube links here",
-        "A YouTube link clicked in a note opens in YT Free, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
+        "A YouTube link clicked in a note opens in YouTube for You, at the link's timestamp, instead of the browser. Links from other apps reach Obsidian through obsidian://ytfree?url=… — the README has the Mac and iPhone setup.",
       ),
       {
         name: "Browser bookmarklet",
-        desc: "Copies a bookmarklet that sends the YouTube tab you are on to YT Free. Make a new bookmark and paste this as its address.",
+        desc: "Copies a bookmarklet that sends the YouTube tab you are on to YouTube for You. Make a new bookmark and paste this as its address.",
         build: (setting) =>
           setting.addButton((button) =>
             button.setButtonText("Copy").onClick(async () => {
               await navigator.clipboard.writeText(HANDOFF_BOOKMARKLET);
-              new Notice("YT Free: bookmarklet copied.");
+              new Notice("YouTube for You: bookmarklet copied.");
             }),
           ),
       },

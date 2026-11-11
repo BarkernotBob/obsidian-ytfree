@@ -55,7 +55,7 @@ export class SilenceStore {
     } catch (err) {
       // A silence map is worth nothing next to the plugin loading, and the
       // worst case is one recompute.
-      console.error("YT Free: silence maps unreadable, starting empty.", err);
+      console.error("YouTube for You: silence maps unreadable, starting empty.", err);
     }
     return emptySilenceState();
   }
@@ -123,7 +123,7 @@ export class SilenceStore {
         this.state = onDisk;
         await this.app.vault.adapter.write(this.path, JSON.stringify(onDisk));
       })
-      .catch((err) => console.error("YT Free: could not write silence maps.", err));
+      .catch((err) => console.error("YouTube for You: could not write silence maps.", err));
     return this.saving;
   }
 }

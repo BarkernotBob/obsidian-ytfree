@@ -512,7 +512,7 @@ function assemble(
       (pending ??= rung.load().then(
         (r) => buildPlaylists(videoId, [r], audio).files[rungUrl(videoId, r.track.height)],
         (err: unknown) => {
-          console.warn(`YT Free: ${rung.meta.height}p would not load, using the top rung`, err);
+          console.warn(`YouTube for You: ${rung.meta.height}p would not load, using the top rung`, err);
           return topPlaylist;
         },
       ));

@@ -1,5 +1,5 @@
 /**
- * Subscribing inside YT Free (GitHub #65), the words and the choices, kept out
+ * Subscribing inside YouTube for You (GitHub #65), the words and the choices, kept out
  * of `hub.ts` so they can be tested without Obsidian.
  *
  * A subscription is the hub's own channel list and nothing else: no sign-in, no
@@ -20,12 +20,12 @@ export function subscribeButton(subscribed: boolean): SubscribeButton {
   return subscribed
     ? {
         text: "Subscribed",
-        title: "This channel is in your YT Free subscriptions.",
+        title: "This channel is in your YouTube for You subscriptions.",
         disabled: true,
       }
     : {
         text: "Subscribe",
-        title: "Add this channel to your YT Free subscriptions. Nothing is sent to YouTube.",
+        title: "Add this channel to your YouTube for You subscriptions. Nothing is sent to YouTube.",
         disabled: false,
       };
 }
@@ -44,17 +44,17 @@ export type SearchChannelMenuItem =
  */
 export function searchChannelMenu(subscribed: boolean): SearchChannelMenuItem[] {
   if (subscribed) {
-    return [{ key: "subscribed", title: "Subscribed in YT Free", icon: "check" }];
+    return [{ key: "subscribed", title: "Subscribed in YouTube for You", icon: "check" }];
   }
   return [
-    { key: "subscribe", title: "Subscribe in YT Free", icon: "plus" },
+    { key: "subscribe", title: "Subscribe in YouTube for You", icon: "plus" },
     { key: "hide", title: "Hide this channel", icon: "eye-off" },
   ];
 }
 
 /** The Notice after subscribing. */
 export function subscribedNotice(title: string): string {
-  return `YT Free: subscribed to ${title || "this channel"}. Its videos arrive in the hub on the next check.`;
+  return `YouTube for You: subscribed to ${title || "this channel"}. Its videos arrive in the hub on the next check.`;
 }
 
 /** Where Google Takeout starts. */

@@ -614,7 +614,7 @@ export class YtFreePlayer {
       if (this.nativeHls && this.upgraded) {
         // Same rule as stitched HD: a failed HD stream goes back to 360p where
         // the reader is, rather than retrying HD into "failed repeatedly".
-        console.warn("YT Free: native HD stream failed", this.video.error.code, this.video.error.message);
+        console.warn("YouTube for You: native HD stream failed", this.video.error.code, this.video.error.message);
         this.upgraded = false;
         this.setHd({ phase: "none", height: 360, reason: "HD stream failed" });
         void this.recover("HD unavailable, back to 360p");
@@ -1610,8 +1610,8 @@ export class YtFreePlayer {
       // temporary, because that is exactly the distinction it exists for.
       const el = panel.createEl("button", {
         cls: "ytfree-panel-link",
-        text: "All YT Free settings…",
-        attr: { "aria-label": "Open YT Free settings" },
+        text: "All YouTube for You settings…",
+        attr: { "aria-label": "Open YouTube for You settings" },
       });
       el.type = "button";
       el.addEventListener("click", (event) => {
@@ -3162,7 +3162,7 @@ export class YtFreePlayer {
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (!data.fatal) return;
         if (stream.virtual) {
-          console.warn("YT Free: HD stream failed", data.type, data.details, data.error?.message ?? "");
+          console.warn("YouTube for You: HD stream failed", data.type, data.details, data.error?.message ?? "");
           // Hours in, an expired URL is the likely cause, and a fresh HD
           // resolve is the cure. Any other failure means HD does not work for
           // this video right now: go back to 360p where the reader is, rather

@@ -31,7 +31,7 @@ export interface YtFreeSettings {
   pinnedPlayer: boolean;
   pinnedHeightVh: number;
   pinnedFrontmatterKeys: string;
-  /** YouTube links clicked in a note open in YT Free, not the browser (GitHub #3). */
+  /** YouTube links clicked in a note open in YouTube for You, not the browser (GitHub #3). */
   openYouTubeLinksHere: boolean;
   collapseProperties: boolean;
   collapseSections: boolean;

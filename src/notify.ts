@@ -178,7 +178,7 @@ export function unclaimed(
 
 /** "1 new video", "6 new videos" — the notification's own headline. */
 export function notificationTitle(count: number): string {
-  return `YT Free: ${count} new video${count === 1 ? "" : "s"}`;
+  return `YouTube for You: ${count} new video${count === 1 ? "" : "s"}`;
 }
 
 /**
@@ -238,7 +238,7 @@ export function buildPayload(items: readonly HubItem[], now: Date): Notification
 export function testPayload(now: Date): NotificationPayload {
   return {
     event: "ytfree.inbox",
-    title: "YT Free: test notification",
+    title: "YouTube for You: test notification",
     message: "If you are reading this on your phone, the webhook works.",
     count: 0,
     channels: [],
@@ -352,7 +352,7 @@ export async function sendNotification(
     return { ok: true };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    console.error("YT Free: notification webhook failed.", err);
+    console.error("YouTube for You: notification webhook failed.", err);
     return { ok: false, reason: "failed", error };
   }
 }
