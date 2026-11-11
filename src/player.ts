@@ -227,6 +227,8 @@ export interface YouTubeEmbedHandle {
   seek(seconds: number): void;
   play(): void;
   pause(): void;
+  /** Hidden but kept loaded, so a later switch back can start it without a tap. */
+  setParked(parked: boolean): void;
 }
 
 /**
@@ -401,6 +403,14 @@ export class YtFreePlayer {
   private stage!: HTMLElement;
   /** YouTube's own player, while it stands in for ours (#25). */
   private ytEmbed: YouTubeEmbedHandle | null = null;
+  /**
+   * YouTube's player after the YouTube button took the reader back to ours:
+   * paused and hidden, not torn down. iOS lets a frame start media only after
+   * a tap inside it (measured 2026-11-11: even a muted scripted start is
+   * refused), so the first switch to YouTube's player needs a tap on its play
+   * button; keeping that same frame means every later switch starts by itself.
+   */
+  private ytParked: YouTubeEmbedHandle | null = null;
   /** YouTube's player is there because our stream could not play (#43), not picked. */
   private ytFallback = false;
   private ytToggle: HTMLButtonElement | null = null;
@@ -2763,7 +2773,28 @@ export class YtFreePlayer {
   private async enterYouTubePlayer(open: NonNullable<QuickPanelOptions["youtubePlayer"]>): Promise<void> {
     const playing = this.pendingPlay || (!this.video.paused && !this.video.ended);
     const at = this.video.currentTime > 0 ? this.video.currentTime : this.resumeSeconds();
+    if (this.ytParked) {
+      this.unparkYouTubePlayer(this.ytParked, at, playing);
+      return;
+    }
     await this.openYouTubePlayer(open, false, at, playing);
+  }
+
+  /** The parked frame back over the picture, at ours's second, in ours's state. */
+  private unparkYouTubePlayer(embed: YouTubeEmbedHandle, at: number, playing: boolean): void {
+    this.ytParked = null;
+    this.setPendingPlay(false);
+    this.video.pause();
+    this.togglePanel(false);
+    if (Math.abs(embed.time() - at) > 1) embed.seek(at);
+    if (playing) embed.play();
+    embed.setParked(false);
+    this.ytEmbed = embed;
+    this.ytFallback = false;
+    this.ytLast = null;
+    this.container.addClass("is-youtube");
+    this.paintQualityChoice();
+    this.paintYouTubeToggle();
   }
 
   /**
@@ -2772,7 +2803,7 @@ export class YtFreePlayer {
    */
   private leaveYouTubePlayer(): void {
     const playing = this.ytLast?.playing ?? false;
-    const at = this.closeYouTubePlayer();
+    const at = this.closeYouTubePlayer(true);
     if (!playing || this.destroyed) return;
     void this.withMedia(() => {
       if (at > 0 && Math.abs(this.video.currentTime - at) > 1) this.video.currentTime = at;
@@ -2861,16 +2892,29 @@ export class YtFreePlayer {
     }
   }
 
-  /** Back to our player, paused where YouTube's got to; answers that second. */
-  private closeYouTubePlayer(): number {
+  /**
+   * Back to our player, paused where YouTube's got to; answers that second.
+   * `park` keeps YouTube's frame loaded and hidden (see `ytParked`); the
+   * fallback tier's frame is always torn down, since ours is being retried.
+   */
+  private closeYouTubePlayer(park = false): number {
     const embed = this.ytEmbed;
     if (!embed) return 0;
+    const parking = park && !this.ytFallback;
     this.ytEmbed = null;
     this.ytFallback = false;
     this.ytLast = null;
     this.container.removeClass("is-youtube");
     if (silencePlaying()) stopSilence();
-    const at = embed.close();
+    let at: number;
+    if (parking) {
+      at = embed.time();
+      embed.pause();
+      embed.setParked(true);
+      this.ytParked = embed;
+    } else {
+      at = embed.close();
+    }
     if (!this.destroyed && at > 0) this.video.currentTime = at;
     this.paintQualityChoice();
     this.paintYouTubeToggle();
@@ -3406,6 +3450,8 @@ export class YtFreePlayer {
     this.setImmersive(false);
     this.ytEmbed?.close();
     this.ytEmbed = null;
+    this.ytParked?.close();
+    this.ytParked = null;
     this.destroyed = true;
     if (this.qualityTimer !== null) window.clearTimeout(this.qualityTimer);
     this.unhushNativeControls();

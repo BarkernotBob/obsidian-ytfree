@@ -4,7 +4,7 @@
 simplify, and harden the code to make it ready to ship to obsidian users."
 
 **Status:** review done on main `f7472ea`. Batch 0 merged (PR #85). Batch 1 built 2026-11-10 after
-Isaiah's answers (section 3). Batches 2–3 are in #86 and #87.
+Isaiah's answers (section 3); **manual test passed 2026-11-10** (Isaiah, Mac and phone: "All looks good"). Batches 2–3 are in #86 and #87.
 
 **Ground rule:** no behaviour change without a test or a decision. Nothing here probes YouTube.
 

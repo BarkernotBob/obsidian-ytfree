@@ -67,3 +67,16 @@ Desktop without yt-dlp (e.g. a work computer): the button is on the bar, same fo
 The hosted page changes (paused hold, muted retry) go live only once this is merged to main,
 because GitHub Pages serves `docs/` from main. Before that, step 3 starts playing instead of
 staying paused.
+
+## Measured on the iPhone (2026-11-11)
+
+With the hosted page live (it is served from the `gh-pages` branch, not from main's `docs/`),
+Isaiah's iPhone (iOS 18.7, Obsidian 1.15.0, frame under `capacitor://localhost`) refused both a
+sound autoplay and the muted retry: the log shows "sound autoplay refused" and the player stays
+unstarted until a tap on YouTube's play. iOS lets a cross-site frame start media only after a tap
+inside it, so a start from our button is not possible. Accepted per Isaiah's rule: (a), one tap.
+
+Mitigation (v1.1): going back to ours **parks** YouTube's frame (paused, hidden, still loaded)
+instead of tearing it down, so the tap is needed once per video; every later switch to YouTube's
+player seeks and starts it by itself. Retest: switch to YouTube (tap its play once), back to ours,
+then to YouTube again: it should start without a tap.

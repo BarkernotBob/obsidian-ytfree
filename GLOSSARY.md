@@ -327,6 +327,10 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - No pin button on the player's control bar (Isaiah, 2026-11-10): the collapse arrow is enough,
   and the room goes to the YouTube button. The pinned player is still on/off from the command
   palette and the settings tab.
+- iPhone: YouTube's player can't be started from our button (measured 2026-11-11, even muted),
+  so the first switch per video needs one tap on its play button; after that its frame is kept
+  loaded behind ours so later switches start by themselves. Pages serves `gh-pages`, not `docs/`.
+
 
 
 ### 2026-11-10 (store defaults and helpers; Isaiah)

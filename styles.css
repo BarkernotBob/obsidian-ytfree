@@ -4000,6 +4000,11 @@ body.ytfree-immersive-open .ytfree-preview-close {
   z-index: 5;
   background: #000;
 }
+/* Kept loaded behind ours after the YouTube button went back (see `ytParked`). */
+.ytfree-yt-embed.is-parked {
+  visibility: hidden;
+  pointer-events: none;
+}
 .ytfree-yt-embed-frame {
   width: 100%;
   height: 100%;
