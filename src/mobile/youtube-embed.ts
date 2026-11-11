@@ -42,6 +42,8 @@ export interface YouTubeEmbed {
   seek(seconds: number): void;
   play(): void;
   pause(): void;
+  /** Hidden but kept loaded (the YouTube button took the reader back to ours). */
+  setParked(parked: boolean): void;
 }
 
 /** What the player reports, about once a second and on every change. */
@@ -141,6 +143,10 @@ export function mountYouTubePlayer(
     },
     play: () => send({ cmd: "play" }),
     pause: () => send({ cmd: "pause" }),
+    setParked(parked) {
+      box.toggleClass("is-parked", parked);
+      log("plugin", parked ? "parked" : "unparked", { at: Math.floor(lastTime) });
+    },
     close() {
       window.removeEventListener("message", onMessage);
       document.removeEventListener("visibilitychange", onVisibility);
