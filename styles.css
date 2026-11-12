@@ -1758,6 +1758,21 @@ body.ytfree-immersive-open {
   background: var(--background-secondary);
 }
 
+/* A video hidden from search: the picture box, empty, at the same size, so
+   the grid keeps its rows and Unhide swaps the picture in without moving
+   anything. No image is requested. */
+.ytfree-hub-thumb-hidden {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35em;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  --icon-size: 16px;
+}
+
 .ytfree-hub-thumb img {
   width: 100%;
   height: 100%;
@@ -2856,9 +2871,34 @@ body.ytfree-immersive-open {
 }
 
 /* Taller than the desktop row: the restore button is the only target on it and
-   a 56px row on a phone is a line of text you have to aim at. */
+   a 56px row on a phone is a line of text you have to aim at.
+   Still a flex line, never the phone card's block: as a block the text stacked
+   to ~60px inside a fixed 64px row and pushed the restore button below it,
+   clipped and over the next row, so nothing could be restored on a phone. A
+   minimum height, not a fixed one, and a gap, so rows never overlap. */
 .ytfree-hub.ytfree-phone .ytfree-hub-hidden-row {
-  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: auto;
+  min-height: 64px;
+  margin-bottom: 8px;
+  padding: 6px 4px 6px 0;
+  overflow: visible;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-hidden-row .ytfree-hub-meta {
+  flex: 1 1 auto;
+  padding: 0 0 0 10px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-hidden-row .ytfree-hub-title {
+  height: auto;
+  max-height: 2.6em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-hidden-row .ytfree-hub-sub {
+  height: auto;
 }
 
 /* --------------------------------------------------------------- preview ---

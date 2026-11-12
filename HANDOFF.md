@@ -26,6 +26,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-10: one-tap YouTube player button on the phone bar
   ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)). Next: iPhone test; if YouTube
   needs a tap to start with sound, try a muted start then unmute in `docs/player/index.html`.
+- 2026-11-12: Remove vs Hide ([scope](docs/V1-SCOPE-HIDE-AND-REMOVE.md), branch
+  `claude/project-thread-tk97wv`): hub Remove → Removed list only; search Hide → Hidden list, text
+  card in later searches; phone Removed rows fixed. Next: Isaiah's D1–D3 answers + phone test.
 - 2026-11-11: Notes button reworked (see GLOSSARY): keyboard-only fold, cursor at the bottom of
   Notes, other YT Free buttons close the keyboard. Next: Isaiah's phone test.
 

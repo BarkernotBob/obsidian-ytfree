@@ -1123,7 +1123,12 @@ export function expireItems(
   return { items: survivors, removed: items.length - survivors.length };
 }
 
-export type HubFilter = "new" | "all" | "kept" | "hidden" | "progress" | "history";
+/**
+ * `hidden` is the **Removed** list (videos removed from the hub; the key kept
+ * its old name so saved views and tests did not churn). `searchHidden` is the
+ * **Hidden** list: videos hidden from search, which are not hub items at all.
+ */
+export type HubFilter = "new" | "all" | "kept" | "hidden" | "searchHidden" | "progress" | "history";
 
 /**
  * What the hub shows, newest first, after the filters have had their say.
@@ -1170,6 +1175,8 @@ export function visibleItems(
     if (!options.includeShorts && item.isShort === true) return false;
     if (!hubItemMatches(item, options.query ?? "")) return false;
     if (options.filter === "history") return options.history?.has(item.videoId) ?? false;
+    // Search hides are a list of IDs, not hub items; the hub draws them itself.
+    if (options.filter === "searchHidden") return false;
     if (options.filter === "hidden") return item.state === "dismissed";
     if (options.filter === "progress") {
       // A video you turned down is not a video you are part-way through, even

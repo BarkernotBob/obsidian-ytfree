@@ -62,6 +62,16 @@ test("a search result already in the hub reads done on the Save slot", () => {
   assert.equal(there[2].done, true);
 });
 
+test("search's fourth button is Hide, and Unhide on a hidden result", () => {
+  const plain = searchSlots({ inHub: false, noteExists: false })[3];
+  assert.equal(plain.key, "remove");
+  assert.equal(plain.label, "Hide");
+  const hidden = searchSlots({ inHub: false, noteExists: false, hiddenFromSearch: true })[3];
+  assert.equal(hidden.key, "remove");
+  assert.equal(hidden.label, "Unhide");
+  assert.notEqual(hidden.danger, true);
+});
+
 /**
  * An icon no longer changes with the state, so no icon may *be* a state: a bare
  * `plus` or `check` on a button that has not been pressed claims something that
