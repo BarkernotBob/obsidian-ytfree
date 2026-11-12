@@ -292,7 +292,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Subscribe in YT Free** (GitHub #65; details Claude's calls, open to change): adds the channel
   to the hub's list only, nothing sent to YouTube; videos arrive on the next feed check (no extra
   poll). On the channel screen the button turns into a greyed "Subscribed" of the same width;
-  there is no unsubscribe there yet. A search card's ⋯ menu offers "Subscribe in YT Free" above
+  there is no unsubscribe there yet (superseded 2026-11-12: see Managing subscriptions). A search card's ⋯ menu offers "Subscribe in YT Free" above
   "Hide this channel", and shows a greyed "Subscribed in YT Free" for a followed channel.
 
 ### Earlier
