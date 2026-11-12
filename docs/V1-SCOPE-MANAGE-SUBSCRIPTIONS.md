@@ -1,7 +1,7 @@
 # V1 scope: managing subscriptions from the hub and from a note
 
-**Written:** 2026-11-12, from Isaiah's ask of the same day. **Status:** proposed, awaiting
-Isaiah's MVP call (decision D1 below). Nothing is built yet.
+**Written:** 2026-11-12, from Isaiah's ask of the same day. **Status:** D1 answered 2026-11-12: S1, S2, S4 MVP, S3 post-MVP.
+S1 and S4 redesigned after Isaiah's review; awaiting his OK on the mockups. Nothing is built yet.
 
 ## The one sentence
 
@@ -22,28 +22,21 @@ Isaiah's MVP call (decision D1 below). Nothing is built yet.
 
 ## In scope
 
-### S1. Remove from the hub sidebar (easy removal)
+### S1. Unsubscribe from the hub (revised 2026-11-12)
 
-- The channel list gets a header row: **Channels · [+] [Edit]**. On the phone it sits in the ☰
-  sheet where "Channels" is today.
-- **Edit** puts a red **−** at the end of every channel row (the unread count moves aside).
-  One tap on **−** removes that channel at once. No confirm dialog.
-- The row stays where it was and turns into **"Removed {name} · Undo"**, the same strip pattern
-  search results use, so nothing below it jumps. Undo puts the channel and its videos back.
-  The strips go when you tap **Done**.
-- Removing does what `removeChannel` already does: the channel leaves the list and the feed
-  poll, its New and Hidden videos leave the hub. **Saved videos, notes and watch history stay.**
-  The tombstone stops the other device bringing it back; adding it again later works (fresh
-  `addedAt` beats the tombstone, already handled in `mergeStates`).
-- Desktop also gets **right-click → Unsubscribe** on a row, which is the same removal.
+Isaiah: a − in an edit mode reads as "remove from the sidebar", not as unsubscribe. Revised,
+mockup: https://claude.ai/artifact/8brXvoZnBSibSMSAJpsHtF (boards 1 and 2).
 
-```
- Channels          [+]  [Edit]        Channels             [+]  [Done]
- All channels                         All channels
- Ali Abdaal               3           Ali Abdaal              (−)
- Veritasium               1           Removed Veritasium · Undo
- Kurzgesagt                           Kurzgesagt              (−)
-```
+- The hub menu's channel section is renamed **Subscriptions · 42** and gets a **Manage** button.
+- **Manage** opens a **Manage subscriptions** screen inside the hub (Back returns): an
+  **Add channel** button on top, a filter box, the line "Unsubscribing stops new videos from
+  that channel. Your Saved videos, notes and watch history stay.", then one row per channel
+  (name, new count, last upload) with a red-outlined **Unsubscribe** button.
+- Tapping Unsubscribe acts at once, no dialog. The row stays in place as
+  **"Unsubscribed from {name} · Undo"**. Undo puts the channel and its videos back.
+- Shortcut: long-press a channel in the menu (right-click on desktop) → **Unsubscribe from {name}**.
+- What it does is `removeChannel`: off the list and the feed poll, New and Hidden videos leave
+  the hub; Saved videos, notes and history stay; tombstone syncs; adding back later works.
 
 ### S2. Unsubscribe from the channel screen and search cards
 
@@ -68,18 +61,18 @@ Isaiah's MVP call (decision D1 below). Nothing is built yet.
 - **Needs one live recording** of a channel search (one request from the Mac, like the #46
   recording run, not bulk probing) so the parser is tested against a real response.
 
-### S4. The channel from a video note
+### S4. The channel from a video note (revised 2026-11-12)
 
-- The note's player **⋯ pop-out** gets a channel row at the top:
-  **{Channel name} ›** (opens the channel screen with that channel's videos, like Preview's
-  link) and a **Subscribe / Subscribed** toggle beside it (same S2 behaviour).
-- Why the pop-out and not the button bar: the bar is full on a phone, and the hub back button
-  (separate thread) is the one getting a bar slot and a mockup. If Isaiah wants the channel in
-  the bar instead, that thread's mockup should place both together.
+Isaiah: not too hidden. Revised, mockup board 3: an always-visible **channel row directly under
+the player's button bar**: avatar initial, channel name, "See all their videos ›" (opens the
+channel screen, like Preview's link), and a **Subscribe / Subscribed ✓** button on the right.
+Tapping Subscribed unsubscribes at once with an Undo, same as S1.
+
 - Channel ID: new notes get a `channel_id:` frontmatter line, so the row works with no network.
-  Older notes use the hub's item when it has one; otherwise the first tap costs one player
-  call (what the command does today). Nothing is fetched when the note opens or the pop-out
-  opens: only on a tap.
+  Older notes use the hub's item when it has one; otherwise the row still shows the name from
+  `author`, and the first tap costs one player call (what the command does today). Nothing is
+  fetched when the note opens.
+- The hub back button (another thread) lives in the button bar; this row does not touch the bar.
 
 ## Out of scope (v2 tickets if wanted)
 
@@ -99,7 +92,7 @@ Isaiah's MVP call (decision D1 below). Nothing is built yet.
 | S4 channel from a note | **MVP (recommended)** | Small: the code path exists (command), only a UI entry and a frontmatter line are new. |
 | S3 add by channel search | **Post-MVP (recommended)** | New InnerTube request shape, needs a live recording and a new parser, adds request load. Adding already works from search cards, the channel screen and URL paste. Interim: [+] opens today's paste-a-link + Takeout dialog. |
 
-**D1 (Isaiah):** accept this split, or make S3 MVP too.
+**D1 answered (Isaiah, 2026-11-12):** S1, S2, S4 MVP; S3 (channel search) post-MVP.
 
 ## Done when (manual test, filled in with exact steps when built)
 
