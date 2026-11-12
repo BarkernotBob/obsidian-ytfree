@@ -1173,7 +1173,7 @@ export default class YtFreePlugin extends Plugin {
           (videoId) => this.progress.resumeFor(videoId),
           // The player inside Preview. The hub knows nothing about streams;
           // this is the only thing it is given to build one with.
-          (host, videoId, meta) => this.mountPreviewPlayer(host, videoId, meta),
+          (host, videoId, meta, close) => this.mountPreviewPlayer(host, videoId, meta, close),
           // Share, from the Preview sheet. The same menu the player's own
           // Share button opens.
           (anchor, videoId, seconds) => this.shareMenuFor(anchor, videoId, seconds),
@@ -3859,6 +3859,7 @@ export default class YtFreePlugin extends Plugin {
     videoId: string,
     sourcePath: string,
     preview = false,
+    closePreview?: () => void,
   ): Promise<PlayerEntry | null> {
     const mobile = !Platform.isDesktopApp;
 
@@ -4006,6 +4007,13 @@ export default class YtFreePlugin extends Plugin {
         // Two ways out of the player and into its settings: the whole screen,
         // and the four dials you actually change while something is playing.
         onOpenSettings: () => this.openSettingsTab(),
+        // Back to the hub (Isaiah, 2026-11-12). A note stays open and keeps
+        // playing behind the hub tab; Preview closes its sheet first, which
+        // stops the video unless it is in Picture-in-Picture.
+        onOpenHub: () => {
+          if (preview) closePreview?.();
+          void this.openHub();
+        },
         // Always. A preview has no note to pin to and nowhere to download to,
         // but it has a video ID, and that is all a link is made of.
         share: (anchor, seconds) => this.shareMenuFor(anchor, videoId, seconds),
@@ -4151,6 +4159,7 @@ export default class YtFreePlugin extends Plugin {
     host: HTMLElement,
     videoId: string,
     meta?: { title: string; channel: string; channelId: string },
+    close?: () => void,
   ): Promise<PreviewHandle> {
     this.destroyPreview();
     if (meta) this.previewMeta.set(videoId, meta);
@@ -4165,7 +4174,7 @@ export default class YtFreePlugin extends Plugin {
     // it — so the preview gets a real one rather than a lookalike, plus a class
     // of its own for the two things that differ inside a modal.
     const wrapper = host.createDiv({ cls: "ytfree-wrapper ytfree-preview-wrapper" });
-    const entry = await this.buildPlayer(wrapper, videoId, "", true);
+    const entry = await this.buildPlayer(wrapper, videoId, "", true, close);
     // Failure has already drawn its own error into the host, and `buildPlayer`
     // has already unregistered — so the handle tears down nothing. It is still
     // a real handle, so the caller has one shape to hold and one thing to call.
