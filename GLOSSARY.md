@@ -367,3 +367,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   ecosystem. TypeScript stays pinned.
 - The plugin's four data files are read together at load, not in sequence.
 
+
+### 2026-11-12 (open at top, Isaiah)
+
+- **Preview opens with neither Description nor Transcript open**, phone and desktop. A missing
+  transcript no longer opens the Description.
+- **A video note opens at its top with no keyboard**, every time it is opened into a pane, new
+  note included (Watch no longer puts the cursor in Notes). The Notes button is the way into
+  writing. Returning to a tab where the note is already open does not move it (Claude's call).
+  [Scope](docs/V1-SCOPE-OPEN-AT-TOP.md).

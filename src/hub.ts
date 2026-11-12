@@ -15,7 +15,6 @@ import {
   ItemView,
   Menu,
   Modal,
-  MarkdownView,
   Notice,
   Platform,
   Setting,
@@ -75,7 +74,6 @@ import {
   unclaimed,
 } from "./notify";
 import type { NotificationSettings, Post, SendOutcome } from "./notify";
-import { NOTES_HEADING } from "./sections";
 import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
 import {
@@ -958,20 +956,9 @@ export class SubscriptionsStore {
     const made = await this.createNote(item);
     if (!made) return;
 
-    const leaf = this.app.workspace.getLeaf(false);
-    await leaf.openFile(made.file);
-    // A fresh note is for writing, so start the cursor in the Notes section
-    // rather than at the top of the frontmatter.
-    if (made.created && leaf.view instanceof MarkdownView) {
-      const editor = leaf.view.editor;
-      for (let i = 0; i < editor.lineCount(); i++) {
-        if (editor.getLine(i) === NOTES_HEADING) {
-          editor.setCursor({ line: i + 1, ch: 0 });
-          editor.focus();
-          break;
-        }
-      }
-    }
+    // Opens at the top with no keyboard, new note or not (Isaiah, 2026-11-12):
+    // the Notes button is the way into writing. See V1-SCOPE-OPEN-AT-TOP.
+    await this.app.workspace.getLeaf(false).openFile(made.file);
   }
 
   /**
@@ -3527,8 +3514,6 @@ class PreviewModal extends Modal {
    * A list rather than two fields so a third region costs nothing.
    */
   private regions: ((open: boolean) => void)[] = [];
-  /** The description's own setter — the region an empty transcript hands back to. */
-  private openDescription: ((open: boolean) => void) | null = null;
 
   constructor(
     app: App,
@@ -3810,13 +3795,12 @@ class PreviewModal extends Modal {
    * everywhere now, because the sheet has a single region at its foot and a
    * region that is always open is a region the transcript can never have.
    *
-   * Open by default off a phone, which is what it was there before: a laptop
-   * sheet that opened straight into an hour of transcript would bury the two
-   * paragraphs saying what the video is.
+   * Shut on open, everywhere (Isaiah, 2026-11-12: "open preview with neither
+   * selected"). See docs/V1-SCOPE-OPEN-AT-TOP.md.
    */
   private mountDescription(host: HTMLElement): void {
     const section = host.createDiv({ cls: "ytfree-preview-describe" });
-    const start = !Platform.isPhone;
+    const start = false;
     section.toggleClass("is-open", start);
 
     const header = section.createEl("button", {
@@ -3827,7 +3811,7 @@ class PreviewModal extends Modal {
     setIcon(chevron, start ? "chevron-down" : "chevron-right");
     header.createSpan({ cls: "ytfree-preview-disclose-label", text: "Description" });
     const body = section.createDiv({ cls: "ytfree-preview-description" });
-    this.openDescription = this.disclose(section, header, chevron);
+    this.disclose(section, header, chevron);
 
     body.setText(this.spec.description || (this.spec.fetchDescription ? "Loading…" : "No description."));
     if (this.spec.fetchDescription) {
@@ -3854,11 +3838,9 @@ class PreviewModal extends Modal {
   private mountTranscript(host: HTMLElement): void {
     if (!this.spec.fetchTranscript) return;
 
-    // Open from the start on a phone (039). The transcript is the reason the
-    // sheet has a region for it at all, and a region you have to open before it
-    // fills the screen is one that reflows the sheet the first time you use it.
-    // Off a phone the description has the region instead — see there.
-    const start = Platform.isPhone;
+    // Shut on open, like the description (Isaiah, 2026-11-12). It still
+    // fetches now, so it is there the moment its header is tapped.
+    const start = false;
     const section = host.createDiv({ cls: "ytfree-preview-transcript" });
     section.toggleClass("is-open", start);
     const header = section.createEl("button", {
@@ -3888,9 +3870,6 @@ class PreviewModal extends Modal {
       label.setText(why);
       header.setAttribute("disabled", "true");
       setOpen(false);
-      // On a phone this is the region that was open, and leaving both shut
-      // would be a sheet with a hole in it. The description takes it instead.
-      this.openDescription?.(true);
     };
 
     void this.spec.fetchTranscript().then(

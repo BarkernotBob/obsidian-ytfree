@@ -460,6 +460,10 @@ export default class YtFreePlugin extends Plugin {
   private collapsed = new Map<MarkdownView, { path: string; container: HTMLElement | null }>();
   /** Same, for the default section folds — see applyDefaultFolds. */
   private folded = new Map<MarkdownView, string>();
+  /** Same, for putting a just-opened note at its top — see settleOnOpen. */
+  private settled = new Map<MarkdownView, string>();
+  /** When the Notes button last asked for the keyboard — settleOnOpen leaves it up. */
+  private writingAskedAt = 0;
   /**
    * The section each note was last sent to, so a second tap on the same button
    * can mean "I'm already here" — see `jumpToSection`.
@@ -1997,12 +2001,14 @@ export default class YtFreePlugin extends Plugin {
       if (path && noteVideo) {
         this.collapseProperties(view, path);
         this.applyDefaultFolds(view, path);
+        this.settleOnOpen(view, path);
         // An open note is an opened video, whichever door it came through — see
         // `noteOpened`. A no-op after the first time, so this costs a lookup.
         this.subscriptions?.noteOpened(noteVideo, path);
       } else if (path) {
         if (this.collapsed.get(view)?.path !== path) this.collapsed.delete(view);
         if (this.folded.get(view) !== path) this.folded.delete(view);
+        if (this.settled.get(view) !== path) this.settled.delete(view);
       }
 
       // The way back on, for a note whose player has been switched off. Before
@@ -2029,6 +2035,9 @@ export default class YtFreePlugin extends Plugin {
     }
     for (const view of [...this.folded.keys()]) {
       if (!open.has(view)) this.folded.delete(view);
+    }
+    for (const view of [...this.settled.keys()]) {
+      if (!open.has(view)) this.settled.delete(view);
     }
   }
 
@@ -2163,6 +2172,69 @@ export default class YtFreePlugin extends Plugin {
       ]);
       if (ranges.length === 0) return;
       this.setFolds(view, { folds: ranges, lines: content.split("\n").length });
+    };
+    attempt();
+  }
+
+  /**
+   * Open a video note at its top, with no keyboard (Isaiah, 2026-11-12: "Note
+   * just opens at the top of the note and NOT with the keyboard opened").
+   *
+   * Once per file per view, like the folds: switching back to a tab where the
+   * note is already open leaves it where it was. Whatever the last visit did —
+   * a Transcript jump, a follow, a caret left in the transcript — is not where
+   * the next visit starts. Run twice, the second a beat later, because Obsidian
+   * restores a leaf's own scroll and focus after the document has loaded. The
+   * Notes button is the way into writing, so a tap on it since the open wins.
+   * See docs/V1-SCOPE-OPEN-AT-TOP.md.
+   */
+  private settleOnOpen(view: MarkdownView, path: string): void {
+    if (this.settled.get(view) === path) return;
+    this.settled.set(view, path);
+    this.lastJump.delete(path);
+    if (this.follow?.view === view) this.stopFollowing();
+    const openedAt = Date.now();
+
+    let attempts = 0;
+    const settle = (): boolean => {
+      if (view.file?.path !== path || this.settled.get(view) !== path) return true;
+      if (this.writingAskedAt >= openedAt) return true;
+      let content = "";
+      try {
+        content = view.editor?.getValue() ?? "";
+      } catch {
+        content = "";
+      }
+      // Not loaded yet: the note has frontmatter at least.
+      if (!content.trim() && view.getMode() === "source") return false;
+      try {
+        view.setEphemeralState({ scroll: 0 });
+      } catch {
+        try {
+          foldableMode(view).applyScroll?.(0);
+        } catch {
+          /* leave it where it is */
+        }
+      }
+      if (!Platform.isDesktopApp) {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && view.containerEl.contains(active)) {
+          try {
+            view.editor.blur();
+          } catch {
+            /* no editor */
+          }
+          active.blur();
+        }
+      }
+      return true;
+    };
+    const attempt = (): void => {
+      if (!settle()) {
+        if (++attempts < 20) window.setTimeout(attempt, 100);
+        return;
+      }
+      window.setTimeout(settle, 300);
     };
     attempt();
   }
@@ -2335,6 +2407,7 @@ export default class YtFreePlugin extends Plugin {
    * state a keyboard is not waiting behind, and 041's remit was the phone.
    */
   private openForWriting(view: MarkdownView): void {
+    this.writingAskedAt = Date.now();
     try {
       if (view.getMode() !== "source" && !Platform.isDesktopApp) {
         void view.setState({ ...(view.getState() as object), mode: "source" }, { history: false });
