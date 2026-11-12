@@ -45,6 +45,10 @@ advances (the ad's clock). After the ad the video goes `3` (buffering) then `1` 
 0:00. The Arc run with an ad: `-1` from 1.0 s to 8.1 s with the clock running 0.0 to 5.9 s.
 YouTube pre-rolls are at least about 5–6 s (inference from ad formats, not measured here).
 
+The page now logs this itself (#91): `ad seen` once the clock has run 2 s within one `-1`
+stretch, and `ad ended` (with `lastedMs`) when the state leaves `-1`. A reader slow to tap play
+leaves the clock still, so that never logs. Logging only; nothing touches the ad.
+
 Obsidian iPhone log, 13 opens (2026-11-10, 13:16–13:27 local): every `-1` lasted 0.9–3.8 s
 before `3` or `1`, the reader's tap included. Shorter than any pre-roll, so no ad played.
 
@@ -88,7 +92,8 @@ Turn browser ad blockers off. Use `dQw4w9WgXcQ` for every step.
    https://barkernotbob.github.io/obsidian-ytfree/player/?v=dQw4w9WgXcQ and tap play. 4 times.
    Expected: at least one ad (baseline that YouTube is serving embed ads).
 2. Obsidian (iPhone): open the video, switch to YouTube's player, tap play, let it run 15 s.
-   10 times. Expected: no ads; `youtube-player-log.txt` shows every `-1` under 5 s.
+   10 times. Expected: no ads; `youtube-player-log.txt` has no `ad seen` line and shows every
+   `-1` under 5 s.
 3. If step 1 has no ads, YouTube isn't serving embed ads right now: the test says nothing; retry
    another day.
 
