@@ -367,3 +367,18 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   ecosystem. TypeScript stays pinned.
 - The plugin's four data files are read together at load, not in sequence.
 
+
+## Managing subscriptions (Isaiah, 2026-11-12; [scope](docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md))
+
+- **Unsubscribe**, never "remove": an edit-mode − in the sidebar read as removing a sidebar row
+  (Isaiah). The hub menu's list is "Subscriptions · N" with **Manage**, which opens the Manage
+  subscriptions screen: Add channel, a filter, and a red **Unsubscribe** per channel.
+- Unsubscribe acts at once with **Undo** (row in place on Manage, a Notice elsewhere). New and
+  Hidden videos of the channel leave the hub; Saved videos, notes and watch history stay.
+- **Subscribed ✓** on the channel screen, a note's channel row and a search card's ⋯ is a button:
+  tapping it unsubscribes. Long-press (right-click on desktop) a channel in the hub menu also
+  offers Unsubscribe.
+- A **note's channel row** sits always visible under the player controls (not hidden in ⋯,
+  Isaiah): channel name, "See all their videos ›", Subscribe. New notes carry `channel_id`.
+- **Adding by channel search** is post-MVP (#108). Add channel opens the paste-a-link + Takeout
+  dialog until then.

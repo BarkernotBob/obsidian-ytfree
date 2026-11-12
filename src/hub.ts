@@ -27,7 +27,7 @@ import {
   setIcon,
 } from "obsidian";
 import { SEARCH_YT_ICON, SHARE_ICON, YT_ICON } from "./icon";
-import type { Channel, HubFilter, HubItem, SubscriptionsState, VideoNote } from "./subscriptions";
+import type { Channel, HubFilter, HubItem, SubscriptionsState, UnsubscribeUndo, VideoNote } from "./subscriptions";
 import {
   buildWatchLaterNote,
   deskSub,
@@ -43,6 +43,7 @@ import {
   expireItems,
   feedUrl,
   isFirstSight,
+  lastUploads,
   noteFeedFailure,
   noteFeedSuccess,
   withRetries,
@@ -61,6 +62,8 @@ import {
   sanitizeFileName,
   searchResultToItem,
   shortsCheck,
+  undoUnsubscribe,
+  unsubscribeChannel,
   visibleItems,
 } from "./subscriptions";
 import { SyncedFile, adapterDisk, appLocalCopy } from "./synced-file";
@@ -120,11 +123,17 @@ import {
 import type { SearchFilters } from "./search-params";
 import { channelScreen, searchScreen } from "./search-screen";
 import {
+  MANAGE_EXPLAINER,
   TAKEOUT_STEPS,
   TAKEOUT_URL,
+  filterChannels,
+  manageRowMeta,
   searchChannelMenu,
   subscribeButton,
   subscribedNotice,
+  subscriptionsHeading,
+  unsubscribedNotice,
+  unsubscribedRow,
 } from "./subscribe";
 import type { SearchScreenCopy, SearchScreenKind } from "./search-screen";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
@@ -273,9 +282,11 @@ async function mapLimit<T>(items: T[], limit: number, worker: (item: T) => Promi
  * under the finger that clicked it is the one thing the UI must never do. A
  * merge is different: the change came from the other device, nothing on screen
  * reflects it, and the list is exactly what has to be rebuilt. The view needs to
- * tell them apart, so it is told.
+ * tell them apart, so it is told. "channels" is an unsubscribe or its Undo: no
+ * card was clicked, and a whole channel's videos came or went, so it redraws
+ * like a merge.
  */
-export type ChangeReason = "local" | "merge";
+export type ChangeReason = "local" | "merge" | "channels";
 
 /**
  * What one save did: whether it reached disk, and what was there before it.
@@ -480,22 +491,22 @@ export class SubscriptionsStore {
   }
 
   /**
-   * Forget a channel and everything of its we have not kept. Notes already made
-   * from it stay — the plugin never deletes a file.
+   * Unsubscribe inside YouTube for You: the channel and everything of its we
+   * have not kept leave the hub. Notes already made from it stay — the plugin
+   * never deletes a file. Returns what Undo needs, or null if it was not here.
    */
-  removeChannel(channelId: string): void {
-    this.state.channels = this.state.channels.filter((c) => c.id !== channelId);
-    this.state.items = this.state.items.filter(
-      (item) => item.channelId !== channelId || item.state === "kept",
-    );
-    // A tombstone, for the same reason a hidden video gets one: without it the
-    // other device's copy hands the channel and its videos straight back on the
-    // next merge.
-    this.state.removedChannels = [
-      ...(this.state.removedChannels ?? []).filter((r) => r.id !== channelId),
-      { id: channelId, at: new Date().toISOString() },
-    ];
-    this.emit();
+  unsubscribeChannel(channelId: string): UnsubscribeUndo | null {
+    const undo = unsubscribeChannel(this.state, channelId, new Date());
+    if (!undo) return null;
+    this.emit("channels");
+    void this.save();
+    return undo;
+  }
+
+  /** Put an unsubscribed channel back, videos and all. */
+  undoUnsubscribe(undo: UnsubscribeUndo): void {
+    undoUnsubscribe(this.state, undo, new Date());
+    this.emit("channels");
     void this.save();
   }
 
@@ -1221,7 +1232,7 @@ const FILTER_RULES: Record<HubFilter, string> = {
  * refresh, poll, or filter change.
  */
 /** Which screen the hub view is drawing. */
-type HubMode = "hub" | "browse" | "channel";
+type HubMode = "hub" | "browse" | "channel" | "manage";
 
 /** Everything the channel screen needs, held so a trip away and back restores it. */
 interface ChannelState {
@@ -1236,7 +1247,7 @@ interface ChannelState {
   state: "idle" | "loading" | "error";
   error: string;
   /** The screen Back returns to. */
-  returnTo: "hub" | "browse";
+  returnTo: "hub" | "browse" | "manage";
 }
 
 export class HubView extends ItemView {
@@ -1337,6 +1348,14 @@ export class HubView extends ItemView {
   private channelFactsEl: HTMLElement | null = null;
   private channelSubscribeEl: HTMLButtonElement | null = null;
 
+  /** Manage subscriptions: what the filter box holds. */
+  private manageQuery = "";
+  /**
+   * Channels unsubscribed on Manage subscriptions, still drawn in place as
+   * "Unsubscribed from … · Undo" until you leave the screen.
+   */
+  private manageUndos = new Map<string, UnsubscribeUndo>();
+
   /**
    * A phone gets a different menu, not a narrower one. See docs/MOBILE-UX.md:
    * the filters and the channel list collapse behind a single disclosure whose
@@ -1423,7 +1442,12 @@ export class HubView extends ItemView {
       // and then went on showing the removed videos until something else forced
       // a full redraw — which read, to anyone using it, exactly like the sync
       // having failed.
-      if (reason === "merge") this.renderList(true);
+      if (reason === "channels" && this.channelFilter && !this.store.isSubscribed(this.channelFilter)) {
+        this.channelFilter = null;
+        this.renderChannels();
+        this.renderMenuLabel();
+      }
+      if (reason === "merge" || reason === "channels") this.renderList(true);
     });
     this.build();
     this.renderAll();
@@ -1475,6 +1499,7 @@ export class HubView extends ItemView {
 
     if (this.mode === "browse") this.buildBrowse(root);
     else if (this.mode === "channel") this.buildChannel(root);
+    else if (this.mode === "manage") this.buildManage(root);
     else this.buildHub(root);
   }
 
@@ -1867,7 +1892,10 @@ export class HubView extends ItemView {
       subscribe.addEventListener("click", () => {
         const current = this.channel;
         if (!current) return;
-        this.subscribeToChannel(current.channelId, this.channelName());
+        if (this.store.isSubscribed(current.channelId)) {
+          unsubscribeWithUndo(this.store, current.channelId, this.channelName());
+          this.renderSubscribeButton();
+        } else this.subscribeToChannel(current.channelId, this.channelName());
       });
       this.channelSubscribeEl = subscribe;
       this.renderSubscribeButton();
@@ -1930,9 +1958,10 @@ export class HubView extends ItemView {
     const copy = subscribeButton(this.store.isSubscribed(channel.channelId));
     el.setText(copy.text);
     el.title = copy.title;
+    el.setAttribute("aria-label", copy.title);
     el.disabled = copy.disabled;
-    el.toggleClass("mod-cta", !copy.disabled);
-    el.toggleClass("is-subscribed", copy.disabled);
+    el.toggleClass("mod-cta", !copy.subscribed);
+    el.toggleClass("is-subscribed", copy.subscribed);
   }
 
   /** Subscribe inside YouTube for You (GitHub #65), from the channel screen or a search card. */
@@ -2084,9 +2113,139 @@ export class HubView extends ItemView {
     }
   }
 
+  // ------------------------------------------------- manage subscriptions
+
+  /**
+   * Manage subscriptions (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md, S1): every
+   * channel you follow, each with an Unsubscribe button, and Add channel on top.
+   */
+  private buildManage(root: HTMLElement): void {
+    const header = root.createDiv({ cls: "ytfree-hub-header ytfree-hub-header-browse" });
+    const back = header.createEl("button", {
+      cls: "ytfree-hub-icon-button ytfree-hub-back",
+      attr: { type: "button", "aria-label": "Back to your hub", title: "Back to your hub" },
+    });
+    setIcon(back, "arrow-left");
+    back.addEventListener("click", () => this.setMode("hub"));
+    const title = header.createDiv({ cls: "ytfree-hub-screen-title" });
+    setIcon(title.createSpan({ cls: "ytfree-hub-screen-icon" }), "settings-2");
+    title.createSpan({ cls: "ytfree-hub-screen-name", text: "Manage subscriptions" });
+
+    const tools = root.createDiv({ cls: "ytfree-manage-tools" });
+    const add = tools.createEl("button", {
+      cls: "mod-cta ytfree-manage-add",
+      attr: { type: "button" },
+    });
+    setIcon(add.createSpan({ cls: "ytfree-manage-add-icon" }), "plus");
+    add.createSpan({ text: "Add channel" });
+    add.addEventListener("click", () =>
+      new ImportSubscriptionsModal(this.app, this.store, () => this.renderAll()).open(),
+    );
+
+    const input = tools.createEl("input", {
+      cls: "ytfree-hub-search-input ytfree-manage-filter",
+      type: "search",
+      attr: {
+        placeholder: `Filter ${this.store.state.channels.length} channels`,
+        enterkeyhint: "search",
+        autocapitalize: "off",
+        autocorrect: "off",
+        spellcheck: "false",
+        "aria-label": "Filter your subscriptions",
+      },
+    });
+    input.value = this.manageQuery;
+    input.addEventListener("input", () => {
+      this.manageQuery = input.value;
+      this.renderManageList();
+    });
+
+    this.statusEl = root.createDiv({ cls: "ytfree-hub-status ytfree-manage-explainer" });
+    const body = root.createDiv({ cls: "ytfree-hub-body" });
+    this.listEl = body.createDiv({ cls: "ytfree-hub-list ytfree-manage-list" });
+  }
+
+  private renderManageList(): void {
+    const list = this.listEl;
+    if (!list) return;
+    list.empty();
+    const { channels, items } = this.store.state;
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      if (item.state !== "new") continue;
+      counts.set(item.channelId, (counts.get(item.channelId) ?? 0) + 1);
+    }
+    const uploads = lastUploads(items);
+    const now = new Date();
+    // An unsubscribed row keeps its place in the list until you leave, so the
+    // rows under your finger never move.
+    const shown = filterChannels(
+      [
+        ...channels.map((channel) => ({ channel, undo: null as UnsubscribeUndo | null })),
+        ...[...this.manageUndos.values()]
+          .filter((undo) => !channels.some((c) => c.id === undo.channel.id))
+          .map((undo) => ({ channel: undo.channel, undo })),
+      ].map((row) => ({ ...row, title: row.channel.title })),
+      this.manageQuery,
+    );
+    if (shown.length === 0) {
+      list.createDiv({
+        cls: "ytfree-hub-empty",
+        text: channels.length === 0 ? "No subscriptions yet. Add a channel above." : "No channel matches that.",
+      });
+      return;
+    }
+    for (const { channel, undo } of shown) {
+      const row = list.createDiv({ cls: "ytfree-manage-row" });
+      const text = row.createDiv({ cls: "ytfree-manage-text" });
+      if (undo) {
+        row.addClass("is-unsubscribed");
+        text.createDiv({ cls: "ytfree-manage-name", text: unsubscribedRow(channel.title) });
+        text.createDiv({ cls: "ytfree-manage-meta", text: "New videos stopped" });
+        const button = row.createEl("button", {
+          cls: "ytfree-manage-undo",
+          text: "Undo",
+          attr: { type: "button", "aria-label": `Undo: subscribe to ${channel.title} again` },
+        });
+        button.addEventListener("click", () => {
+          this.manageUndos.delete(channel.id);
+          this.store.undoUnsubscribe(undo);
+        });
+        continue;
+      }
+      // The name opens the channel's videos, like a Preview's channel link.
+      const name = text.createEl("button", {
+        cls: "ytfree-manage-name ytfree-manage-open",
+        text: channel.title,
+        attr: { type: "button", title: `See everything from ${channel.title}` },
+      });
+      name.addEventListener("click", () => this.showChannel(channel.id, channel.title));
+      const age = uploads.get(channel.id);
+      text.createDiv({
+        cls: "ytfree-manage-meta",
+        text: manageRowMeta(counts.get(channel.id) ?? 0, age ? relativeAge(age, now) : ""),
+      });
+      const button = row.createEl("button", {
+        cls: "ytfree-manage-unsubscribe",
+        text: "Unsubscribe",
+        attr: { type: "button", "aria-label": `Unsubscribe from ${channel.title}` },
+      });
+      button.addEventListener("click", () => {
+        const done = this.store.unsubscribeChannel(channel.id);
+        if (done) this.manageUndos.set(channel.id, done);
+        this.renderManageList();
+      });
+    }
+  }
+
   /** Swap screens. Everything either one needs is in a field, so this is safe. */
   private setMode(mode: HubMode): void {
     if (this.mode === mode) return;
+    // Leaving Manage settles its unsubscribes: the Undo rows go with it.
+    if (this.mode === "manage" && mode !== "channel") {
+      this.manageUndos.clear();
+      this.manageQuery = "";
+    }
     this.mode = mode;
     this.build();
     this.renderAll();
@@ -2129,7 +2288,6 @@ export class HubView extends ItemView {
     this.menuEl = body.createDiv({ cls: "ytfree-hub-menu" });
     this.menuEl.createDiv({ cls: "ytfree-hub-menu-heading", text: "Show" });
     this.buildFilters(this.menuEl);
-    this.menuEl.createDiv({ cls: "ytfree-hub-menu-heading", text: "Channels" });
     this.channelsEl = this.menuEl.createDiv({ cls: "ytfree-hub-channels" });
   }
 
@@ -2170,6 +2328,10 @@ export class HubView extends ItemView {
     }
     if (this.mode === "channel") {
       this.statusEl.setText(this.channelCopy().status);
+      return;
+    }
+    if (this.mode === "manage") {
+      this.statusEl.setText(MANAGE_EXPLAINER);
       return;
     }
 
@@ -2229,6 +2391,24 @@ export class HubView extends ItemView {
     if (!this.channelsEl) return;
     this.channelsEl.empty();
 
+    // The list's name says what these are — subscriptions — and Manage beside
+    // it is where you unsubscribe (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md, S1).
+    const heading = this.channelsEl.createDiv({ cls: "ytfree-hub-subs-heading" });
+    heading.createSpan({
+      cls: "ytfree-hub-subs-title",
+      text: subscriptionsHeading(this.store.state.channels.length),
+    });
+    const manage = heading.createEl("button", {
+      cls: "ytfree-hub-subs-manage",
+      attr: { type: "button", "aria-label": "Manage subscriptions", title: "Manage subscriptions" },
+    });
+    setIcon(manage.createSpan({ cls: "ytfree-hub-subs-manage-icon" }), "settings-2");
+    manage.createSpan({ text: "Manage" });
+    manage.addEventListener("click", () => {
+      this.setMenuOpen(false);
+      this.setMode("manage");
+    });
+
     const all = this.channelsEl.createDiv({ cls: "ytfree-hub-channel" });
     all.toggleClass("is-active", this.channelFilter === null);
     all.createSpan({ text: "All channels", cls: "ytfree-hub-channel-name" });
@@ -2255,8 +2435,61 @@ export class HubView extends ItemView {
         row.setAttribute("aria-label", `Feed failed: ${channel.error}`);
         row.setAttribute("title", `Feed failed: ${channel.error}`);
       }
-      row.addEventListener("click", () => this.selectChannel(channel.id));
+      row.addEventListener("click", () => {
+        if (row.dataset.longPressed) {
+          delete row.dataset.longPressed;
+          return;
+        }
+        this.selectChannel(channel.id);
+      });
+      this.addUnsubscribeMenu(row, channel);
     }
+  }
+
+  /**
+   * Right-click on a desktop, a long press on a phone: Unsubscribe from that
+   * channel, without going to Manage. The long press is timed by hand because
+   * iOS sends no `contextmenu` for a held tap on a plain element.
+   */
+  private addUnsubscribeMenu(row: HTMLElement, channel: Channel): void {
+    const show = (position: { x: number; y: number }) => {
+      const menu = new Menu();
+      menu.addItem((item) =>
+        item
+          .setTitle(`Unsubscribe from ${channel.title}`)
+          .setIcon("user-minus")
+          .onClick(() => {
+            this.setMenuOpen(false);
+            unsubscribeWithUndo(this.store, channel.id, channel.title);
+          }),
+      );
+      menu.showAtPosition(position);
+    };
+    row.addEventListener("contextmenu", (evt) => {
+      evt.preventDefault();
+      show({ x: evt.clientX, y: evt.clientY });
+    });
+    if (!this.phone) return;
+    let timer: number | null = null;
+    const cancel = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+    };
+    row.addEventListener("touchstart", (evt) => {
+      const touch = evt.touches[0];
+      if (!touch) return;
+      const at = { x: touch.clientX, y: touch.clientY };
+      cancel();
+      timer = window.setTimeout(() => {
+        timer = null;
+        // The click that ends this press must not also pick the channel.
+        row.dataset.longPressed = "1";
+        show(at);
+      }, 500);
+    }, { passive: true });
+    row.addEventListener("touchmove", cancel, { passive: true });
+    row.addEventListener("touchend", cancel);
+    row.addEventListener("touchcancel", cancel);
   }
 
   private selectChannel(channelId: string | null): void {
@@ -2734,8 +2967,9 @@ export class HubView extends ItemView {
       for (const entry of searchChannelMenu(this.store.isSubscribed(result.channelId))) {
         menu.addItem((item) => {
           item.setTitle(entry.title).setIcon(entry.icon);
-          if (entry.key === "subscribed") item.setDisabled(true);
-          else if (entry.key === "subscribe") {
+          if (entry.key === "unsubscribe") {
+            item.onClick(() => unsubscribeWithUndo(this.store, result.channelId, result.channelTitle));
+          } else if (entry.key === "subscribe") {
             item.onClick(() => this.subscribeToChannel(result.channelId, result.channelTitle));
           } else item.onClick(() => this.hideChannelFromSearch(result));
         });
@@ -2860,6 +3094,10 @@ export class HubView extends ItemView {
     }
     if (this.mode === "channel") {
       this.renderChannelList();
+      return;
+    }
+    if (this.mode === "manage") {
+      this.renderManageList();
       return;
     }
     list.empty();
@@ -4272,4 +4510,25 @@ function historyResult(item: HubItem): SearchResult {
     thumbnail: item.thumbnail,
     secondary: false,
   };
+}
+
+/**
+ * Unsubscribe from anywhere but Manage subscriptions (which keeps its own Undo
+ * row): the channel screen, a search card's menu, a long press in the hub menu,
+ * a note's channel row. The Notice carries the Undo.
+ */
+export function unsubscribeWithUndo(store: SubscriptionsStore, channelId: string, title: string): boolean {
+  const undo = store.unsubscribeChannel(channelId);
+  if (!undo) return false;
+  const fragment = createFragment();
+  fragment.appendText(unsubscribedNotice(title || undo.channel.title));
+  fragment.appendText(" ");
+  const button = fragment.createEl("button", { cls: "ytfree-notice-undo", text: "Undo" });
+  const notice = new Notice(fragment, 8000);
+  button.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    store.undoUnsubscribe(undo);
+    notice.hide();
+  });
+  return true;
 }

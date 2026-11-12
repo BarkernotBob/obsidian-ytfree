@@ -3956,9 +3956,8 @@ body.ytfree-immersive-open .ytfree-preview-close {
   justify-content: center;
 }
 
-.ytfree-channel-subscribe.is-subscribed:disabled {
-  opacity: 1;
-  cursor: default;
+/* Subscribed is a button now: tapping it unsubscribes, with an Undo. */
+.ytfree-channel-subscribe.is-subscribed {
   color: var(--text-muted);
 }
 
@@ -4104,4 +4103,237 @@ body.ytfree-immersive-open .ytfree-preview-close {
 }
 .is-youtube .ytfree-stage > .ytfree-video {
   visibility: hidden;
+}
+
+/* ------------------------------------------------------------------------
+ * Managing subscriptions (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md)
+ * --------------------------------------------------------------------- */
+
+/* The hub menu's heading over the channel list: "Subscriptions · 42" and Manage. */
+.ytfree-hub-subs-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.4em 0.5em 0.4em;
+}
+
+.ytfree-hub-subs-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ytfree-hub-subs-manage {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  height: 28px;
+  padding: 0 0.6em;
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  color: var(--text-accent);
+}
+
+.ytfree-hub-subs-manage-icon {
+  display: inline-flex;
+}
+
+.ytfree-hub-subs-manage-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-subs-heading {
+  padding: 0.9em 0.2em 0.4em;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-subs-manage {
+  height: 36px;
+}
+
+/* The Manage subscriptions screen. */
+.ytfree-manage-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0.75em 4px;
+}
+
+.ytfree-manage-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  height: 40px;
+}
+
+.ytfree-manage-add-icon {
+  display: inline-flex;
+}
+
+.ytfree-manage-filter {
+  flex: none;
+  width: 100%;
+}
+
+.ytfree-manage-explainer {
+  height: auto;
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.ytfree-manage-list {
+  padding: 0;
+}
+
+.ytfree-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 6px 0.75em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  box-sizing: border-box;
+}
+
+.ytfree-manage-row.is-unsubscribed {
+  background: var(--background-secondary);
+}
+
+.ytfree-manage-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ytfree-manage-name {
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The name is a link-styled button: it opens the channel's videos. */
+.ytfree-manage-open {
+  all: unset;
+  cursor: pointer;
+  font-size: var(--font-ui-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ytfree-manage-row.is-unsubscribed .ytfree-manage-name {
+  color: var(--text-muted);
+}
+
+.ytfree-manage-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.ytfree-manage-unsubscribe,
+.ytfree-manage-undo {
+  flex: 0 0 auto;
+  min-width: 7.5em;
+  height: 36px;
+  justify-content: center;
+}
+
+.ytfree-manage-unsubscribe {
+  background: transparent;
+  box-shadow: none;
+  border: 1px solid var(--text-error);
+  color: var(--text-error);
+}
+
+.ytfree-manage-undo {
+  font-weight: var(--font-semibold);
+}
+
+/* A note's channel row, under the player's controls. */
+.ytfree-channel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 4px 4px 4px 8px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  box-sizing: border-box;
+}
+
+.ytfree-docked .ytfree-channel-row {
+  margin: 4px 12px 0;
+}
+
+.ytfree-channel-row-open {
+  all: unset;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.ytfree-channel-row-avatar {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--background-modifier-border);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  line-height: 28px;
+  text-align: center;
+}
+
+.ytfree-channel-row-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ytfree-channel-row-name {
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ytfree-channel-row-hint {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-accent);
+}
+
+/* One width for both labels, so the tap that flips it moves nothing. */
+.ytfree-channel-row-subscribe {
+  flex: 0 0 auto;
+  width: 8.5em;
+  height: 32px;
+  justify-content: center;
+  border-radius: 16px;
+}
+
+.ytfree-channel-row-subscribe.is-subscribed {
+  color: var(--text-muted);
+}
+
+.ytfree-notice-undo {
+  margin-left: 0.4em;
 }
