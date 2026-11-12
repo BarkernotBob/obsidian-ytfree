@@ -19,25 +19,29 @@ import { readFileSync } from "node:fs";
 const LOCAL = "docs/player/index.html";
 const git = (...args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
-function remoteFile(branch, path) {
-  git("fetch", "--quiet", "--depth=1", "origin", `refs/heads/${branch}`);
-  return git("show", `FETCH_HEAD:${path}`);
-}
-
 const local = readFileSync(LOCAL, "utf8");
-let published, mainCopy;
+
+// One fetch into private refs. --depth only in an already-shallow clone (CI), so
+// a full clone on the Mac is never cut down to one commit.
+const shallow = git("rev-parse", "--is-shallow-repository").trim() === "true";
 try {
-  published = remoteFile("gh-pages", "player/index.html");
-  mainCopy = remoteFile("main", LOCAL);
+  git(
+    "fetch", "--quiet", "--no-tags", ...(shallow ? ["--depth=1"] : []), "origin",
+    "+refs/heads/gh-pages:refs/check-pages/gh-pages",
+    "+refs/heads/main:refs/check-pages/main",
+  );
 } catch (err) {
   const why = String(err.stderr || err.message).trim().split("\n")[0];
   if (process.env.CI) {
-    console.error(`check-pages: could not read gh-pages/main from origin: ${why}`);
+    console.error(`check-pages: could not fetch gh-pages and main from origin: ${why}`);
     process.exit(1);
   }
   console.warn(`check-pages: skipped (could not reach origin: ${why})`);
   process.exit(0);
 }
+// Past the fetch, a missing file is a real failure, online or not.
+const published = git("show", "refs/check-pages/gh-pages:player/index.html");
+const mainCopy = git("show", `refs/check-pages/main:${LOCAL}`);
 
 if (published === local || published === mainCopy) {
   console.log("check-pages: gh-pages player/index.html is in step");

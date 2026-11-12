@@ -162,7 +162,9 @@
    * YouTube reports -1 (unstarted) while getCurrentTime() runs, the ad's clock.
    * Once that clock has run 2 s in one -1 stretch: "ad seen"; when the state
    * leaves -1: "ad ended". A reader who is slow to tap play leaves the clock
-   * still, so it never logs. A jump (a seek to the start second) isn't counted.
+   * still, so it never logs. A jump (a seek to the start second) isn't counted:
+   * a step only counts if it is no faster than 2x the time since the last poll,
+   * which also keeps the seconds of a throttled (slow) timer.
    * Logging only: nothing here hides, skips, mutes or blocks an ad.
    */
   var adRun = null;
@@ -176,10 +178,15 @@
       adRun = null;
       return;
     }
-    if (!adRun) { adRun = { clock: clock, ran: 0, seen: false, startedAt: now }; return; }
+    if (!adRun) { adRun = { clock: clock, at: now, ran: 0, seen: false, startedAt: 0 }; return; }
     var step = clock - adRun.clock;
+    var wall = (now - adRun.at) / 1000;
     adRun.clock = clock;
-    if (step > 0 && step <= 1.5) adRun.ran += step;
+    adRun.at = now;
+    if (step > 0 && step <= wall * 2 + 0.25) {
+      if (!adRun.ran) adRun.startedAt = now - step * 1000;
+      adRun.ran += step;
+    }
     if (!adRun.seen && adRun.ran >= 2) {
       adRun.seen = true;
       log("ad seen", { clock: Math.round(clock * 10) / 10 });

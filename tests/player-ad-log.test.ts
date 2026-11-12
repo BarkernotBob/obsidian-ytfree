@@ -85,7 +85,9 @@ function openPage(query = "?v=dQw4w9WgXcQ") {
     now = end;
   }
   const logs = () => sent.filter((m) => m.type === "log").map((m) => m.event);
-  return { yt, run, logs, sent };
+  /** iOS throttling: every timer fires at most once per `ms`. */
+  const throttle = (ms: number) => timers.forEach((t) => { if (t.every) t.every = Math.max(t.every, ms); });
+  return { yt, run, logs, sent, throttle };
 }
 
 test("a pre-roll (-1 with the clock running) logs ad seen, then ad ended when the video starts", () => {
@@ -118,4 +120,22 @@ test("a jump to the start second while -1 is not mistaken for an ad", () => {
   p.yt.time = 31; // cued at the start second
   p.run(3000, 0);
   assert.ok(!p.logs().includes("ad seen"));
+});
+
+test("waiting before the ad isn't counted as ad time", () => {
+  const p = openPage("?v=dQw4w9WgXcQ&play=0");
+  p.run(20_000, 0); // reader waits 20 s at -1
+  p.run(6000, 1); // then a 6 s pre-roll
+  p.yt.state = 1;
+  p.run(1000, 1);
+  const ended = p.sent.find((m) => m.event === "ad ended")!;
+  const lasted = ended.lastedMs as number;
+  assert.ok(lasted >= 6000 && lasted < 8000, `lastedMs ${lasted}`);
+});
+
+test("an ad still logs when iOS throttles the page's timers to one every 3 s", () => {
+  const p = openPage();
+  p.throttle(3000);
+  p.run(9000, 1);
+  assert.ok(p.logs().includes("ad seen"));
 });

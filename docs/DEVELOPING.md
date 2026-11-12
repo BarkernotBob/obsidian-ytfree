@@ -61,7 +61,8 @@ cd /tmp/gh-pages && git commit -am "Player page: <what changed> (from main docs/
 
 `npm run check` (so CI) fails while the gh-pages copy matches neither your branch's
 `docs/player/index.html` nor main's (`scripts/check-pages.mjs`). Offline on the Mac it warns
-and passes.
+and passes. While gh-pages carries an unmerged branch's page, other branches' CI goes red until
+that branch merges, so sync gh-pages just before merging.
 
 ## Where things are
 
