@@ -2281,24 +2281,6 @@ body.ytfree-immersive-open {
   flex-direction: column;
 }
 
-/* Spans the columns on a phone: a heading in one cell of a two-up grid would
-   put the first related result beside its own title. */
-.ytfree-hub-results-heading {
-  grid-column: 1 / -1;
-  padding: 0.9em 0.6em 0.5em;
-  font-size: var(--font-ui-smaller);
-  font-weight: var(--font-semibold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-/* The first heading on the screen sits directly under the status strip and
-   needs no space above it; the second is separating two sections and does. */
-.ytfree-hub-results:first-child > .ytfree-hub-results-heading {
-  padding-top: 0.3em;
-}
-
 /*
  * A separator between results, at no cost in layout.
  *

@@ -75,7 +75,6 @@ function result(videoId: string, publishedText: string): SearchResult {
     views: 10,
     duration: "1:00",
     thumbnail: "",
-    secondary: false,
   };
 }
 

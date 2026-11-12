@@ -40,18 +40,6 @@ export interface SearchResult {
   /** "55:31". The feed has no equivalent, which is why it is shown here. */
   duration: string;
   thumbnail: string;
-  /**
-   * True for a result that came from a section *after* the one answering the
-   * query — YouTube's "related to your search" material.
-   *
-   * The response is not one list. Only the first video-bearing item section is
-   * the answer; the sections below it are loosely-related videos that no sort
-   * and no filter is applied to (measured — `docs/spikes/search-filters/sections.mjs`
-   * — a view-count-sorted response has a perfectly ordered first section and an
-   * unordered one underneath). Flattening them together is what made a sorted
-   * list look random, so the hub draws these under their own heading instead.
-   */
-  secondary: boolean;
 }
 
 export interface SearchPage {
@@ -142,7 +130,7 @@ export function pickThumbnail(thumbnails: unknown): string {
   return chosen.url.startsWith("//") ? `https:${chosen.url}` : chosen.url;
 }
 
-function parseVideo(raw: unknown, secondary: boolean): SearchResult | null {
+function parseVideo(raw: unknown): SearchResult | null {
   const video = record(raw);
   if (!video) return null;
   const videoId = typeof video.videoId === "string" ? video.videoId : "";
@@ -163,7 +151,6 @@ function parseVideo(raw: unknown, secondary: boolean): SearchResult | null {
     views: parseViewCount(text(video.viewCountText) || text(video.shortViewCountText)),
     duration: text(video.lengthText),
     thumbnail: pickThumbnail(at(video, "thumbnail", "thumbnails")),
-    secondary,
   };
 }
 
@@ -185,11 +172,14 @@ export function parseSearchResponse(raw: unknown): SearchPage {
 
   const results: SearchResult[] = [];
   const seen = new Set<string>();
-  // The first section with a video in it is the answer to the query. Everything
-  // in a later section is related material — see the note on `secondary`. A
-  // section holding only ads or a chip cloud is not the answer to anything, so
-  // it does not count as the first one.
-  let answered = false;
+  // Only the first section with a video in it is the answer to the query, and
+  // it is the only one YouTube sorts and filters (measured 2026-07,
+  // `docs/spikes/search-filters/sections.mjs`). The sections after it, between
+  // the shelves, ignore the filter bar, so drawing them made a sorted or dated
+  // search look unsorted (GitHub #46). They are dropped, not relabelled; the
+  // hub fetches the next page instead (`docs/V1-SCOPE-SEARCH.md`). A section
+  // holding only ads or a chip cloud is not the answer to anything, so it does
+  // not count as the first one.
   for (const section of array(root.contents)) {
     const entries = array(at(section, "itemSectionRenderer", "contents"));
     const videos = entries.filter((entry) => {
@@ -197,18 +187,17 @@ export function parseSearchResponse(raw: unknown): SearchPage {
       return Boolean(object && "compactVideoRenderer" in object);
     });
     if (videos.length === 0) continue;
-    const secondary = answered;
-    answered = true;
 
     for (const entry of videos) {
       const object = record(entry);
-      const result = parseVideo(object?.compactVideoRenderer, secondary);
+      const result = parseVideo(object?.compactVideoRenderer);
       // A query and its continuation can repeat a video; the hub would show it
       // twice under one More results click.
       if (!result || seen.has(result.videoId)) continue;
       seen.add(result.videoId);
       results.push(result);
     }
+    break;
   }
 
   const token = at(
@@ -220,4 +209,57 @@ export function parseSearchResponse(raw: unknown): SearchPage {
     results,
     continuation: typeof token === "string" && token ? token : null,
   };
+}
+
+/** What one search action hands the screen: pages already merged. */
+export interface CollectedPages {
+  results: SearchResult[];
+  continuation: string | null;
+  /** Results dropped by `accept` (already in the hub, already on screen). */
+  skipped: number;
+  /** Requests this action sent, for the ceiling tests. */
+  pages: number;
+}
+
+/**
+ * Fetch pages for one search action, merged into one answer.
+ *
+ * Two rules, both bounded by `maxPages` so a click can never turn into more
+ * than four requests:
+ *
+ * - **A new search reads two pages** (`minPages: 2`, Isaiah 2026-11-12, #46).
+ *   Page one's answer section is only about seven videos once the unfiltered
+ *   sections after it are dropped, so the second page is fetched straight away
+ *   rather than leaving a thin list behind a "More results" button.
+ * - **Nothing new means keep going.** A page whose every result is already in
+ *   the hub would read as "nothing found" while a continuation token full of
+ *   results sits unused, so fetching continues until something survives
+ *   `accept` or YouTube stops offering a token.
+ */
+export async function collectPages(
+  fetchPage: (continuation: string | null) => Promise<SearchPage>,
+  accept: (result: SearchResult) => boolean,
+  continuation: string | null,
+  minPages: number,
+  maxPages = 4,
+): Promise<CollectedPages> {
+  const results: SearchResult[] = [];
+  const seen = new Set<string>();
+  let token = continuation;
+  let skipped = 0;
+  let pages = 0;
+  while (pages < maxPages) {
+    const page = await fetchPage(token);
+    pages++;
+    for (const result of page.results) {
+      if (seen.has(result.videoId)) continue;
+      seen.add(result.videoId);
+      if (accept(result)) results.push(result);
+      else skipped++;
+    }
+    token = page.continuation;
+    if (!token) break;
+    if (pages >= minPages && results.length > 0) break;
+  }
+  return { results, continuation: token, skipped, pages };
 }

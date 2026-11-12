@@ -7,3 +7,4 @@ node_modules
 /app.css
 /.vault
 /tests/fixtures/raw-channel/
+/tests/fixtures/raw-search/
