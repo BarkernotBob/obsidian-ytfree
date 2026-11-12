@@ -29,6 +29,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-11: Notes button reworked (see GLOSSARY): keyboard-only fold, cursor at the bottom of
   Notes, other YT Free buttons close the keyboard. Next: Isaiah's phone test.
 
+- 2026-11-12: notes and Previews open at the top, nothing selected, no keyboard
+  ([V1-SCOPE-OPEN-AT-TOP](docs/V1-SCOPE-OPEN-AT-TOP.md)). Next: Isaiah's phone test.
+
 - 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
 
 ## Shipped on main (scope doc = manual test)
