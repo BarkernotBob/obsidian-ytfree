@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- The embed needs a real https referrer; Obsidian iOS (capacitor://localhost) gives it none. -->
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<title>YT Free player</title>
+<title>YouTube for You player</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   #player { position: fixed; inset: 0; width: 100%; height: 100%; }
@@ -15,7 +15,7 @@
 <div id="player"></div>
 <script>
 /*
- * YT Free (GitHub #25): YouTube's own IFrame player, hosted on an https page so
+ * YouTube for You (GitHub #25): YouTube's own IFrame player, hosted on an https page so
  * Obsidian on the iPhone can frame it. It reports to the plugin that framed it
  * and takes play, pause, seek and speed from it. Nothing is stored or sent
  * anywhere else.
@@ -69,6 +69,7 @@
           logEnvironment();
           status();
           setInterval(status, 1000);
+          setInterval(watchForAd, 500);
           startScripted();
         },
         onStateChange: function (e) { onState(e); status(); },
@@ -154,6 +155,41 @@
     } else {
       env.storageAccess = "n/a";
       log("environment", env);
+    }
+  }
+  /*
+   * Log when an ad plays (GitHub #91). The pre-roll signature (Arc, 2026-11-10):
+   * YouTube reports -1 (unstarted) while getCurrentTime() runs, the ad's clock.
+   * Once that clock has run 2 s in one -1 stretch: "ad seen"; when the state
+   * leaves -1: "ad ended". A reader who is slow to tap play leaves the clock
+   * still, so it never logs. A jump (a seek to the start second) isn't counted:
+   * a step only counts if it is no faster than 2x the time since the last poll,
+   * which also keeps the seconds of a throttled (slow) timer.
+   * Logging only: nothing here hides, skips, mutes or blocks an ad.
+   */
+  var adRun = null;
+  function watchForAd() {
+    if (!player || !player.getPlayerState) return;
+    var st = player.getPlayerState();
+    var clock = player.getCurrentTime() || 0;
+    var now = Date.now();
+    if (st !== -1) {
+      if (adRun && adRun.seen) log("ad ended", { lastedMs: now - adRun.startedAt, ran: Math.round(adRun.ran * 10) / 10 });
+      adRun = null;
+      return;
+    }
+    if (!adRun) { adRun = { clock: clock, at: now, ran: 0, seen: false, startedAt: 0 }; return; }
+    var step = clock - adRun.clock;
+    var wall = (now - adRun.at) / 1000;
+    adRun.clock = clock;
+    adRun.at = now;
+    if (step > 0 && step <= wall * 2 + 0.25) {
+      if (!adRun.ran) adRun.startedAt = now - step * 1000;
+      adRun.ran += step;
+    }
+    if (!adRun.seen && adRun.ran >= 2) {
+      adRun.seen = true;
+      log("ad seen", { clock: Math.round(clock * 10) / 10 });
     }
   }
   function later(label, ms) {
