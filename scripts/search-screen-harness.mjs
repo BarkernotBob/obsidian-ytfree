@@ -142,9 +142,8 @@ const page = (phone) => `<!doctype html>
 
 const RESULTS = (n) =>
   `<div class="ytfree-hub-results ytfree-hub-grid">` +
-  `<div class="ytfree-hub-results-heading">Results</div>` +
   Array.from({ length: n }, (_, i) => card(i)).join("") +
-  `</div><div class="ytfree-hub-results ytfree-hub-grid"></div>` +
+  `</div>` +
   `<button class="ytfree-hub-more">More results</button>`;
 
 /** Every element's box, keyed by a stable path through the tree. */

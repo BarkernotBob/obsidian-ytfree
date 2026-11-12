@@ -107,7 +107,8 @@ import type { BlockEntry } from "./search-blocklist";
 import type { ChannelHeader } from "./channel";
 import { followIndexAt, groupCues, restingScrollTop } from "./transcript";
 import type { Paragraph } from "./transcript";
-import type { SearchPage, SearchResult } from "./search";
+import { collectPages } from "./search";
+import type { SearchResult } from "./search";
 import {
   DURATION_OPTIONS,
   FEATURE_OPTIONS,
@@ -865,7 +866,6 @@ export class SubscriptionsStore {
         views: null,
         duration: "",
         thumbnail: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-        secondary: false,
       },
       details.description,
       new Date(),
@@ -1313,8 +1313,7 @@ export class HubView extends ItemView {
   /** How many results this search dropped for already being in the hub. */
   private searchSkipped = 0;
   /** The two halves of the results list: the answer, then the related. */
-  private primaryEl: HTMLElement | null = null;
-  private relatedEl: HTMLElement | null = null;
+  private resultsEl: HTMLElement | null = null;
   /** Result cards on screen, so Remove and Undo can swap one in place. */
   private results = new Map<string, HTMLElement>();
   /**
@@ -1461,8 +1460,7 @@ export class HubView extends ItemView {
     this.listEl = null;
     this.channelsEl = null;
     this.statusEl = null;
-    this.primaryEl = null;
-    this.relatedEl = null;
+    this.resultsEl = null;
     this.searchInputEl = null;
     this.channelFactsEl = null;
     this.channelSubscribeEl = null;
@@ -2061,8 +2059,7 @@ export class HubView extends ItemView {
     list.empty();
     this.cards.clear();
     this.results.clear();
-    this.primaryEl = null;
-    this.relatedEl = null;
+    this.resultsEl = null;
     const channel = this.channel;
 
     const copy = this.channelCopy();
@@ -2071,7 +2068,7 @@ export class HubView extends ItemView {
       return;
     }
 
-    this.primaryEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
+    this.resultsEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
     for (const result of channel.results) this.renderResult(result);
 
     if (channel.continuation) {
@@ -2409,28 +2406,21 @@ export class HubView extends ItemView {
   }
 
   /**
-   * Fetch pages until one of them survives `acceptable`, or the road runs out.
-   *
-   * Without this, a search whose whole first page is already in your hub would
-   * answer "nothing found" while sitting on a continuation token full of
-   * results. Three extra pages is the budget: enough for a query you have
-   * mostly worked through, bounded enough that a pathological one cannot turn a
-   * click into sixty requests.
+   * One search action's pages, merged: two for a new search, one for "More
+   * results", and up to four when everything is already in the hub. The rules
+   * live in `collectPages` (`src/search.ts`) so they are tested without a view.
    */
-  private async fetchPage(
+  private fetchPage(
     query: string,
     continuation: string | null,
   ): Promise<{ results: SearchResult[]; continuation: string | null; skipped: number }> {
-    let token = continuation;
-    let skipped = 0;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const page: SearchPage = await searchYouTube(query, this.searchFilters, token);
-      const fresh = this.acceptable(page.results);
-      skipped += page.results.length - fresh.length;
-      token = page.continuation;
-      if (fresh.length > 0 || !token) return { results: fresh, continuation: token, skipped };
-    }
-    return { results: [], continuation: token, skipped };
+    const filters = this.searchFilters;
+    return collectPages(
+      (token) => searchYouTube(query, filters, token),
+      (result) => this.acceptable([result]).length > 0,
+      continuation,
+      continuation === null ? 2 : 1,
+    );
   }
 
   /**
@@ -2551,8 +2541,7 @@ export class HubView extends ItemView {
     list.empty();
     this.cards.clear();
     this.results.clear();
-    this.primaryEl = null;
-    this.relatedEl = null;
+    this.resultsEl = null;
 
     const copy = this.searchCopy();
     if (copy.kind !== "results") {
@@ -2560,11 +2549,9 @@ export class HubView extends ItemView {
       return;
     }
 
-    // Two hosts, created up front and in this order, so an appended page lands
-    // in the right half without anything above it being redrawn. Each is a card
-    // grid in its own right — two-up on a phone, a column on a desktop.
-    this.primaryEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
-    this.relatedEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
+    // One host, so an appended page lands at the end without anything above it
+    // being redrawn. A card grid — two-up on a phone, a column on a desktop.
+    this.resultsEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
 
     for (const result of this.searchResults) this.renderResult(result);
 
@@ -2636,32 +2623,6 @@ export class HubView extends ItemView {
   }
 
   /**
-   * Where a result goes: the answer, or the related material below it.
-   *
-   * Each half gets a heading with its first result rather than up front,
-   * because a heading over an empty section is a promise the section did not
-   * keep — after the already-in-your-hub filter, either half can come back with
-   * nothing. Both are at the bottom of a list that is only appended to, so
-   * creating one moves nothing that was already on screen.
-   */
-  private resultHost(result: SearchResult): HTMLElement | null {
-    const host = result.secondary ? this.relatedEl : this.primaryEl;
-    // A channel's catalogue is one list with nothing related under it, so it
-    // needs no heading saying which half you are in.
-    if (this.mode === "channel") return host;
-    if (host && host.childElementCount === 0) {
-      host.createDiv({
-        cls: "ytfree-hub-results-heading",
-        // "Results" says the section below is the answer, which is only worth
-        // saying because "Related to your search" is a section too — YouTube's
-        // own related material, kept out of the answer rather than mixed in.
-        text: result.secondary ? "Related to your search" : "Results",
-      });
-    }
-    return host;
-  }
-
-  /**
    * A search result card.
    *
    * The same card as the hub's, with the same four buttons in the same four
@@ -2671,7 +2632,7 @@ export class HubView extends ItemView {
    * no anchor and no `<video>` here — see `docs/V1-SCOPE-BROWSE.md`.
    */
   private renderResult(result: SearchResult): void {
-    const host = this.resultHost(result);
+    const host = this.resultsEl;
     if (!host) return;
     if (this.removedResults.has(result.videoId)) {
       host.appendChild(this.buildRemovedStrip(result));
@@ -3350,7 +3311,6 @@ export class HubView extends ItemView {
         views: null,
         duration: details.durationSeconds ? formatDuration(details.durationSeconds) : "",
         thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-        secondary: false,
       };
     }
     this.openPreview(videoId, () => undefined, seconds);
@@ -3391,7 +3351,6 @@ export class HubView extends ItemView {
             views: null,
             duration: formatDuration(item.durationSeconds),
             thumbnail: item.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-            secondary: false,
           }
         : null);
     const channelId = item?.channelId || result?.channelId || "";
@@ -4270,6 +4229,5 @@ function historyResult(item: HubItem): SearchResult {
     views: null,
     duration: formatDuration(item.durationSeconds),
     thumbnail: item.thumbnail,
-    secondary: false,
   };
 }

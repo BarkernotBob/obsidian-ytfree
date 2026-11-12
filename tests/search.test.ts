@@ -17,10 +17,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
+  collectPages,
   parseSearchResponse,
   parseViewCount,
   pickThumbnail,
 } from "../src/search.ts";
+import type { SearchPage } from "../src/search.ts";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -33,9 +35,9 @@ const secondPage = fixture("search-android-continuation.json");
 
 // ------------------------------------------------------------------ results
 
-test("parses every video in the item sections", () => {
+test("parses every video in the answer section", () => {
   const page = parseSearchResponse(firstPage);
-  assert.ok(page.results.length >= 15, `only ${page.results.length} results`);
+  assert.equal(page.results.length, 7);
   for (const result of page.results) {
     assert.match(result.videoId, /^[A-Za-z0-9_-]{11}$/);
     assert.ok(result.title.length > 0);
@@ -63,20 +65,24 @@ test("every result states a duration", () => {
 
 // ------------------------------------------------------------------ sections
 
-test("only the first video-bearing section is the answer to the search", () => {
-  // The fixture has three of them. Flattening all three is what made "sort by
-  // upload date" look random: the later sections are YouTube's own "related to
-  // your search", and they are not sorted by anything we asked for.
+test("only the first video-bearing section is kept (#46)", () => {
+  // The fixture's page one has videos in three sections: 7, then 2 and 10
+  // between the shelves. Only the first is sorted and filtered by YouTube, so
+  // the other two are dropped rather than drawn under a "related" heading.
   const page = parseSearchResponse(firstPage);
-  const primary = page.results.filter((result) => !result.secondary);
-  const secondary = page.results.filter((result) => result.secondary);
-  assert.ok(primary.length > 0);
-  assert.ok(secondary.length > 0, "fixture has no second section to mark");
-  // Primary comes first, so the list can be drawn in order under one heading.
-  assert.equal(page.results.slice(0, primary.length).every((r) => !r.secondary), true);
+  assert.equal(page.results.length, 7);
+  assert.equal(page.results[0].title.startsWith("The PROBLEM with Capitalism"), true);
+  const titles = page.results.map((result) => result.title);
+  assert.ok(!titles.some((title) => title.startsWith("The Backwards Brain Bicycle")));
+  assert.ok(!titles.some((title) => title.startsWith("TRACTOR PULLS")));
+  assert.ok(page.continuation, "page one still offers the next page");
 });
 
-test("a single-section response marks nothing secondary", () => {
+test("a continuation's answer section is kept whole", () => {
+  assert.equal(parseSearchResponse(fixture("search-android-continuation.json")).results.length, 20);
+});
+
+test("a section with no videos in it is not the first section", () => {
   const page = parseSearchResponse({
     contents: {
       sectionListRenderer: {
@@ -87,13 +93,104 @@ test("a single-section response marks nothing secondary", () => {
               contents: [{ compactVideoRenderer: { videoId: "vS6HEes8daw" } }],
             },
           },
+          {
+            itemSectionRenderer: {
+              contents: [{ compactVideoRenderer: { videoId: "aqz-KE-bpKQ" } }],
+            },
+          },
         ],
       },
     },
   });
-  // A section with no videos in it is not the first section — it is furniture.
-  assert.equal(page.results.length, 1);
-  assert.equal(page.results[0].secondary, false);
+  // Furniture first, then the answer; the section after the answer is dropped.
+  assert.deepEqual(page.results.map((r) => r.videoId), ["vS6HEes8daw"]);
+});
+
+// ------------------------------------------------------------------ collecting pages
+
+function fakePage(ids: string[], continuation: string | null): SearchPage {
+  return {
+    results: ids.map((videoId) => ({
+      videoId,
+      title: videoId,
+      channelId: "",
+      channelTitle: "",
+      publishedText: "",
+      views: null,
+      duration: "",
+      thumbnail: "",
+    })),
+    continuation,
+  };
+}
+
+/** Pages keyed by the token that fetches them; null is page one. */
+function fakeYouTube(pages: Record<string, SearchPage>): {
+  fetch: (token: string | null) => Promise<SearchPage>;
+  sent: Array<string | null>;
+} {
+  const sent: Array<string | null> = [];
+  return {
+    sent,
+    fetch: (token) => {
+      sent.push(token);
+      return Promise.resolve(pages[token ?? "first"] ?? fakePage([], null));
+    },
+  };
+}
+
+const id = (n: number): string => `vid${String(n).padStart(8, "0")}`;
+
+test("a new search reads page one and page two in one action", async () => {
+  const yt = fakeYouTube({
+    first: fakePage([id(1), id(2)], "t2"),
+    t2: fakePage([id(3), id(4)], "t3"),
+    t3: fakePage([id(5)], null),
+  });
+  const got = await collectPages(yt.fetch, () => true, null, 2);
+  assert.deepEqual(yt.sent, [null, "t2"]);
+  assert.deepEqual(got.results.map((r) => r.videoId), [id(1), id(2), id(3), id(4)]);
+  assert.equal(got.continuation, "t3");
+  assert.equal(got.pages, 2);
+});
+
+test("More results reads one page", async () => {
+  const yt = fakeYouTube({ t3: fakePage([id(5)], "t4") });
+  const got = await collectPages(yt.fetch, () => true, "t3", 1);
+  assert.deepEqual(yt.sent, ["t3"]);
+  assert.equal(got.results.length, 1);
+});
+
+test("a one-page answer stops when YouTube offers no token", async () => {
+  const yt = fakeYouTube({ first: fakePage([id(1)], null) });
+  const got = await collectPages(yt.fetch, () => true, null, 2);
+  assert.equal(got.pages, 1);
+  assert.equal(got.continuation, null);
+});
+
+test("pages whose results are all in the hub are skipped, at most four requests", async () => {
+  const yt = fakeYouTube({
+    first: fakePage([id(1)], "t2"),
+    t2: fakePage([id(2)], "t3"),
+    t3: fakePage([id(3)], "t4"),
+    t4: fakePage([id(4)], "t5"),
+    t5: fakePage([id(5)], null),
+  });
+  const got = await collectPages(yt.fetch, () => false, null, 2);
+  assert.equal(got.pages, 4);
+  assert.equal(got.results.length, 0);
+  assert.equal(got.skipped, 4);
+  assert.equal(got.continuation, "t5");
+});
+
+test("a video repeated on page two is shown once", async () => {
+  const yt = fakeYouTube({
+    first: fakePage([id(1), id(2)], "t2"),
+    t2: fakePage([id(2), id(3)], null),
+  });
+  const got = await collectPages(yt.fetch, () => true, null, 2);
+  assert.deepEqual(got.results.map((r) => r.videoId), [id(1), id(2), id(3)]);
+  assert.equal(got.skipped, 0);
 });
 
 // ------------------------------------------------------------------ refusals
