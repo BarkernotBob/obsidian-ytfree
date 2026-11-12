@@ -101,6 +101,13 @@ export interface PlayerOptions {
    */
   onOpenSettings?: () => void;
   /**
+   * Back to the hub: the grid button, first on the left of the bar (Isaiah,
+   * 2026-11-12). A note's player brings the hub tab forward and keeps playing;
+   * Preview's also closes its sheet, by the sheet's own close rule. Absent,
+   * no button.
+   */
+  onOpenHub?: () => void;
+  /**
    * Share this video. One button on the bar, not two — the choice between a
    * plain link and a link at this moment is made *after* pressing it, in a menu
    * the host draws. The player supplies the anchor to draw it against and the
@@ -1162,6 +1169,15 @@ export class YtFreePlayer {
     // A double chevron says "skip", not "skip how far". The numeral is a static
     // corner badge inside a fixed-size button, so it costs no layout.
     for (const el of [back, forward]) el.createSpan({ cls: "ytfree-btn-badge", text: "10" });
+
+    // The way back to the hub, first of all: the top-left is where a way back
+    // is looked for. On a phone the side row has no room for a ninth 40pt
+    // target, so CSS lifts it to the left end of the transport row — the same
+    // top-left corner, a row higher. It stays visible over YouTube's player.
+    if (this.options.onOpenHub) {
+      const hub = button("left", "Hub", "layout-grid", "Back to the hub", () => this.options.onOpenHub?.());
+      hub.addClass("ytfree-btn-hub");
+    }
 
     // Left is how the picture plays and where it plays: the speed picker, then
     // the two ways out of the note — Picture-in-Picture and Fullscreen, which

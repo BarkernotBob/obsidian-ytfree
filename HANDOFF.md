@@ -28,6 +28,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   needs a tap to start with sound, try a muted start then unmute in `docs/player/index.html`.
 - 2026-11-11: Notes button reworked (see GLOSSARY): keyboard-only fold, cursor at the bottom of
   Notes, other YT Free buttons close the keyboard. Next: Isaiah's phone test.
+- 2026-11-12: hub button (grid icon) on every player bar, note and Preview; bar spacing made equal
+  ([V1-SCOPE-HUB-BUTTON](docs/V1-SCOPE-HUB-BUTTON.md)). Next: Isaiah's phone + Mac test.
 
 - 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
 

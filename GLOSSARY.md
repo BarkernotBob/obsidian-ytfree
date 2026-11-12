@@ -367,3 +367,10 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   ecosystem. TypeScript stays pinned.
 - The plugin's four data files are read together at load, not in sequence.
 
+### 2026-11-12 (hub button, MVP)
+
+- **Hub button** (grid icon) first on the left of every player bar, video notes and Preview.
+  In a note it brings the hub tab forward, the note stays open and **keeps playing**. In Preview it
+  closes the sheet like its close button (stops unless in PiP), then shows the hub.
+- **Bar spacing is equal** between every pair of controls (Isaiah). On a phone the hub button sits
+  at the left end of the transport row, because the side row has no room for a ninth button.

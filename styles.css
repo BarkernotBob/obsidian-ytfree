@@ -254,19 +254,21 @@
   /* The per-video pop-out hangs off this row and opens upwards over the video,
      so the row is its positioning parent. */
   position: relative;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
   /*
-   * Two spacings, not one.
+   * One run of controls with the same gap between every pair (Isaiah,
+   * 2026-11-12: "the spacing between buttons needs to be consistent").
    *
-   * Every control used to be 6px from every other, so the row read as one
-   * undivided run of nine targets and the button next to Play was as easy to
-   * hit as Play. The gap between the groups is now twice the gap inside them:
-   * the transport is a thing of its own with clear air either side, and the
-   * mis-taps that air prevents are exactly the ones that were happening.
+   * It used to be a `1fr auto 1fr` grid with 8px inside each group and the
+   * leftover air between the groups, so the gaps were 8, 8, 40-odd, 8, 8 and
+   * read as three clusters. The groups are now `display: contents` and the
+   * bar spreads every control evenly with `space-between`. The left and right
+   * runs are the same width give or take the speed picker, so Play stays
+   * within a few pixels of the centre without the grid forcing it there.
    */
-  gap: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   min-height: 56px;
   padding: 4px 8px;
   border-radius: var(--radius-m);
@@ -274,26 +276,15 @@
   box-sizing: border-box;
 }
 
+/* The groups stay in the DOM because the code and the YouTube-player rules
+   name them; they no longer draw a box of their own. */
 .ytfree-controls-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: contents;
 }
 
-/*
- * The transport is the middle cell; the sides push outwards from it.
- *
- * Named classes, not `:first-child` / `:last-child`. The pop-out is a child of
- * this same bar and it is built last, so it held `:last-child` and the right
- * group silently fell back to `flex-start` — which is the "everything bunched
- * against the transport with a hole on the outside" the alignment pass found.
- */
-.ytfree-controls-left {
-  justify-content: flex-start;
-}
-
-.ytfree-controls-right {
-  justify-content: flex-end;
+/* Left first, then the transport (ordered below), then the right. */
+.ytfree-controls-right > * {
+  order: 4;
 }
 
 /* Construction order puts Play first, because Play is the button the rest of
@@ -1079,12 +1070,14 @@
  * trusting this sum.
  */
 @media (max-width: 460px) {
+  /* Two rows: the transport alone and centred on top, then the seven side
+     controls spread evenly across the full width beneath it. The hub button
+     sits at the top row's left end (below): a ninth 40pt target does not fit
+     on the second row of a 390pt phone with any gap at all. */
   .ytfree-controls {
-    grid-template-columns: 1fr 1fr;
-    grid-template-areas:
-      "transport transport"
-      "left right";
-    gap: 8px;
+    flex-wrap: wrap;
+    row-gap: 8px;
+    column-gap: 0;
     padding: 4px 6px;
     /* 8 padding + 48 transport + 8 row gap + 40 side row. Fixed, so the row
        count cannot change under a control that has just been pressed. */
@@ -1092,20 +1085,26 @@
   }
 
   .ytfree-controls-transport {
-    grid-area: transport;
-    justify-self: center;
-  }
-
-  .ytfree-controls-left {
-    grid-area: left;
-  }
-
-  .ytfree-controls-right {
-    grid-area: right;
-  }
-
-  .ytfree-controls-group {
+    display: flex;
+    flex-basis: 100%;
+    justify-content: center;
+    align-items: center;
     gap: 8px;
+    order: 0;
+  }
+
+  .ytfree-controls-left > * {
+    order: 1;
+  }
+
+  .ytfree-controls-right > * {
+    order: 2;
+  }
+
+  .ytfree-controls .ytfree-btn-hub {
+    position: absolute;
+    top: 8px;
+    left: 6px;
   }
 
   /* Deliberately not smaller than the desktop's: this is the surface a thumb
@@ -1230,6 +1229,12 @@
 }
 
 .ytfree-wrapper.is-immersive .ytfree-sections {
+  display: none;
+}
+
+/* Leaving for the hub from the plugin's own fullscreen would leave the
+   overlay behind it; the way out of fullscreen comes first. */
+.ytfree-wrapper.is-immersive .ytfree-btn-hub {
   display: none;
 }
 
@@ -4058,7 +4063,9 @@ body.ytfree-immersive-open .ytfree-preview-close {
   visibility: hidden;
 }
 .is-youtube .ytfree-controls .ytfree-btn-youtube,
-.is-youtube .ytfree-controls .ytfree-btn-youtube * {
+.is-youtube .ytfree-controls .ytfree-btn-youtube *,
+.is-youtube .ytfree-controls .ytfree-btn-hub,
+.is-youtube .ytfree-controls .ytfree-btn-hub * {
   visibility: visible;
 }
 /* Desktop: only the way back from the fallback tier, never a way in. */
