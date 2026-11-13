@@ -292,7 +292,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Subscribe in YT Free** (GitHub #65; details Claude's calls, open to change): adds the channel
   to the hub's list only, nothing sent to YouTube; videos arrive on the next feed check (no extra
   poll). On the channel screen the button turns into a greyed "Subscribed" of the same width;
-  there is no unsubscribe there yet. A search card's ⋯ menu offers "Subscribe in YT Free" above
+  there is no unsubscribe there yet (superseded 2026-11-12: see Managing subscriptions). A search card's ⋯ menu offers "Subscribe in YT Free" above
   "Hide this channel", and shows a greyed "Subscribed in YT Free" for a followed channel.
 
 ### Earlier
@@ -367,3 +367,18 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   ecosystem. TypeScript stays pinned.
 - The plugin's four data files are read together at load, not in sequence.
 
+
+## Managing subscriptions (Isaiah, 2026-11-12; [scope](docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md))
+
+- **Unsubscribe**, never "remove": an edit-mode − in the sidebar read as removing a sidebar row
+  (Isaiah). The hub menu's list is "Subscriptions · N" with **Manage**, which opens the Manage
+  subscriptions screen: Add channel, a filter, and a red **Unsubscribe** per channel.
+- Unsubscribe acts at once with **Undo** (row in place on Manage, a Notice elsewhere). New and
+  Hidden videos of the channel leave the hub; Saved videos, notes and watch history stay.
+- **Subscribed ✓** on the channel screen, a note's channel row and a search card's ⋯ is a button:
+  tapping it unsubscribes. Long-press (right-click on desktop) a channel in the hub menu also
+  offers Unsubscribe.
+- A **note's channel row** sits always visible under the player controls (not hidden in ⋯,
+  Isaiah): channel name, "See all their videos ›", Subscribe. New notes carry `channel_id`.
+- **Adding by channel search** is post-MVP (#108). Add channel opens the paste-a-link + Takeout
+  dialog until then.

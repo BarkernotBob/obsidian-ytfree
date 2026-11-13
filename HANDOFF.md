@@ -29,6 +29,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
 - 2026-11-11: Notes button reworked (see GLOSSARY): keyboard-only fold, cursor at the bottom of
   Notes, other YT Free buttons close the keyboard. Next: Isaiah's phone test.
 
+- 2026-11-12: unsubscribe (Manage subscriptions screen), Subscribed toggles, note channel row
+  built on PR #106 ([scope](docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md)). Next: Isaiah's phone + Mac test.
+
 - 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
 
 ## Shipped on main (scope doc = manual test)

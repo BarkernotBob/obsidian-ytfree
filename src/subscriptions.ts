@@ -286,6 +286,70 @@ export function rememberVideo(state: SubscriptionsState, videoId: string): void 
   state.deletedVideos = state.deletedVideos.filter((entry) => entry.id !== videoId);
 }
 
+// ------------------------------------------------------------ unsubscribe
+
+/**
+ * Everything an unsubscribe took away, so Undo can put it back exactly
+ * (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md, S1).
+ */
+export interface UnsubscribeUndo {
+  channel: Channel;
+  /** The channel's videos that left the hub with it: New and Hidden ones. */
+  items: HubItem[];
+  /** The tombstone this channel had before, if it had been removed once already. */
+  priorTombstone: { id: string; at: string } | null;
+}
+
+/**
+ * Unsubscribe inside YouTube for You: the channel leaves the list and the feed
+ * poll, its New and Hidden videos leave the hub. Saved videos stay, and so do
+ * notes and watch history, which live elsewhere. A tombstone stops the other
+ * device handing the channel back on its next merge. Mutates `state`.
+ */
+export function unsubscribeChannel(
+  state: SubscriptionsState,
+  channelId: string,
+  now: Date,
+): UnsubscribeUndo | null {
+  const channel = state.channels.find((c) => c.id === channelId);
+  if (!channel) return null;
+  const items = state.items.filter((item) => item.channelId === channelId && item.state !== "kept");
+  const priorTombstone = (state.removedChannels ?? []).find((r) => r.id === channelId) ?? null;
+  state.channels = state.channels.filter((c) => c.id !== channelId);
+  state.items = state.items.filter((item) => item.channelId !== channelId || item.state === "kept");
+  state.removedChannels = [
+    ...(state.removedChannels ?? []).filter((r) => r.id !== channelId),
+    { id: channelId, at: now.toISOString() },
+  ];
+  return { channel: { ...channel }, items, priorTombstone };
+}
+
+/**
+ * Undo an unsubscribe. The channel comes back with a fresh `addedAt`, which is
+ * what beats the tombstone if the other device already merged it (see
+ * `mergeStates`); the tombstone goes back to what it was. Mutates `state`.
+ */
+export function undoUnsubscribe(state: SubscriptionsState, undo: UnsubscribeUndo, now: Date): void {
+  const id = undo.channel.id;
+  if (!state.channels.some((c) => c.id === id)) {
+    state.channels = [...state.channels, { ...undo.channel, addedAt: now.toISOString() }];
+  }
+  const present = new Set(state.items.map((item) => item.videoId));
+  state.items = [...state.items, ...undo.items.filter((item) => !present.has(item.videoId))];
+  const others = (state.removedChannels ?? []).filter((r) => r.id !== id);
+  state.removedChannels = undo.priorTombstone ? [...others, undo.priorTombstone] : others;
+}
+
+/** The last upload this hub knows of for each channel, as an ISO time. */
+export function lastUploads(items: readonly HubItem[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const item of items) {
+    const seen = out.get(item.channelId);
+    if (!seen || item.published > seen) out.set(item.channelId, item.published);
+  }
+  return out;
+}
+
 // -------------------------------------------------------------------- merge
 
 /**
@@ -1279,6 +1343,9 @@ export function buildWatchLaterNote(item: HubItem, now: Date): string {
     "tags: []",
     "domain: youtube.com",
     `media_link: ${url}`,
+    // So a note's channel row knows the channel with no network
+    // (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md, S4). The name can change; this can't.
+    ...(item.channelId ? [`channel_id: ${item.channelId}`] : []),
     "length: ",
     "---",
     NOTES_HEADING,

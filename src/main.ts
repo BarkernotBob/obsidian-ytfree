@@ -42,7 +42,9 @@ import {
   PreviewHandle,
   ImportSubscriptionsModal,
   SubscriptionsStore,
+  unsubscribeWithUndo,
 } from "./hub";
+import { subscribeButton, subscribedNotice } from "./subscribe";
 import { YT_ICON, registerIcons } from "./icon";
 import { previewCloseAction } from "./preview";
 import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings.ts";
@@ -1764,10 +1766,106 @@ export default class YtFreePlugin extends Plugin {
     new Notice(`YouTube for You: opened the note, but could not start it at ${formatTimestamp(seconds)}.`);
   }
 
-  private async openVideoChannel(videoId: string): Promise<void> {
+  /**
+   * A note's channel row (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md, S4): who made
+   * this video, a way to all their videos, and Subscribe / Subscribed.
+   *
+   * Nothing is fetched to draw it. The channel comes from `channel_id` in the
+   * frontmatter (notes made since this row), the hub's row, or the author name
+   * matched against your subscriptions; only a tap on a note that knows none of
+   * those costs one player call to ask YouTube.
+   */
+  private buildChannelRow(wrapper: HTMLElement, videoId: string, note: TFile): void {
+    const row = wrapper.createDiv({ cls: "ytfree-channel-row" });
+    const open = row.createEl("button", { cls: "ytfree-channel-row-open", attr: { type: "button" } });
+    const avatar = open.createSpan({ cls: "ytfree-channel-row-avatar", attr: { "aria-hidden": "true" } });
+    const text = open.createSpan({ cls: "ytfree-channel-row-text" });
+    const name = text.createSpan({ cls: "ytfree-channel-row-name" });
+    text.createSpan({ cls: "ytfree-channel-row-hint", text: "See all their videos ›" });
+    const subscribe = row.createEl("button", { cls: "ytfree-channel-row-subscribe", attr: { type: "button" } });
+
+    let asked: { id: string; title: string } | null = null;
+    const current = () => {
+      const known = this.channelForNote(videoId, note);
+      return asked && !known.id ? asked : known;
+    };
+    const paint = () => {
+      const channel = current();
+      const title = channel.title || "This video's channel";
+      name.setText(title);
+      avatar.setText((channel.title || "?").trim().charAt(0).toUpperCase());
+      open.setAttribute("aria-label", `See all videos from ${title}`);
+      const copy = subscribeButton(Boolean(channel.id) && this.subscriptions.isSubscribed(channel.id));
+      subscribe.setText(copy.text);
+      subscribe.setAttribute("aria-label", copy.title);
+      subscribe.title = copy.title;
+      subscribe.toggleClass("mod-cta", !copy.subscribed);
+      subscribe.toggleClass("is-subscribed", copy.subscribed);
+    };
+    const resolve = async (): Promise<{ id: string; title: string } | null> => {
+      const channel = current();
+      if (channel.id) return channel;
+      const details = await fetchVideoDetails(videoId);
+      if (!details.channelId) {
+        new Notice("YouTube for You: YouTube would not say whose video this is.");
+        return null;
+      }
+      asked = { id: details.channelId, title: details.channelTitle || channel.title };
+      return asked;
+    };
+
+    open.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      const channel = current();
+      void this.openVideoChannel(videoId, channel.id ? channel : undefined);
+    });
+    subscribe.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      void resolve().then((channel) => {
+        if (!channel) return;
+        if (this.subscriptions.isSubscribed(channel.id)) {
+          unsubscribeWithUndo(this.subscriptions, channel.id, channel.title);
+        } else {
+          this.subscriptions.addChannels([{ id: channel.id, title: channel.title || channel.id }]);
+          new Notice(subscribedNotice(channel.title));
+        }
+        paint();
+      });
+    });
+
+    paint();
+    // Subscribing anywhere else — the hub, the other device — repaints this.
+    const off = this.subscriptions.onChange(() => {
+      if (!row.isConnected) {
+        off();
+        return;
+      }
+      paint();
+    });
+  }
+
+  /** What a note knows about its channel without asking YouTube. */
+  private channelForNote(videoId: string, note: TFile): { id: string; title: string } {
+    const fm = this.app.metadataCache.getFileCache(note)?.frontmatter;
+    const author: unknown = firstValue(fm?.author) ?? (fm?.channel as unknown);
+    const fmTitle = typeof author === "string" ? author.trim() : "";
+    const fmId = typeof fm?.channel_id === "string" && /^UC[\w-]{22}$/.test(fm.channel_id) ? fm.channel_id : "";
     const item = this.subscriptions.itemFor(videoId);
-    let channelId = item?.channelId ?? "";
-    let channelTitle = item?.channelTitle ?? "";
+    const title = item?.channelTitle || fmTitle;
+    const id =
+      fmId ||
+      item?.channelId ||
+      (title ? (this.subscriptions.state.channels.find((c) => c.title === title)?.id ?? "") : "");
+    return { id, title };
+  }
+
+  private async openVideoChannel(
+    videoId: string,
+    known?: { id: string; title: string },
+  ): Promise<void> {
+    const item = this.subscriptions.itemFor(videoId);
+    let channelId = known?.id || item?.channelId || "";
+    let channelTitle = known?.title || item?.channelTitle || "";
     if (!channelId) {
       const details = await fetchVideoDetails(videoId);
       channelId = details.channelId;
@@ -4086,6 +4184,9 @@ export default class YtFreePlugin extends Plugin {
     };
     if (preview) this.preview = entry;
     else this.players.set(videoId, entry);
+    // The channel, under the controls, in a note — never in Preview, which has
+    // its own channel link (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md, S4).
+    if (!preview && noteFile instanceof TFile) this.buildChannelRow(wrapper, videoId, noteFile);
     player.video.addEventListener("play", () => {
       // A preview never claims this. It is what "the player a timestamp belongs
       // to" falls back to, and a preview has no note to write one into.
