@@ -11,6 +11,7 @@
  * Nothing here may import `obsidian` or a Node builtin.
  */
 
+import { AGE_BLOCKED_MESSAGE, isAgeGatePlayability } from "../age-restricted.ts";
 import { EXPIRY_SAFETY_MARGIN_MS, parseExpiry } from "../stream.ts";
 import type { ResolvedStream } from "../stream.ts";
 
@@ -48,7 +49,7 @@ export interface InnerTubeFormat {
  * was, because "age-restricted" and "YouTube changed something" call for
  * completely different reactions and both otherwise look like a dead player.
  */
-export type FailureKind = "login" | "unplayable" | "no-format" | "network";
+export type FailureKind = "login" | "age-restricted" | "unplayable" | "no-format" | "network";
 
 export class MobileResolveError extends Error {
   // Written out longhand rather than as a constructor parameter property,
@@ -66,9 +67,9 @@ export class MobileResolveError extends Error {
 /**
  * The playability problem, or null when the video can be played.
  *
- * `LOGIN_REQUIRED` covers age-restricted and members-only videos, which do not
- * resolve on desktop without cookies either, and it is also what a bot check
- * looks like. Either way the honest answer is "open it in YouTube".
+ * An age or content gate is `age-restricted` (GitHub #111): blocked, never
+ * offered in YouTube. `LOGIN_REQUIRED` otherwise covers members-only videos
+ * and the bot check, told apart from an age gate by the reason text.
  */
 export function playabilityFailure(response: PlayerResponse): MobileResolveError | null {
   const status = response.playabilityStatus?.status;
@@ -78,10 +79,13 @@ export function playabilityFailure(response: PlayerResponse): MobileResolveError
     return new MobileResolveError("unplayable", "YouTube sent no playability status.");
   }
   if (status === "OK") return null;
+  if (isAgeGatePlayability(status, reason)) {
+    return new MobileResolveError("age-restricted", AGE_BLOCKED_MESSAGE);
+  }
   if (status === "LOGIN_REQUIRED") {
     return new MobileResolveError(
       "login",
-      reason || "This video needs a signed-in account (age-restricted or members-only).",
+      reason || "This video needs a signed-in account (members-only).",
     );
   }
   return new MobileResolveError("unplayable", reason || status);
