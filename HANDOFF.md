@@ -30,6 +30,7 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   Notes, other YT Free buttons close the keyboard. Next: Isaiah's phone test.
 
 - 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
+- 2026-11-13 nightly (#108): Add channels sheet searches channels (WEB, `src/channel-search.ts`), Subscribe toggle per row. After #106 merges, rename its `removeChannel` undo.
 
 ## Shipped on main (scope doc = manual test)
 

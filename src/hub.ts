@@ -83,8 +83,11 @@ import {
   fetchPublishDate,
   fetchTranscriptCues,
   fetchVideoDetails,
+  searchChannels,
   searchYouTube,
 } from "./innertube";
+import { classifyAddChannelInput, resultButton, searchStatus } from "./channel-search";
+import type { ChannelResult } from "./channel-search";
 import {
   BACKFILL_MAX_PAGES,
   backfillItem,
@@ -4057,6 +4060,11 @@ class PreviewModal extends Modal {
  * way to read a subscription list, which is exactly why this is a manual dump.
  */
 export class ImportSubscriptionsModal extends Modal {
+  /** Channels subscribed from this sheet's results, which tapping again undoes. */
+  private addedHere = new Set<string>();
+  /** Bumped per search, so a slow answer to an old query is dropped. */
+  private searchToken = 0;
+
   constructor(
     app: App,
     private store: SubscriptionsStore,
@@ -4065,10 +4073,46 @@ export class ImportSubscriptionsModal extends Modal {
     super(app);
   }
 
+  /**
+   * The Add channels sheet (GitHub #108, docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md
+   * S3): one box that searches channels or takes a pasted link, a Subscribe
+   * toggle per result, and the Google Takeout import at the foot.
+   */
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "Import YouTube subscriptions" });
+    this.modalEl.addClass("ytfree-add-channels-modal");
+    contentEl.createEl("h2", { text: "Add channels" });
+
+    const form = contentEl.createEl("form", { cls: "ytfree-add-channels-form" });
+    const input = form.createEl("input", {
+      cls: "ytfree-add-channels-input",
+      type: "search",
+      attr: {
+        placeholder: "Search channels, or paste a channel link",
+        "aria-label": "Search channels, or paste a channel link",
+        enterkeyhint: "search",
+        autocapitalize: "off",
+        autocorrect: "off",
+        spellcheck: "false",
+      },
+    });
+    const go = form.createEl("button", { cls: "mod-cta", text: "Search", attr: { type: "submit" } });
+    go.title = "One search per tap. A pasted link is added directly.";
+
+    // A reserved status line: filling it in must not resize the dialog.
+    const status = contentEl.createDiv({ cls: "ytfree-hub-modal-status" });
+    const results = contentEl.createDiv({ cls: "ytfree-add-channels-results" });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const what = classifyAddChannelInput(input.value);
+      if (what.kind === "empty") return;
+      if (what.kind === "link") void this.addOne(what.value, status);
+      else void this.runChannelSearch(what.query, status, results);
+    });
+
+    contentEl.createEl("h3", { cls: "ytfree-add-channels-foot", text: "Import from Google Takeout…" });
     contentEl.createEl("p", {
       cls: "ytfree-hub-hint",
       text: "Your YouTube subscriptions come out of Google Takeout as one file, subscriptions.csv:",
@@ -4090,9 +4134,6 @@ export class ImportSubscriptionsModal extends Modal {
         "Importing again later adds new channels and changes nothing else. " +
         "You can also subscribe from a channel's screen, or from a search result's ⋯ menu.",
     });
-
-    // A reserved status line: filling it in must not resize the dialog.
-    const status = contentEl.createDiv({ cls: "ytfree-hub-modal-status" });
 
     const picker = contentEl.createEl("input", { type: "file" });
     picker.accept = ".csv,text/csv";
@@ -4117,27 +4158,70 @@ export class ImportSubscriptionsModal extends Modal {
         .catch((err: unknown) => status.setText(`Could not read that file — ${String(err)}`));
     });
 
-    let single = "";
-    new Setting(contentEl)
-      .setName("Or add one channel")
-      .setDesc("A channel URL or a UC… ID. A @handle works too — the ID is read off the page.")
-      .addText((text) =>
-        text.setPlaceholder("https://www.youtube.com/@channel").onChange((value) => {
-          single = value;
-        }),
-      )
-      .addButton((button) =>
-        button.setButtonText("Add").onClick(() => {
-          void this.addOne(single, status);
-        }),
-      );
-
     new Setting(contentEl).addButton((button) =>
       button
         .setButtonText("Done")
         .setCta()
         .onClick(() => this.close()),
     );
+    input.focus();
+  }
+
+  /** One channel search, its results drawn as rows with a Subscribe toggle each. */
+  private async runChannelSearch(query: string, status: HTMLElement, list: HTMLElement): Promise<void> {
+    const token = ++this.searchToken;
+    status.setText("Searching channels…");
+    let found: ChannelResult[];
+    try {
+      found = await searchChannels(query);
+    } catch (err) {
+      if (token !== this.searchToken) return;
+      status.setText(`Could not search channels — ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    if (token !== this.searchToken) return;
+    status.setText(searchStatus(query, found.length));
+    list.empty();
+    for (const channel of found) this.renderChannelResult(list, channel, status);
+  }
+
+  private renderChannelResult(list: HTMLElement, channel: ChannelResult, status: HTMLElement): void {
+    const row = list.createDiv({ cls: "ytfree-add-channels-row" });
+    const avatar = row.createDiv({ cls: "ytfree-add-channels-avatar" });
+    if (channel.avatar) {
+      avatar.createEl("img", { attr: { src: channel.avatar, alt: "", loading: "lazy", referrerpolicy: "no-referrer" } });
+    } else avatar.setText(channel.title.slice(0, 1).toUpperCase());
+    const words = row.createDiv({ cls: "ytfree-add-channels-words" });
+    words.createDiv({ cls: "ytfree-add-channels-name", text: channel.title });
+    words.createDiv({
+      cls: "ytfree-add-channels-meta",
+      // A non-breaking space keeps the row two lines tall when both are missing.
+      text: [channel.handle, channel.subscribers].filter(Boolean).join(" · ") || "\u00a0",
+    });
+    const button = row.createEl("button", { cls: "ytfree-add-channels-subscribe", attr: { type: "button" } });
+    const paint = () => {
+      const copy = resultButton(this.store.isSubscribed(channel.channelId), this.addedHere.has(channel.channelId));
+      button.setText(copy.text);
+      button.title = copy.title;
+      button.disabled = copy.disabled;
+      button.toggleClass("mod-cta", !copy.subscribed);
+      button.toggleClass("is-subscribed", copy.subscribed);
+    };
+    button.addEventListener("click", () => {
+      const id = channel.channelId;
+      if (!this.store.isSubscribed(id)) {
+        this.store.addChannels([{ id, title: channel.title }]);
+        this.addedHere.add(id);
+        status.setText(`Subscribed to ${channel.title}. Its videos arrive in the hub on the next check.`);
+      } else if (this.addedHere.has(id)) {
+        this.store.removeChannel(id);
+        this.addedHere.delete(id);
+        status.setText(`Undone: not subscribed to ${channel.title}.`);
+      }
+      paint();
+      this.onDone();
+    });
+    paint();
   }
 
   private async addOne(input: string, status: HTMLElement): Promise<void> {

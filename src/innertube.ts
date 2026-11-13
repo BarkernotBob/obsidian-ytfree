@@ -30,7 +30,9 @@ import {
 import type { ChannelPage } from "./channel.ts";
 import { parseSearchResponse } from "./search.ts";
 import type { SearchPage } from "./search.ts";
-import { defaultFilters, encodeSearchParams } from "./search-params.ts";
+import { defaultFilters, encodeChannelSearchParams, encodeSearchParams } from "./search-params.ts";
+import { parseChannelSearchResponse } from "./channel-search.ts";
+import type { ChannelResult } from "./channel-search.ts";
 import type { SearchFilters } from "./search-params.ts";
 import { parseHeatmapMarkers, parseJson3, pickPlayerCaptionTrack } from "./transcript.ts";
 import type {
@@ -156,6 +158,16 @@ export async function searchYouTube(
     ? { continuation }
     : { query, params: encodeSearchParams(filters) };
   return parseSearchResponse(await callInnertube(SEARCH_URL, "android", body));
+}
+
+/**
+ * Channels matching a query, for the Add channel sheet (GitHub #108). One
+ * request per Enter, first page only. WEB, because ANDROID answers a channel
+ * search with unreadable `elementRenderer`s (see `channel-search.ts`).
+ */
+export async function searchChannels(query: string): Promise<ChannelResult[]> {
+  const body = { query, params: encodeChannelSearchParams() };
+  return parseChannelSearchResponse(await callInnertube(SEARCH_URL, "web", body));
 }
 
 /**
