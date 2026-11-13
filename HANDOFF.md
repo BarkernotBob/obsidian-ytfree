@@ -37,7 +37,9 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   ~55 s stutter and jumps ([V1-SCOPE-HD-STUTTER-AND-SEEK](docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md), #23/#24);
   desktop HD from yt-dlp's files; per-video quality switch ([V1-SCOPE-QUALITY-SWITCH](docs/V1-SCOPE-QUALITY-SWITCH.md)).
 - Phone HD (#25): native IOS HLS (~1 in 5 videos) and YouTube's own player from ⋯ → Quality
-  ([V1-SCOPE-PHONE-HD](docs/V1-SCOPE-PHONE-HD.md)). Part 2 needs GitHub Pages on, serving `/docs` from main.
+  ([V1-SCOPE-PHONE-HD](docs/V1-SCOPE-PHONE-HD.md)). Pages serves the player page from the `gh-pages`
+  branch: copy `docs/player/index.html` there after each change (`npm run check` fails if it lags; docs/DEVELOPING.md).
+- 2026-11-12 (#91): the player page logs `ad seen`/`ad ended`; no-ads device test is a release step (DEVELOPING.md).
 - Keep playing on the phone, resumable background pause, Now playing button
   ([V1-SCOPE-KEEP-PLAYING](docs/V1-SCOPE-KEEP-PLAYING.md)).
 - Halfway thumbnails (#41), paste-to-Preview, hub deep link, pasteable videos (#29), request
