@@ -1192,8 +1192,8 @@ interface CardButton {
 }
 
 /**
- * The lists, in the order they are offered. Removed (`hidden`) is what you took
- * out of the hub; Hidden (`searchHidden`) is what you hid from search.
+ * The lists, in the order they are offered. Hidden (`searchHidden`) is what you
+ * hid from search. Videos removed from the hub (`hidden`) have no list.
  *
  * A video is in exactly one of three states — undecided, kept (you opened it),
  * hidden (you turned it down) — and three of the chips are those states.
@@ -1212,7 +1212,8 @@ const FILTER_LABELS: ReadonlyArray<readonly [HubFilter, string]> = [
   ["new", "Inbox"],
   ["progress", "In progress"],
   ["kept", "Saved"],
-  ["hidden", "Removed"],
+  // No chip for `hidden` (removed from the hub): Isaiah, 2026-11-12 — a removed
+  // video is found again by searching for it.
   ["searchHidden", "Hidden"],
   ["history", "History"],
   ["all", "Everything"],
@@ -2423,11 +2424,10 @@ export class HubView extends ItemView {
   /**
    * Drop the results you have already dealt with.
    *
-   * "Dealt with" is anything in the hub's lists: Inbox or Saved. A video you
-   * removed from the hub is not dealt with for search's purposes — removing it
-   * only took it out of the hub — so it comes back as a normal card. Hiding is
-   * search's own decision, and a hidden video lists as a text card
-   * (docs/V1-SCOPE-HIDE-AND-REMOVE.md).
+   * Only repeats: a result already on screen from an earlier page. Everything
+   * else lists — Inbox, Saved and removed videos as normal cards (their Save
+   * and Watch read done where that is true), and videos hidden from search as
+   * text cards (Isaiah, 2026-11-12; docs/V1-SCOPE-HIDE-AND-REMOVE.md).
    *
    * This runs when a page *lands*, not when a card is drawn, which is what
    * keeps it compatible with the no-reflow rule: a result you add while looking
@@ -2437,7 +2437,7 @@ export class HubView extends ItemView {
   private acceptable(results: SearchResult[]): SearchResult[] {
     const shown = new Set(this.searchResults.map((result) => result.videoId));
     return results.filter(
-      (result) => !shown.has(result.videoId) && !this.store.isInHub(result.videoId),
+      (result) => !shown.has(result.videoId),
     );
   }
 

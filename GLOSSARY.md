@@ -15,14 +15,16 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Drained** (`progress.json`): watch stamps already handed to `history.json` (#48), so a
   merge with an older copy cannot bring them back and restart the hand-over every save.
 
-- **Hub**: the subscriptions screen. Chips: Inbox, In progress, Saved, Removed, Hidden, History, Everything.
+- **Hub**: the subscriptions screen. Chips: Inbox, In progress, Saved, Hidden, History, Everything.
 - **Inbox**: hub items not yet opened, kept or hidden.
 - **Saved** (chip; `kept` in code): hub items you opened or saved. Not the same as "has a note" (see 017).
-- **Removed** (chip; filter `hidden` and state `dismissed` in code): videos removed from the hub.
-  ↺ puts one back in the Inbox. Does not affect search (Isaiah, 2026-11-12).
+- **Removed** (state `dismissed`, filter key `hidden` in code): a video removed from the hub. No
+  list shows them; search for one to get it back. Does not affect search (Isaiah, 2026-11-13).
 - **Hidden** (chip; filter `searchHidden`, list `searchRemovedVideos` in code): videos hidden from
   search with Hide. They still list in search as a text card (no picture) with Unhide (Isaiah,
   2026-11-12; [scope](docs/V1-SCOPE-HIDE-AND-REMOVE.md)). Replaced Settings → "Removed from search".
+- **Search shows hub videos** (Isaiah, 2026-11-13): Inbox, Saved and removed videos all list in
+  search; only repeats are dropped.
 - **Feed poll**: the check of a subscribed channel's RSS feed, a rolling window of 15
   uploads by that channel only. Every channel, every 60 minutes, 5 at a time, stalest first;
   Sync now checks every channel too. A channel's first check after an import seeds its videos

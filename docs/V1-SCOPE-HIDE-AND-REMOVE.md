@@ -9,7 +9,7 @@
 4. On search cards the Remove button says **Hide**. That is what hides the picture and puts the
    video in the Hidden list.
 
-**Status:** draft, decisions D1–D3 below awaiting Isaiah. Built on the recommended answers.
+**Status:** D1–D3 answered by Isaiah 2026-11-13 00:51Z (see Decisions). Built on PR #110.
 
 ## What the code does today (main bd069ef)
 
@@ -26,41 +26,41 @@
 
 ## v1
 
-1. **Phone rows fixed.** The row stays a flex line on the phone (title and channel left, restore
-   button right, 44px target), with no fixed height. A harness check measures that no row
-   overlaps the next and every restore button is fully inside its row.
-2. **Two lists in the hub (D1):**
-   - **Removed** (was "Hidden"): videos you removed from the hub. ↺ puts one back in the Inbox,
-     as today. Status line: "you removed these from the hub".
-   - **Hidden** (new chip): videos you hid from search. Each row has **Unhide**. This replaces
-     Settings → "Removed from search" (that button goes; "Hidden from search" for channels stays).
-3. **Removing from the hub no longer touches search.** A removed video comes back in search as a
-   normal card with its picture. Its Save button reads as not saved. Save or Watch first puts it
-   back in the hub properly (picture and description fetched again), then works as on any search
-   card: Save makes the note (Saved), Watch makes it and opens it.
+1. **No list for removed videos (D1).** Hub Remove takes a video out of the hub (a tombstone, so
+   the next poll does not bring it back) and that is all. The old Hidden chip, which held them, is
+   gone: you find a removed video again by searching for it. Item 1's restore problem goes with it.
+   The phone row fix (rows stay a flex line, restore/unhide button inside its row) is kept, since
+   the new Hidden list uses the same rows.
+2. **Hidden** (new chip): videos you hid from search, newest first, each with **Unhide**. This
+   replaces Settings → "Removed from search" (that button goes; "Hidden from search" for channels
+   stays).
+3. **Search shows everything except repeats (D3).** Inbox, Saved and removed videos all list as
+   normal cards; Save and Watch read done where that is true. Save or Watch on a removed video first
+   puts it back in the hub properly (picture and description fetched again), then works as on any
+   search card.
 4. **Search Remove becomes Hide.** Same in-place strip ("Hidden · Undo"), stored in the same
    synced list as today (`searchRemovedVideos`, so no file migration).
-5. **A hidden video in a later search (D2)** is a text card: no picture, title, channel, age and
-   duration, and the four buttons Preview / Watch / Save / **Unhide**. Unhide redraws it with its
-   picture where it is. Save and Watch work as on any card and leave it hidden from search.
+5. **A hidden video in a later search (D2)** is a text card: an empty "Hidden" box the size of the
+   picture (no image requested), title, channel, age and duration, and Preview / Watch / Save /
+   **Unhide**. Unhide redraws it with its picture where it is. Save and Watch work as on any card
+   and leave it hidden from search.
 6. **Channel screen:** same as search (hidden videos are text cards, the button says Hide).
-7. **Inbox and Saved videos stay skipped in search (D3)**, as today and as PR #104 keeps it.
 
 ## Data
 
 No new fields. `searchRemovedVideos` keeps its name and sync rules; it now means "hidden from
 search". The hub's dismissed tombstones keep theirs; they now only mean "removed from the hub".
-Effect on existing data: everything already on the old Hidden chip moves to Removed and starts
-showing in searches again; everything in Settings → "Removed from search" moves to the Hidden chip
-and shows in searches as a text card.
+Effect on existing data: everything already on the old Hidden chip starts showing in searches
+again and has no list of its own; everything in Settings → "Removed from search" moves to the Hidden
+chip and shows in searches as a text card.
 
-## Decisions (Isaiah)
+## Decisions (Isaiah, 2026-11-13)
 
-- **D1. Two lists, "Removed" and "Hidden"?** Recommended: yes, as above. Alternative: one Hidden
-  chip with two sections.
-- **D2. Hidden card's fourth button = Unhide?** Recommended: yes. Alternative: keep it Hide, greyed.
-- **D3. Inbox and Saved videos still skipped in search?** Recommended: yes (unchanged). Alternative:
-  show them with a "Saved"/"In inbox" tick.
+- **D1. A list for removed videos?** **No:** "You could just search for a video if you removed it."
+  Only the Hidden list exists. (Claude had recommended a Removed chip beside Hidden.)
+- **D2. Hidden card's fourth button = Unhide?** **Yes.**
+- **D3. Inbox and Saved videos in search?** **Show them too.** (Claude had recommended keeping them
+  skipped.) Search now only drops repeats.
 
 ## Not in v1
 

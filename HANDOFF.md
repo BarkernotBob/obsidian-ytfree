@@ -27,8 +27,8 @@ Ticket detail lives in `issues/NNN-*.md` (each has a Status line and a Manual te
   ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)). Next: iPhone test; if YouTube
   needs a tap to start with sound, try a muted start then unmute in `docs/player/index.html`.
 - 2026-11-12: Remove vs Hide ([scope](docs/V1-SCOPE-HIDE-AND-REMOVE.md), branch
-  `claude/project-thread-tk97wv`): hub Remove → Removed list only; search Hide → Hidden list, text
-  card in later searches; phone Removed rows fixed. Next: Isaiah's D1–D3 answers + phone test.
+  `claude/project-thread-tk97wv`, PR #110): hub Remove → out of the hub, no list; search Hide →
+  Hidden chip + text card; search shows Inbox/Saved too. Next: Isaiah's phone test, then merge.
 - 2026-11-11: Notes button reworked (see GLOSSARY): keyboard-only fold, cursor at the bottom of
   Notes, other YT Free buttons close the keyboard. Next: Isaiah's phone test.
 
