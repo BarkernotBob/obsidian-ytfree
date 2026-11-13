@@ -1981,8 +1981,19 @@ body.ytfree-immersive-open {
 }
 
 .ytfree-add-channels-results {
-  max-height: 50vh;
+  height: min(50vh, 26em);
   overflow-y: auto;
+}
+
+/* Two reserved lines: "20 channels for …" wraps on a phone. */
+.ytfree-add-channels-modal .ytfree-hub-modal-status {
+  min-height: 3.2em;
+}
+
+.ytfree-add-channels-empty {
+  padding: 1em 0;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
 }
 
 .ytfree-add-channels-row {

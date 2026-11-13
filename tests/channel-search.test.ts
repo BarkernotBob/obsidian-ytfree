@@ -78,6 +78,9 @@ test("the box: links, IDs and @handles add directly; anything else searches", ()
     value: "UC6107grRI4m0o2-emgoDnAA",
   });
   assert.deepEqual(classifyAddChannelInput(" smarter every day "), { kind: "search", query: "smarter every day" });
+  // Words around a domain are still a search; a youtu.be link is a video, not a channel.
+  assert.deepEqual(classifyAddChannelInput("youtube.com tips"), { kind: "search", query: "youtube.com tips" });
+  assert.equal(classifyAddChannelInput("https://youtu.be/dQw4w9WgXcQ").kind, "search");
 });
 
 test("a result's button: Subscribe, Subscribed ✓ (undoable), or already subscribed", () => {
@@ -99,4 +102,16 @@ test("the status line after a search", () => {
   assert.equal(searchStatus("zzz", 0), "No channels found for “zzz”.");
   assert.equal(searchStatus("a", 1), "1 channel for “a”. Tap Subscribe on each one you want.");
   assert.equal(searchStatus("a", 20), "20 channels for “a”. Tap Subscribe on each one you want.");
+});
+
+test("undoing a Subscribe in the sheet only unsubscribes; it is not the hub's Remove", () => {
+  // removeChannel deletes the channel's undecided videos and syncs that deletion.
+  // A one-tap undo must not (code review on #108).
+  const hub = readFileSync(new URL("../src/hub.ts", import.meta.url), "utf8");
+  const sheet = hub.slice(hub.indexOf("export class ImportSubscriptionsModal"), hub.indexOf("export class SearchBlocklistModal"));
+  assert.ok(sheet.includes("undoSubscribe("));
+  assert.ok(!sheet.includes("removeChannel("));
+  const undo = hub.slice(hub.indexOf("  undoSubscribe(channelId: string)"), hub.indexOf("// ------------------------------------------------------ search blocklist"));
+  assert.ok(undo.includes("unsubscribedChannels"));
+  assert.ok(!undo.includes("items"));
 });

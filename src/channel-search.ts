@@ -154,7 +154,9 @@ export function classifyAddChannelInput(input: string): AddChannelInput {
   const value = input.trim();
   if (!value) return { kind: "empty" };
   if (/^@[^\s/?#]+$/.test(value)) return { kind: "link", value: `https://www.youtube.com/${value}` };
-  if (/youtube\.com|youtu\.be/i.test(value) || /UC[A-Za-z0-9_-]{22}/.test(value)) {
+  // Words with spaces are a search, even "youtube.com tips". youtu.be is a
+  // video link, which has no channel ID to read, so it is not a channel link.
+  if (!/\s/.test(value) && (/youtube\.com\//i.test(value) || /UC[A-Za-z0-9_-]{22}/.test(value))) {
     return { kind: "link", value };
   }
   return { kind: "search", query: value };

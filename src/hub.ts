@@ -420,6 +420,23 @@ export class SubscriptionsStore {
     return this.state.channels.length - before;
   }
 
+  /**
+   * Undo a subscribe made a moment ago in the Add channels sheet (GitHub #108).
+   * Not `removeChannel`, which is the hub's Remove and takes the channel's
+   * undecided videos with it: this only stops polling, with the same tombstone
+   * an unsubscribe on YouTube gets, so nothing already in the hub is touched and
+   * the other device does not hand the channel back.
+   */
+  undoSubscribe(channelId: string): void {
+    this.state.channels = this.state.channels.filter((c) => c.id !== channelId);
+    this.state.unsubscribedChannels = [
+      ...(this.state.unsubscribedChannels ?? []).filter((r) => r.id !== channelId),
+      { id: channelId, at: new Date().toISOString() },
+    ];
+    this.emit();
+    void this.save();
+  }
+
   // ------------------------------------------------------ search blocklist
 
   /** Whether a search or channel-screen result stays off the screen (issue 047). */
@@ -4062,8 +4079,15 @@ class PreviewModal extends Modal {
 export class ImportSubscriptionsModal extends Modal {
   /** Channels subscribed from this sheet's results, which tapping again undoes. */
   private addedHere = new Set<string>();
-  /** Bumped per search, so a slow answer to an old query is dropped. */
+  /** Of `addedHere`, the ones that were hidden from search: an undo hides them again. */
+  private wasHidden = new Set<string>();
+  /** Bumped per search or added link, so a slow answer to an old query is dropped. */
   private searchToken = 0;
+  /**
+   * A Subscribe tap only marks this; `onDone` (which can open the hub and poll
+   * every channel) runs once, when the sheet closes, not once per tap.
+   */
+  private changed = false;
 
   constructor(
     app: App,
@@ -4102,13 +4126,22 @@ export class ImportSubscriptionsModal extends Modal {
 
     // A reserved status line: filling it in must not resize the dialog.
     const status = contentEl.createDiv({ cls: "ytfree-hub-modal-status" });
+    // A fixed-height region from the start, so a search fills it rather than
+    // pushing the Takeout section down.
     const results = contentEl.createDiv({ cls: "ytfree-add-channels-results" });
+    results.createDiv({
+      cls: "ytfree-add-channels-empty",
+      text: "Search by name, like “smarter every day”. One search per tap.",
+    });
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const what = classifyAddChannelInput(input.value);
       if (what.kind === "empty") return;
-      if (what.kind === "link") void this.addOne(what.value, status);
+      if (what.kind === "link") {
+        this.searchToken++;
+        void this.addOne(what.value, status);
+      }
       else void this.runChannelSearch(what.query, status, results);
     });
 
@@ -4138,6 +4171,8 @@ export class ImportSubscriptionsModal extends Modal {
     const picker = contentEl.createEl("input", { type: "file" });
     picker.accept = ".csv,text/csv";
     picker.addClass("ytfree-hub-file");
+    // Its own reserved line, beside the picker: the top one can be scrolled away.
+    const takeoutStatus = contentEl.createDiv({ cls: "ytfree-hub-modal-status" });
     picker.addEventListener("change", () => {
       const file = picker.files?.[0];
       if (!file) return;
@@ -4146,16 +4181,16 @@ export class ImportSubscriptionsModal extends Modal {
         .then((text) => {
           const parsed = parseSubscriptionsCsv(text);
           if (parsed.length === 0) {
-            status.setText("No channel IDs found in that file. Is it subscriptions.csv?");
+            takeoutStatus.setText("No channel IDs found in that file. Is it subscriptions.csv?");
             return;
           }
           const added = this.store.addChannels(parsed);
-          status.setText(
+          takeoutStatus.setText(
             `${parsed.length} channels in the file — ${added} new, ${parsed.length - added} already here.`,
           );
           this.onDone();
         })
-        .catch((err: unknown) => status.setText(`Could not read that file — ${String(err)}`));
+        .catch((err: unknown) => takeoutStatus.setText(`Could not read that file — ${String(err)}`));
     });
 
     new Setting(contentEl).addButton((button) =>
@@ -4210,16 +4245,18 @@ export class ImportSubscriptionsModal extends Modal {
     button.addEventListener("click", () => {
       const id = channel.channelId;
       if (!this.store.isSubscribed(id)) {
+        if (this.store.hiddenSearchChannels().some((entry) => entry.id === id)) this.wasHidden.add(id);
         this.store.addChannels([{ id, title: channel.title }]);
         this.addedHere.add(id);
         status.setText(`Subscribed to ${channel.title}. Its videos arrive in the hub on the next check.`);
       } else if (this.addedHere.has(id)) {
-        this.store.removeChannel(id);
+        this.store.undoSubscribe(id);
+        if (this.wasHidden.delete(id)) this.store.setSearchHidden({ id, title: channel.title }, true);
         this.addedHere.delete(id);
         status.setText(`Undone: not subscribed to ${channel.title}.`);
-      }
+      } else return;
+      this.changed = true;
       paint();
-      this.onDone();
     });
     paint();
   }
@@ -4249,6 +4286,10 @@ export class ImportSubscriptionsModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+    if (this.changed) {
+      this.changed = false;
+      this.onDone();
+    }
   }
 }
 
