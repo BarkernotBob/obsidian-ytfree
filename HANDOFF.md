@@ -45,6 +45,8 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
 4. #62 device test of merged-but-untested features; #25, #5, #46, #48; bugs Isaiah lists.
 5. Hardening ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md)): Batches 0–2 built;
    Batch 3 (#87) waits until after release. Still open: a Windows or Linux test.
+6. Channel paging + Preview → channel ([V1-SCOPE-CHANNEL-PAGING](docs/V1-SCOPE-CHANNEL-PAGING.md)):
+   built on PR #117 2026-11-14, awaiting Isaiah's device test. #118 (batches, auto-load) post-MVP.
 
 ## How to ship and test
 

@@ -106,6 +106,8 @@ import {
 import type { BlockEntry } from "./search-blocklist";
 import { AGE_RESTRICTED_LIMIT } from "./age-restricted.ts";
 import type { ChannelHeader } from "./channel";
+import { nextChannelPage } from "./channel";
+import { resolvePreviewChannel } from "./preview";
 import { followIndexAt, groupCues, restingScrollTop } from "./transcript";
 import type { Paragraph } from "./transcript";
 import type { SearchPage, SearchResult } from "./search";
@@ -1911,6 +1913,7 @@ export class HubView extends ItemView {
       error: channel?.error ?? "",
       results: this.shownResults(channel?.results ?? [], "channel"),
       videosText: channel?.header?.videos ?? "",
+      ended: channel?.state === "idle" && !channel.continuation,
     });
   }
 
@@ -2105,17 +2108,16 @@ export class HubView extends ItemView {
     channel.state = "loading";
     button.setText("Loading…");
 
-    void browseChannel(channel, channel.query, channel.continuation).then(
-      (page) => {
+    const shown = new Set(channel.results.map((result) => result.videoId));
+    void nextChannelPage((next) => browseChannel(channel, channel.query, next), shown, channel.continuation).then(
+      ({ fresh, continuation }) => {
         if (token !== this.channelToken || this.channel !== channel) return;
-        const shown = new Set(channel.results.map((result) => result.videoId));
-        const fresh = page.results.filter((result) => !shown.has(result.videoId));
         channel.results = [...channel.results, ...fresh];
-        channel.continuation = page.continuation;
+        channel.continuation = continuation;
         channel.state = "idle";
         for (const result of fresh) this.renderResult(result);
         button.setText("More videos");
-        if (!page.continuation || fresh.length === 0) button.remove();
+        if (!continuation) button.remove();
         this.renderStatus();
       },
       (err: unknown) => {
@@ -3515,10 +3517,22 @@ export class HubView extends ItemView {
       // The way from a video to everything else its channel has made — the
       // question that follows a good video (045). Not offered from inside the
       // channel it would open: that is where you already are.
-      openChannel:
-        channelId && !(this.mode === "channel" && this.channel?.channelId === channelId)
-          ? () => this.showChannel(channelId, channelTitle)
-          : null,
+      // Always a link when there is a name (2026-11-14): a video with no
+      // channel id (a note-only or History card) looks it up on the tap. On
+      // the channel's own screen the tap just closes Preview: you are there.
+      openChannel: channelTitle
+        ? () =>
+            void resolvePreviewChannel({ channelId, channelTitle }, () => fetchVideoDetails(videoId)).then(
+              (found) => {
+                if (!found) {
+                  new Notice("YouTube for You: YouTube would not say whose video this is.");
+                  return;
+                }
+                if (this.mode === "channel" && this.channel?.channelId === found.channelId) return;
+                this.showChannel(found.channelId, found.channelTitle);
+              },
+            )
+        : null,
       slots: () => (item ? hubSlots(facts()) : searchSlots(facts())),
       run: async (key, repaint) => {
         // Re-looked-up: the modal outlives the card that opened it, and a poll
