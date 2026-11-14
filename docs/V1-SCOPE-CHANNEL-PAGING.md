@@ -49,12 +49,11 @@ top of it, so the two PRs don't fight over `loadMore`.
 1. "More videos" keeps going while YouTube sends a token. A page with nothing new no longer ends
    the list if it came with a token: the same tap reads one more page (2 empty in a row, then it
    stops), so a parser miss can't silently cap the catalogue. Worst case 2 requests per tap.
-2. If the recording (D2) shows a new item shape, the parser learns it.
-3. At the end of the catalogue, the status line says "N shown · end of the Videos tab
+2. At the end of the catalogue, the status line says "N shown · end of the Videos tab
    (YouTube's 112 videos also counts Shorts and live streams)" instead of "N shown of 112 videos".
-   Shorts and Live tabs on the channel screen are post-MVP. Pulling the whole catalogue to search it ourselves costs one request per 30
-   videos and is out of v1.
-4. Tests: continuation fixtures from D2; the two-empty-pages rule.
+   Shorts and Live tabs on the channel screen are post-MVP (#119).
+3. Tests: the two-empty-pages rule, the end-of-list line. No recording run (Isaiah didn't ask
+   for one), so no new fixtures.
 
 ### C1. Even batches (if picked)
 
