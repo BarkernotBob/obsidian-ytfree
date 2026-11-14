@@ -35,7 +35,8 @@ async function live() {
     body: JSON.stringify({
       query: QUERY,
       params: CHANNEL_PARAMS,
-      context: { client: { ...WEB.ctx, hl: "en", gl: "US" } },
+      // Restricted Mode, as `searchChannels` sends it (GitHub #111).
+      context: { client: { ...WEB.ctx, hl: "en", gl: "US" }, user: { enableSafetyMode: true } },
     }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

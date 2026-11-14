@@ -4148,6 +4148,9 @@ class PreviewModal extends Modal {
   }
 }
 
+/** The Add channels sheet's results region before a search, or after a failed one. */
+const ADD_CHANNELS_EMPTY = "Search by name, like “smarter every day”. One search per tap.";
+
 /**
  * Getting channels in — a Takeout CSV, or one channel at a time.
  *
@@ -4213,7 +4216,7 @@ export class ImportSubscriptionsModal extends Modal {
     const results = contentEl.createDiv({ cls: "ytfree-add-channels-results" });
     results.createDiv({
       cls: "ytfree-add-channels-empty",
-      text: "Search by name, like “smarter every day”. One search per tap.",
+      text: ADD_CHANNELS_EMPTY,
     });
 
     form.addEventListener("submit", (event) => {
@@ -4221,8 +4224,7 @@ export class ImportSubscriptionsModal extends Modal {
       const what = classifyAddChannelInput(input.value);
       if (what.kind === "empty") return;
       if (what.kind === "link") {
-        this.searchToken++;
-        void this.addOne(what.value, status);
+        void this.addOne(what.value, status, ++this.searchToken);
       }
       else void this.runChannelSearch(what.query, status, results);
     });
@@ -4294,6 +4296,9 @@ export class ImportSubscriptionsModal extends Modal {
     } catch (err) {
       if (token !== this.searchToken) return;
       status.setText(`Could not search channels — ${err instanceof Error ? err.message : String(err)}`);
+      // The last query's rows would sit under this error with live buttons.
+      list.empty();
+      list.createDiv({ cls: "ytfree-add-channels-empty", text: ADD_CHANNELS_EMPTY });
       return;
     }
     if (token !== this.searchToken) return;
@@ -4343,7 +4348,8 @@ export class ImportSubscriptionsModal extends Modal {
     paint();
   }
 
-  private async addOne(input: string, status: HTMLElement): Promise<void> {
+  /** `token` is this lookup's `searchToken`: a later search or link owns the status line. */
+  private async addOne(input: string, status: HTMLElement, token: number): Promise<void> {
     const text = input.trim();
     if (!text) return;
 
@@ -4356,6 +4362,7 @@ export class ImportSubscriptionsModal extends Modal {
       } catch {
         id = null;
       }
+      if (token !== this.searchToken) return;
     }
     if (!id) {
       status.setText("No channel ID in that. Try the channel's URL, or its UC… ID.");

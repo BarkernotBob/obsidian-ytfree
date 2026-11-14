@@ -183,7 +183,8 @@ export async function searchYouTube(
  */
 export async function searchChannels(query: string): Promise<ChannelResult[]> {
   const body = { query, params: encodeChannelSearchParams() };
-  return parseChannelSearchResponse(await callInnertube(SEARCH_URL, "web", body));
+  // Restricted Mode, like every other search (GitHub #111).
+  return parseChannelSearchResponse(await callInnertube(SEARCH_URL, "web", body, true));
 }
 
 /**

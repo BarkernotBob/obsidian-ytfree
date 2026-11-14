@@ -48,11 +48,12 @@ function playerWithCaptions(): unknown {
 
 interface Sent {
   url: string;
+  body?: string;
 }
 const sent: Sent[] = [];
 let botChecked = false;
-(globalThis as Record<string, unknown>).__ytfreeRequestUrl = (req: { url: string }) => {
-  sent.push({ url: req.url });
+(globalThis as Record<string, unknown>).__ytfreeRequestUrl = (req: { url: string; body?: string }) => {
+  sent.push({ url: req.url, body: req.body });
   let body: unknown;
   if (req.url.includes("/player")) body = botChecked ? fixture("player-bot-check.json") : playerWithCaptions();
   else if (req.url.includes("/search")) body = fixture("search-android.json");
@@ -79,6 +80,21 @@ test("a search costs one request a page", async () => {
 test("a channel screen costs one request a page", async () => {
   const channel = { channelId: "UCaaaaaaaaaaaaaaaaaaaaaa", channelTitle: "A" };
   assert.equal((await count(() => yt.browseChannel(channel))).length, 1);
+});
+
+test("every search and channel browse sends Restricted Mode, the channel search too (#111, #108)", async () => {
+  const channel = { channelId: "UCaaaaaaaaaaaaaaaaaaaaaa", channelTitle: "A" };
+  for (const action of [
+    () => yt.searchYouTube("cats"),
+    () => yt.browseChannel(channel),
+    () => yt.searchChannels("cats"),
+  ]) {
+    sent.length = 0;
+    await action().catch(() => undefined);
+    assert.equal(sent.length, 1);
+    const body = JSON.parse(sent[0].body ?? "{}") as { context?: { user?: unknown } };
+    assert.deepEqual(body.context?.user, { enableSafetyMode: true }, sent[0].url);
+  }
 });
 
 test("opening a video asks the player once, however many facts are read from it", async () => {
