@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import {
   channelUrl,
   isChannelId,
+  nextChannelPage,
   parseChannelHeader,
   parseChannelResponse,
   parseShortViews,
@@ -229,4 +230,78 @@ test("the channel screen says what it is doing", () => {
   assert.match(channelScreen({ ...base, query: "zzz" }).help, /clear the box/);
   // Before the header has named it.
   assert.equal(channelScreen({ ...base, title: "", state: "loading" }).status, "Loading this channel…");
+});
+
+/** A stand-in card: only the id matters to paging. */
+const card = (videoId: string) => ({
+  videoId,
+  title: videoId,
+  channelId: "UCKRmL7BMyCeLE4KUo73RDzw",
+  channelTitle: "Ward on Words",
+  publishedText: "",
+  views: null,
+  duration: "",
+  thumbnail: "",
+  secondary: false,
+});
+
+test("More videos: a page with nothing new but a token reads one more page", async () => {
+  const sent: string[] = [];
+  const pages: Record<string, { results: ReturnType<typeof card>[]; continuation: string | null }> = {
+    t1: { results: [card("aaaaaaaaaaa")], continuation: "t2" },
+    t2: { results: [card("bbbbbbbbbbb")], continuation: "t3" },
+  };
+  const out = await nextChannelPage(
+    async (token) => {
+      sent.push(token);
+      return { header: null, ...pages[token] };
+    },
+    new Set(["aaaaaaaaaaa"]),
+    "t1",
+  );
+  assert.deepEqual(sent, ["t1", "t2"]);
+  assert.deepEqual(out.fresh.map((r) => r.videoId), ["bbbbbbbbbbb"]);
+  assert.equal(out.continuation, "t3");
+});
+
+test("More videos: two empty pages in a row end the list, however many tokens remain", async () => {
+  let calls = 0;
+  const out = await nextChannelPage(
+    async () => {
+      calls++;
+      return { header: null, results: [], continuation: `t${calls + 1}` };
+    },
+    new Set(),
+    "t1",
+  );
+  assert.equal(calls, 2);
+  assert.deepEqual(out, { fresh: [], continuation: null });
+});
+
+test("More videos: no token ends the list after one request", async () => {
+  let calls = 0;
+  const out = await nextChannelPage(
+    async () => {
+      calls++;
+      return { header: null, results: [card("ccccccccccc")], continuation: null };
+    },
+    new Set(),
+    "t1",
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(out.fresh.map((r) => r.videoId), ["ccccccccccc"]);
+  assert.equal(out.continuation, null);
+});
+
+test("the end of a channel's list says the header count includes Shorts and live streams", () => {
+  const status = channelScreen({
+    title: "Mike Schmitz",
+    query: null,
+    state: "idle",
+    error: "",
+    results: 80,
+    videosText: "112 videos",
+    ended: true,
+  }).status;
+  assert.equal(status, "80 shown · end of the Videos tab (YouTube's 112 videos also counts Shorts and live streams)");
 });

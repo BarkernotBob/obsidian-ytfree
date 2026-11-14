@@ -4,7 +4,7 @@
 channel's list stops at 80 videos while regular search goes further; search should load in
 even-numbered batches and load the next page on its own at the bottom.
 
-**Status:** draft, awaiting Isaiah's answers to D1-D3. Nothing built yet.
+**Status:** answered by Isaiah 2026-11-14 (see Decisions). A and B built on PR #117; C1/C2 post-MVP (#118).
 
 ## Triage (store MVP, see [V1-SCOPE-MVP](V1-SCOPE-MVP.md))
 
@@ -47,12 +47,12 @@ top of it, so the two PRs don't fight over `loadMore`.
 ### B. Channel paging to the end
 
 1. "More videos" keeps going while YouTube sends a token. A page with nothing new no longer ends
-   the list if it came with a token: we read one more page (max 2 empty in a row, then stop and
-   say so), so a parser miss can't silently cap the catalogue.
+   the list if it came with a token: the same tap reads one more page (2 empty in a row, then it
+   stops), so a parser miss can't silently cap the catalogue. Worst case 2 requests per tap.
 2. If the recording (D2) shows a new item shape, the parser learns it.
-3. If the cap is YouTube's own (channel search stops sending tokens), the end of the list says
-   "YouTube shows up to N matches here. Scroll the channel's videos to see the rest" instead of
-   just ending. Pulling the whole catalogue to search it ourselves costs one request per 30
+3. At the end of the catalogue, the status line says "N shown · end of the Videos tab
+   (YouTube's 112 videos also counts Shorts and live streams)" instead of "N shown of 112 videos".
+   Shorts and Live tabs on the channel screen are post-MVP. Pulling the whole catalogue to search it ourselves costs one request per 30
    videos and is out of v1.
 4. Tests: continuation fixtures from D2; the two-empty-pages rule.
 
@@ -74,6 +74,17 @@ next page. At the true end, show everything. No extra requests. Applies to searc
 
 ## Decisions for Isaiah
 
+**Answers (Isaiah, 2026-11-14):** D1: the channel name wasn't tappable at all. D2: the channel's
+own list (More videos) on his subscription Mike Schmitz; the header said 100-some videos, More
+stopped at 80. No recording run. D3: after the MVP.
+
+**What that points to (inference, not measured):** an untappable name means the video reached
+Preview with no channel id (note-only and History cards never carry one), or Preview was opened
+on that channel's own screen. For the cap, the header's count includes Shorts and live streams,
+which the Videos tab doesn't list, so the list most likely really ended. v1 covers both readings:
+A1 makes the name always tappable, B1 stops a bad page from ending the list, and B3 now says at
+the end that the header counts Shorts and live streams.
+
 - **D1. Preview bug.** Where did you open Preview (hub, search, a channel screen, a note link),
   and what happened: the channel name wasn't tappable, or tapping did nothing?
 - **D2. The 80 cap.** Was it the channel's own video list ("More videos"), or a search inside
@@ -86,3 +97,14 @@ next page. At the true end, show everything. No extra requests. Applies to searc
 
 - Searching a channel's full catalogue ourselves.
 - Sorting the channel list (oldest first, most viewed).
+
+## Manual test (phone and Mac)
+
+1. Hub → tap a subscription card → Preview. The channel name under the title is blue. Tap it:
+   Preview closes and that channel's screen opens.
+2. Open a video from History, or a note-only card in In progress, → Preview. The channel name is
+   blue. Tap it: after a moment the channel's screen opens.
+3. On Mike Schmitz's channel screen, tap More videos until it goes away. The line at the top
+   then says "… shown · end of the Videos tab (YouTube's … also counts Shorts and live streams)".
+4. On that channel screen, Preview one of its videos and tap the channel name: Preview just
+   closes and you stay on the channel.

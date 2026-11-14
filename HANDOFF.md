@@ -46,7 +46,7 @@ first; `post-mvp` waits. New filings get an MVP call against the rule in that do
 5. Hardening ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md)): Batches 0–2 built;
    Batch 3 (#87) waits until after release. Still open: a Windows or Linux test.
 6. Channel paging + Preview → channel ([V1-SCOPE-CHANNEL-PAGING](docs/V1-SCOPE-CHANNEL-PAGING.md)):
-   scope drafted 2026-11-14, awaiting Isaiah's D1-D3.
+   built on PR #117 2026-11-14, awaiting Isaiah's device test. #118 (batches, auto-load) post-MVP.
 
 ## How to ship and test
 

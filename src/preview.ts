@@ -41,3 +41,28 @@ export function previewCloseAction(state: PreviewCloseState): PreviewCloseAction
   if (state.handingOver) return "destroy";
   return state.pictureInPicture ? "keep-playing" : "destroy";
 }
+
+/** Whose channel Preview's channel name opens. */
+export interface ChannelRef {
+  channelId: string;
+  channelTitle: string;
+}
+
+/**
+ * The channel behind Preview's channel name (2026-11-14).
+ *
+ * A video can reach Preview with a channel name and no channel id: a note-only
+ * card, a History card, or a search result whose byline carried no link. The
+ * name used to be plain text then, so a tap did nothing. Now the id is looked
+ * up on the tap (one player call, the same one a note's channel row makes)
+ * and only a video YouTube will not attribute has nowhere to go.
+ */
+export async function resolvePreviewChannel(
+  known: ChannelRef,
+  lookup: () => Promise<ChannelRef>,
+): Promise<ChannelRef | null> {
+  if (known.channelId) return known;
+  const found = await lookup().catch(() => null);
+  if (!found?.channelId) return null;
+  return { channelId: found.channelId, channelTitle: found.channelTitle || known.channelTitle };
+}
