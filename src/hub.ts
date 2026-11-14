@@ -104,6 +104,7 @@ import {
   setBlocked,
 } from "./search-blocklist";
 import type { BlockEntry } from "./search-blocklist";
+import { AGE_RESTRICTED_LIMIT } from "./age-restricted.ts";
 import type { ChannelHeader } from "./channel";
 import { followIndexAt, groupCues, restingScrollTop } from "./transcript";
 import type { Paragraph } from "./transcript";
@@ -424,6 +425,7 @@ export class SubscriptionsStore {
     result: { videoId: string; channelId: string },
     where: "search" | "channel",
   ): boolean {
+    if (this.isAgeRestricted(result.videoId)) return true;
     return isResultBlocked(
       result,
       where,
@@ -431,6 +433,37 @@ export class SubscriptionsStore {
       new Set(this.state.channels.map((c) => c.id)),
     );
   }
+
+  // -------------------------------------------------------- age-restricted
+
+  /** Every video known to be age-restricted (GitHub #111). */
+  ageBlocked(): Set<string> {
+    return blockedIds(this.state.ageRestricted);
+  }
+
+  isAgeRestricted(videoId: string): boolean {
+    return this.ageBlocked().has(videoId);
+  }
+
+  /**
+   * Remember an age-restricted video, wherever it was found: hidden from every
+   * list from now on, on both devices, and refused on Play.
+   */
+  markAgeRestricted(videoId: string): void {
+    const item = this.itemFor(videoId);
+    if (item) delete item.ageCheck;
+    if (this.isAgeRestricted(videoId)) return;
+    this.state.ageRestricted = setBlocked(
+      this.state.ageRestricted,
+      { id: videoId, title: item?.title ?? "" },
+      true,
+      new Date(),
+      AGE_RESTRICTED_LIMIT,
+    );
+    this.emit();
+    void this.save();
+  }
+
 
   /** Hidden from search: it lists as a text card, and sits on the Hidden list. */
   isHiddenFromSearch(videoId: string): boolean {
@@ -616,6 +649,10 @@ export class SubscriptionsStore {
       const expired = expireItems(this.state.items, this.settings().expiryDays, now);
       this.state.items = expired.items;
 
+      // Age checks before anything else spends the budget: a new feed item is
+      // held out of the Inbox until one has run (GitHub #111).
+      added.push(...(await this.checkAges()));
+
       // Durations first: they decide which videos need the Shorts check.
       await this.backfillDurations(DURATIONS_PER_POLL);
 
@@ -722,15 +759,20 @@ export class SubscriptionsStore {
       ? pickNotifiable(added, this.state.items, this.state.notifiedVideos ?? [], {
           showWatched: settings.showWatched,
           includeShorts: settings.includeShorts,
+          blocked: this.ageBlocked(),
         })
       : [];
 
-    if (candidates.length) {
-      this.state.notifiedVideos = rememberNotified(
-        this.state.notifiedVideos ?? [],
-        candidates.map((item) => item.videoId),
-        new Date(),
-      );
+    // A video held for its age check (GitHub #111) is notified by the later
+    // poll that clears it, which is no longer seeding and whose `quiet` set is
+    // its own. One added by a seeding or first-sight poll is claimed now
+    // instead, so it stays as quiet as it would have been.
+    const held = added
+      .filter((item) => item.ageCheck === "pending" && (seeding || quiet.has(item.videoId)))
+      .map((item) => item.videoId);
+    const claims = [...candidates.map((item) => item.videoId), ...held];
+    if (claims.length) {
+      this.state.notifiedVideos = rememberNotified(this.state.notifiedVideos ?? [], claims, new Date());
     }
 
     const disk = await this.save();
@@ -786,6 +828,43 @@ export class SubscriptionsStore {
       // out of the 15-entry window can never get one anywhere else.
       if (!target.description && details.description) target.description = details.description;
     });
+  }
+
+  /**
+   * The age check for new feed items (GitHub #111): one player call each,
+   * newest first, one at a time, inside the background budget. RSS carries no
+   * age flag, so this is the only way to know. A pending item stays out of
+   * every list until YouTube answers; a network failure or a bot check leaves
+   * it pending for the next poll. The same call is cached, so the duration and
+   * description come with it. Returns the items it cleared, which are new to
+   * the Inbox now and so are notifiable.
+   */
+  private async checkAges(): Promise<HubItem[]> {
+    const pending = this.state.items
+      .filter((item) => item.ageCheck === "pending")
+      .sort((a, b) => (Date.parse(b.published) || 0) - (Date.parse(a.published) || 0));
+    const cleared: HubItem[] = [];
+    for (const item of pending) {
+      if (!governor.backgroundRoom() || botCheck.isPaused()) break;
+      const details = await fetchVideoDetails(item.videoId);
+      // Offline or refused: the rest would fail the same way and only spend
+      // the hour's budget. They stay pending for the next poll.
+      if (!details.answered) break;
+      if (details.ageRestricted) {
+        // Also reported from `callInnertube`; this covers a hub with no
+        // listener attached yet.
+        this.markAgeRestricted(item.videoId);
+        continue;
+      }
+      // Re-looked-up after the round trip: a merge can replace or drop it.
+      const target = this.itemFor(item.videoId);
+      if (!target) continue;
+      delete target.ageCheck;
+      if (target.durationSeconds === undefined) target.durationSeconds = details.durationSeconds;
+      if (!target.description && details.description) target.description = details.description;
+      cleared.push(target);
+    }
+    return cleared;
   }
 
   // --------------------------------------------------------------- search
@@ -2267,8 +2346,10 @@ export class HubView extends ItemView {
     all.addEventListener("click", () => this.selectChannel(null));
 
     const counts = new Map<string, number>();
+    // Counted like the list counts them: no age-restricted or still-unchecked video.
+    const ageBlocked = this.store.ageBlocked();
     for (const item of this.store.state.items) {
-      if (item.state !== "new") continue;
+      if (item.state !== "new" || item.ageCheck === "pending" || ageBlocked.has(item.videoId)) continue;
       counts.set(item.channelId, (counts.get(item.channelId) ?? 0) + 1);
     }
 
@@ -2325,6 +2406,7 @@ export class HubView extends ItemView {
       // next time it is drawn. Only computed for the list that uses it.
       inProgress,
       hasNote: (item) => this.noteFile(item) !== null,
+      blocked: this.store.ageBlocked(),
     });
   }
 
@@ -2376,6 +2458,7 @@ export class HubView extends ItemView {
       includeShorts: true,
       query: this.itemQuery,
       history: order,
+      blocked: this.store.ageBlocked(),
     });
   }
 

@@ -86,6 +86,13 @@ import {
 } from "./transcript";
 import { attachPlayerStore, fetchCaptionTrack, fetchHeatmap, fetchVideoDetails, forgetPlayer } from "./innertube";
 import { BotCheckPausedError, botCheck, isBotCheck } from "./bot-check.ts";
+import {
+  AGE_BLOCKED_MESSAGE,
+  AgeRestrictedError,
+  isAgeRestricted,
+  onAgeRestricted,
+  reportAgeRestricted,
+} from "./age-restricted.ts";
 import { DeviceIdSet } from "./device-id-set";
 import { InfoCache } from "./info-cache.ts";
 import type { AnswerStore } from "./info-cache.ts";
@@ -598,6 +605,9 @@ export default class YtFreePlugin extends Plugin {
       this.subscriptions.load(),
     ]);
     this.debug(`stores loaded in ${Date.now() - loadStarted} ms`);
+    // Every age gate found anywhere lands on the synced list (GitHub #111).
+    onAgeRestricted((videoId) => this.subscriptions.markAgeRestricted(videoId));
+    this.register(() => onAgeRestricted(null));
     // The old watch stamps move from progress.json into history (GitHub #48).
     this.progress.drainStampsTo((stamps) => this.history.importStamps(stamps));
     this.register(this.history.onChange(() => this.refreshHistoryViews()));
@@ -2829,6 +2839,12 @@ export default class YtFreePlugin extends Plugin {
       return;
     }
 
+    // Refused like Play (GitHub #111).
+    if (this.subscriptions.isAgeRestricted(videoId)) {
+      new Notice(`YouTube for You: ${AGE_BLOCKED_MESSAGE}`);
+      return;
+    }
+
     const entry = this.players.get(videoId);
     const existing = await this.localFileFor(file.path, videoId);
     if (existing) {
@@ -2907,9 +2923,14 @@ export default class YtFreePlugin extends Plugin {
     } catch (err) {
       entry?.player.setDownloadState("idle");
       const message = (err as Error).message;
-      notice.setMessage(
-        message === "cancelled" ? "YouTube for You: download cancelled." : `YouTube for You: download failed — ${message}`,
-      );
+      if (isAgeRestricted(err)) {
+        reportAgeRestricted(videoId);
+        notice.setMessage(`YouTube for You: ${AGE_BLOCKED_MESSAGE}`);
+      } else {
+        notice.setMessage(
+          message === "cancelled" ? "YouTube for You: download cancelled." : `YouTube for You: download failed — ${message}`,
+        );
+      }
     } finally {
       this.downloads.delete(videoId);
       window.setTimeout(() => notice.hide(), 8000);
@@ -4037,6 +4058,10 @@ export default class YtFreePlugin extends Plugin {
           // YouTube's own player: the last playback tier everywhere (#43),
           // and on the phone the YouTube button on the bar.
           youtubePlayer: async (host, at, rate, onStatus, play) => {
+            // Never YouTube's own player for an age-restricted video: it
+            // would show the age gate (GitHub #111). The player treats the
+            // throw as "could not open it".
+            if (this.subscriptions.isAgeRestricted(videoId)) throw new AgeRestrictedError(videoId);
             const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
             return mountYouTubePlayer(host, videoId, at, rate, onStatus, (line) => this.youtubeLog(line), play);
           },
@@ -4999,7 +5024,12 @@ export default class YtFreePlugin extends Plugin {
      */
     let resolved: Promise<void> | null = null;
     const hd = Platform.isDesktopApp ? this.settings.upgradeToHighQuality : this.settings.phoneHighQuality;
-    const resolve = (): Promise<void> => (resolved ??= player.load(hd, this.settings.startInHd));
+    // A video already known to be age-restricted is refused without asking
+    // YouTube (GitHub #111).
+    const resolve = (): Promise<void> =>
+      (resolved ??= this.subscriptions.isAgeRestricted(entry.videoId)
+        ? Promise.reject(new AgeRestrictedError(entry.videoId))
+        : player.load(hd, this.settings.startInHd));
 
     // Metadata now, so the first press of Fullscreen is the phone's own
     // fullscreen rather than our substitute. Failures are swallowed: nothing
@@ -5109,6 +5139,14 @@ export default class YtFreePlugin extends Plugin {
   ): void {
     media.querySelector(".ytfree-fallback")?.remove();
 
+    // Blocked, and nothing else (GitHub #111): no YouTube link, no retry.
+    if (isAgeRestricted(err)) {
+      reportAgeRestricted(entry.videoId);
+      const blocked = media.createDiv({ cls: "ytfree-fallback" });
+      blocked.createDiv({ cls: "ytfree-fallback-text", text: AGE_BLOCKED_MESSAGE });
+      return;
+    }
+
     const seconds = this.pendingSeek.get(entry.videoId) ?? 0;
     const kind = (err as { kind?: string })?.kind;
     const paused = isBotCheck(err) || err instanceof BotCheckPausedError ? botCheck.message() : null;
@@ -5117,7 +5155,7 @@ export default class YtFreePlugin extends Plugin {
       : err instanceof AllTiersFailedError || err instanceof YtDlpMissingError
         ? new AllTiersFailedError().message
       : kind === "login"
-        ? "This video needs a signed-in account — age-restricted or members-only."
+        ? "This video needs a signed-in account (members-only)."
         : kind === "network"
           ? "Could not reach YouTube. Check your connection and try again."
           : kind === "no-format"
