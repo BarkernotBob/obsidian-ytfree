@@ -18,6 +18,8 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
   ([scope](docs/V1-SCOPE-AGE-RESTRICTED.md), `src/age-restricted.ts`). Synced `ageRestricted` list;
   new feed items wait `ageCheck: "pending"` for one player call (`checkAges` in hub poll). U1/U2
   (does Restricted Mode / the content flags really drop 18+?) need the scope's device test.
+- 2026-11-12 Remove vs Hide (#110, [scope](docs/V1-SCOPE-HIDE-AND-REMOVE.md)): hub Remove → out of
+  the hub, no list; search Hide → Hidden chip + text card; search shows Inbox/Saved too. Phone test, then merge.
 
 ## Shipped on main (scope doc = manual test)
 

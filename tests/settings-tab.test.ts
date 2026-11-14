@@ -266,8 +266,10 @@ test("closing a search blocklist redraws the tab", () => {
   reset(true);
   const tab = new Tab({}, fakePlugin());
   tab.display();
-  const row = g.__drawn.find((s) => s.name === "Removed from search");
-  assert.match(row?.desc ?? "", /^2 videos\./);
+  // Hidden videos moved to the hub's Hidden list; only channels are here now.
+  assert.equal(g.__drawn.find((s) => s.name === "Removed from search"), undefined);
+  const row = g.__drawn.find((s) => s.name === "Hidden from search");
+  assert.match(row?.desc ?? "", /^1 channel\./);
   void row?.controls[0].click?.();
   const before = g.__drawn.length;
   g.__opened[0].done?.();

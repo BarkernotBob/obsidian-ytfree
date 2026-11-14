@@ -429,7 +429,6 @@ export class SubscriptionsStore {
     return isResultBlocked(
       result,
       where,
-      blockedIds(this.state.searchRemovedVideos),
       blockedIds(this.state.searchHiddenChannels),
       new Set(this.state.channels.map((c) => c.id)),
     );
@@ -465,7 +464,13 @@ export class SubscriptionsStore {
     void this.save();
   }
 
-  /** Remove a search result for good, or (with `removed` false) undo it. */
+
+  /** Hidden from search: it lists as a text card, and sits on the Hidden list. */
+  isHiddenFromSearch(videoId: string): boolean {
+    return blockedIds(this.state.searchRemovedVideos).has(videoId);
+  }
+
+  /** Hide a search result (lasting, synced), or (with `removed` false) unhide it. */
   setSearchRemoved(video: { videoId: string; title: string }, removed: boolean): void {
     this.state.searchRemovedVideos = setBlocked(
       this.state.searchRemovedVideos,
@@ -872,6 +877,15 @@ export class SubscriptionsStore {
     return this.state.items.some((item) => item.videoId === videoId);
   }
 
+  /**
+   * In one of the hub's lists: an item that is not a removal tombstone. A video
+   * removed from the hub is not in it any more, so search offers it again as a
+   * normal card (docs/V1-SCOPE-HIDE-AND-REMOVE.md).
+   */
+  isInHub(videoId: string): boolean {
+    return this.state.items.some((item) => item.videoId === videoId && item.state !== "dismissed");
+  }
+
   /** The hub's own copy of this video, if it has one. */
   itemFor(videoId: string): HubItem | null {
     return this.state.items.find((item) => item.videoId === videoId) ?? null;
@@ -1075,11 +1089,13 @@ export class SubscriptionsStore {
   }
 
   /**
-   * Remove a video from the hub — which now means hiding it, not deleting it.
+   * Remove a video from the hub — a tombstone, not a deletion; it goes on the
+   * Removed list.
    *
    * `hideItem` strips it to a tombstone on the way out; see the note there for
    * why the description goes. The tombstone is what stops the video coming back
-   * from a later poll, and what stops a search offering it to you again.
+   * from a later poll. It does not touch search: a removed video is offered
+   * there again like any other (docs/V1-SCOPE-HIDE-AND-REMOVE.md).
    */
   hide(item: HubItem): void {
     hideItem(this.live(item), new Date());
@@ -1239,6 +1255,12 @@ interface CardSpec {
   /** How far in playback got, 0–1. Drawn along the foot of the thumbnail. */
   watched: number;
   extraClass?: string;
+  /**
+   * Hidden from search: the picture box is drawn empty, at the same size, with
+   * a "Hidden" label, and no image is requested. Same size so the grid does not
+   * jog and Unhide can put the picture back without moving anything.
+   */
+  textOnly?: boolean;
   /** Re-read on every repaint, so a button reflects the state it caused. */
   slots: () => CardSlot[];
   run: (key: CardActionKey, repaint: () => void) => Promise<void> | void;
@@ -1249,7 +1271,8 @@ interface CardButton {
 }
 
 /**
- * The five lists, in the order they are offered.
+ * The lists, in the order they are offered. Hidden (`searchHidden`) is what you
+ * hid from search. Videos removed from the hub (`hidden`) have no list.
  *
  * A video is in exactly one of three states — undecided, kept (you opened it),
  * hidden (you turned it down) — and three of the chips are those states.
@@ -1268,7 +1291,9 @@ const FILTER_LABELS: ReadonlyArray<readonly [HubFilter, string]> = [
   ["new", "Inbox"],
   ["progress", "In progress"],
   ["kept", "Saved"],
-  ["hidden", "Hidden"],
+  // No chip for `hidden` (removed from the hub): Isaiah, 2026-11-12 — a removed
+  // video is found again by searching for it.
+  ["searchHidden", "Hidden"],
   ["history", "History"],
   ["all", "Everything"],
 ];
@@ -1284,7 +1309,8 @@ const FILTER_RULES: Record<HubFilter, string> = {
   new: "not opened, not hidden",
   progress: "started and not finished — most recently watched first",
   kept: "saved — a note exists",
-  hidden: "you removed these",
+  hidden: "you removed these from the hub",
+  searchHidden: "you hid these from search — they show there without a picture",
   history: "everything you watched — most recent first",
   all: "inbox + saved, including already-watched",
 };
@@ -2252,7 +2278,8 @@ export class HubView extends ItemView {
     }
 
     const { channels, lastPolledAt } = this.store.state;
-    const shown = this.currentItems().length;
+    const shown =
+      this.filter === "searchHidden" ? this.searchHiddenEntries().length : this.currentItems().length;
     const parts: string[] = [];
     const paused = botCheck.message();
     if (paused) parts.push(paused);
@@ -2273,7 +2300,13 @@ export class HubView extends ItemView {
       parts.push(`${shown} ${noun} · ${FILTER_RULES[this.filter]}`);
       if (this.filter === "hidden" && shown > 0) parts.push("put one back with the arrow");
     }
-    if (lastPolledAt && !this.store.polling && this.filter !== "hidden" && this.filter !== "history") {
+    if (
+      lastPolledAt &&
+      !this.store.polling &&
+      this.filter !== "hidden" &&
+      this.filter !== "searchHidden" &&
+      this.filter !== "history"
+    ) {
       parts.push(`checked ${relativeAge(lastPolledAt, new Date())}`);
     }
     this.statusEl.setText(parts.join(" · "));
@@ -2474,9 +2507,10 @@ export class HubView extends ItemView {
   /**
    * Drop the results you have already dealt with.
    *
-   * "Dealt with" is anything the hub knows about: saved, kept, or hidden. A
-   * video you removed is a decision, and offering it back in a search two
-   * minutes later is the search arguing with you.
+   * Only repeats: a result already on screen from an earlier page. Everything
+   * else lists — Inbox, Saved and removed videos as normal cards (their Save
+   * and Watch read done where that is true), and videos hidden from search as
+   * text cards (Isaiah, 2026-11-12; docs/V1-SCOPE-HIDE-AND-REMOVE.md).
    *
    * This runs when a page *lands*, not when a card is drawn, which is what
    * keeps it compatible with the no-reflow rule: a result you add while looking
@@ -2486,7 +2520,7 @@ export class HubView extends ItemView {
   private acceptable(results: SearchResult[]): SearchResult[] {
     const shown = new Set(this.searchResults.map((result) => result.videoId));
     return results.filter(
-      (result) => !shown.has(result.videoId) && !this.store.hasItem(result.videoId),
+      (result) => !shown.has(result.videoId),
     );
   }
 
@@ -2762,13 +2796,16 @@ export class HubView extends ItemView {
     const where = this.mode === "channel" ? "channel" : "search";
     if (this.store.isBlockedResult(result, where)) return;
 
+    const hidden = this.store.isHiddenFromSearch(result.videoId);
     const facts = (): CardFacts => ({
-      inHub: this.store.hasItem(result.videoId),
+      inHub: this.store.isInHub(result.videoId),
       noteExists: this.store.hasNote(result.videoId),
+      hiddenFromSearch: hidden,
     });
 
     const card = this.buildCard({
       extraClass: "ytfree-hub-result",
+      textOnly: hidden,
       videoId: result.videoId,
       title: result.title,
       thumbnail: result.thumbnail,
@@ -2859,25 +2896,33 @@ export class HubView extends ItemView {
       return;
     }
     if (key === "remove") {
-      this.removeResult(result);
+      if (this.store.isHiddenFromSearch(result.videoId)) this.unhideResult(result);
+      else this.removeResult(result);
       return;
     }
 
     await this.store.addSearchResult(result);
-    const item = this.store.itemFor(result.videoId);
+    let item = this.store.itemFor(result.videoId);
     if (!item) return;
+    // Removed from the hub earlier: a tombstone with no picture or description.
+    // Put it back properly first, so the note and the card are whole again.
+    if (item.state === "dismissed") {
+      await this.store.restore(item);
+      item = this.store.itemFor(result.videoId);
+      if (!item) return;
+    }
     if (key === "save") await this.store.saveItem(item);
     else await this.store.openItem(item);
     this.renderStatus();
   }
 
   /**
-   * Remove on a search card: lasting, and undoable where it happened.
+   * Hide on a search card: lasting, and undoable where it happened.
    *
-   * The card collapses in place to a strip of the same height, so removing the
-   * third result does not pull the fourth up under your thumb. The removal is
-   * stored (issue 047) and syncs; later searches leave the video out, and
-   * Settings → Subscriptions hub lists it for undoing later.
+   * The card collapses in place to a strip of the same height, so hiding the
+   * third result does not pull the fourth up under your thumb. The hide is
+   * stored (issue 047) and syncs; later searches show the video as a text card
+   * with Unhide, and the hub's Hidden list has it too.
    */
   private removeResult(result: SearchResult): void {
     this.removedResults.add(result.videoId);
@@ -2893,7 +2938,25 @@ export class HubView extends ItemView {
   }
 
   /**
-   * "Removed — Undo", at the height of the card it replaced.
+   * Unhide on a hidden search card: the picture comes back where the card is.
+   * The card is rebuilt in place rather than the list redrawn, for the same
+   * no-reflow reason as the strip.
+   */
+  private unhideResult(result: SearchResult): void {
+    this.store.setSearchRemoved(result, false);
+    const card = this.results.get(result.videoId);
+    const host = card?.parentElement;
+    if (!card || !host) return;
+    const marker = card.nextSibling;
+    card.remove();
+    this.results.delete(result.videoId);
+    this.renderResult(result);
+    const rebuilt = this.results.get(result.videoId);
+    if (rebuilt && marker) host.insertBefore(rebuilt, marker);
+  }
+
+  /**
+   * "Hidden — Undo", at the height of the card it replaced.
    *
    * Undo swaps the card straight back in rather than re-rendering the results:
    * a redraw of the list under a finger that has just pressed Undo is the same
@@ -2901,7 +2964,7 @@ export class HubView extends ItemView {
    */
   private buildRemovedStrip(result: SearchResult): HTMLElement {
     const strip = createDiv({ cls: "ytfree-hub-card ytfree-hub-removed" });
-    strip.createDiv({ cls: "ytfree-hub-removed-text", text: "Removed" });
+    strip.createDiv({ cls: "ytfree-hub-removed-text", text: "Hidden" });
     const undo = strip.createEl("button", {
       cls: "ytfree-hub-removed-undo",
       text: "Undo",
@@ -2948,6 +3011,17 @@ export class HubView extends ItemView {
     this.cards.clear();
     this.stopSentinel();
     if (!keepPages) this.pages = 1;
+
+    if (this.filter === "searchHidden") {
+      const entries = this.searchHiddenEntries();
+      if (entries.length === 0) {
+        list.createDiv({ cls: "ytfree-hub-empty", text: this.emptyMessage() });
+        return;
+      }
+      const now = new Date();
+      for (const entry of entries) this.renderSearchHiddenRow(entry, now);
+      return;
+    }
 
     const items = this.currentItems();
     if (items.length === 0) {
@@ -3026,7 +3100,10 @@ export class HubView extends ItemView {
   private emptyMessage(): string {
     if (this.itemQuery) return `Nothing in this list matches “${this.itemQuery}”.`;
     if (this.filter === "hidden") {
-      return "Nothing hidden. Removing a video from the hub puts it here.";
+      return "Nothing removed. Removing a video from the hub puts it here.";
+    }
+    if (this.filter === "searchHidden") {
+      return "Nothing hidden. Hide on a search result puts it here.";
     }
     if (this.filter === "history") {
       return "Nothing watched yet. A video lands here once you have watched 2 minutes or a tenth of it.";
@@ -3036,8 +3113,46 @@ export class HubView extends ItemView {
       : "Nothing here. Try Everything, or check for new videos.";
   }
 
+  /** The Hidden list: videos hidden from search, filtered by the hub's search box. */
+  private searchHiddenEntries(): BlockEntry[] {
+    const query = this.itemQuery.trim().toLowerCase();
+    const all = this.store.removedSearchVideos();
+    return query ? all.filter((entry) => entry.title.toLowerCase().includes(query)) : all;
+  }
+
   /**
-   * One hidden video: a line of text and a way back.
+   * One video hidden from search: its title and Unhide. Built like a Removed
+   * row — a search hide stores only the ID and the title.
+   */
+  private renderSearchHiddenRow(entry: BlockEntry, now: Date): void {
+    const list = this.listEl;
+    if (!list) return;
+    const row = list.createDiv({ cls: "ytfree-hub-card ytfree-hub-hidden-row" });
+    this.cards.set(entry.id, row);
+
+    const meta = row.createDiv({ cls: "ytfree-hub-meta" });
+    meta.createDiv({ cls: "ytfree-hub-title", text: entry.title || entry.id });
+    const age = relativeAge(entry.at, now);
+    meta.createDiv({ cls: "ytfree-hub-sub", text: age ? `hidden from search ${age}` : "hidden from search" });
+
+    const actions = row.createDiv({ cls: "ytfree-hub-dismiss" });
+    const unhide = new ButtonComponent(actions)
+      .setIcon("eye")
+      .setTooltip("Unhide: show its picture in search again")
+      .onClick((evt) => {
+        evt.stopPropagation();
+        this.store.setSearchRemoved({ videoId: entry.id, title: entry.title }, false);
+        row.remove();
+        this.cards.delete(entry.id);
+        if (this.cards.size === 0) this.renderList();
+        this.renderStatus();
+      });
+    unhide.buttonEl.addClass("ytfree-hub-icon-button");
+    unhide.buttonEl.setAttribute("aria-label", "Unhide");
+  }
+
+  /**
+   * One removed video: a line of text and a way back.
    *
    * Deliberately not a card. A hidden item has no thumbnail stored — see
    * `hideItem` — and drawing one would mean rebuilding the URL and fetching an
@@ -3055,7 +3170,7 @@ export class HubView extends ItemView {
     const hiddenAge = relativeAge(item.dismissedAt ?? "", now);
     meta.createDiv({
       cls: "ytfree-hub-sub",
-      text: [item.channelTitle, hiddenAge ? `hidden ${hiddenAge}` : "hidden"]
+      text: [item.channelTitle, hiddenAge ? `removed ${hiddenAge}` : "removed"]
         .filter(Boolean)
         .join(" · "),
     });
@@ -3063,7 +3178,7 @@ export class HubView extends ItemView {
     const actions = row.createDiv({ cls: "ytfree-hub-dismiss" });
     const restore = new ButtonComponent(actions)
       .setIcon("rotate-ccw")
-      .setTooltip("Put back in the hub")
+      .setTooltip("Put back in the Inbox")
       .onClick((evt) => {
         evt.stopPropagation();
         void this.store.restore(item).catch((err: unknown) => {
@@ -3235,8 +3350,13 @@ export class HubView extends ItemView {
     const thumb = card.createDiv({ cls: "ytfree-hub-thumb" });
     // The halfway frame rather than the uploader's picture, falling back to the
     // stored thumbnail — see `src/thumbnail.ts`.
-    const pictures = thumbnailCandidates(spec.videoId, spec.thumbnail, spec.isShort);
-    if (pictures.length > 0) {
+    const pictures = spec.textOnly ? [] : thumbnailCandidates(spec.videoId, spec.thumbnail, spec.isShort);
+    if (spec.textOnly) {
+      card.addClass("ytfree-hub-textonly");
+      const blank = thumb.createDiv({ cls: "ytfree-hub-thumb-hidden" });
+      setIcon(blank.createSpan(), "eye-off");
+      blank.createSpan({ text: "Hidden" });
+    } else if (pictures.length > 0) {
       const img = thumb.createEl("img");
       img.loading = "lazy";
       img.alt = "";

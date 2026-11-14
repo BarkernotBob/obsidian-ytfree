@@ -341,6 +341,18 @@ test("the Hidden view lists hidden videos and nothing else", () => {
   assert.deepEqual(visible.map((i) => i.videoId), ["bbbbbbbbbbb"]);
 });
 
+test("the Hidden list (search hides) holds no hub items; Removed holds the tombstones", () => {
+  const items = [
+    item({ videoId: "keptkeptkep", state: "kept" }),
+    item({ videoId: "gonegonegon", state: "dismissed", dismissedAt: "2026-11-01T00:00:00Z" }),
+  ];
+  assert.deepEqual(visibleItems(items, { filter: "searchHidden", channelId: null, includeShorts: false }), []);
+  assert.deepEqual(
+    visibleItems(items, { filter: "hidden", channelId: null, includeShorts: false }).map((i) => i.videoId),
+    ["gonegonegon"],
+  );
+});
+
 // --------------------------------------------------------------- item filter
 
 test("the item filter matches title or channel, and demands every word", () => {
