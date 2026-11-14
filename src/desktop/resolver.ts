@@ -14,6 +14,13 @@ import type { YtDlpInfo } from "../ytdlp-info.ts";
 import { ytDlpEnv } from "./env.ts";
 import { botCheck, isBotCheck } from "../bot-check.ts";
 import { governor } from "../request-governor.ts";
+import {
+  AgeRestrictedError,
+  YTDLP_AGE_LIMIT,
+  isAdultAgeLimit,
+  isAgeRestricted,
+  reportAgeRestricted,
+} from "../age-restricted.ts";
 // `import type` and not a plain import: `node --test` strips types rather than
 // compiling them, so a type imported as a value makes the whole module fail to
 // load — which is what stopped `npm run smoke` running at all.
@@ -97,17 +104,42 @@ export async function getVersion(ytDlpPath: string): Promise<string> {
  * whose files serve the whole video (measured 2026-11-04).
  */
 export async function fetchYtDlpInfo(videoId: string, ytDlpPath: string): Promise<YtDlpInfo> {
-  const stdout = await ytDlp(
-    ytDlpPath,
-    ["--no-warnings", "--no-playlist", "--skip-download", "-J", `https://www.youtube.com/watch?v=${videoId}`],
-    // Info JSON for a long video with 150+ caption languages runs to megabytes.
-    64 * 1024 * 1024,
-  );
+  let stdout: string;
   try {
-    return JSON.parse(stdout) as YtDlpInfo;
+    stdout = await ytDlp(
+      ytDlpPath,
+      [
+        "--no-warnings",
+        "--no-playlist",
+        "--skip-download",
+        // Refuse 18+ (GitHub #111). With `-J` a refused video still prints its
+        // JSON, carrying `age_limit: 18`, which is checked below.
+        "--age-limit",
+        String(YTDLP_AGE_LIMIT),
+        "-J",
+        `https://www.youtube.com/watch?v=${videoId}`,
+      ],
+      // Info JSON for a long video with 150+ caption languages runs to megabytes.
+      64 * 1024 * 1024,
+    );
+  } catch (err) {
+    // "Sign in to confirm your age": blocked, never retried (GitHub #111).
+    if (isAgeRestricted(err)) throw ageRestricted(videoId);
+    throw err;
+  }
+  let info: YtDlpInfo;
+  try {
+    info = JSON.parse(stdout) as YtDlpInfo;
   } catch {
     throw new ResolveError("yt-dlp's answer was not JSON");
   }
+  if (isAdultAgeLimit((info as { age_limit?: unknown } | null)?.age_limit)) throw ageRestricted(videoId);
+  return info;
+}
+
+function ageRestricted(videoId: string): AgeRestrictedError {
+  reportAgeRestricted(videoId);
+  return new AgeRestrictedError(videoId);
 }
 
 /**

@@ -65,6 +65,22 @@ export const CLIENTS: Record<"android" | "ios" | "web", ClientProfile> = {
   },
 };
 
+/**
+ * A player request. Both checks are false (GitHub #111): YouTube then refuses
+ * an age-gated or content-warned video instead of handing it over, and the
+ * plugin blocks it (`age-restricted.ts`).
+ */
 export function playerBody(videoId: string): Record<string, unknown> {
-  return { videoId, contentCheckOk: true, racyCheckOk: true };
+  return { videoId, contentCheckOk: false, racyCheckOk: false };
+}
+
+/**
+ * The `context` of one InnerTube request. `safe` turns on Restricted Mode
+ * (`user.enableSafetyMode`), which every search and channel browse sends so an
+ * age-restricted video never reaches a list (GitHub #111).
+ */
+export function requestContext(ctx: ClientProfile["ctx"], safe: boolean): Record<string, unknown> {
+  const context: Record<string, unknown> = { client: { ...ctx, hl: "en", gl: "US" } };
+  if (safe) context.user = { enableSafetyMode: true };
+  return context;
 }

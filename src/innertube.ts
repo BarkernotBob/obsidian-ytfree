@@ -14,13 +14,22 @@
  */
 
 import { requestUrl } from "obsidian";
+import { isAgeGatedAnswer, reportAgeRestricted } from "./age-restricted.ts";
 import { botCheck, isBotCheckPlayability } from "./bot-check.ts";
 import { trimPlayerAnswer } from "./answer-trim.ts";
 import { InfoCache } from "./info-cache.ts";
 import type { AnswerStore } from "./info-cache.ts";
 import { governor } from "./request-governor.ts";
 import { EXPIRY_SAFETY_MARGIN_MS } from "./stream.ts";
-import { BROWSE_URL, CLIENTS, NEXT_URL, PLAYER_URL, SEARCH_URL, playerBody } from "./innertube-context.ts";
+import {
+  BROWSE_URL,
+  CLIENTS,
+  NEXT_URL,
+  PLAYER_URL,
+  SEARCH_URL,
+  playerBody,
+  requestContext,
+} from "./innertube-context.ts";
 import {
   CHANNEL_SEARCH_PARAMS,
   CHANNEL_VIDEOS_PARAMS,
@@ -52,12 +61,14 @@ export class InnertubeError extends Error {}
 
 /**
  * One InnerTube POST. `hl`/`gl` are pinned to `en`/`US` here, as everywhere
- * else in this plugin, so a result reads the same on any machine.
+ * else in this plugin, so a result reads the same on any machine. `safe` sends
+ * Restricted Mode, for search and channel browse (GitHub #111).
  */
 export async function callInnertube(
   url: string,
   client: keyof typeof CLIENTS,
   body: Record<string, unknown>,
+  safe = false,
 ): Promise<unknown> {
   const { ctx, ua } = CLIENTS[client];
   let response;
@@ -69,7 +80,7 @@ export async function callInnertube(
         url,
         method: "POST",
         headers: { "Content-Type": "application/json", "User-Agent": ua },
-        body: JSON.stringify({ ...body, context: { client: { ...ctx, hl: "en", gl: "US" } } }),
+        body: JSON.stringify({ ...body, context: requestContext(ctx, safe) }),
         // Handled here, so a 4xx reads as a network failure rather than throwing
         // an Obsidian error object at the caller.
         throw: false,
@@ -95,6 +106,11 @@ export async function callInnertube(
   if (status && isBotCheckPlayability(status.status, status.reason)) botCheck.trip();
   // A playable answer during a bot-check pause ends it (GitHub #66).
   else if (status?.status === "OK") botCheck.succeeded(sentAt);
+  // An age gate, wherever the player call came from, is remembered so the
+  // video drops out of every list (GitHub #111).
+  if (url === PLAYER_URL && typeof body.videoId === "string" && isAgeGatedAnswer(parsed)) {
+    reportAgeRestricted(body.videoId);
+  }
   return parsed;
 }
 
@@ -157,7 +173,7 @@ export async function searchYouTube(
   const body = continuation
     ? { continuation }
     : { query, params: encodeSearchParams(filters) };
-  return parseSearchResponse(await callInnertube(SEARCH_URL, "android", body));
+  return parseSearchResponse(await callInnertube(SEARCH_URL, "android", body, true));
 }
 
 /**
@@ -187,7 +203,7 @@ export async function browseChannel(
     : query
       ? { browseId: channel.channelId, params: CHANNEL_SEARCH_PARAMS, query }
       : { browseId: channel.channelId, params: CHANNEL_VIDEOS_PARAMS };
-  return parseChannelResponse(await callInnertube(BROWSE_URL, "web", body), channel);
+  return parseChannelResponse(await callInnertube(BROWSE_URL, "web", body, true), channel);
 }
 
 /** What one player call is worth to the hub: the two facts a feed lacks. */
@@ -200,6 +216,14 @@ export interface VideoDetails {
   channelTitle: string;
   /** The video's title, for a link opened with no hub item behind it. "" when unknown. */
   title: string;
+  /**
+   * YouTube answered at all (any playability status), so the age check of a
+   * feed item is done. False on a network failure or a bot-check pause: ask
+   * again later (GitHub #111).
+   */
+  answered: boolean;
+  /** The answer was an age or content gate (GitHub #111). */
+  ageRestricted: boolean;
 }
 
 /**
@@ -215,6 +239,11 @@ export interface VideoDetails {
 export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> {
   try {
     const response = await fetchPlayer(videoId, "android");
+    const playability = (response as { playabilityStatus?: { status?: unknown; reason?: unknown } })
+      ?.playabilityStatus;
+    // A bot check is no answer about the video itself: ask again later.
+    const answered =
+      typeof playability?.status === "string" && !isBotCheckPlayability(playability.status, playability.reason);
     const details = (response as {
       videoDetails?: {
         shortDescription?: unknown;
@@ -232,9 +261,19 @@ export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> 
       channelId: typeof details?.channelId === "string" ? details.channelId : "",
       channelTitle: typeof details?.author === "string" ? details.author : "",
       title: typeof details?.title === "string" ? details.title : "",
+      answered,
+      ageRestricted: isAgeGatedAnswer(response),
     };
   } catch {
-    return { description: "", durationSeconds: null, channelId: "", channelTitle: "", title: "" };
+    return {
+      description: "",
+      durationSeconds: null,
+      channelId: "",
+      channelTitle: "",
+      title: "",
+      answered: false,
+      ageRestricted: false,
+    };
   }
 }
 

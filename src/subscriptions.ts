@@ -24,6 +24,7 @@ import {
   normalizeBlockList,
 } from "./search-blocklist.ts";
 import type { BlockEntry } from "./search-blocklist.ts";
+import { AGE_RESTRICTED_LIMIT } from "./age-restricted.ts";
 import { laterStamp } from "./feed-schedule.ts";
 
 /** A channel we poll. */
@@ -112,6 +113,13 @@ export interface HubItem {
    * item, `mergeStates` can take the newer decision instead of the newer file.
    */
   decidedAt?: string;
+  /**
+   * "pending": a feed item whose age check has not run yet (GitHub #111). RSS
+   * carries no age flag, so a new feed item is held back from every list until
+   * one player call says it is not age-restricted. Absent means checked, or
+   * never needed one (search, Watch Later, everything from before #111).
+   */
+  ageCheck?: "pending";
 }
 
 /** A channel feed, your Watch Later list, both, or a search you ran. */
@@ -182,6 +190,12 @@ export interface SubscriptionsState {
    */
   searchRemovedVideos?: BlockEntry[];
   searchHiddenChannels?: BlockEntry[];
+  /**
+   * Videos found age-restricted, wherever that was found (GitHub #111). Hidden
+   * from every list and refused on Play. Synced, so one device's discovery
+   * covers both. See `age-restricted.ts`.
+   */
+  ageRestricted?: BlockEntry[];
 }
 
 export function emptyState(): SubscriptionsState {
@@ -196,6 +210,7 @@ export function emptyState(): SubscriptionsState {
     notifiedVideos: [],
     searchRemovedVideos: [],
     searchHiddenChannels: [],
+    ageRestricted: [],
   };
 }
 
@@ -245,6 +260,7 @@ export function normalizeState(raw: unknown): SubscriptionsState {
   }
   state.searchRemovedVideos = normalizeBlockList(data.searchRemovedVideos);
   state.searchHiddenChannels = normalizeBlockList(data.searchHiddenChannels);
+  state.ageRestricted = normalizeBlockList(data.ageRestricted);
   return state;
 }
 
@@ -356,6 +372,8 @@ function mergeItem(mine: HubItem, theirs: HubItem): HubItem {
   if (merged.watched === undefined && loser.watched !== undefined) merged.watched = loser.watched;
   if (loser.seenAt && (!merged.seenAt || loser.seenAt < merged.seenAt)) merged.seenAt = loser.seenAt;
   merged.origin = mergeOrigin(mine.origin, theirs.origin);
+  // A check is a fact, not a decision: once either device has run it, it is done.
+  if (!mine.ageCheck || !theirs.ageCheck) delete merged.ageCheck;
   return merged;
 }
 
@@ -583,6 +601,7 @@ export function mergeStates(
       HIDDEN_CHANNELS_LIMIT,
       new Date(),
     ),
+    ageRestricted: mergeBlockLists(mine.ageRestricted, theirs.ageRestricted, AGE_RESTRICTED_LIMIT, new Date()),
   };
 }
 
@@ -942,6 +961,7 @@ export function mergeItems(
       state: "new",
       seenAt: now.toISOString(),
       origin: "feed",
+      ageCheck: "pending",
     });
   }
 
@@ -1163,9 +1183,14 @@ export function visibleItems(
      * exactly these, whatever their hub state, newest first.
      */
     history?: ReadonlyMap<string, string>;
+    /** Age-restricted videos (GitHub #111): never shown, in any list. */
+    blocked?: ReadonlySet<string>;
   },
 ): HubItem[] {
   const matching = items.filter((item) => {
+    if (options.blocked?.has(item.videoId)) return false;
+    // Held back until checked; History is a record of what you watched, so not there.
+    if (item.ageCheck === "pending" && options.filter !== "history") return false;
     if (options.channelId && item.channelId !== options.channelId) return false;
     if (!options.includeShorts && item.isShort === true) return false;
     if (!hubItemMatches(item, options.query ?? "")) return false;
