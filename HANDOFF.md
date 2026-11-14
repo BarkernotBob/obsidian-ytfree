@@ -18,6 +18,7 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
   ([scope](docs/V1-SCOPE-AGE-RESTRICTED.md), `src/age-restricted.ts`). Synced `ageRestricted` list;
   new feed items wait `ageCheck: "pending"` for one player call (`checkAges` in hub poll). U1/U2
   (does Restricted Mode / the content flags really drop 18+?) need the scope's device test.
+- #108 nightly: Add channels sheet searches channels (`src/channel-search.ts`), Subscribe per row.
 
 ## Shipped on main (scope doc = manual test)
 
@@ -30,8 +31,7 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 - #91: player page logs `ad seen`/`ad ended`; no-ads device test is a release step (DEVELOPING.md).
 - Keep playing on the phone, resumable background pause, Now playing button
   ([V1-SCOPE-KEEP-PLAYING](docs/V1-SCOPE-KEEP-PLAYING.md)).
-- Halfway thumbnails (#41), paste-to-Preview, deep link, #29, request research: see `docs/V1-SCOPE-*`.
-- **Parked:** 018 (Watch Later). Do not re-ask.
+- Halfway thumbnails (#41), paste-to-Preview, deep link, #29, request research: `docs/V1-SCOPE-*`. **Parked:** 018 (Watch Later); do not re-ask.
 
 ## Next step
 
