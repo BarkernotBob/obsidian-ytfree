@@ -146,6 +146,9 @@ const FEATURE: Record<Feature, number> = {
  */
 const TYPE_VIDEO = 1;
 
+/** The Add channel sheet's search asks for channels instead (GitHub #108). */
+const TYPE_CHANNEL = 2;
+
 // ------------------------------------------------------------------ protobuf
 
 /** Base-128 varint, little-endian, high bit as the continuation flag. */
@@ -225,4 +228,14 @@ export function encodeSearchParams(filters: SearchFilters): string {
   params.push(...messageField(2, filter));
 
   return base64url(params);
+}
+
+/**
+ * The `params` string for a channels-only search: the type set to channel and
+ * nothing else. Byte-identical to youtube.com's own "Channels" filter
+ * (`&sp=EgIQAg%3D%3D`, here unpadded like every other string this file makes).
+ * The Add channel sheet sends it; no other filter applies there (GitHub #108).
+ */
+export function encodeChannelSearchParams(): string {
+  return base64url(messageField(2, varintField(2, TYPE_CHANNEL)));
 }
