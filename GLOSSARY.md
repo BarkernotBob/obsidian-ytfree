@@ -367,3 +367,11 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   ecosystem. TypeScript stays pinned.
 - The plugin's four data files are read together at load, not in sequence.
 
+
+### 2026-11-14 (channel paging, Preview → channel; [scope](docs/V1-SCOPE-CHANNEL-PAGING.md))
+
+- Preview's channel name is always a link when there is a name; a missing channel id is looked up
+  on the tap. MVP.
+- A channel's "More videos" ends only with no token, or after 2 pages in a row with nothing new.
+  The end of the list says YouTube's header count also counts Shorts and live streams. MVP.
+- Even-numbered batches and auto-load at the bottom: post-MVP (Isaiah), issue #118, after #104.
