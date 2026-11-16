@@ -1964,6 +1964,93 @@ body.ytfree-immersive-open {
   color: var(--text-muted);
 }
 
+/* --------------------------------------------------- hub: add channels ---
+   The Add channels sheet (GitHub #108): one box that searches channels or
+   takes a pasted link, a Subscribe toggle per result, Takeout at the foot.
+   The toggle has a fixed width so Subscribe <-> Subscribed never moves a row. */
+
+.ytfree-add-channels-form {
+  display: flex;
+  gap: 0.5em;
+  margin-bottom: 0.3em;
+}
+
+.ytfree-add-channels-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ytfree-add-channels-results {
+  height: min(50vh, 26em);
+  overflow-y: auto;
+}
+
+/* Two reserved lines: "20 channels for …" wraps on a phone. */
+.ytfree-add-channels-modal .ytfree-hub-modal-status {
+  min-height: 3.2em;
+}
+
+.ytfree-add-channels-empty {
+  padding: 1em 0;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.ytfree-add-channels-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.45em 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ytfree-add-channels-avatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  font-weight: var(--font-semibold);
+}
+
+.ytfree-add-channels-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ytfree-add-channels-words {
+  flex: 1;
+  min-width: 0;
+}
+
+.ytfree-add-channels-name,
+.ytfree-add-channels-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ytfree-add-channels-meta {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.ytfree-add-channels-subscribe {
+  flex-shrink: 0;
+  width: 8.5em;
+  justify-content: center;
+}
+
+.ytfree-add-channels-foot {
+  margin: 1.2em 0 0.3em;
+}
+
 /* ---------------------------------------------------------- hub: search ---
    Browse: search results rendered as hub cards. See docs/V1-SCOPE-BROWSE.md —
    a result can do exactly one thing, and it is not playback. */
