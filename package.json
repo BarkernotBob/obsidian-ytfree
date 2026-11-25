@@ -9,7 +9,8 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "test": "node --test \"tests/*.test.ts\"",
     "smoke": "node scripts/smoke.mjs",
-    "check": "npm run test && npm run build",
+    "check": "npm run test && npm run check:pages && npm run build",
+    "check:pages": "node scripts/check-pages.mjs",
     "smoke:full": "node scripts/smoke.mjs --full",
     "lint": "eslint src manifest.json package.json LICENSE",
     "version": "node version-bump.mjs && git add manifest.json versions.json"

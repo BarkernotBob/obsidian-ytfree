@@ -82,7 +82,7 @@ export function pickNotifiable(
   added: readonly HubItem[],
   live: readonly HubItem[],
   notified: ReadonlyArray<{ id: string; at: string }>,
-  options: { showWatched?: boolean; includeShorts?: boolean } = {},
+  options: { showWatched?: boolean; includeShorts?: boolean; blocked?: ReadonlySet<string> } = {},
 ): HubItem[] {
   const already = new Set(notified.map((entry) => entry.id));
   const byId = new Map(live.map((item) => [item.videoId, item]));
@@ -96,6 +96,8 @@ export function pickNotifiable(
     // feeds were in flight. Either way there is nothing in the Inbox to point at.
     if (!item) continue;
     if (item.state !== "new") continue;
+    // Not in the Inbox: age check still to run, or age-restricted (GitHub #111).
+    if (item.ageCheck === "pending" || options.blocked?.has(item.videoId)) continue;
     if (item.watched && !options.showWatched) continue;
     // `isShort` is null until the probe runs, and null is "not known to be a
     // Short" — announcing it is right, and the card shows up in the Inbox too.

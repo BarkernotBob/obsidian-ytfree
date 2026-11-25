@@ -110,14 +110,22 @@ test("an empty response is a failure, not a silent null", () => {
 
 // ------------------------------------------------------------------ LOGIN_REQUIRED
 
-test("an age-restricted video reports the login failure and YouTube's own reason", () => {
+test("an age-restricted video is blocked, not a login problem (#111)", () => {
+  // The real recorded age gate: LOGIN_REQUIRED with YouTube's age wording.
+  // It used to fall through to the "login" fallback (with an Open-on-YouTube
+  // link); now it is its own kind, which nothing hands to YouTube.
   const problem = playabilityFailure(loginRequired);
   assert.ok(problem instanceof MobileResolveError);
-  assert.equal(problem.kind, "login");
-  // The reason is what the user sees in the fallback notice, so it comes from
-  // YouTube rather than from a guess of ours.
-  assert.equal(problem.message, "This video may be inappropriate for some users.");
+  assert.equal(problem.kind, "age-restricted");
+  assert.equal(problem.message, "Blocked: this video is age-restricted.");
   assert.equal(pickMuxedFormat(loginRequired), null);
+});
+
+test("LOGIN_REQUIRED for a members-only video is still a login problem", () => {
+  const problem = playabilityFailure({
+    playabilityStatus: { status: "LOGIN_REQUIRED", reason: "Join this channel to get access to members-only content like this video." },
+  });
+  assert.equal(problem?.kind, "login");
 });
 
 test("LOGIN_REQUIRED with no reason still explains itself", () => {

@@ -485,4 +485,7 @@ test("which failures go to YouTube's player: all tiers failed, a bot check, a bo
   assert.ok(needsYouTubePlayer(new Error("Sign in to confirm you’re not a bot")));
   assert.ok(!needsYouTubePlayer(new Error("network")));
   assert.ok(!needsYouTubePlayer(null));
+  // An age gate never goes to YouTube's player (#111), even with a bot-check-ish history.
+  const { AgeRestrictedError } = await import("../src/age-restricted.ts");
+  assert.ok(!needsYouTubePlayer(new AgeRestrictedError("aaaaaaaaaaa")));
 });

@@ -1,6 +1,7 @@
 import Hls from "hls.js";
 import { Platform, setIcon } from "obsidian";
 import { isBotCheck } from "./bot-check.ts";
+import { isAgeRestricted } from "./age-restricted.ts";
 import { formatTimestamp } from "./format.ts";
 import { playedSpanMs } from "./history.ts";
 import { SHARE_ICON, YT_ICON } from "./icon.ts";
@@ -238,6 +239,8 @@ export interface YouTubeEmbedHandle {
  */
 export function needsYouTubePlayer(err: unknown): boolean {
   if (err == null) return false;
+  // Blocked, never handed to YouTube's player (GitHub #111).
+  if (isAgeRestricted(err)) return false;
   const name = (err as { name?: unknown }).name;
   return name === "AllTiersFailedError" || name === "BotCheckPausedError" || isBotCheck(err);
 }

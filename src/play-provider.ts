@@ -11,6 +11,7 @@
  * 360p and HD, and InnerTube only when yt-dlp is missing or fails.
  */
 import type { FetchRange, YtDlpFormat } from "./adaptive.ts";
+import { isAgeRestricted } from "./age-restricted.ts";
 import { botCheck, isBotCheck } from "./bot-check.ts";
 import { YtDlpMissingError } from "./stream.ts";
 import { resolveByTier } from "./tier-failures.ts";
@@ -80,9 +81,18 @@ export function mobileResolve(
       tiers: () => ["own"],
       failures,
       resolve: () => innertubeFast(videoId),
-      stop: isBotCheck,
+      stop: endsTierWalk,
     });
   };
+}
+
+/**
+ * Errors that end the tier walk at once: a bot check, and an age-restricted
+ * video, which is blocked rather than handed to the next tier or to YouTube's
+ * player (GitHub #111).
+ */
+export function endsTierWalk(err: unknown): boolean {
+  return isBotCheck(err) || isAgeRestricted(err);
 }
 
 /** Where a desktop stream comes from. Supplied by the plugin; faked in tests. */
@@ -131,8 +141,9 @@ function desktopFast(videoId: string, src: DesktopSources): Promise<ResolvedStre
       if (src.ytDlpUnavailable()) src.onPlayingWithoutYtDlp();
       return stream;
     },
-    // Tried once. Asking InnerTube next is more of what flagged the network.
-    stop: isBotCheck,
+    // Tried once. Asking InnerTube next is more of what flagged the network,
+    // and an age-restricted video is blocked on every tier (GitHub #111).
+    stop: endsTierWalk,
     onError: (_tier, err) => {
       // Probing four paths on every video is not worth it once it is known
       // to be absent. Absence is not this video's failure, so not marked.

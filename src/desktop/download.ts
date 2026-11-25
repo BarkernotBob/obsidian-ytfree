@@ -8,6 +8,10 @@ import { promisify } from "util";
 const pExecFile = promisify(execFile);
 
 import { ytDlpEnv } from "./env.ts";
+import { AgeRestrictedError, YTDLP_AGE_LIMIT, isAdultAgeLimit, isAgeGateText } from "../age-restricted.ts";
+
+/** Marks the stdout line that carries the video's age rating. */
+export const AGE_LIMIT_PREFIX = "ytfree-age-limit:";
 
 /**
  * Where downloads go when the setting is blank.
@@ -167,6 +171,14 @@ export function buildArgs(opts: DownloadOptions): string[] {
     "--no-playlist",
     "--newline",
     "--no-simulate",
+    // Refuse 18+ (GitHub #111).
+    "--age-limit",
+    String(YTDLP_AGE_LIMIT),
+    // `--print` implies `--quiet`, which swallows yt-dlp's own "Skipping …
+    // because it is age restricted" line. This prints the rating before the
+    // filter runs, so a skip is still recognisable.
+    "--print",
+    `pre_process:${AGE_LIMIT_PREFIX}%(age_limit)s`,
     // Prints the path *after* any merge and rename, so we learn the real
     // extension instead of guessing it.
     "--print",
@@ -194,6 +206,8 @@ export function downloadVideo(opts: DownloadOptions): DownloadHandle {
   let cancelled = false;
   let finalPath = "";
   let stderr = "";
+  // An 18+ rating from the pre_process print: `--age-limit` then skips with exit 0.
+  let ageSkipped = false;
 
   const done = new Promise<string>((resolve, reject) => {
     let buffer = "";
@@ -205,6 +219,8 @@ export function downloadVideo(opts: DownloadOptions): DownloadHandle {
         const progress = parseProgress(line);
         if (progress) {
           opts.onProgress(progress.percent, progress.totalBytes);
+        } else if (line.startsWith(AGE_LIMIT_PREFIX)) {
+          if (isAdultAgeLimit(Number(line.slice(AGE_LIMIT_PREFIX.length).trim()))) ageSkipped = true;
         } else if (line.trim().startsWith("/")) {
           finalPath = line.trim(); // the after_move:filepath print
         }
@@ -221,6 +237,13 @@ export function downloadVideo(opts: DownloadOptions): DownloadHandle {
       if (cancelled) {
         void sweepPartials(opts.destDir, opts.baseName);
         reject(new Error("cancelled"));
+        return;
+      }
+      // The stderr check is for yt-dlp's own age error; only when nothing was
+      // saved, so no other text in it can turn a finished download into a block.
+      if (ageSkipped || (!finalPath && isAgeGateText(stderr))) {
+        void sweepPartials(opts.destDir, opts.baseName);
+        reject(new AgeRestrictedError(opts.videoId));
         return;
       }
       if (code !== 0) {

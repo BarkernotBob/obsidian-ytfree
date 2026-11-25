@@ -86,8 +86,11 @@ import {
   fetchPublishDate,
   fetchTranscriptCues,
   fetchVideoDetails,
+  searchChannels,
   searchYouTube,
 } from "./innertube";
+import { classifyAddChannelInput, resultButton, searchStatus } from "./channel-search";
+import type { ChannelResult } from "./channel-search";
 import {
   BACKFILL_MAX_PAGES,
   backfillItem,
@@ -107,6 +110,7 @@ import {
   setBlocked,
 } from "./search-blocklist";
 import type { BlockEntry } from "./search-blocklist";
+import { AGE_RESTRICTED_LIMIT } from "./age-restricted.ts";
 import type { ChannelHeader } from "./channel";
 import { followIndexAt, groupCues, restingScrollTop } from "./transcript";
 import type { Paragraph } from "./transcript";
@@ -428,6 +432,23 @@ export class SubscriptionsStore {
     return this.state.channels.length - before;
   }
 
+  /**
+   * Undo a subscribe made a moment ago in the Add channels sheet (GitHub #108).
+   * Not `unsubscribeChannel`, which is the hub's Unsubscribe and takes the channel's
+   * undecided videos with it: this only stops polling, with the same tombstone
+   * an unsubscribe on YouTube gets, so nothing already in the hub is touched and
+   * the other device does not hand the channel back.
+   */
+  undoSubscribe(channelId: string): void {
+    this.state.channels = this.state.channels.filter((c) => c.id !== channelId);
+    this.state.unsubscribedChannels = [
+      ...(this.state.unsubscribedChannels ?? []).filter((r) => r.id !== channelId),
+      { id: channelId, at: new Date().toISOString() },
+    ];
+    this.emit();
+    void this.save();
+  }
+
   // ------------------------------------------------------ search blocklist
 
   /** Whether a search or channel-screen result stays off the screen (issue 047). */
@@ -435,6 +456,7 @@ export class SubscriptionsStore {
     result: { videoId: string; channelId: string },
     where: "search" | "channel",
   ): boolean {
+    if (this.isAgeRestricted(result.videoId)) return true;
     return isResultBlocked(
       result,
       where,
@@ -442,6 +464,36 @@ export class SubscriptionsStore {
       blockedIds(this.state.searchHiddenChannels),
       new Set(this.state.channels.map((c) => c.id)),
     );
+  }
+
+  // -------------------------------------------------------- age-restricted
+
+  /** Every video known to be age-restricted (GitHub #111). */
+  ageBlocked(): Set<string> {
+    return blockedIds(this.state.ageRestricted);
+  }
+
+  isAgeRestricted(videoId: string): boolean {
+    return this.ageBlocked().has(videoId);
+  }
+
+  /**
+   * Remember an age-restricted video, wherever it was found: hidden from every
+   * list from now on, on both devices, and refused on Play.
+   */
+  markAgeRestricted(videoId: string): void {
+    const item = this.itemFor(videoId);
+    if (item) delete item.ageCheck;
+    if (this.isAgeRestricted(videoId)) return;
+    this.state.ageRestricted = setBlocked(
+      this.state.ageRestricted,
+      { id: videoId, title: item?.title ?? "" },
+      true,
+      new Date(),
+      AGE_RESTRICTED_LIMIT,
+    );
+    this.emit();
+    void this.save();
   }
 
   /** Remove a search result for good, or (with `removed` false) undo it. */
@@ -623,6 +675,10 @@ export class SubscriptionsStore {
       const expired = expireItems(this.state.items, this.settings().expiryDays, now);
       this.state.items = expired.items;
 
+      // Age checks before anything else spends the budget: a new feed item is
+      // held out of the Inbox until one has run (GitHub #111).
+      added.push(...(await this.checkAges()));
+
       // Durations first: they decide which videos need the Shorts check.
       await this.backfillDurations(DURATIONS_PER_POLL);
 
@@ -729,15 +785,20 @@ export class SubscriptionsStore {
       ? pickNotifiable(added, this.state.items, this.state.notifiedVideos ?? [], {
           showWatched: settings.showWatched,
           includeShorts: settings.includeShorts,
+          blocked: this.ageBlocked(),
         })
       : [];
 
-    if (candidates.length) {
-      this.state.notifiedVideos = rememberNotified(
-        this.state.notifiedVideos ?? [],
-        candidates.map((item) => item.videoId),
-        new Date(),
-      );
+    // A video held for its age check (GitHub #111) is notified by the later
+    // poll that clears it, which is no longer seeding and whose `quiet` set is
+    // its own. One added by a seeding or first-sight poll is claimed now
+    // instead, so it stays as quiet as it would have been.
+    const held = added
+      .filter((item) => item.ageCheck === "pending" && (seeding || quiet.has(item.videoId)))
+      .map((item) => item.videoId);
+    const claims = [...candidates.map((item) => item.videoId), ...held];
+    if (claims.length) {
+      this.state.notifiedVideos = rememberNotified(this.state.notifiedVideos ?? [], claims, new Date());
     }
 
     const disk = await this.save();
@@ -793,6 +854,43 @@ export class SubscriptionsStore {
       // out of the 15-entry window can never get one anywhere else.
       if (!target.description && details.description) target.description = details.description;
     });
+  }
+
+  /**
+   * The age check for new feed items (GitHub #111): one player call each,
+   * newest first, one at a time, inside the background budget. RSS carries no
+   * age flag, so this is the only way to know. A pending item stays out of
+   * every list until YouTube answers; a network failure or a bot check leaves
+   * it pending for the next poll. The same call is cached, so the duration and
+   * description come with it. Returns the items it cleared, which are new to
+   * the Inbox now and so are notifiable.
+   */
+  private async checkAges(): Promise<HubItem[]> {
+    const pending = this.state.items
+      .filter((item) => item.ageCheck === "pending")
+      .sort((a, b) => (Date.parse(b.published) || 0) - (Date.parse(a.published) || 0));
+    const cleared: HubItem[] = [];
+    for (const item of pending) {
+      if (!governor.backgroundRoom() || botCheck.isPaused()) break;
+      const details = await fetchVideoDetails(item.videoId);
+      // Offline or refused: the rest would fail the same way and only spend
+      // the hour's budget. They stay pending for the next poll.
+      if (!details.answered) break;
+      if (details.ageRestricted) {
+        // Also reported from `callInnertube`; this covers a hub with no
+        // listener attached yet.
+        this.markAgeRestricted(item.videoId);
+        continue;
+      }
+      // Re-looked-up after the round trip: a merge can replace or drop it.
+      const target = this.itemFor(item.videoId);
+      if (!target) continue;
+      delete target.ageCheck;
+      if (target.durationSeconds === undefined) target.durationSeconds = details.durationSeconds;
+      if (!target.description && details.description) target.description = details.description;
+      cleared.push(target);
+    }
+    return cleared;
   }
 
   // --------------------------------------------------------------- search
@@ -2415,8 +2513,10 @@ export class HubView extends ItemView {
     all.addEventListener("click", () => this.selectChannel(null));
 
     const counts = new Map<string, number>();
+    // Counted like the list counts them: no age-restricted or still-unchecked video.
+    const ageBlocked = this.store.ageBlocked();
     for (const item of this.store.state.items) {
-      if (item.state !== "new") continue;
+      if (item.state !== "new" || item.ageCheck === "pending" || ageBlocked.has(item.videoId)) continue;
       counts.set(item.channelId, (counts.get(item.channelId) ?? 0) + 1);
     }
 
@@ -2526,6 +2626,7 @@ export class HubView extends ItemView {
       // next time it is drawn. Only computed for the list that uses it.
       inProgress,
       hasNote: (item) => this.noteFile(item) !== null,
+      blocked: this.store.ageBlocked(),
     });
   }
 
@@ -2577,6 +2678,7 @@ export class HubView extends ItemView {
       includeShorts: true,
       query: this.itemQuery,
       history: order,
+      blocked: this.store.ageBlocked(),
     });
   }
 
@@ -4284,6 +4386,9 @@ class PreviewModal extends Modal {
   }
 }
 
+/** The Add channels sheet's results region before a search, or after a failed one. */
+const ADD_CHANNELS_EMPTY = "Search by name, like “smarter every day”. One search per tap.";
+
 /**
  * Getting channels in — a Takeout CSV, or one channel at a time.
  *
@@ -4295,6 +4400,18 @@ class PreviewModal extends Modal {
  * way to read a subscription list, which is exactly why this is a manual dump.
  */
 export class ImportSubscriptionsModal extends Modal {
+  /** Channels subscribed from this sheet's results, which tapping again undoes. */
+  private addedHere = new Set<string>();
+  /** Of `addedHere`, the ones that were hidden from search: an undo hides them again. */
+  private wasHidden = new Set<string>();
+  /** Bumped per search or added link, so a slow answer to an old query is dropped. */
+  private searchToken = 0;
+  /**
+   * A Subscribe tap only marks this; `onDone` (which can open the hub and poll
+   * every channel) runs once, when the sheet closes, not once per tap.
+   */
+  private changed = false;
+
   constructor(
     app: App,
     private store: SubscriptionsStore,
@@ -4303,10 +4420,54 @@ export class ImportSubscriptionsModal extends Modal {
     super(app);
   }
 
+  /**
+   * The Add channels sheet (GitHub #108, docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md
+   * S3): one box that searches channels or takes a pasted link, a Subscribe
+   * toggle per result, and the Google Takeout import at the foot.
+   */
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "Import YouTube subscriptions" });
+    this.modalEl.addClass("ytfree-add-channels-modal");
+    contentEl.createEl("h2", { text: "Add channels" });
+
+    const form = contentEl.createEl("form", { cls: "ytfree-add-channels-form" });
+    const input = form.createEl("input", {
+      cls: "ytfree-add-channels-input",
+      type: "search",
+      attr: {
+        placeholder: "Search channels, or paste a channel link",
+        "aria-label": "Search channels, or paste a channel link",
+        enterkeyhint: "search",
+        autocapitalize: "off",
+        autocorrect: "off",
+        spellcheck: "false",
+      },
+    });
+    const go = form.createEl("button", { cls: "mod-cta", text: "Search", attr: { type: "submit" } });
+    go.title = "One search per tap. A pasted link is added directly.";
+
+    // A reserved status line: filling it in must not resize the dialog.
+    const status = contentEl.createDiv({ cls: "ytfree-hub-modal-status" });
+    // A fixed-height region from the start, so a search fills it rather than
+    // pushing the Takeout section down.
+    const results = contentEl.createDiv({ cls: "ytfree-add-channels-results" });
+    results.createDiv({
+      cls: "ytfree-add-channels-empty",
+      text: ADD_CHANNELS_EMPTY,
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const what = classifyAddChannelInput(input.value);
+      if (what.kind === "empty") return;
+      if (what.kind === "link") {
+        void this.addOne(what.value, status, ++this.searchToken);
+      }
+      else void this.runChannelSearch(what.query, status, results);
+    });
+
+    contentEl.createEl("h3", { cls: "ytfree-add-channels-foot", text: "Import from Google Takeout…" });
     contentEl.createEl("p", {
       cls: "ytfree-hub-hint",
       text: "Your YouTube subscriptions come out of Google Takeout as one file, subscriptions.csv:",
@@ -4329,12 +4490,11 @@ export class ImportSubscriptionsModal extends Modal {
         "You can also subscribe from a channel's screen, or from a search result's ⋯ menu.",
     });
 
-    // A reserved status line: filling it in must not resize the dialog.
-    const status = contentEl.createDiv({ cls: "ytfree-hub-modal-status" });
-
     const picker = contentEl.createEl("input", { type: "file" });
     picker.accept = ".csv,text/csv";
     picker.addClass("ytfree-hub-file");
+    // Its own reserved line, beside the picker: the top one can be scrolled away.
+    const takeoutStatus = contentEl.createDiv({ cls: "ytfree-hub-modal-status" });
     picker.addEventListener("change", () => {
       const file = picker.files?.[0];
       if (!file) return;
@@ -4343,32 +4503,17 @@ export class ImportSubscriptionsModal extends Modal {
         .then((text) => {
           const parsed = parseSubscriptionsCsv(text);
           if (parsed.length === 0) {
-            status.setText("No channel IDs found in that file. Is it subscriptions.csv?");
+            takeoutStatus.setText("No channel IDs found in that file. Is it subscriptions.csv?");
             return;
           }
           const added = this.store.addChannels(parsed);
-          status.setText(
+          takeoutStatus.setText(
             `${parsed.length} channels in the file — ${added} new, ${parsed.length - added} already here.`,
           );
           this.onDone();
         })
-        .catch((err: unknown) => status.setText(`Could not read that file — ${String(err)}`));
+        .catch((err: unknown) => takeoutStatus.setText(`Could not read that file — ${String(err)}`));
     });
-
-    let single = "";
-    new Setting(contentEl)
-      .setName("Or add one channel")
-      .setDesc("A channel URL or a UC… ID. A @handle works too — the ID is read off the page.")
-      .addText((text) =>
-        text.setPlaceholder("https://www.youtube.com/@channel").onChange((value) => {
-          single = value;
-        }),
-      )
-      .addButton((button) =>
-        button.setButtonText("Add").onClick(() => {
-          void this.addOne(single, status);
-        }),
-      );
 
     new Setting(contentEl).addButton((button) =>
       button
@@ -4376,9 +4521,73 @@ export class ImportSubscriptionsModal extends Modal {
         .setCta()
         .onClick(() => this.close()),
     );
+    input.focus();
   }
 
-  private async addOne(input: string, status: HTMLElement): Promise<void> {
+  /** One channel search, its results drawn as rows with a Subscribe toggle each. */
+  private async runChannelSearch(query: string, status: HTMLElement, list: HTMLElement): Promise<void> {
+    const token = ++this.searchToken;
+    status.setText("Searching channels…");
+    let found: ChannelResult[];
+    try {
+      found = await searchChannels(query);
+    } catch (err) {
+      if (token !== this.searchToken) return;
+      status.setText(`Could not search channels — ${err instanceof Error ? err.message : String(err)}`);
+      // The last query's rows would sit under this error with live buttons.
+      list.empty();
+      list.createDiv({ cls: "ytfree-add-channels-empty", text: ADD_CHANNELS_EMPTY });
+      return;
+    }
+    if (token !== this.searchToken) return;
+    status.setText(searchStatus(query, found.length));
+    list.empty();
+    for (const channel of found) this.renderChannelResult(list, channel, status);
+  }
+
+  private renderChannelResult(list: HTMLElement, channel: ChannelResult, status: HTMLElement): void {
+    const row = list.createDiv({ cls: "ytfree-add-channels-row" });
+    const avatar = row.createDiv({ cls: "ytfree-add-channels-avatar" });
+    if (channel.avatar) {
+      avatar.createEl("img", { attr: { src: channel.avatar, alt: "", loading: "lazy", referrerpolicy: "no-referrer" } });
+    } else avatar.setText(channel.title.slice(0, 1).toUpperCase());
+    const words = row.createDiv({ cls: "ytfree-add-channels-words" });
+    words.createDiv({ cls: "ytfree-add-channels-name", text: channel.title });
+    words.createDiv({
+      cls: "ytfree-add-channels-meta",
+      // A non-breaking space keeps the row two lines tall when both are missing.
+      text: [channel.handle, channel.subscribers].filter(Boolean).join(" · ") || "\u00a0",
+    });
+    const button = row.createEl("button", { cls: "ytfree-add-channels-subscribe", attr: { type: "button" } });
+    const paint = () => {
+      const copy = resultButton(this.store.isSubscribed(channel.channelId), this.addedHere.has(channel.channelId));
+      button.setText(copy.text);
+      button.title = copy.title;
+      button.disabled = copy.disabled;
+      button.toggleClass("mod-cta", !copy.subscribed);
+      button.toggleClass("is-subscribed", copy.subscribed);
+    };
+    button.addEventListener("click", () => {
+      const id = channel.channelId;
+      if (!this.store.isSubscribed(id)) {
+        if (this.store.hiddenSearchChannels().some((entry) => entry.id === id)) this.wasHidden.add(id);
+        this.store.addChannels([{ id, title: channel.title }]);
+        this.addedHere.add(id);
+        status.setText(`Subscribed to ${channel.title}. Its videos arrive in the hub on the next check.`);
+      } else if (this.addedHere.has(id)) {
+        this.store.undoSubscribe(id);
+        if (this.wasHidden.delete(id)) this.store.setSearchHidden({ id, title: channel.title }, true);
+        this.addedHere.delete(id);
+        status.setText(`Undone: not subscribed to ${channel.title}.`);
+      } else return;
+      this.changed = true;
+      paint();
+    });
+    paint();
+  }
+
+  /** `token` is this lookup's `searchToken`: a later search or link owns the status line. */
+  private async addOne(input: string, status: HTMLElement, token: number): Promise<void> {
     const text = input.trim();
     if (!text) return;
 
@@ -4391,6 +4600,7 @@ export class ImportSubscriptionsModal extends Modal {
       } catch {
         id = null;
       }
+      if (token !== this.searchToken) return;
     }
     if (!id) {
       status.setText("No channel ID in that. Try the channel's URL, or its UC… ID.");
@@ -4403,6 +4613,10 @@ export class ImportSubscriptionsModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+    if (this.changed) {
+      this.changed = false;
+      this.onDone();
+    }
   }
 }
 
