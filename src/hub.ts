@@ -235,6 +235,65 @@ const postWebhook: Post = async ({ url, body, contentType, headers }) => {
  * A vault folder as the user typed it, in the form the vault API wants: one
  * kind of slash, none at either end. Blank stays blank (the vault root).
  */
+/**
+ * Every search and filter box in the app, built one way: a leading glass, the
+ * box, the × that empties it (`wireClearButton`), and optionally a run button,
+ * all inside one frame that takes the focus ring. One builder so the boxes
+ * cannot drift apart in look or behaviour.
+ */
+interface SearchFieldOptions {
+  placeholder: string;
+  label: string;
+  value?: string;
+  /** A run button at the right edge; left out for boxes that filter as you type. */
+  go?: { label: string; onRun: (query: string) => void };
+}
+
+interface SearchField {
+  field: HTMLElement;
+  input: HTMLInputElement;
+  /** Shows or hides the × after code changes the text (which fires no event). */
+  syncClear: () => void;
+}
+
+function buildSearchField(parent: HTMLElement, opts: SearchFieldOptions): SearchField {
+  const field = parent.createDiv({ cls: "ytfree-search-field" });
+  setIcon(field.createSpan({ cls: "ytfree-search-field-icon" }), "search");
+  const input = field.createEl("input", {
+    cls: "ytfree-search-field-input",
+    type: "search",
+    attr: {
+      placeholder: opts.placeholder,
+      enterkeyhint: "search",
+      autocapitalize: "off",
+      autocorrect: "off",
+      spellcheck: "false",
+      "aria-label": opts.label,
+    },
+  });
+  input.value = opts.value ?? "";
+
+  const clear = field.createEl("button", {
+    // `clickable-icon` is Obsidian's bare icon button: no box, no shadow,
+    // the same treatment as the clear button in Obsidian's own search.
+    cls: "ytfree-search-field-clear clickable-icon",
+    attr: { type: "button", "aria-label": "Clear search", title: "Clear search" },
+  });
+  setIcon(clear, "x-circle");
+  const syncClear = wireClearButton(input, clear);
+
+  if (opts.go) {
+    const { label, onRun } = opts.go;
+    const go = field.createEl("button", {
+      cls: "ytfree-search-field-go",
+      attr: { type: "button", "aria-label": label, title: label },
+    });
+    setIcon(go, "arrow-right");
+    go.addEventListener("click", () => onRun(input.value));
+  }
+  return { field, input, syncClear };
+}
+
 function vaultFolder(typed: string): string {
   const folder = normalizePath(typed.trim());
   return folder === "/" ? "" : folder;
@@ -1645,24 +1704,12 @@ export class HubView extends ItemView {
    */
   private buildItemFilter(root: HTMLElement): void {
     const row = root.createDiv({ cls: "ytfree-hub-search" });
-
-    const input = row.createEl("input", {
-      cls: "ytfree-hub-search-input",
-      // `search` gives iOS a Search key and both platforms a native clear
-      // control, which fires `input` like any other edit — so clearing by hand
-      // and clearing with the × take the same path.
-      type: "search",
-      attr: {
-        placeholder: "Filter these videos",
-        enterkeyhint: "search",
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: "false",
-        "aria-label": "Filter the videos in your hub",
-      },
+    const { input, syncClear } = buildSearchField(row, {
+      placeholder: "Filter these videos",
+      label: "Filter the videos in your hub",
+      // Survives a trip to the search screen and back, like everything else here.
+      value: this.itemQuery,
     });
-    // Survives a trip to the search screen and back, like everything else here.
-    input.value = this.itemQuery;
 
     const apply = (): void => {
       this.itemQuery = input.value;
@@ -1674,6 +1721,7 @@ export class HubView extends ItemView {
       if (evt.key === "Escape") {
         evt.preventDefault();
         input.value = "";
+        syncClear();
         apply();
       }
     });
@@ -1752,25 +1800,16 @@ export class HubView extends ItemView {
     // leading glyph, the box, and the run control, all inside one border that
     // takes the focus ring. The ring is a box-shadow, so focus cannot resize it.
     const row = root.createDiv({ cls: "ytfree-hub-searchbar" });
-    const field = row.createDiv({ cls: "ytfree-search-field" });
-    setIcon(field.createSpan({ cls: "ytfree-search-field-icon" }), "search");
-
-    const input = field.createEl("input", {
-      cls: "ytfree-search-field-input",
-      type: "search",
-      attr: {
-        // Says what the box reaches, which is the difference between it and the
-        // hub's own box one screen back.
-        placeholder: "Search all of YouTube",
-        enterkeyhint: "search",
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: "false",
-        "aria-label": "Search all of YouTube",
-      },
+    const { input, syncClear } = buildSearchField(row, {
+      // Says what the box reaches, which is the difference between it and the
+      // hub's own box one screen back.
+      placeholder: "Search all of YouTube",
+      label: "Search all of YouTube",
+      value: this.searchQuery ?? "",
+      go: { label: "Run this search", onRun: (query) => this.runSearch(query) },
     });
+    this.syncSearchClear = syncClear;
     this.searchInputEl = input;
-    input.value = this.searchQuery ?? "";
 
     input.addEventListener("keydown", (evt) => {
       if (evt.key === "Enter") {
@@ -1787,14 +1826,6 @@ export class HubView extends ItemView {
       if (input.value.trim() === "" && this.searchQuery !== null) this.exitSearch();
     });
 
-    this.syncSearchClear = this.addClearButton(field, input);
-
-    const go = field.createEl("button", {
-      cls: "ytfree-search-field-go",
-      attr: { type: "button", "aria-label": "Run this search", title: "Run this search" },
-    });
-    setIcon(go, "arrow-right");
-    go.addEventListener("click", () => this.runSearch(input.value));
 
     this.buildSearchFilters(root);
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status ytfree-hub-status-browse" });
@@ -1981,22 +2012,13 @@ export class HubView extends ItemView {
     this.renderChannelFacts();
 
     const row = root.createDiv({ cls: "ytfree-hub-searchbar" });
-    const field = row.createDiv({ cls: "ytfree-search-field" });
-    setIcon(field.createSpan({ cls: "ytfree-search-field-icon" }), "search");
     const label = `Search ${this.channelName() || "this channel"}`;
-    const input = field.createEl("input", {
-      cls: "ytfree-search-field-input",
-      type: "search",
-      attr: {
-        placeholder: label,
-        enterkeyhint: "search",
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: "false",
-        "aria-label": label,
-      },
+    const { input, syncClear } = buildSearchField(row, {
+      placeholder: label,
+      label,
+      value: channel?.query ?? "",
+      go: { label: "Search this channel", onRun: (query) => this.runChannelSearch(query) },
     });
-    input.value = channel?.query ?? "";
     input.addEventListener("keydown", (evt) => {
       if (evt.key === "Enter") {
         evt.preventDefault();
@@ -2004,6 +2026,7 @@ export class HubView extends ItemView {
       } else if (evt.key === "Escape") {
         evt.preventDefault();
         input.value = "";
+        syncClear();
         this.runChannelSearch("");
       }
     });
@@ -2011,13 +2034,6 @@ export class HubView extends ItemView {
     input.addEventListener("input", () => {
       if (input.value.trim() === "" && this.channel?.query) this.runChannelSearch("");
     });
-    this.addClearButton(field, input);
-    const go = field.createEl("button", {
-      cls: "ytfree-search-field-go",
-      attr: { type: "button", "aria-label": "Search this channel", title: "Search this channel" },
-    });
-    setIcon(go, "arrow-right");
-    go.addEventListener("click", () => this.runChannelSearch(input.value));
 
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status ytfree-hub-status-browse" });
     const body = root.createDiv({ cls: "ytfree-hub-body" });
@@ -2560,18 +2576,6 @@ export class HubView extends ItemView {
     this.removedResults.clear();
     if (this.searchInputEl) this.searchInputEl.value = "";
     this.syncSearchClear?.();
-  }
-
-  /** The × that empties a search field in one tap (see `wireClearButton`). */
-  private addClearButton(field: HTMLElement, input: HTMLInputElement): () => void {
-    const clear = field.createEl("button", {
-      // `clickable-icon` is Obsidian's bare icon button: no box, no shadow,
-      // the same treatment as the clear button in Obsidian's own search.
-      cls: "ytfree-search-field-clear clickable-icon",
-      attr: { type: "button", "aria-label": "Clear search", title: "Clear search" },
-    });
-    setIcon(clear, "x-circle");
-    return wireClearButton(input, clear);
   }
 
   private exitSearch(): void {
@@ -4214,18 +4218,11 @@ export class ImportSubscriptionsModal extends Modal {
     contentEl.createEl("h2", { text: "Add channels" });
 
     const form = contentEl.createEl("form", { cls: "ytfree-add-channels-form" });
-    const input = form.createEl("input", {
-      cls: "ytfree-add-channels-input",
-      type: "search",
-      attr: {
-        placeholder: "Search channels, or paste a channel link",
-        "aria-label": "Search channels, or paste a channel link",
-        enterkeyhint: "search",
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: "false",
-      },
+    const { field, input } = buildSearchField(form, {
+      placeholder: "Search channels, or paste a channel link",
+      label: "Search channels, or paste a channel link",
     });
+    field.addClass("ytfree-add-channels-input");
     const go = form.createEl("button", { cls: "mod-cta", text: "Search", attr: { type: "submit" } });
     go.title = "One search per tap. A pasted link is added directly.";
 

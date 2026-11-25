@@ -2064,6 +2064,13 @@ body.ytfree-immersive-open {
   flex: 0 0 auto;
 }
 
+/* The hub's filter box is the shared search field (buildSearchField), so it
+   takes the row's width; it filters as you type, so it has no run button. */
+.ytfree-hub-search .ytfree-search-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .ytfree-hub-search-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -2935,8 +2942,21 @@ body.ytfree-immersive-open {
   padding: 0 4px 0 0.7em;
 }
 
-.ytfree-hub.ytfree-phone .ytfree-search-field-input {
+.ytfree-hub.ytfree-phone .ytfree-search-field-input,
+.is-mobile .ytfree-search-field-input {
   font-size: 16px;
+}
+
+/* The Add channels sheet is a modal, outside the hub's phone class: same
+   thumb-sized field there. */
+.is-phone .ytfree-add-channels-form .ytfree-search-field {
+  height: 44px;
+}
+
+.is-phone .ytfree-add-channels-form .ytfree-search-field .ytfree-search-field-clear {
+  width: 36px;
+  height: 36px;
+  --icon-size: 18px;
 }
 
 /* A thumb-sized target, matching the go button beside it. */
