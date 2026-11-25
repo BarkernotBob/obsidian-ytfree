@@ -2249,9 +2249,12 @@ body.ytfree-immersive-open {
   background: var(--background-modifier-form-field);
 }
 
+/* Typing in the box lights the whole field in the accent colour: the box has
+   no frame of its own any more, so this ring is the only sign of focus and has
+   to read at a glance (WCAG 2.4.7). */
 .ytfree-search-field:focus-within {
-  border-color: var(--background-modifier-border-focus);
-  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
 }
 
 .ytfree-search-field-icon {
@@ -2331,6 +2334,15 @@ body.ytfree-immersive-open {
   display: none;
 }
 
+/* Tabbing onto the × gives it its own ring, so focus visibly moves off the
+   text and onto the button inside the same lit field. */
+.ytfree-search-field .ytfree-search-field-clear:focus-visible {
+  outline: none;
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
 .ytfree-search-field .ytfree-search-field-clear:hover,
 .ytfree-search-field .ytfree-search-field-clear:active {
   background: transparent;
@@ -2354,6 +2366,12 @@ body.ytfree-immersive-open {
   color: var(--text-on-accent);
   cursor: var(--cursor);
   --icon-size: 16px;
+}
+
+/* The next Tab stop after the ×, ringed the same way. */
+.ytfree-search-field .ytfree-search-field-go:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--interactive-accent);
 }
 
 @media (hover: hover) and (pointer: fine) {
