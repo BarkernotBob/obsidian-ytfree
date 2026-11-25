@@ -2283,6 +2283,19 @@ body.ytfree-immersive-open {
   outline: none;
 }
 
+/* Obsidian's app styles give every search input its own border, fill and
+   focus ring; at a higher rank than one class, so the box drew a second box
+   inside the field. Outranked here so the field is the only frame. */
+.ytfree-search-field input.ytfree-search-field-input,
+.ytfree-search-field input.ytfree-search-field-input:hover,
+.ytfree-search-field input.ytfree-search-field-input:focus,
+.ytfree-search-field input.ytfree-search-field-input:focus-visible {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
 /* Our own × (see search-clear.ts), so the browser's is hidden where it draws
    one: two clear controls side by side would be one too many. */
 .ytfree-search-field-input::-webkit-search-cancel-button {
@@ -2291,32 +2304,37 @@ body.ytfree-immersive-open {
   display: none;
 }
 
-.ytfree-search-field-clear {
+/* A small, faint circle-× at the box's right edge, the way iOS, Material and
+   Obsidian's own search draw it: part of the text box, not a control of its
+   own. The class pair outranks Obsidian's button and clickable-icon rules, so
+   no grey box or hover square appears around it. */
+.ytfree-search-field .ytfree-search-field-clear {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
+  margin: 0 2px 0 0;
   padding: 0;
   border: none;
   border-radius: 50%;
   background: transparent;
   box-shadow: none;
-  color: var(--text-muted);
+  color: var(--text-faint);
   cursor: var(--cursor);
   --icon-size: 16px;
+  --icon-stroke: 2px;
 }
 
-.ytfree-search-field-clear[hidden] {
+.ytfree-search-field .ytfree-search-field-clear[hidden] {
   display: none;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .ytfree-search-field-clear:hover {
-    color: var(--text-normal);
-    background: var(--background-modifier-hover);
-  }
+.ytfree-search-field .ytfree-search-field-clear:hover,
+.ytfree-search-field .ytfree-search-field-clear:active {
+  background: transparent;
+  color: var(--text-muted);
 }
 
 /* The one accented thing on the screen, because pressing it is the screen's
@@ -2904,10 +2922,12 @@ body.ytfree-immersive-open {
 }
 
 /* A thumb-sized target, matching the go button beside it. */
-.ytfree-hub.ytfree-phone .ytfree-search-field-clear {
-  width: 40px;
-  height: 40px;
-  --icon-size: 20px;
+/* The glyph stays small; only the tap target grows to a thumb's width. */
+.ytfree-hub.ytfree-phone .ytfree-search-field .ytfree-search-field-clear {
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  --icon-size: 18px;
 }
 
 .ytfree-hub.ytfree-phone .ytfree-search-field-go {

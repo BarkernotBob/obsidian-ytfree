@@ -2565,10 +2565,12 @@ export class HubView extends ItemView {
   /** The × that empties a search field in one tap (see `wireClearButton`). */
   private addClearButton(field: HTMLElement, input: HTMLInputElement): () => void {
     const clear = field.createEl("button", {
-      cls: "ytfree-search-field-clear",
+      // `clickable-icon` is Obsidian's bare icon button: no box, no shadow,
+      // the same treatment as the clear button in Obsidian's own search.
+      cls: "ytfree-search-field-clear clickable-icon",
       attr: { type: "button", "aria-label": "Clear search", title: "Clear search" },
     });
-    setIcon(clear, "x");
+    setIcon(clear, "x-circle");
     return wireClearButton(input, clear);
   }
 
