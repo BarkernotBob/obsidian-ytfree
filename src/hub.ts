@@ -134,6 +134,7 @@ import type { SearchScreenCopy, SearchScreenKind } from "./search-screen";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 import type { HistoryStore } from "./history-store.ts";
 import { statsLine } from "./history.ts";
+import { wireClearButton } from "./search-clear.ts";
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
 
@@ -1407,6 +1408,8 @@ export class HubView extends ItemView {
   private searchState: "idle" | "loading" | "error" = "idle";
   private searchError = "";
   private searchInputEl: HTMLInputElement | null = null;
+  /** Shows or hides the search box's × after code changes its text. */
+  private syncSearchClear: (() => void) | null = null;
   private searchFilters: SearchFilters = defaultFilters();
   /** How many results this search dropped for already being in the hub. */
   private searchSkipped = 0;
@@ -1562,6 +1565,7 @@ export class HubView extends ItemView {
     this.primaryEl = null;
     this.relatedEl = null;
     this.searchInputEl = null;
+    this.syncSearchClear = null;
     this.channelFactsEl = null;
     this.channelSubscribeEl = null;
     this.menuEl = null;
@@ -1782,6 +1786,8 @@ export class HubView extends ItemView {
     input.addEventListener("input", () => {
       if (input.value.trim() === "" && this.searchQuery !== null) this.exitSearch();
     });
+
+    this.syncSearchClear = this.addClearButton(field, input);
 
     const go = field.createEl("button", {
       cls: "ytfree-search-field-go",
@@ -2005,6 +2011,7 @@ export class HubView extends ItemView {
     input.addEventListener("input", () => {
       if (input.value.trim() === "" && this.channel?.query) this.runChannelSearch("");
     });
+    this.addClearButton(field, input);
     const go = field.createEl("button", {
       cls: "ytfree-search-field-go",
       attr: { type: "button", "aria-label": "Search this channel", title: "Search this channel" },
@@ -2552,6 +2559,17 @@ export class HubView extends ItemView {
     this.searchSkipped = 0;
     this.removedResults.clear();
     if (this.searchInputEl) this.searchInputEl.value = "";
+    this.syncSearchClear?.();
+  }
+
+  /** The × that empties a search field in one tap (see `wireClearButton`). */
+  private addClearButton(field: HTMLElement, input: HTMLInputElement): () => void {
+    const clear = field.createEl("button", {
+      cls: "ytfree-search-field-clear",
+      attr: { type: "button", "aria-label": "Clear search", title: "Clear search" },
+    });
+    setIcon(clear, "x");
+    return wireClearButton(input, clear);
   }
 
   private exitSearch(): void {

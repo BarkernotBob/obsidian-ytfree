@@ -2283,6 +2283,42 @@ body.ytfree-immersive-open {
   outline: none;
 }
 
+/* Our own × (see search-clear.ts), so the browser's is hidden where it draws
+   one: two clear controls side by side would be one too many. */
+.ytfree-search-field-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+.ytfree-search-field-clear {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: var(--cursor);
+  --icon-size: 16px;
+}
+
+.ytfree-search-field-clear[hidden] {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-search-field-clear:hover {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+}
+
 /* The one accented thing on the screen, because pressing it is the screen's
    whole purpose. A fixed square, so nothing about it depends on its state. */
 .ytfree-search-field-go {
@@ -2865,6 +2901,13 @@ body.ytfree-immersive-open {
 
 .ytfree-hub.ytfree-phone .ytfree-search-field-input {
   font-size: 16px;
+}
+
+/* A thumb-sized target, matching the go button beside it. */
+.ytfree-hub.ytfree-phone .ytfree-search-field-clear {
+  width: 40px;
+  height: 40px;
+  --icon-size: 20px;
 }
 
 .ytfree-hub.ytfree-phone .ytfree-search-field-go {
