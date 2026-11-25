@@ -623,6 +623,13 @@ export class YtFreePlayer {
         void this.recover("HD unavailable, back to 360p");
         return;
       }
+      // MEDIA_ERR_ABORTED: the fetch was stopped on this side (a source swap,
+      // iOS suspending it), not refused by YouTube. Re-resolved, never counted
+      // as a dead link (GitHub #121).
+      if (this.video.error.code === 1) {
+        void this.recover("playback interrupted");
+        return;
+      }
       void this.recover("playback error");
     });
 
@@ -3229,7 +3236,7 @@ export class YtFreePlayer {
       // Recover in whatever quality is currently playing, so a refresh never
       // silently downgrades the picture.
       // HD dropping back to 360p is not the 360p link's failure.
-      const deadLink = !this.upgraded && !reason.startsWith("HD unavailable");
+      const deadLink = !this.upgraded && !reason.startsWith("HD unavailable") && reason !== "playback interrupted";
       const stream = await this.provider(this.upgraded ? "quality" : "fast", true, deadLink);
       this.attach(stream, resumeAt, wasPlaying);
       this.onStatus(null);

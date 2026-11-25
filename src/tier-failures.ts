@@ -15,8 +15,14 @@ import type { StreamTier } from "./youtube-player-rule.ts";
 
 export const FAILURE_TTL_MS = 30 * 60_000;
 
+/** How long to wait before asking the same tier again after a network blip. */
+export const TRANSIENT_RETRY_MS = 1000;
+
 export class TierFailures {
   private marks = new Map<string, Map<StreamTier, number>>();
+
+  /** One dead link already seen on our own stream, per video (GitHub #121). */
+  private strikes = new Map<string, number>();
 
   private now: () => number;
 
@@ -42,8 +48,31 @@ export class TierFailures {
     return out;
   }
 
+  /**
+   * A 360p link died before it expired. Answers whether the tier is now failed.
+   *
+   * yt-dlp fails at once: asking it again gets the same refusal (#43). Our own
+   * stream is the last tier before YouTube's player, and its links die for
+   * ordinary reasons (a kept answer from another network, a blip), so its first
+   * dead link only asks for a fresh link; the second within `FAILURE_TTL_MS`
+   * fails it (GitHub #121: "really quickly auto going to the YouTube player").
+   */
+  deadLink(videoId: string, tier: StreamTier): boolean {
+    if (tier === "own") {
+      const at = this.strikes.get(videoId);
+      if (at === undefined || this.now() - at >= FAILURE_TTL_MS) {
+        this.strikes.set(videoId, this.now());
+        return false;
+      }
+      this.strikes.delete(videoId);
+    }
+    this.mark(videoId, tier);
+    return true;
+  }
+
   clear(videoId: string): void {
     this.marks.delete(videoId);
+    this.strikes.delete(videoId);
   }
 }
 
@@ -73,8 +102,16 @@ export async function resolveByTier<S>(opts: {
   stop: (err: unknown) => boolean;
   /** Called on a failure; return false to not mark the tier (e.g. not installed). */
   onError?: (tier: StreamTier, err: unknown) => boolean;
+  /**
+   * A failure worth one more try on the same tier before it is marked: a
+   * network blip, not an answer from YouTube (GitHub #121).
+   */
+  transient?: (err: unknown) => boolean;
+  /** Wait before that one retry. Tests pass 0. */
+  retryDelayMs?: number;
 }): Promise<S & { tier: StreamTier }> {
   let firstError: unknown = null;
+  const retried = new Set<StreamTier>();
   for (;;) {
     const choice = choosePlayer({
       tiers: opts.tiers(),
@@ -90,6 +127,12 @@ export async function resolveByTier<S>(opts: {
       return { ...(await opts.resolve(choice.tier)), tier: choice.tier };
     } catch (err) {
       if (opts.stop(err)) throw err;
+      if (!retried.has(choice.tier) && opts.transient?.(err)) {
+        retried.add(choice.tier);
+        const wait = opts.retryDelayMs ?? TRANSIENT_RETRY_MS;
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
       firstError ??= err;
       if (opts.onError?.(choice.tier, err) ?? true) opts.failures.mark(opts.videoId, choice.tier);
     }

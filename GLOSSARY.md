@@ -284,6 +284,8 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   link or its 360p link will not play before expiry; that video skips the tier for 30 minutes.
   Users are never told to install or update yt-dlp (Isaiah, 2026-11-10: "a user should never have
   to update YT DLP themselves").
+  2026-11-25 (#121, Claude's call): our own stream, the last tier, fails only on its second dead
+  link (the first gets a fresh link) or after a network blip retried once; yt-dlp still fails at once.
 - **YouTube's player as last tier** (#43, approved 2026-11-10): when every stream tier failed for
   a video, or on a bot check, YouTube's player replaces ours in place (hosted page, GitHub Pages),
   with "Try our stream again". Desktop never offers it as a menu choice.

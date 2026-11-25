@@ -13,6 +13,7 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
   Bot-check Play retries 1, 5, 10, 30 min, 1 h, 2 h, 6 h ([scope](docs/V1-SCOPE-BOT-SAFE.md)).
 - #48 watch history ([scope](docs/V1-SCOPE-WATCH-HISTORY.md)): device test next.
 - #43 (PR #79): dead stream → next tier → YouTube's player ([scope](docs/V1-SCOPE-PLAYER-FALLBACK.md)).
+- #121: our own stream gets one fresh link / one retry before YouTube's player ([scope](docs/V1-SCOPE-NO-EARLY-YOUTUBE-PLAYER.md)); phone test.
 - Phone YouTube-player button ([scope](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)), Notes button (GLOSSARY): phone test.
 - 2026-11-13 nightly (#111): age-restricted videos blocked everywhere
   ([scope](docs/V1-SCOPE-AGE-RESTRICTED.md), `src/age-restricted.ts`). Synced `ageRestricted` list;
