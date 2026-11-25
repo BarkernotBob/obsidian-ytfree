@@ -45,3 +45,29 @@ export function shouldResumeSystemPause(facts: PauseFacts): boolean {
   const readerAsked = readerPauseAt > 0 && pauseAt - readerPauseAt >= 0 && pauseAt - readerPauseAt <= READER_PAUSE_MARK_MS;
   return !readerAsked;
 }
+
+export interface BackgroundFullscreenFacts {
+  /** The phone's own fullscreen player is showing this video. */
+  nativeFullscreen: boolean;
+  /** The video is playing right now. */
+  playing: boolean;
+  /** The video is paused, and `shouldResumeSystemPause` says the pause was the phone's. */
+  systemPaused: boolean;
+}
+
+/**
+ * Locking the phone in fullscreen stops the video (Isaiah, 2026-11-25).
+ *
+ * Inline, a playing video carries on behind the lock screen. In the iPhone's
+ * own fullscreen player it does not: iOS pauses a video whose picture is on
+ * screen when the app goes to the background (inferred from the inline and
+ * fullscreen cases behaving differently, not from WebKit's source), and a
+ * `play()` from us does not stick while that player is still up. So when the
+ * app goes hidden with the video in that player, the player leaves fullscreen
+ * first and resumes inline, which is the case that works. Only when the video
+ * was playing or the pause was the phone's: a reader's own pause stays put.
+ */
+export function shouldLeaveFullscreenForBackground(facts: BackgroundFullscreenFacts): boolean {
+  if (!facts.nativeFullscreen) return false;
+  return facts.playing || facts.systemPaused;
+}

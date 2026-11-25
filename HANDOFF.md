@@ -19,6 +19,8 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
   new feed items wait `ageCheck: "pending"` for one player call (`checkAges` in hub poll). U1/U2
   (does Restricted Mode / the content flags really drop 18+?) need the scope's device test.
 - #108 nightly: Add channels sheet searches channels (`src/channel-search.ts`), Subscribe per row.
+- 2026-11-25: locking the phone in fullscreen stopped playback; fix leaves fullscreen and resumes
+  inline ([scope part 3](docs/V1-SCOPE-KEEP-PLAYING.md)). iPhone test next.
 
 ## Shipped on main (scope doc = manual test)
 

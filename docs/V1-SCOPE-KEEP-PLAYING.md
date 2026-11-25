@@ -71,3 +71,32 @@ Changed 2026-11-07 (#51): the phone pill is removed at Isaiah's request. The pho
 command; the desktop keeps the status-bar item.
 
 Not in v1: reopening a note whose tab was closed (the player stops with its tab).
+
+## Part 3 (2026-11-25): locking the phone in fullscreen
+
+Isaiah: in fullscreen the video now stops when the phone locks; not in fullscreen it keeps playing.
+Triage: MVP (regression of shipped behaviour).
+
+Cause (inferred, not measured on a device): in the iPhone's own fullscreen player, iOS pauses a
+video whose picture is on screen when the app goes to the background, and our `play()` does not
+stick while that player is still up. Inline, the same `play()` works.
+
+v1: when Obsidian goes hidden (lock or app switch) with the video in the phone's own fullscreen,
+and it was playing or the phone just paused it, the player leaves fullscreen (`webkitExitFullscreen`)
+and resumes inline. If `webkitendfullscreen` doesn't arrive while hidden, it tries anyway 600 ms
+later. A video the reader paused stays in fullscreen. Rule: `shouldLeaveFullscreenForBackground`
+in `src/keep-playing.ts`.
+
+Trade-off: coming back to the app finds the video playing in the note, not fullscreen. iOS needs
+a tap to enter fullscreen, so it can't be restored automatically.
+
+Debug log lines (with debug logs on): `keep playing: app hidden in fullscreen, leaving fullscreen`,
+then `keep playing: left fullscreen for the background` and `keep playing: background resume played`
+(or `… refused`).
+
+Device test (iPhone):
+1. Open a video note, tap Play, tap Fullscreen. Lock the phone. Expect: sound keeps going.
+2. Unlock. Expect: video playing in the note, not fullscreen.
+3. Fullscreen again, swipe home to leave Obsidian. Expect: sound keeps going.
+4. Fullscreen, pause with the phone's controls, lock. Expect: stays paused; unlock shows it still in fullscreen.
+5. Not in fullscreen, play and lock. Expect: still keeps playing (unchanged).

@@ -152,6 +152,9 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   locking the phone do not pause the video. Reverses the old "collapse pauses" rule. Whether iOS
   allows the background resume is unmeasured; see
   [docs/V1-SCOPE-KEEP-PLAYING.md](docs/V1-SCOPE-KEEP-PLAYING.md).
+- **Locking in fullscreen** (2026-11-25): the video keeps playing too. The player leaves the
+  phone's fullscreen when the app goes to the background and resumes inline, so coming back
+  finds it in the note, not fullscreen (iOS needs a tap to re-enter). MVP.
 
 ### 2026-11-07 (Isaiah)
 
