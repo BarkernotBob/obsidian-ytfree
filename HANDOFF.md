@@ -55,6 +55,8 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 - 2026-11-12 Remove vs Hide (#110, [scope](docs/V1-SCOPE-HIDE-AND-REMOVE.md)): hub Remove → out of
   the hub, no list; search Hide → Hidden chip + text card; search shows Inbox/Saved too. Phone test, then merge.
 - 2026-11-25: × clear button in the YouTube and channel search boxes (`src/search-clear.ts`); phone test pending.
+- 2026-11-25: locking the phone in fullscreen stopped playback; fix leaves fullscreen and resumes
+  inline ([scope part 3](docs/V1-SCOPE-KEEP-PLAYING.md)). iPhone test next.
 
 ## Shipped on main (scope doc = manual test)
 
