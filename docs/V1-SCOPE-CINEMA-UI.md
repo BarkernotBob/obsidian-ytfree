@@ -18,9 +18,11 @@ variables, so it works in light, dark and community themes.
    under it. On desktop the same card in a grid (2 to 4 columns by width).
 3. **The stage is always dark.** The player and the Preview's picture area are black in every theme.
    Nothing else is.
-4. **Controls always visible, under the picture.** They sit in a dark strip that is part of the
-   stage, never over the video and never hidden (Isaiah, 2026-11-26). Only the plugin's own
-   fullscreen keeps today's floating bar.
+4. **Transport on the picture, tools under it.** Back 10 / Play / Forward 10 sit on the picture with
+   Play at its exact centre. Everything else is in a dark strip under the video that never hides
+   (Isaiah, 2026-11-26).
+7. **One spacing scale and real centring.** Gaps are 4, 8, 12, 16, 24 or 32 px, nothing else. Rows
+   with a middle item use a `1fr auto 1fr` grid so the middle item is centred whatever is beside it.
 5. **Pills.** Filters, speed and secondary actions are rounded pills. The selected pill is filled
    with the text colour.
 6. **One accent.** Obsidian's accent is used for progress only.
@@ -39,20 +41,25 @@ variables, so it works in light, dark and community themes.
   no-horizontal-scroll rule in MOBILE-UX.md stands). The channel list keeps its own button.
 
 ### Player (note, Preview, pinned)
-- Same buttons as today, in the same places: no button moves into Options.
-- Restyled as a dark strip under the picture: progress bar, then elapsed and total time, then the
-  controls. Play is a white circle; the rest are light icons on the dark strip.
-- Phone: two rows as today (transport row with −10 / Play / +10 / speed, then the side row).
-  Desktop: one row.
-- The strip is always visible, playing or paused. No auto-hide.
-- YouTube's embedded player (the fallback) keeps YouTube's own controls inside the picture; our
-  strip stays under it as today.
+- **On the picture:** Back 10, Play, Forward 10. Play is 56 px, at the exact centre; back and
+  forward are 40 px, 24 px either side. Shown while paused; while playing they fade after 3 s and a
+  tap on the picture brings them back. Hidden when YouTube's embedded player (the fallback) is
+  showing, so they never block YouTube's own controls.
+- **Strip row 1:** elapsed time, seek bar, total time.
+- **Strip row 2 (tools):** Hub, PiP, Fullscreen on the left; speed pill centred; HD, Collapse,
+  Share, Options on the right. On a phone this replaces today's transport row and side row, so the
+  player loses a row.
+- **Strip row 3 (notes only):** Notes, Description, Transcript, This moment as four equal pills.
+  Same behaviour as today's section links (Notes still folds the video only while the keyboard is up).
+- No button is removed and none moves into Options.
 
 ### Preview
-- Desktop (#133 folds in here): dark modal, video on the right two-thirds, whole title, facts,
-  pill actions and description on the left over a dark gradient.
-- Phone: dark sheet, video on top, whole title under it (replaces today's one-line ellipsis,
-  which needs the grid layout changed, not just the clamp removed).
+- Phone sheet: player on top, then the whole title and facts, then Watch / Save / Remove as three
+  equal pills, then **Description | Transcript** tabs. The transcript highlights the line playing.
+- Desktop (#133 folds in here): follows the theme (only the player is dark). 32 px margins, two
+  columns at 5:7, 32 px apart. Left: whole title (22 px), facts, action pills, the two tabs. Right:
+  the player with the same transport and strip. Each block on the left is 24 px from the next.
+- Card actions on hub cards (Preview, Watch, Save, Remove) stay; one row of four equal pills.
 
 ### Settings
 - **No restyle.** On Obsidian 1.13+ Obsidian draws the settings tab itself from our definitions, in
@@ -71,7 +78,8 @@ variables, so it works in light, dark and community themes.
 |---|---|
 | Fewer cards per phone screen (about 2.5, from about 7) | Accepted with the pick. Lazy images keep scrolling smooth. |
 | Variable card heights from whole titles | The hub has no fixed-height virtual list; the paging sentinel is an IntersectionObserver, so it is unaffected. |
-| The dark strip adds height under a phone video | Same two rows as today, so no height is added. |
+| Buttons on the picture over a phone video | Only three, centred, 40 to 56 px; Obsidian already handles the poster tap (#132) and the floating fullscreen bar, so this is the same kind of positioned element inside the player box. |
+| Tools row on a narrow phone | 7 icons plus speed need about 310 pt at 36 pt each; a 390 pt phone has 366 pt. On the narrowest phones (320 pt) the icons drop to 32 pt. |
 | Store linter | No new inline styles (sizes go through CSS variables, as the progress bar and pinned height already do), no `!important`, no `:has`. Fixed black and white on the stage are plain colours, which the linter allows. |
 | Floating UI clipped in Live Preview (`contain: paint`) | Controls sit inside the player box, so they are not affected. Pop-outs already lift to `document.body`. |
 | Community themes | Every colour outside the stage is an Obsidian variable. Check in Default, Minimal and AnuPpuccin, light and dark. |
@@ -79,10 +87,13 @@ variables, so it works in light, dark and community themes.
 ## Manual test (phone, then desktop)
 1. Open the hub. Each card shows a full-width picture and its **whole** title, however long.
 2. Tap each filter pill. The list changes; the pills wrap if they need two lines; nothing scrolls sideways.
-3. Open a video note and play. The controls sit in a dark strip under the picture and stay
-   visible the whole time, playing or paused. Nothing covers the video.
-4. Every button from before is still in the strip (Hub, PiP, Fullscreen, −10, Play, +10, speed,
-   HD, Collapse, Share, Options).
-5. Switch Obsidian to light, then dark. The stage stays black; everything else follows the theme.
-6. Desktop: open Preview. Video on the right, whole title and actions on the left.
-7. Search and a channel screen show the same cards as the hub.
+3. Open a video note. Play is in the exact centre of the picture, with back and forward the same
+   distance either side. Play: they fade after about 3 s; tap the picture and they come back.
+4. Under the picture: the seek bar, then one row with speed in the middle (Hub, PiP, Fullscreen
+   left; HD, Collapse, Share, Options right), then Notes, Description, Transcript, This moment.
+   Each of those buttons still does what it does today.
+5. Desktop Preview: nothing touches anything else; the title, actions and tabs line up on one
+   left edge, and the tabs switch between Description and Transcript.
+6. Switch Obsidian to light, then dark. The stage stays black; everything else follows the theme.
+7. Desktop: open Preview. Video on the right, whole title and actions on the left.
+8. Search and a channel screen show the same cards as the hub.

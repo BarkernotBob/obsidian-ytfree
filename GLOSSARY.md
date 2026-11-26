@@ -457,6 +457,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   always-dark stage, pill controls. Scope:
   docs/V1-SCOPE-CINEMA-UI.md. Priority 2, after the description and settings cleanup.
 - **Video titles are always shown whole**, never cut with an ellipsis (Isaiah).
-- **Player controls stay always visible under the video**, not floating over it (Isaiah). Same
-  buttons as before; only the plugin's fullscreen keeps a floating bar.
+- **Back / Play / Forward sit on the picture, Play at its exact centre; every other control stays
+  in an always-visible strip under the video** (Isaiah). Notes, Description, Transcript and card
+  actions stay. One spacing scale (4/8/12/16/24/32).
 - #133 (desktop Preview, video on the right) is built as part of it.
