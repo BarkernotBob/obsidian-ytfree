@@ -4543,7 +4543,10 @@ export default class YtFreePlugin extends Plugin {
     // cannot affect the layout of anything.
     media.addClass("has-poster");
     const poster = media.createEl("button", { cls: "ytfree-poster", attr: { type: "button" } });
-    const thumb = poster.createEl("img", { cls: "ytfree-poster-image", attr: { alt: "" } });
+    // Not draggable (GitHub #132): on the desktop a click that moves a pixel
+    // starts dragging the picture instead of pressing the button, which shows a
+    // floating copy of the thumbnail and never plays.
+    const thumb = poster.createEl("img", { cls: "ytfree-poster-image", attr: { alt: "", draggable: "false" } });
     // The halfway frame, as on the hub's cards; the uploader's picture if
     // YouTube has no still for this one.
     showThumbnail(

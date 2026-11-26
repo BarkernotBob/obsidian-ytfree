@@ -16,11 +16,13 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 ## Next step
 
 1. 0.2.2 removes every store-scan warning, yt-dlp and ffmpeg included (Isaiah, 2026-11-26; see
-   GLOSSARY). After Isaiah's device test, he tags 0.2.2 from his Mac. Then read the listing's
-   Review rating: no Caution means the label is solved and a desktop companion plugin can be
-   scoped; Caution still means the 7 deprecation notes or the disclosures are the cause.
-2. Then post-MVP backlog (label `post-mvp`): #132/#133 desktop player and Preview, #125
-   manage-filter ×, #87 Batch 3, #86 Windows/Linux test, #118/#119 channel lists.
+   GLOSSARY), and carries the #132 poster fix. After Isaiah's device test, he tags 0.2.2 from his
+   Mac. Then read the listing's Review rating: no Caution means the label is solved and a desktop
+   companion plugin can be scoped; Caution still means the 7 deprecation notes or the
+   disclosures are the cause.
+2. #133 Preview layout awaits scope OK.
+3. Then post-MVP backlog (label `post-mvp`): #125 manage-filter ×, #87 Batch 3, #86 Windows/Linux
+   test, #118/#119 channel lists. Dependabot PRs #101/#113 after release.
 
 ## How to ship and test
 
