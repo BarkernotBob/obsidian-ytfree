@@ -99,3 +99,98 @@ test("failures are forgotten after the TTL, and are per video", () => {
   now = FAILURE_TTL_MS;
   assert.equal(failures.failed("v").size, 0);
 });
+
+// ---- GitHub #121: our own stream is not given up on after one hiccup ---------
+
+test("our own stream's first dead link asks for a fresh link; the second fails it", () => {
+  const failures = new TierFailures();
+  assert.equal(failures.deadLink("v", "own"), false);
+  assert.equal(failures.failed("v").size, 0);
+  assert.equal(failures.deadLink("v", "own"), true);
+  assert.deepEqual([...failures.failed("v")], ["own"]);
+});
+
+test("a yt-dlp dead link still fails yt-dlp at once (#43)", () => {
+  const failures = new TierFailures();
+  assert.equal(failures.deadLink("v", "yt-dlp"), true);
+  assert.deepEqual([...failures.failed("v")], ["yt-dlp"]);
+});
+
+test("an old dead link does not count: the strike lapses with the failure window", () => {
+  let now = 0;
+  const failures = new TierFailures(() => now);
+  failures.deadLink("v", "own");
+  now += FAILURE_TTL_MS;
+  assert.equal(failures.deadLink("v", "own"), false);
+});
+
+test("Try our stream again forgets the strike too", () => {
+  const failures = new TierFailures();
+  failures.deadLink("v", "own");
+  failures.clear("v");
+  assert.equal(failures.deadLink("v", "own"), false);
+});
+
+test("a network blip on the phone is asked once more before our own stream fails", async () => {
+  const failures = new TierFailures();
+  let calls = 0;
+  const blip = Object.assign(new Error("timeout"), { kind: "network" });
+  const s = await resolveByTier({
+    videoId: "v",
+    tiers: () => ["own"],
+    failures,
+    resolve: async () => {
+      calls++;
+      if (calls === 1) throw blip;
+      return { url: "ok" };
+    },
+    stop: never,
+    transient: (e) => e === blip,
+    retryDelayMs: 0,
+  });
+  assert.equal(s.url, "ok");
+  assert.equal(calls, 2);
+  assert.equal(failures.failed("v").size, 0);
+});
+
+test("two blips in a row: the tier fails, once retried, never a third ask", async () => {
+  const failures = new TierFailures();
+  let calls = 0;
+  await assert.rejects(
+    resolveByTier({
+      videoId: "v",
+      tiers: () => ["own"],
+      failures,
+      resolve: async () => {
+        calls++;
+        throw new Error("timeout");
+      },
+      stop: never,
+      transient: () => true,
+      retryDelayMs: 0,
+    }),
+    /timeout/,
+  );
+  assert.equal(calls, 2);
+  assert.deepEqual([...failures.failed("v")], ["own"]);
+});
+
+test("an answer from YouTube (unplayable) is not retried", async () => {
+  const failures = new TierFailures();
+  let calls = 0;
+  await assert.rejects(
+    resolveByTier({
+      videoId: "v",
+      tiers: () => ["own"],
+      failures,
+      resolve: async () => {
+        calls++;
+        throw new Error("Video unavailable");
+      },
+      stop: never,
+      transient: () => false,
+      retryDelayMs: 0,
+    }),
+  );
+  assert.equal(calls, 1);
+});

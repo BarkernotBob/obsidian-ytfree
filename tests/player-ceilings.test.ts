@@ -394,7 +394,7 @@ test("Play on the phone, HD off: one InnerTube player call", async () => {
 
 // ---- Fallback tiers (#43) ----------------------------------------------------
 
-test("a dead link: yt-dlp once, our own stream once, then YouTube's player; never a third resolve", async () => {
+test("a dead link: yt-dlp once, our own stream twice (one fresh link), then YouTube's player", async () => {
   forgetPlayer(VIDEO);
   const failures = new TierFailures();
   let ytDlp = 0;
@@ -460,11 +460,17 @@ test("a dead link: yt-dlp once, our own stream once, then YouTube's player; neve
   assert.deepEqual([ytDlp, own], [1, 1]);
   assert.equal(opened.length, 0);
 
-  kill(); // our own stream's link refused too: YouTube's player, after the cooldown
+  kill(); // our own stream's first dead link: one fresh link, not YouTube's player (#121)
   // The second retry waits out the player's 2 s cooldown first.
+  await until(() => own === 2 && statuses.at(-1) === null);
+  await settle();
+  assert.deepEqual([ytDlp, own], [1, 2]);
+  assert.equal(opened.length, 0, "one dead link on our own stream is not a failure");
+
+  kill(); // the fresh link refused too: YouTube's player
   await until(() => opened.length > 0);
   await settle();
-  assert.deepEqual([ytDlp, own], [1, 1], "no third resolve");
+  assert.deepEqual([ytDlp, own], [1, 2], "no further resolve");
   assert.equal(opened.length, 1, "YouTube's player took over");
   assert.ok(host.classList.contains("is-youtube"), "in place, in the same player");
   assert.ok(!statuses.some((m) => m && /brew|yt-dlp/i.test(m)), "never a yt-dlp message");
@@ -488,4 +494,15 @@ test("which failures go to YouTube's player: all tiers failed, a bot check, a bo
   // An age gate never goes to YouTube's player (#111), even with a bot-check-ish history.
   const { AgeRestrictedError } = await import("../src/age-restricted.ts");
   assert.ok(!needsYouTubePlayer(new AgeRestrictedError("aaaaaaaaaaa")));
+});
+
+test("which resolve failures are a network blip worth one retry (#121)", async () => {
+  const { isNetworkBlip } = await import("../src/play-provider.ts");
+  const { MobileResolveError } = await import("../src/mobile/player-response.ts");
+  assert.ok(isNetworkBlip(new MobileResolveError("network", "Request timed out")));
+  assert.ok(isNetworkBlip(new MobileResolveError("network", "YouTube answered HTTP 503.")));
+  assert.ok(!isNetworkBlip(new MobileResolveError("network", "YouTube answered HTTP 429.")), "a rate limit is an answer");
+  assert.ok(!isNetworkBlip(new MobileResolveError("unplayable", "Video unavailable")));
+  assert.ok(!isNetworkBlip(new MobileResolveError("no-format", "none")));
+  assert.ok(!isNetworkBlip(new Error("ERROR: unable to extract")), "yt-dlp errors move to the next tier as before");
 });
