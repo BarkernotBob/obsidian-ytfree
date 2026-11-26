@@ -45,6 +45,8 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 
 - 2026-11-12: notes and Previews open at the top, nothing selected, no keyboard
   ([V1-SCOPE-OPEN-AT-TOP](docs/V1-SCOPE-OPEN-AT-TOP.md)). Next: Isaiah's phone test.
+- 2026-11-12: hub button (grid icon) on every player bar, note and Preview; bar spacing made equal
+  ([V1-SCOPE-HUB-BUTTON](docs/V1-SCOPE-HUB-BUTTON.md)). Next: Isaiah's phone + Mac test.
 
 - 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
 

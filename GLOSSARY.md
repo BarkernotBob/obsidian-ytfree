@@ -384,3 +384,10 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   note included (Watch no longer puts the cursor in Notes). The Notes button is the way into
   writing. Returning to a tab where the note is already open does not move it (Claude's call).
   [Scope](docs/V1-SCOPE-OPEN-AT-TOP.md).
+### 2026-11-12 (hub button, MVP)
+
+- **Hub button** (grid icon) first on the left of every player bar, video notes and Preview.
+  In a note it brings the hub tab forward, the note stays open and **keeps playing**. In Preview it
+  closes the sheet like its close button (stops unless in PiP), then shows the hub.
+- **Bar spacing is equal** between every pair of controls (Isaiah). On a phone the hub button sits
+  at the left end of the transport row, because the side row has no room for a ninth button.

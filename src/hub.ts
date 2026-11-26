@@ -149,6 +149,8 @@ export type PreviewMount = (
   videoId: string,
   /** What the sheet knows about the video, for watch history (GitHub #48). */
   meta?: { title: string; channel: string; channelId: string },
+  /** Close the sheet: the player's hub button does this before showing the hub. */
+  close?: () => void,
 ) => Promise<PreviewHandle>;
 
 /**
@@ -3737,7 +3739,7 @@ class PreviewModal extends Modal {
         title: this.spec.title,
         channel: this.spec.channel,
         channelId: this.spec.channelId,
-      })
+      }, () => this.close())
       .then(
       (handle) => {
         // Dismissed while the stream was resolving. Nobody will call the
