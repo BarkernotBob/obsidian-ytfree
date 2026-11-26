@@ -17,7 +17,9 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 
 1. Isaiah submits at community.obsidian.md (sign in, link GitHub, add plugin); fix whatever the
    automated review lists with a new patch release.
-2. Then post-MVP backlog (label `post-mvp`): #125 manage-filter ×, #87 Batch 3 (pop-out warnings),
+2. #132 (MVP): desktop poster click dragged the thumbnail instead of playing; poster image made
+   undraggable (0.2.2 candidate). Hourglass-on-hover not yet reproduced. #133 Preview layout awaits scope OK.
+3. Then post-MVP backlog (label `post-mvp`): #125 manage-filter ×, #87 Batch 3 (pop-out warnings),
    #86 Windows/Linux test, #118/#119 channel lists. Dependabot PRs #101/#113 after release.
 
 ## How to ship and test
