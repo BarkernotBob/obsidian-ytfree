@@ -96,3 +96,10 @@ test("every way to unsubscribe goes through the one function with an Undo", () =
   assert.ok(hub.includes("export function unsubscribeWithUndo("));
   assert.ok(main.includes("unsubscribeWithUndo(this.subscriptions"), "a note's channel row unsubscribes too");
 });
+
+test("Manage subscriptions' filter is the shared search field, with its × (#125)", () => {
+  const hub = readFileSync("src/hub.ts", "utf8");
+  const manage = hub.slice(hub.indexOf("private buildManage("), hub.indexOf("private renderManageList("));
+  assert.ok(manage.includes("buildSearchField(tools"), "the Manage filter uses buildSearchField");
+  assert.ok(!manage.includes('createEl("input"'), "no plain input left on Manage subscriptions");
+});
