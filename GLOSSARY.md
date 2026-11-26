@@ -411,3 +411,10 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   Isaiah): channel name, "See all their videos ›", Subscribe. New notes carry `channel_id`.
 - **Adding by channel search** is post-MVP (#108). Add channel opens the paste-a-link + Takeout
   dialog until then.
+### 2026-11-14 (channel paging, Preview → channel; [scope](docs/V1-SCOPE-CHANNEL-PAGING.md))
+
+- Preview's channel name is always a link when there is a name; a missing channel id is looked up
+  on the tap. MVP.
+- A channel's "More videos" ends only with no token, or after 2 pages in a row with nothing new.
+  The end of the list says YouTube's header count also counts Shorts and live streams. MVP.
+- Even-numbered batches and auto-load at the bottom: post-MVP (Isaiah), issue #118, after #104.

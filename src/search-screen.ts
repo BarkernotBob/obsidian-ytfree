@@ -141,6 +141,8 @@ export interface ChannelScreenInput {
   results: number;
   /** "418 videos", from the header, or "". */
   videosText: string;
+  /** YouTube has no more pages of this list ("More videos" is gone). */
+  ended?: boolean;
 }
 
 /**
@@ -191,6 +193,18 @@ export function channelScreen(input: ChannelScreenInput): SearchScreenCopy {
     return {
       kind: "results",
       status: `${plural(input.results, "result")} for ${quoted(input.query)} in ${name}`,
+      headline: "",
+      help: "",
+      retry: false,
+    };
+  }
+  // At the end, the header's count is usually bigger than the list: YouTube
+  // counts Shorts and live streams too, and the Videos tab holds neither
+  // (2026-11-14, "it said 100 and some videos, but stopped at 80").
+  if (input.ended && input.videosText) {
+    return {
+      kind: "results",
+      status: `${input.results} shown · end of the Videos tab (YouTube's ${input.videosText} also counts Shorts and live streams)`,
       headline: "",
       help: "",
       retry: false,
