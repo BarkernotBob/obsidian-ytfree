@@ -1558,28 +1558,29 @@ body.ytfree-immersive-open {
   flex: 0 0 auto;
 }
 
+/* Cinema pills: rounded, one line each, the selected one filled with the text
+   colour. Every pill keeps its size whatever is selected, so a tap never
+   re-wraps the row. */
 .ytfree-hub-filters {
   display: flex;
-  /* Wraps since the fifth chip — "In progress" is two words and a narrow
-     sidebar has no room for five on one line. Wrapping happens on a resize,
-     never on a click: the chips keep their width whatever is selected. */
   flex-wrap: wrap;
-  gap: 0.3em;
+  gap: 8px;
 }
 
-/* Active state is a background change only. A weight or border change would
-   re-measure the button and nudge its neighbours. */
 .ytfree-hub-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 16px;
+  box-sizing: border-box;
   background: transparent;
-  border: none;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
   box-shadow: none;
   color: var(--text-muted);
   cursor: var(--cursor);
-  padding: 0.3em 0.8em;
-  border-radius: var(--radius-s);
   font-size: var(--font-ui-small);
-  /* One line each, or a chip would change height when the row got tight and
-     take its neighbours with it. */
   white-space: nowrap;
 }
 
@@ -1590,8 +1591,21 @@ body.ytfree-immersive-open {
 }
 
 .ytfree-hub-filter.is-active {
-  background: var(--background-modifier-active-hover);
-  color: var(--text-normal);
+  background: var(--text-normal);
+  border-color: var(--text-normal);
+  color: var(--background-primary);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-hub-filter.is-active:hover {
+    background: var(--text-normal);
+  }
+}
+
+.ytfree-hub-pills {
+  flex: 0 0 auto;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .ytfree-hub .ytfree-hub-icon-button {
@@ -2824,23 +2838,6 @@ body.ytfree-immersive-open {
   color: var(--text-faint);
 }
 
-/* Three equal chips on one row — never a horizontal scroller. */
-.ytfree-hub.ytfree-phone .ytfree-hub-filters {
-  gap: 0.4em;
-}
-
-.ytfree-hub.ytfree-phone .ytfree-hub-filter {
-  /* Three across, then two: five 40pt targets do not fit across a phone, and a
-     tap target squeezed to 60pt is worse than a second row in a menu that is
-     already a sheet. */
-  flex: 1 1 30%;
-  min-width: 0;
-  height: 40px;
-  padding: 0;
-  border: 1px solid var(--background-modifier-border);
-  font-size: var(--font-ui-small);
-}
-
 .ytfree-hub.ytfree-phone .ytfree-hub-channels {
   flex: none;
   padding: 0;
@@ -2926,7 +2923,8 @@ body.ytfree-immersive-open {
 /* A 40px target, and 16px text — anything smaller and iOS zooms the whole view
    when the box takes focus, which is a zoom nothing ever takes back. */
 .ytfree-hub.ytfree-phone .ytfree-hub-search {
-  padding: 0.4em 0.5em;
+  padding: 8px 16px 0;
+  border-bottom: none;
 }
 
 .ytfree-hub.ytfree-phone .ytfree-hub-search-input {
@@ -4700,4 +4698,36 @@ body.ytfree-immersive-open .ytfree-preview-close {
 
 .ytfree-own-transport .ytfree-poster-play {
   display: none;
+}
+
+/*
+ * Cinema buttons are flat. Obsidian paints every `button` with its own fill
+ * and shadow (`button:not(.clickable-icon)`, and `.mobile-tap` while a finger
+ * is down), which outranks a single class, so these restate the surface at a
+ * specificity that wins in every state.
+ */
+.ytfree-card-actions button.ytfree-card-act,
+.ytfree-hub-filters button.ytfree-hub-filter {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.ytfree-hub-filters button.ytfree-hub-filter.is-active {
+  background-color: var(--text-normal);
+}
+
+.ytfree-transport button.ytfree-transport-btn {
+  background-color: rgba(0, 0, 0, 0.55);
+  box-shadow: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ytfree-card-actions button.ytfree-card-act:hover,
+  .ytfree-hub-filters button.ytfree-hub-filter:not(.is-active):hover {
+    background-color: var(--background-modifier-hover);
+  }
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-status {
+  padding-inline: 16px;
 }

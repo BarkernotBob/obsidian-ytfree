@@ -1672,8 +1672,9 @@ export class HubView extends ItemView {
   private buildHub(root: HTMLElement): void {
     const header = root.createDiv({ cls: "ytfree-hub-header" });
 
-    // Phone: the filters move into the collapsible menu and the header carries
-    // only the disclosure that says what is currently selected.
+    // Phone: the header carries the channel disclosure, and the six filters
+    // are a wrapping row of pills under the search box (Cinema, 2026-11-26),
+    // one tap away instead of inside the menu.
     if (this.phone) this.buildDisclosure(header);
     else this.buildFilters(header);
 
@@ -1712,6 +1713,7 @@ export class HubView extends ItemView {
     });
 
     this.buildItemFilter(root);
+    if (this.phone) this.buildFilters(root.createDiv({ cls: "ytfree-hub-pills" }));
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status" });
 
     const body = root.createDiv({ cls: "ytfree-hub-body" });
@@ -2409,8 +2411,6 @@ export class HubView extends ItemView {
     this.scrimEl.addEventListener("click", () => this.setMenuOpen(false));
 
     this.menuEl = body.createDiv({ cls: "ytfree-hub-menu" });
-    this.menuEl.createDiv({ cls: "ytfree-hub-menu-heading", text: "Show" });
-    this.buildFilters(this.menuEl);
     this.channelsEl = this.menuEl.createDiv({ cls: "ytfree-hub-channels" });
   }
 
@@ -2426,14 +2426,13 @@ export class HubView extends ItemView {
     if (open) this.menuEl.scrollTop = 0;
   }
 
-  /** What the collapsed menu says: the filter, then the channel. */
+  /** What the collapsed menu says: the channel. The filter is its own pill row. */
   private renderMenuLabel(): void {
     if (!this.menuLabelEl) return;
-    const filterLabel = FILTER_LABELS.find(([value]) => value === this.filter)?.[1] ?? "Everything";
     const channel = this.channelFilter
       ? (this.store.state.channels.find((c) => c.id === this.channelFilter)?.title ?? "Channel")
       : "All channels";
-    this.menuLabelEl.setText(`${filterLabel} · ${channel}`);
+    this.menuLabelEl.setText(channel);
   }
 
   renderAll(): void {
