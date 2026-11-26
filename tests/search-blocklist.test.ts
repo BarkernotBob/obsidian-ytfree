@@ -86,29 +86,28 @@ test("active entries come newest first", () => {
   );
 });
 
-test("a removed video is blocked in search and on a channel screen", () => {
-  const removed = new Set(["aaaaaaaaaaa"]);
+test("a video hidden from search is not taken off the screen (it lists as a text card)", () => {
   const result = { videoId: "aaaaaaaaaaa", channelId: CH };
-  assert.equal(isResultBlocked(result, "search", removed, new Set(), new Set()), true);
-  assert.equal(isResultBlocked(result, "channel", removed, new Set(), new Set()), true);
+  assert.equal(isResultBlocked(result, "search", new Set(), new Set()), false);
+  assert.equal(isResultBlocked(result, "channel", new Set(), new Set()), false);
 });
 
 test("a hidden channel filters search only", () => {
   const hidden = new Set([CH]);
   const result = { videoId: "aaaaaaaaaaa", channelId: CH };
-  assert.equal(isResultBlocked(result, "search", new Set(), hidden, new Set()), true);
-  assert.equal(isResultBlocked(result, "channel", new Set(), hidden, new Set()), false);
+  assert.equal(isResultBlocked(result, "search", hidden, new Set()), true);
+  assert.equal(isResultBlocked(result, "channel", hidden, new Set()), false);
 });
 
 test("subscribing wins over a hide even before the hide is lifted", () => {
   const hidden = new Set([CH]);
   const result = { videoId: "aaaaaaaaaaa", channelId: CH };
-  assert.equal(isResultBlocked(result, "search", new Set(), hidden, new Set([CH])), false);
+  assert.equal(isResultBlocked(result, "search", hidden, new Set([CH])), false);
 });
 
 test("a result with no channel is never hidden by a channel hide", () => {
   assert.equal(
-    isResultBlocked({ videoId: "a", channelId: "" }, "search", new Set(), new Set([""]), new Set()),
+    isResultBlocked({ videoId: "a", channelId: "" }, "search", new Set([""]), new Set()),
     false,
   );
 });

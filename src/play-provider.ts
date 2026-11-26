@@ -40,10 +40,11 @@ export function cachedProvider(
     else botCheck.guardPlay();
     if (forceRefresh) {
       // A 360p link still inside its lifetime that is being replaced did not
-      // play: that tier failed for this video, and the next try moves on
-      // (#43). An expired link is just re-resolved on the same tier.
+      // play: yt-dlp fails for this video at once and the next try moves on
+      // (#43); our own stream first gets one fresh link (#121). An expired
+      // link is just re-resolved on the same tier.
       const live = cache.get(videoId, "fast");
-      if (deadLink && mode === "fast" && live?.tier) failures?.mark(videoId, live.tier);
+      if (deadLink && mode === "fast" && live?.tier) failures?.deadLink(videoId, live.tier);
       cache.invalidate(videoId);
       forget();
     }
@@ -82,8 +83,20 @@ export function mobileResolve(
       failures,
       resolve: () => innertubeFast(videoId),
       stop: endsTierWalk,
+      transient: isNetworkBlip,
     });
   };
+}
+
+/**
+ * A failure to reach YouTube at all, worth one more try before our own stream
+ * counts as failed (GitHub #121). Not a 4xx: a refusal or a rate limit is an
+ * answer, and asking again is more of what flags a network.
+ */
+export function isNetworkBlip(err: unknown): boolean {
+  const e = err as { name?: unknown; kind?: unknown; message?: unknown } | null;
+  if (!e || e.name !== "MobileResolveError" || e.kind !== "network") return false;
+  return !/HTTP 4\d\d/.test(typeof e.message === "string" ? e.message : "");
 }
 
 /**
@@ -144,6 +157,8 @@ function desktopFast(videoId: string, src: DesktopSources): Promise<ResolvedStre
     // Tried once. Asking InnerTube next is more of what flagged the network,
     // and an age-restricted video is blocked on every tier (GitHub #111).
     stop: endsTierWalk,
+    // A blip on our own stream, the last tier, is asked once more (#121).
+    transient: isNetworkBlip,
     onError: (_tier, err) => {
       // Probing four paths on every video is not worth it once it is known
       // to be absent. Absence is not this video's failure, so not marked.

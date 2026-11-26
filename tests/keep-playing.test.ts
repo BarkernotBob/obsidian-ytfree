@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { shouldResumeSystemPause, SYSTEM_PAUSE_WINDOW_MS } from "../src/keep-playing.ts";
+import {
+  shouldLeaveFullscreenForBackground,
+  shouldResumeSystemPause,
+  SYSTEM_PAUSE_WINDOW_MS,
+} from "../src/keep-playing.ts";
 
 const base = { pauseAt: 10_000, readerPauseAt: 0, pausedByTyping: false, causeAt: 10_000, ended: false };
 
@@ -38,4 +42,22 @@ test("the end of the video is not a pause to undo", () => {
 test("no cause yet, or no pause, means nothing to do", () => {
   assert.equal(shouldResumeSystemPause({ ...base, causeAt: 0 }), false);
   assert.equal(shouldResumeSystemPause({ ...base, pauseAt: 0 }), false);
+});
+
+const fs = { nativeFullscreen: true, playing: true, systemPaused: false };
+
+test("locking in the phone's fullscreen while playing leaves fullscreen to keep playing", () => {
+  assert.equal(shouldLeaveFullscreenForBackground(fs), true);
+});
+
+test("locking in fullscreen right after the phone paused it also leaves fullscreen", () => {
+  assert.equal(shouldLeaveFullscreenForBackground({ ...fs, playing: false, systemPaused: true }), true);
+});
+
+test("a video the reader paused stays in fullscreen", () => {
+  assert.equal(shouldLeaveFullscreenForBackground({ ...fs, playing: false, systemPaused: false }), false);
+});
+
+test("not in the phone's fullscreen: nothing to leave", () => {
+  assert.equal(shouldLeaveFullscreenForBackground({ ...fs, nativeFullscreen: false }), false);
 });

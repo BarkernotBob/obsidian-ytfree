@@ -42,7 +42,9 @@ import {
   PreviewHandle,
   ImportSubscriptionsModal,
   SubscriptionsStore,
+  unsubscribeWithUndo,
 } from "./hub";
+import { subscribeButton, subscribedNotice } from "./subscribe";
 import { YT_ICON, registerIcons } from "./icon";
 import { previewCloseAction } from "./preview";
 import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings.ts";
@@ -467,6 +469,10 @@ export default class YtFreePlugin extends Plugin {
   private collapsed = new Map<MarkdownView, { path: string; container: HTMLElement | null }>();
   /** Same, for the default section folds — see applyDefaultFolds. */
   private folded = new Map<MarkdownView, string>();
+  /** Same, for putting a just-opened note at its top — see settleOnOpen. */
+  private settled = new Map<MarkdownView, string>();
+  /** When the Notes button last asked for the keyboard — settleOnOpen leaves it up. */
+  private writingAskedAt = 0;
   /**
    * The section each note was last sent to, so a second tap on the same button
    * can mean "I'm already here" — see `jumpToSection`.
@@ -1183,7 +1189,7 @@ export default class YtFreePlugin extends Plugin {
           (videoId) => this.progress.resumeFor(videoId),
           // The player inside Preview. The hub knows nothing about streams;
           // this is the only thing it is given to build one with.
-          (host, videoId, meta) => this.mountPreviewPlayer(host, videoId, meta),
+          (host, videoId, meta, close) => this.mountPreviewPlayer(host, videoId, meta, close),
           // Share, from the Preview sheet. The same menu the player's own
           // Share button opens.
           (anchor, videoId, seconds) => this.shareMenuFor(anchor, videoId, seconds),
@@ -1774,10 +1780,106 @@ export default class YtFreePlugin extends Plugin {
     new Notice(`YouTube for You: opened the note, but could not start it at ${formatTimestamp(seconds)}.`);
   }
 
-  private async openVideoChannel(videoId: string): Promise<void> {
+  /**
+   * A note's channel row (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md, S4): who made
+   * this video, a way to all their videos, and Subscribe / Subscribed.
+   *
+   * Nothing is fetched to draw it. The channel comes from `channel_id` in the
+   * frontmatter (notes made since this row), the hub's row, or the author name
+   * matched against your subscriptions; only a tap on a note that knows none of
+   * those costs one player call to ask YouTube.
+   */
+  private buildChannelRow(wrapper: HTMLElement, videoId: string, note: TFile): void {
+    const row = wrapper.createDiv({ cls: "ytfree-channel-row" });
+    const open = row.createEl("button", { cls: "ytfree-channel-row-open", attr: { type: "button" } });
+    const avatar = open.createSpan({ cls: "ytfree-channel-row-avatar", attr: { "aria-hidden": "true" } });
+    const text = open.createSpan({ cls: "ytfree-channel-row-text" });
+    const name = text.createSpan({ cls: "ytfree-channel-row-name" });
+    text.createSpan({ cls: "ytfree-channel-row-hint", text: "See all their videos ›" });
+    const subscribe = row.createEl("button", { cls: "ytfree-channel-row-subscribe", attr: { type: "button" } });
+
+    let asked: { id: string; title: string } | null = null;
+    const current = () => {
+      const known = this.channelForNote(videoId, note);
+      return asked && !known.id ? asked : known;
+    };
+    const paint = () => {
+      const channel = current();
+      const title = channel.title || "This video's channel";
+      name.setText(title);
+      avatar.setText((channel.title || "?").trim().charAt(0).toUpperCase());
+      open.setAttribute("aria-label", `See all videos from ${title}`);
+      const copy = subscribeButton(Boolean(channel.id) && this.subscriptions.isSubscribed(channel.id));
+      subscribe.setText(copy.text);
+      subscribe.setAttribute("aria-label", copy.title);
+      subscribe.title = copy.title;
+      subscribe.toggleClass("mod-cta", !copy.subscribed);
+      subscribe.toggleClass("is-subscribed", copy.subscribed);
+    };
+    const resolve = async (): Promise<{ id: string; title: string } | null> => {
+      const channel = current();
+      if (channel.id) return channel;
+      const details = await fetchVideoDetails(videoId);
+      if (!details.channelId) {
+        new Notice("YouTube for You: YouTube would not say whose video this is.");
+        return null;
+      }
+      asked = { id: details.channelId, title: details.channelTitle || channel.title };
+      return asked;
+    };
+
+    open.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      const channel = current();
+      void this.openVideoChannel(videoId, channel.id ? channel : undefined);
+    });
+    subscribe.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      void resolve().then((channel) => {
+        if (!channel) return;
+        if (this.subscriptions.isSubscribed(channel.id)) {
+          unsubscribeWithUndo(this.subscriptions, channel.id, channel.title);
+        } else {
+          this.subscriptions.addChannels([{ id: channel.id, title: channel.title || channel.id }]);
+          new Notice(subscribedNotice(channel.title));
+        }
+        paint();
+      });
+    });
+
+    paint();
+    // Subscribing anywhere else — the hub, the other device — repaints this.
+    const off = this.subscriptions.onChange(() => {
+      if (!row.isConnected) {
+        off();
+        return;
+      }
+      paint();
+    });
+  }
+
+  /** What a note knows about its channel without asking YouTube. */
+  private channelForNote(videoId: string, note: TFile): { id: string; title: string } {
+    const fm = this.app.metadataCache.getFileCache(note)?.frontmatter;
+    const author: unknown = firstValue(fm?.author) ?? (fm?.channel as unknown);
+    const fmTitle = typeof author === "string" ? author.trim() : "";
+    const fmId = typeof fm?.channel_id === "string" && /^UC[\w-]{22}$/.test(fm.channel_id) ? fm.channel_id : "";
     const item = this.subscriptions.itemFor(videoId);
-    let channelId = item?.channelId ?? "";
-    let channelTitle = item?.channelTitle ?? "";
+    const title = item?.channelTitle || fmTitle;
+    const id =
+      fmId ||
+      item?.channelId ||
+      (title ? (this.subscriptions.state.channels.find((c) => c.title === title)?.id ?? "") : "");
+    return { id, title };
+  }
+
+  private async openVideoChannel(
+    videoId: string,
+    known?: { id: string; title: string },
+  ): Promise<void> {
+    const item = this.subscriptions.itemFor(videoId);
+    let channelId = known?.id || item?.channelId || "";
+    let channelTitle = known?.title || item?.channelTitle || "";
     if (!channelId) {
       const details = await fetchVideoDetails(videoId);
       channelId = details.channelId;
@@ -2007,12 +2109,14 @@ export default class YtFreePlugin extends Plugin {
       if (path && noteVideo) {
         this.collapseProperties(view, path);
         this.applyDefaultFolds(view, path);
+        this.settleOnOpen(view, path);
         // An open note is an opened video, whichever door it came through — see
         // `noteOpened`. A no-op after the first time, so this costs a lookup.
         this.subscriptions?.noteOpened(noteVideo, path);
       } else if (path) {
         if (this.collapsed.get(view)?.path !== path) this.collapsed.delete(view);
         if (this.folded.get(view) !== path) this.folded.delete(view);
+        if (this.settled.get(view) !== path) this.settled.delete(view);
       }
 
       // The way back on, for a note whose player has been switched off. Before
@@ -2039,6 +2143,9 @@ export default class YtFreePlugin extends Plugin {
     }
     for (const view of [...this.folded.keys()]) {
       if (!open.has(view)) this.folded.delete(view);
+    }
+    for (const view of [...this.settled.keys()]) {
+      if (!open.has(view)) this.settled.delete(view);
     }
   }
 
@@ -2173,6 +2280,69 @@ export default class YtFreePlugin extends Plugin {
       ]);
       if (ranges.length === 0) return;
       this.setFolds(view, { folds: ranges, lines: content.split("\n").length });
+    };
+    attempt();
+  }
+
+  /**
+   * Open a video note at its top, with no keyboard (Isaiah, 2026-11-12: "Note
+   * just opens at the top of the note and NOT with the keyboard opened").
+   *
+   * Once per file per view, like the folds: switching back to a tab where the
+   * note is already open leaves it where it was. Whatever the last visit did —
+   * a Transcript jump, a follow, a caret left in the transcript — is not where
+   * the next visit starts. Run twice, the second a beat later, because Obsidian
+   * restores a leaf's own scroll and focus after the document has loaded. The
+   * Notes button is the way into writing, so a tap on it since the open wins.
+   * See docs/V1-SCOPE-OPEN-AT-TOP.md.
+   */
+  private settleOnOpen(view: MarkdownView, path: string): void {
+    if (this.settled.get(view) === path) return;
+    this.settled.set(view, path);
+    this.lastJump.delete(path);
+    if (this.follow?.view === view) this.stopFollowing();
+    const openedAt = Date.now();
+
+    let attempts = 0;
+    const settle = (): boolean => {
+      if (view.file?.path !== path || this.settled.get(view) !== path) return true;
+      if (this.writingAskedAt >= openedAt) return true;
+      let content = "";
+      try {
+        content = view.editor?.getValue() ?? "";
+      } catch {
+        content = "";
+      }
+      // Not loaded yet: the note has frontmatter at least.
+      if (!content.trim() && view.getMode() === "source") return false;
+      try {
+        view.setEphemeralState({ scroll: 0 });
+      } catch {
+        try {
+          foldableMode(view).applyScroll?.(0);
+        } catch {
+          /* leave it where it is */
+        }
+      }
+      if (!Platform.isDesktopApp) {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && view.containerEl.contains(active)) {
+          try {
+            view.editor.blur();
+          } catch {
+            /* no editor */
+          }
+          active.blur();
+        }
+      }
+      return true;
+    };
+    const attempt = (): void => {
+      if (!settle()) {
+        if (++attempts < 20) window.setTimeout(attempt, 100);
+        return;
+      }
+      window.setTimeout(settle, 300);
     };
     attempt();
   }
@@ -2345,6 +2515,7 @@ export default class YtFreePlugin extends Plugin {
    * state a keyboard is not waiting behind, and 041's remit was the phone.
    */
   private openForWriting(view: MarkdownView): void {
+    this.writingAskedAt = Date.now();
     try {
       if (view.getMode() !== "source" && !Platform.isDesktopApp) {
         void view.setState({ ...(view.getState() as object), mode: "source" }, { history: false });
@@ -3880,6 +4051,7 @@ export default class YtFreePlugin extends Plugin {
     videoId: string,
     sourcePath: string,
     preview = false,
+    closePreview?: () => void,
   ): Promise<PlayerEntry | null> {
     const mobile = !Platform.isDesktopApp;
 
@@ -4027,6 +4199,13 @@ export default class YtFreePlugin extends Plugin {
         // Two ways out of the player and into its settings: the whole screen,
         // and the four dials you actually change while something is playing.
         onOpenSettings: () => this.openSettingsTab(),
+        // Back to the hub (Isaiah, 2026-11-12). A note stays open and keeps
+        // playing behind the hub tab; Preview closes its sheet first, which
+        // stops the video unless it is in Picture-in-Picture.
+        onOpenHub: () => {
+          if (preview) closePreview?.();
+          void this.openHub();
+        },
         // Always. A preview has no note to pin to and nowhere to download to,
         // but it has a video ID, and that is all a link is made of.
         share: (anchor, seconds) => this.shareMenuFor(anchor, videoId, seconds),
@@ -4111,6 +4290,9 @@ export default class YtFreePlugin extends Plugin {
     };
     if (preview) this.preview = entry;
     else this.players.set(videoId, entry);
+    // The channel, under the controls, in a note — never in Preview, which has
+    // its own channel link (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md, S4).
+    if (!preview && noteFile instanceof TFile) this.buildChannelRow(wrapper, videoId, noteFile);
     player.video.addEventListener("play", () => {
       // A preview never claims this. It is what "the player a timestamp belongs
       // to" falls back to, and a preview has no note to write one into.
@@ -4176,6 +4358,7 @@ export default class YtFreePlugin extends Plugin {
     host: HTMLElement,
     videoId: string,
     meta?: { title: string; channel: string; channelId: string },
+    close?: () => void,
   ): Promise<PreviewHandle> {
     this.destroyPreview();
     if (meta) this.previewMeta.set(videoId, meta);
@@ -4190,7 +4373,7 @@ export default class YtFreePlugin extends Plugin {
     // it — so the preview gets a real one rather than a lookalike, plus a class
     // of its own for the two things that differ inside a modal.
     const wrapper = host.createDiv({ cls: "ytfree-wrapper ytfree-preview-wrapper" });
-    const entry = await this.buildPlayer(wrapper, videoId, "", true);
+    const entry = await this.buildPlayer(wrapper, videoId, "", true, close);
     // Failure has already drawn its own error into the host, and `buildPlayer`
     // has already unregistered — so the handle tears down nothing. It is still
     // a real handle, so the caller has one shape to hold and one thing to call.

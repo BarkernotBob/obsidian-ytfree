@@ -268,7 +268,6 @@ export class YtFreeSettingTab extends PluginSettingTab {
 
   private hubRows(): Row[] {
     const { plugin } = this;
-    const removedCount = plugin.subscriptions.removedSearchVideos().length;
     const hiddenCount = plugin.subscriptions.hiddenSearchChannels().length;
     return [
       {
@@ -335,18 +334,6 @@ export class YtFreeSettingTab extends PluginSettingTab {
         "The feed mixes Shorts with normal videos and marks neither, so each new video is checked once to tell them apart. Off by default.",
         () => plugin.refreshHub(),
       ),
-      {
-        name: "Removed from search",
-        desc: `${removedCount} ${removedCount === 1 ? "video" : "videos"}. Remove on a search result keeps it out of later searches on both devices. Undo any of them here.`,
-        build: (setting) =>
-          setting.addButton((button) =>
-            button
-              .setButtonText("Show list…")
-              .onClick(() =>
-                new SearchBlocklistModal(this.app, plugin.subscriptions, "videos", () => this.redraw()).open(),
-              ),
-          ),
-      },
       {
         name: "Hidden from search",
         desc: `${hiddenCount} ${hiddenCount === 1 ? "channel" : "channels"}. Hidden with the ⋯ on a search result. Only search is affected; subscribing to one un-hides it.`,

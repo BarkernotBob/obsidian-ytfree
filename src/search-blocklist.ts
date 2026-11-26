@@ -1,13 +1,14 @@
 /**
  * What you turned down in search, and it stays turned down (issue 047).
  *
- * Two lists in the state file: videos you removed from a search, and channels
+ * Two lists in the state file: videos you hid from search, and channels
  * you hid from search. Both cross devices through `mergeStates`, and both are
- * deliberately not the Hidden filter — Hidden is the drawer for hub mistakes,
- * and things you never collected must not fill it.
+ * deliberately not the Removed list — Removed is the drawer for hub mistakes,
+ * and things you never collected must not fill it. Hidden videos have their own
+ * hub list, Hidden (`searchHidden`); `searchRemovedVideos` kept its old name.
  *
  * Why these merge differently from the four tombstone lists already in the
- * file: both lists have an undo, in Settings, and an undo has to cross devices
+ * file: both lists have an undo (the hub's Hidden list, Settings for channels), and an undo has to cross devices
  * too. `deletedVideos` gets its undo for free — the video comes back as an item
  * with a newer decision stamp, and the tombstone loses to it. Nothing comes
  * back here; a search result is never stored. So an undo is itself an entry:
@@ -19,7 +20,7 @@
 export interface BlockEntry {
   /** A video ID or a `UC…` channel ID. */
   id: string;
-  /** What the Settings list shows. Search results carry it; nothing else would. */
+  /** What the Hidden list and Settings show. Search results carry it; nothing else would. */
   title: string;
   /** When this decision was made — removal, hide, or undo. */
   at: string;
@@ -83,7 +84,7 @@ export function mergeBlockLists(
   return settle([...(theirs ?? []), ...(mine ?? [])], limit, now);
 }
 
-/** The entries in force, newest first — what the Settings list shows. */
+/** The entries in force, newest first — what the lists show. */
 export function activeBlocks(list: ReadonlyArray<BlockEntry> | undefined): BlockEntry[] {
   return (list ?? []).filter((entry) => !entry.undone).reverse();
 }
@@ -95,8 +96,9 @@ export function blockedIds(list: ReadonlyArray<BlockEntry> | undefined): Set<str
 /**
  * Should this result stay off the screen?
  *
- * A removed video is gone from search and from a channel screen alike. A hidden
- * channel only filters search: opening its channel screen is asking to see it.
+ * Only a hidden channel takes results away, and only from search: opening its
+ * channel screen is asking to see it. A video hidden from search is no longer
+ * taken away — it still lists, as a text card (docs/V1-SCOPE-HIDE-AND-REMOVE.md).
  * And subscribing wins — a hide on a channel you now poll is ignored here even
  * before `liftHides` has caught up, which matters when the subscription arrived
  * from the other device or from the account sync.
@@ -104,11 +106,9 @@ export function blockedIds(list: ReadonlyArray<BlockEntry> | undefined): Set<str
 export function isResultBlocked(
   result: { videoId: string; channelId: string },
   where: "search" | "channel",
-  removed: ReadonlySet<string>,
   hiddenChannels: ReadonlySet<string>,
   subscribed: ReadonlySet<string>,
 ): boolean {
-  if (removed.has(result.videoId)) return true;
   if (where !== "search" || !result.channelId) return false;
   return hiddenChannels.has(result.channelId) && !subscribed.has(result.channelId);
 }

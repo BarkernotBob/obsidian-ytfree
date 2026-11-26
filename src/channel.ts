@@ -176,7 +176,6 @@ function parseLockup(raw: unknown, channelId: string, channelTitle: string): Sea
     views: viewsPart ? parseShortViews(viewsPart) : null,
     duration,
     thumbnail: pickThumbnail(at(image, "image", "sources")),
-    secondary: false,
   };
 }
 
@@ -201,7 +200,6 @@ function parseVideoRenderer(raw: unknown, channelId: string, channelTitle: strin
     views: parseViewCount(text(video.viewCountText)),
     duration: text(video.lengthText),
     thumbnail: pickThumbnail(at(video, "thumbnail", "thumbnails")),
-    secondary: false,
   };
 }
 
@@ -345,4 +343,37 @@ export function parsePlayerPublishDate(raw: unknown): string {
     if (value && Number.isFinite(time)) return new Date(time).toISOString();
   }
   return "";
+}
+
+/**
+ * How many pages in a row may bring nothing new before "More videos" gives up
+ * even though YouTube still offers a token (2026-11-14).
+ *
+ * The old rule ended the list on the first such page. A page the parser can't
+ * read (a new item shape) brings nothing new too, so one bad page silently cut
+ * a channel's catalogue short. Reading on is bounded so a token that never
+ * runs out cannot turn one tap into a request loop.
+ */
+export const MAX_EMPTY_CHANNEL_PAGES = 2;
+
+/**
+ * One "More videos" tap: the next page with anything new on it, or the end.
+ *
+ * Returns the new cards (not already in `shown`) and the token to continue
+ * from; `null` means YouTube has no more pages, or `MAX_EMPTY_CHANNEL_PAGES`
+ * came back empty in a row.
+ */
+export async function nextChannelPage(
+  fetchPage: (token: string) => Promise<ChannelPage>,
+  shown: ReadonlySet<string>,
+  token: string,
+): Promise<{ fresh: SearchResult[]; continuation: string | null }> {
+  let next: string | null = token;
+  for (let empty = 0; next && empty < MAX_EMPTY_CHANNEL_PAGES; empty++) {
+    const page = await fetchPage(next);
+    const fresh = page.results.filter((result) => !shown.has(result.videoId));
+    next = page.continuation;
+    if (fresh.length > 0) return { fresh, continuation: next };
+  }
+  return { fresh: [], continuation: null };
 }
