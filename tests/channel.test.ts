@@ -62,7 +62,6 @@ test("page one of the Videos tab: every playable video, newest first", () => {
     assert.match(result.publishedText, /ago$/);
     assert.match(result.duration, /^\d{1,2}(:\d{2}){1,2}$/);
     assert.match(result.thumbnail, /^https:\/\/i\.ytimg\.com\//);
-    assert.equal(result.secondary, false);
   }
   assert.equal(page.results[0].videoId, "Z4Ql-1GnK0g");
   assert.equal(page.results[0].publishedText, "5 days ago");

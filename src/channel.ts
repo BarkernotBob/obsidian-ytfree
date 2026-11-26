@@ -176,7 +176,6 @@ function parseLockup(raw: unknown, channelId: string, channelTitle: string): Sea
     views: viewsPart ? parseShortViews(viewsPart) : null,
     duration,
     thumbnail: pickThumbnail(at(image, "image", "sources")),
-    secondary: false,
   };
 }
 
@@ -201,7 +200,6 @@ function parseVideoRenderer(raw: unknown, channelId: string, channelTitle: strin
     views: parseViewCount(text(video.viewCountText)),
     duration: text(video.lengthText),
     thumbnail: pickThumbnail(at(video, "thumbnail", "thumbnails")),
-    secondary: false,
   };
 }
 

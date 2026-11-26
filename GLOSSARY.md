@@ -310,6 +310,14 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - On Windows the plugin never rewrites the PATH it gives yt-dlp, and yt-dlp and ffmpeg are also
   looked for by bare name, last. Not tested on a Windows machine.
 
+### 2026-11-12 (search, #46; Isaiah)
+
+- **Search shows one list.** No "Related to your search" heading. Only YouTube's first results
+  section (the one it sorts and filters) is kept; the sections after it are dropped.
+- **A new search reads two pages at once** (about 27 results, 2 requests). "More results" reads
+  one page. Picked over merging the later sections on plain searches.
+- **One recording run of 6 searches** from the Mac is allowed to confirm the filters, once.
+
 ### 2026-11-11 (Notes button, replaces 2026-11-10)
 
 - **Notes button folds the video only while the keyboard is up** (phone). Putting the keyboard

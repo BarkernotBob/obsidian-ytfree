@@ -19,6 +19,31 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
   new feed items wait `ageCheck: "pending"` for one player call (`checkAges` in hub poll). U1/U2
   (does Restricted Mode / the content flags really drop 18+?) need the scope's device test.
 - #108 nightly: Add channels sheet searches channels (`src/channel-search.ts`), Subscribe per row.
+- The plugin ships as GitHub releases. `v0.1.0` exists. `setup.sh` is the one-liner in the README.
+- Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md). New follow-ups are filed as GitHub issues, not as files in `issues/`.
+- 2026-11-09: YouTube sign-in, cookies and account sync removed (#64); see GLOSSARY.
+- 2026-11-09 (#66, PR #67): HD on Play and ceiling tests (#70); torture test showed no need for
+  poll rounds; nothing before Play on desktop; bot-check retries on Play (1, 5, 10, 30 min, 1 h,
+  2 h, 6 h); savings G1–G5; embed rule waits for #43 ([scope](docs/V1-SCOPE-BOT-SAFE.md)).
+- 2026-11-10 nightly (#66): Play/HD ceilings tested end to end through the real player
+  (`tests/player-ceilings.test.ts`, provider now in `src/play-provider.ts`). #66 is blocked on #43 only.
+- #48 watch history (PR #74, #77; [scope](docs/V1-SCOPE-WATCH-HISTORY.md)). Next: device test. #43 must feed it.
+- 2026-11-09: Subscribe inside YT Free + Takeout steps (#65, `src/subscribe.ts`).
+- 2026-11-09: hub/watch-time sync fix merged (PR #76; docs/V1-SCOPE-SYNC.md). Next: Isaiah's
+  Mac+iPhone test. Follow-up #75.
+
+- 2026-11-10 (#43, PR #79): a dead stream link moves playback to the next tier, ending in
+  YouTube's player in place ([V1-SCOPE-PLAYER-FALLBACK](docs/V1-SCOPE-PLAYER-FALLBACK.md)); brew messages gone.
+
+- 2026-11-10: one-tap YouTube player button on the phone bar
+  ([V1-SCOPE-YOUTUBE-TOGGLE](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)). Next: iPhone test; if YouTube
+  needs a tap to start with sound, try a muted start then unmute in `docs/player/index.html`.
+- 2026-11-11: Notes button reworked (see GLOSSARY): keyboard-only fold, cursor at the bottom of
+  Notes, other YT Free buttons close the keyboard. Next: Isaiah's phone test.
+- 2026-11-12 (#46): search scope drafted ([V1-SCOPE-SEARCH](docs/V1-SCOPE-SEARCH.md)). Next:
+  Isaiah answers D1 (later sections) and D2 (one 6-search recording run), then build.
+
+- 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
 
 ## Shipped on main (scope doc = manual test)
 
