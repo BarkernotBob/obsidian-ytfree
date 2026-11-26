@@ -15,7 +15,6 @@ import {
   ItemView,
   Menu,
   Modal,
-  MarkdownView,
   Notice,
   Platform,
   Setting,
@@ -27,7 +26,7 @@ import {
   setIcon,
 } from "obsidian";
 import { SEARCH_YT_ICON, SHARE_ICON, YT_ICON } from "./icon";
-import type { Channel, HubFilter, HubItem, SubscriptionsState, VideoNote } from "./subscriptions";
+import type { Channel, HubFilter, HubItem, SubscriptionsState, UnsubscribeUndo, VideoNote } from "./subscriptions";
 import {
   buildWatchLaterNote,
   deskSub,
@@ -43,6 +42,7 @@ import {
   expireItems,
   feedUrl,
   isFirstSight,
+  lastUploads,
   noteFeedFailure,
   noteFeedSuccess,
   withRetries,
@@ -61,6 +61,8 @@ import {
   sanitizeFileName,
   searchResultToItem,
   shortsCheck,
+  undoUnsubscribe,
+  unsubscribeChannel,
   visibleItems,
 } from "./subscriptions";
 import { SyncedFile, adapterDisk, appLocalCopy } from "./synced-file";
@@ -75,7 +77,6 @@ import {
   unclaimed,
 } from "./notify";
 import type { NotificationSettings, Post, SendOutcome } from "./notify";
-import { NOTES_HEADING } from "./sections";
 import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
 import {
@@ -109,9 +110,12 @@ import {
 import type { BlockEntry } from "./search-blocklist";
 import { AGE_RESTRICTED_LIMIT } from "./age-restricted.ts";
 import type { ChannelHeader } from "./channel";
+import { nextChannelPage } from "./channel";
+import { resolvePreviewChannel } from "./preview";
 import { followIndexAt, groupCues, restingScrollTop } from "./transcript";
 import type { Paragraph } from "./transcript";
-import type { SearchPage, SearchResult } from "./search";
+import { collectPages } from "./search";
+import type { SearchResult } from "./search";
 import {
   DURATION_OPTIONS,
   FEATURE_OPTIONS,
@@ -124,16 +128,23 @@ import {
 import type { SearchFilters } from "./search-params";
 import { channelScreen, searchScreen } from "./search-screen";
 import {
+  MANAGE_EXPLAINER,
   TAKEOUT_STEPS,
   TAKEOUT_URL,
+  filterChannels,
+  manageRowMeta,
   searchChannelMenu,
   subscribeButton,
   subscribedNotice,
+  subscriptionsHeading,
+  unsubscribedNotice,
+  unsubscribedRow,
 } from "./subscribe";
 import type { SearchScreenCopy, SearchScreenKind } from "./search-screen";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 import type { HistoryStore } from "./history-store.ts";
 import { statsLine } from "./history.ts";
+import { wireClearButton } from "./search-clear.ts";
 
 export const HUB_VIEW_TYPE = "ytfree-hub";
 
@@ -150,6 +161,8 @@ export type PreviewMount = (
   videoId: string,
   /** What the sheet knows about the video, for watch history (GitHub #48). */
   meta?: { title: string; channel: string; channelId: string },
+  /** Close the sheet: the player's hub button does this before showing the hub. */
+  close?: () => void,
 ) => Promise<PreviewHandle>;
 
 /**
@@ -234,12 +247,71 @@ const postWebhook: Post = async ({ url, body, contentType, headers }) => {
  * A vault folder as the user typed it, in the form the vault API wants: one
  * kind of slash, none at either end. Blank stays blank (the vault root).
  */
+/**
+ * Every search and filter box in the app, built one way: a leading glass, the
+ * box, the × that empties it (`wireClearButton`), and optionally a run button,
+ * all inside one frame that takes the focus ring. One builder so the boxes
+ * cannot drift apart in look or behaviour.
+ */
+interface SearchFieldOptions {
+  placeholder: string;
+  label: string;
+  value?: string;
+  /** A run button at the right edge; left out for boxes that filter as you type. */
+  go?: { label: string; onRun: (query: string) => void };
+}
+
+interface SearchField {
+  field: HTMLElement;
+  input: HTMLInputElement;
+  /** Shows or hides the × after code changes the text (which fires no event). */
+  syncClear: () => void;
+}
+
+function buildSearchField(parent: HTMLElement, opts: SearchFieldOptions): SearchField {
+  const field = parent.createDiv({ cls: "ytfree-search-field" });
+  setIcon(field.createSpan({ cls: "ytfree-search-field-icon" }), "search");
+  const input = field.createEl("input", {
+    cls: "ytfree-search-field-input",
+    type: "search",
+    attr: {
+      placeholder: opts.placeholder,
+      enterkeyhint: "search",
+      autocapitalize: "off",
+      autocorrect: "off",
+      spellcheck: "false",
+      "aria-label": opts.label,
+    },
+  });
+  input.value = opts.value ?? "";
+
+  const clear = field.createEl("button", {
+    // `clickable-icon` is Obsidian's bare icon button: no box, no shadow,
+    // the same treatment as the clear button in Obsidian's own search.
+    cls: "ytfree-search-field-clear clickable-icon",
+    attr: { type: "button", "aria-label": "Clear search", title: "Clear search" },
+  });
+  setIcon(clear, "x-circle");
+  const syncClear = wireClearButton(input, clear);
+
+  if (opts.go) {
+    const { label, onRun } = opts.go;
+    const go = field.createEl("button", {
+      cls: "ytfree-search-field-go",
+      attr: { type: "button", "aria-label": label, title: label },
+    });
+    setIcon(go, "arrow-right");
+    go.addEventListener("click", () => onRun(input.value));
+  }
+  return { field, input, syncClear };
+}
+
 function vaultFolder(typed: string): string {
   const folder = normalizePath(typed.trim());
   return folder === "/" ? "" : folder;
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 /**
  * How long a save waits before trying again after refusing to write.
@@ -277,9 +349,11 @@ async function mapLimit<T>(items: T[], limit: number, worker: (item: T) => Promi
  * under the finger that clicked it is the one thing the UI must never do. A
  * merge is different: the change came from the other device, nothing on screen
  * reflects it, and the list is exactly what has to be rebuilt. The view needs to
- * tell them apart, so it is told.
+ * tell them apart, so it is told. "channels" is an unsubscribe or its Undo: no
+ * card was clicked, and a whole channel's videos came or went, so it redraws
+ * like a merge.
  */
-export type ChangeReason = "local" | "merge";
+export type ChangeReason = "local" | "merge" | "channels";
 
 /**
  * What one save did: whether it reached disk, and what was there before it.
@@ -423,7 +497,7 @@ export class SubscriptionsStore {
 
   /**
    * Undo a subscribe made a moment ago in the Add channels sheet (GitHub #108).
-   * Not `removeChannel`, which is the hub's Remove and takes the channel's
+   * Not `unsubscribeChannel`, which is the hub's Unsubscribe and takes the channel's
    * undecided videos with it: this only stops polling, with the same tombstone
    * an unsubscribe on YouTube gets, so nothing already in the hub is touched and
    * the other device does not hand the channel back.
@@ -449,7 +523,6 @@ export class SubscriptionsStore {
     return isResultBlocked(
       result,
       where,
-      blockedIds(this.state.searchRemovedVideos),
       blockedIds(this.state.searchHiddenChannels),
       new Set(this.state.channels.map((c) => c.id)),
     );
@@ -485,7 +558,13 @@ export class SubscriptionsStore {
     void this.save();
   }
 
-  /** Remove a search result for good, or (with `removed` false) undo it. */
+
+  /** Hidden from search: it lists as a text card, and sits on the Hidden list. */
+  isHiddenFromSearch(videoId: string): boolean {
+    return blockedIds(this.state.searchRemovedVideos).has(videoId);
+  }
+
+  /** Hide a search result (lasting, synced), or (with `removed` false) unhide it. */
   setSearchRemoved(video: { videoId: string; title: string }, removed: boolean): void {
     this.state.searchRemovedVideos = setBlocked(
       this.state.searchRemovedVideos,
@@ -532,22 +611,22 @@ export class SubscriptionsStore {
   }
 
   /**
-   * Forget a channel and everything of its we have not kept. Notes already made
-   * from it stay — the plugin never deletes a file.
+   * Unsubscribe inside YouTube for You: the channel and everything of its we
+   * have not kept leave the hub. Notes already made from it stay — the plugin
+   * never deletes a file. Returns what Undo needs, or null if it was not here.
    */
-  removeChannel(channelId: string): void {
-    this.state.channels = this.state.channels.filter((c) => c.id !== channelId);
-    this.state.items = this.state.items.filter(
-      (item) => item.channelId !== channelId || item.state === "kept",
-    );
-    // A tombstone, for the same reason a hidden video gets one: without it the
-    // other device's copy hands the channel and its videos straight back on the
-    // next merge.
-    this.state.removedChannels = [
-      ...(this.state.removedChannels ?? []).filter((r) => r.id !== channelId),
-      { id: channelId, at: new Date().toISOString() },
-    ];
-    this.emit();
+  unsubscribeChannel(channelId: string): UnsubscribeUndo | null {
+    const undo = unsubscribeChannel(this.state, channelId, new Date());
+    if (!undo) return null;
+    this.emit("channels");
+    void this.save();
+    return undo;
+  }
+
+  /** Put an unsubscribed channel back, videos and all. */
+  undoUnsubscribe(undo: UnsubscribeUndo): void {
+    undoUnsubscribe(this.state, undo, new Date());
+    this.emit("channels");
     void this.save();
   }
 
@@ -671,24 +750,11 @@ export class SubscriptionsStore {
       // Durations first: they decide which videos need the Shorts check.
       await this.backfillDurations(DURATIONS_PER_POLL);
 
-      // Telling a Short from a long-form video means reading a redirect status,
-      // which needs Node's `https` — so it only happens on desktop, and it is
-      // imported dynamically because that import throws at module load on iOS.
-      // Mobile leaves `isShort` null, which already means "ask again later";
-      // the next desktop poll fills it in and nothing is misclassified. A video
-      // known to run over 3 minutes is not asked (GitHub #66 G4).
-      if (Platform.isDesktopApp) {
-        for (const item of this.state.items) if (shortsCheck(item) === "long") item.isShort = false;
-        const unprobed = this.state.items.filter((item) => shortsCheck(item) === "ask");
-        if (unprobed.length) {
-          const { probeIsShort } = await import("./desktop/shorts-probe.ts");
-          await mapLimit(unprobed, 2, async (item) => {
-            if (!governor.backgroundRoom()) return;
-            governor.count("probe");
-            item.isShort = await probeIsShort(item.videoId);
-          });
-        }
-      }
+      // Telling a Short from a long-form video meant reading a redirect status
+      // with Node's `https`, which went in 0.2.2 (store scan). What is left is
+      // the duration rule: a video known to run over 3 minutes is not a Short
+      // (GitHub #66 G4). Anything else keeps `isShort` null.
+      for (const item of this.state.items) if (shortsCheck(item) === "long") item.isShort = false;
 
       this.state.lastPolledAt = now.toISOString();
       // Which kind of device polled, so the phone can leave it to the desktop.
@@ -892,6 +958,15 @@ export class SubscriptionsStore {
     return this.state.items.some((item) => item.videoId === videoId);
   }
 
+  /**
+   * In one of the hub's lists: an item that is not a removal tombstone. A video
+   * removed from the hub is not in it any more, so search offers it again as a
+   * normal card (docs/V1-SCOPE-HIDE-AND-REMOVE.md).
+   */
+  isInHub(videoId: string): boolean {
+    return this.state.items.some((item) => item.videoId === videoId && item.state !== "dismissed");
+  }
+
   /** The hub's own copy of this video, if it has one. */
   itemFor(videoId: string): HubItem | null {
     return this.state.items.find((item) => item.videoId === videoId) ?? null;
@@ -963,7 +1038,6 @@ export class SubscriptionsStore {
         views: null,
         duration: "",
         thumbnail: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-        secondary: false,
       },
       details.description,
       new Date(),
@@ -1056,20 +1130,9 @@ export class SubscriptionsStore {
     const made = await this.createNote(item);
     if (!made) return;
 
-    const leaf = this.app.workspace.getLeaf(false);
-    await leaf.openFile(made.file);
-    // A fresh note is for writing, so start the cursor in the Notes section
-    // rather than at the top of the frontmatter.
-    if (made.created && leaf.view instanceof MarkdownView) {
-      const editor = leaf.view.editor;
-      for (let i = 0; i < editor.lineCount(); i++) {
-        if (editor.getLine(i) === NOTES_HEADING) {
-          editor.setCursor({ line: i + 1, ch: 0 });
-          editor.focus();
-          break;
-        }
-      }
-    }
+    // Opens at the top with no keyboard, new note or not (Isaiah, 2026-11-12):
+    // the Notes button is the way into writing. See V1-SCOPE-OPEN-AT-TOP.
+    await this.app.workspace.getLeaf(false).openFile(made.file);
   }
 
   /**
@@ -1095,11 +1158,13 @@ export class SubscriptionsStore {
   }
 
   /**
-   * Remove a video from the hub — which now means hiding it, not deleting it.
+   * Remove a video from the hub — a tombstone, not a deletion; it goes on the
+   * Removed list.
    *
    * `hideItem` strips it to a tombstone on the way out; see the note there for
    * why the description goes. The tombstone is what stops the video coming back
-   * from a later poll, and what stops a search offering it to you again.
+   * from a later poll. It does not touch search: a removed video is offered
+   * there again like any other (docs/V1-SCOPE-HIDE-AND-REMOVE.md).
    */
   hide(item: HubItem): void {
     hideItem(this.live(item), new Date());
@@ -1259,6 +1324,12 @@ interface CardSpec {
   /** How far in playback got, 0–1. Drawn along the foot of the thumbnail. */
   watched: number;
   extraClass?: string;
+  /**
+   * Hidden from search: the picture box is drawn empty, at the same size, with
+   * a "Hidden" label, and no image is requested. Same size so the grid does not
+   * jog and Unhide can put the picture back without moving anything.
+   */
+  textOnly?: boolean;
   /** Re-read on every repaint, so a button reflects the state it caused. */
   slots: () => CardSlot[];
   run: (key: CardActionKey, repaint: () => void) => Promise<void> | void;
@@ -1269,7 +1340,8 @@ interface CardButton {
 }
 
 /**
- * The five lists, in the order they are offered.
+ * The lists, in the order they are offered. Hidden (`searchHidden`) is what you
+ * hid from search. Videos removed from the hub (`hidden`) have no list.
  *
  * A video is in exactly one of three states — undecided, kept (you opened it),
  * hidden (you turned it down) — and three of the chips are those states.
@@ -1288,7 +1360,9 @@ const FILTER_LABELS: ReadonlyArray<readonly [HubFilter, string]> = [
   ["new", "Inbox"],
   ["progress", "In progress"],
   ["kept", "Saved"],
-  ["hidden", "Hidden"],
+  // No chip for `hidden` (removed from the hub): Isaiah, 2026-11-12 — a removed
+  // video is found again by searching for it.
+  ["searchHidden", "Hidden"],
   ["history", "History"],
   ["all", "Everything"],
 ];
@@ -1304,7 +1378,8 @@ const FILTER_RULES: Record<HubFilter, string> = {
   new: "not opened, not hidden",
   progress: "started and not finished — most recently watched first",
   kept: "saved — a note exists",
-  hidden: "you removed these",
+  hidden: "you removed these from the hub",
+  searchHidden: "you hid these from search — they show there without a picture",
   history: "everything you watched — most recent first",
   all: "inbox + saved, including already-watched",
 };
@@ -1319,7 +1394,7 @@ const FILTER_RULES: Record<HubFilter, string> = {
  * refresh, poll, or filter change.
  */
 /** Which screen the hub view is drawing. */
-type HubMode = "hub" | "browse" | "channel";
+type HubMode = "hub" | "browse" | "channel" | "manage";
 
 /** Everything the channel screen needs, held so a trip away and back restores it. */
 interface ChannelState {
@@ -1334,7 +1409,7 @@ interface ChannelState {
   state: "idle" | "loading" | "error";
   error: string;
   /** The screen Back returns to. */
-  returnTo: "hub" | "browse";
+  returnTo: "hub" | "browse" | "manage";
 }
 
 export class HubView extends ItemView {
@@ -1407,12 +1482,13 @@ export class HubView extends ItemView {
   private searchState: "idle" | "loading" | "error" = "idle";
   private searchError = "";
   private searchInputEl: HTMLInputElement | null = null;
+  /** Shows or hides the search box's × after code changes its text. */
+  private syncSearchClear: (() => void) | null = null;
   private searchFilters: SearchFilters = defaultFilters();
   /** How many results this search dropped for already being in the hub. */
   private searchSkipped = 0;
   /** The two halves of the results list: the answer, then the related. */
-  private primaryEl: HTMLElement | null = null;
-  private relatedEl: HTMLElement | null = null;
+  private resultsEl: HTMLElement | null = null;
   /** Result cards on screen, so Remove and Undo can swap one in place. */
   private results = new Map<string, HTMLElement>();
   /**
@@ -1434,6 +1510,14 @@ export class HubView extends ItemView {
   private channelToken = 0;
   private channelFactsEl: HTMLElement | null = null;
   private channelSubscribeEl: HTMLButtonElement | null = null;
+
+  /** Manage subscriptions: what the filter box holds. */
+  private manageQuery = "";
+  /**
+   * Channels unsubscribed on Manage subscriptions, still drawn in place as
+   * "Unsubscribed from … · Undo" until you leave the screen.
+   */
+  private manageUndos = new Map<string, UnsubscribeUndo>();
 
   /**
    * A phone gets a different menu, not a narrower one. See docs/MOBILE-UX.md:
@@ -1521,7 +1605,12 @@ export class HubView extends ItemView {
       // and then went on showing the removed videos until something else forced
       // a full redraw — which read, to anyone using it, exactly like the sync
       // having failed.
-      if (reason === "merge") this.renderList(true);
+      if (reason === "channels" && this.channelFilter && !this.store.isSubscribed(this.channelFilter)) {
+        this.channelFilter = null;
+        this.renderChannels();
+        this.renderMenuLabel();
+      }
+      if (reason === "merge" || reason === "channels") this.renderList(true);
     });
     this.build();
     this.renderAll();
@@ -1559,9 +1648,9 @@ export class HubView extends ItemView {
     this.listEl = null;
     this.channelsEl = null;
     this.statusEl = null;
-    this.primaryEl = null;
-    this.relatedEl = null;
+    this.resultsEl = null;
     this.searchInputEl = null;
+    this.syncSearchClear = null;
     this.channelFactsEl = null;
     this.channelSubscribeEl = null;
     this.menuEl = null;
@@ -1573,6 +1662,7 @@ export class HubView extends ItemView {
 
     if (this.mode === "browse") this.buildBrowse(root);
     else if (this.mode === "channel") this.buildChannel(root);
+    else if (this.mode === "manage") this.buildManage(root);
     else this.buildHub(root);
   }
 
@@ -1641,24 +1731,12 @@ export class HubView extends ItemView {
    */
   private buildItemFilter(root: HTMLElement): void {
     const row = root.createDiv({ cls: "ytfree-hub-search" });
-
-    const input = row.createEl("input", {
-      cls: "ytfree-hub-search-input",
-      // `search` gives iOS a Search key and both platforms a native clear
-      // control, which fires `input` like any other edit — so clearing by hand
-      // and clearing with the × take the same path.
-      type: "search",
-      attr: {
-        placeholder: "Filter these videos",
-        enterkeyhint: "search",
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: "false",
-        "aria-label": "Filter the videos in your hub",
-      },
+    const { input, syncClear } = buildSearchField(row, {
+      placeholder: "Filter these videos",
+      label: "Filter the videos in your hub",
+      // Survives a trip to the search screen and back, like everything else here.
+      value: this.itemQuery,
     });
-    // Survives a trip to the search screen and back, like everything else here.
-    input.value = this.itemQuery;
 
     const apply = (): void => {
       this.itemQuery = input.value;
@@ -1670,6 +1748,7 @@ export class HubView extends ItemView {
       if (evt.key === "Escape") {
         evt.preventDefault();
         input.value = "";
+        syncClear();
         apply();
       }
     });
@@ -1748,25 +1827,16 @@ export class HubView extends ItemView {
     // leading glyph, the box, and the run control, all inside one border that
     // takes the focus ring. The ring is a box-shadow, so focus cannot resize it.
     const row = root.createDiv({ cls: "ytfree-hub-searchbar" });
-    const field = row.createDiv({ cls: "ytfree-search-field" });
-    setIcon(field.createSpan({ cls: "ytfree-search-field-icon" }), "search");
-
-    const input = field.createEl("input", {
-      cls: "ytfree-search-field-input",
-      type: "search",
-      attr: {
-        // Says what the box reaches, which is the difference between it and the
-        // hub's own box one screen back.
-        placeholder: "Search all of YouTube",
-        enterkeyhint: "search",
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: "false",
-        "aria-label": "Search all of YouTube",
-      },
+    const { input, syncClear } = buildSearchField(row, {
+      // Says what the box reaches, which is the difference between it and the
+      // hub's own box one screen back.
+      placeholder: "Search all of YouTube",
+      label: "Search all of YouTube",
+      value: this.searchQuery ?? "",
+      go: { label: "Run this search", onRun: (query) => this.runSearch(query) },
     });
+    this.syncSearchClear = syncClear;
     this.searchInputEl = input;
-    input.value = this.searchQuery ?? "";
 
     input.addEventListener("keydown", (evt) => {
       if (evt.key === "Enter") {
@@ -1783,12 +1853,6 @@ export class HubView extends ItemView {
       if (input.value.trim() === "" && this.searchQuery !== null) this.exitSearch();
     });
 
-    const go = field.createEl("button", {
-      cls: "ytfree-search-field-go",
-      attr: { type: "button", "aria-label": "Run this search", title: "Run this search" },
-    });
-    setIcon(go, "arrow-right");
-    go.addEventListener("click", () => this.runSearch(input.value));
 
     this.buildSearchFilters(root);
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status ytfree-hub-status-browse" });
@@ -1931,6 +1995,7 @@ export class HubView extends ItemView {
       error: channel?.error ?? "",
       results: this.shownResults(channel?.results ?? [], "channel"),
       videosText: channel?.header?.videos ?? "",
+      ended: channel?.state === "idle" && !channel.continuation,
     });
   }
 
@@ -1965,7 +2030,10 @@ export class HubView extends ItemView {
       subscribe.addEventListener("click", () => {
         const current = this.channel;
         if (!current) return;
-        this.subscribeToChannel(current.channelId, this.channelName());
+        if (this.store.isSubscribed(current.channelId)) {
+          unsubscribeWithUndo(this.store, current.channelId, this.channelName());
+          this.renderSubscribeButton();
+        } else this.subscribeToChannel(current.channelId, this.channelName());
       });
       this.channelSubscribeEl = subscribe;
       this.renderSubscribeButton();
@@ -1975,22 +2043,13 @@ export class HubView extends ItemView {
     this.renderChannelFacts();
 
     const row = root.createDiv({ cls: "ytfree-hub-searchbar" });
-    const field = row.createDiv({ cls: "ytfree-search-field" });
-    setIcon(field.createSpan({ cls: "ytfree-search-field-icon" }), "search");
     const label = `Search ${this.channelName() || "this channel"}`;
-    const input = field.createEl("input", {
-      cls: "ytfree-search-field-input",
-      type: "search",
-      attr: {
-        placeholder: label,
-        enterkeyhint: "search",
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: "false",
-        "aria-label": label,
-      },
+    const { input, syncClear } = buildSearchField(row, {
+      placeholder: label,
+      label,
+      value: channel?.query ?? "",
+      go: { label: "Search this channel", onRun: (query) => this.runChannelSearch(query) },
     });
-    input.value = channel?.query ?? "";
     input.addEventListener("keydown", (evt) => {
       if (evt.key === "Enter") {
         evt.preventDefault();
@@ -1998,6 +2057,7 @@ export class HubView extends ItemView {
       } else if (evt.key === "Escape") {
         evt.preventDefault();
         input.value = "";
+        syncClear();
         this.runChannelSearch("");
       }
     });
@@ -2005,12 +2065,6 @@ export class HubView extends ItemView {
     input.addEventListener("input", () => {
       if (input.value.trim() === "" && this.channel?.query) this.runChannelSearch("");
     });
-    const go = field.createEl("button", {
-      cls: "ytfree-search-field-go",
-      attr: { type: "button", "aria-label": "Search this channel", title: "Search this channel" },
-    });
-    setIcon(go, "arrow-right");
-    go.addEventListener("click", () => this.runChannelSearch(input.value));
 
     this.statusEl = root.createDiv({ cls: "ytfree-hub-status ytfree-hub-status-browse" });
     const body = root.createDiv({ cls: "ytfree-hub-body" });
@@ -2028,9 +2082,10 @@ export class HubView extends ItemView {
     const copy = subscribeButton(this.store.isSubscribed(channel.channelId));
     el.setText(copy.text);
     el.title = copy.title;
+    el.setAttribute("aria-label", copy.title);
     el.disabled = copy.disabled;
-    el.toggleClass("mod-cta", !copy.disabled);
-    el.toggleClass("is-subscribed", copy.disabled);
+    el.toggleClass("mod-cta", !copy.subscribed);
+    el.toggleClass("is-subscribed", copy.subscribed);
   }
 
   /** Subscribe inside YouTube for You (GitHub #65), from the channel screen or a search card. */
@@ -2125,17 +2180,16 @@ export class HubView extends ItemView {
     channel.state = "loading";
     button.setText("Loading…");
 
-    void browseChannel(channel, channel.query, channel.continuation).then(
-      (page) => {
+    const shown = new Set(channel.results.map((result) => result.videoId));
+    void nextChannelPage((next) => browseChannel(channel, channel.query, next), shown, channel.continuation).then(
+      ({ fresh, continuation }) => {
         if (token !== this.channelToken || this.channel !== channel) return;
-        const shown = new Set(channel.results.map((result) => result.videoId));
-        const fresh = page.results.filter((result) => !shown.has(result.videoId));
         channel.results = [...channel.results, ...fresh];
-        channel.continuation = page.continuation;
+        channel.continuation = continuation;
         channel.state = "idle";
         for (const result of fresh) this.renderResult(result);
         button.setText("More videos");
-        if (!page.continuation || fresh.length === 0) button.remove();
+        if (!continuation) button.remove();
         this.renderStatus();
       },
       (err: unknown) => {
@@ -2159,8 +2213,7 @@ export class HubView extends ItemView {
     list.empty();
     this.cards.clear();
     this.results.clear();
-    this.primaryEl = null;
-    this.relatedEl = null;
+    this.resultsEl = null;
     const channel = this.channel;
 
     const copy = this.channelCopy();
@@ -2169,7 +2222,7 @@ export class HubView extends ItemView {
       return;
     }
 
-    this.primaryEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
+    this.resultsEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
     for (const result of channel.results) this.renderResult(result);
 
     if (channel.continuation) {
@@ -2182,9 +2235,139 @@ export class HubView extends ItemView {
     }
   }
 
+  // ------------------------------------------------- manage subscriptions
+
+  /**
+   * Manage subscriptions (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md, S1): every
+   * channel you follow, each with an Unsubscribe button, and Add channel on top.
+   */
+  private buildManage(root: HTMLElement): void {
+    const header = root.createDiv({ cls: "ytfree-hub-header ytfree-hub-header-browse" });
+    const back = header.createEl("button", {
+      cls: "ytfree-hub-icon-button ytfree-hub-back",
+      attr: { type: "button", "aria-label": "Back to your hub", title: "Back to your hub" },
+    });
+    setIcon(back, "arrow-left");
+    back.addEventListener("click", () => this.setMode("hub"));
+    const title = header.createDiv({ cls: "ytfree-hub-screen-title" });
+    setIcon(title.createSpan({ cls: "ytfree-hub-screen-icon" }), "settings-2");
+    title.createSpan({ cls: "ytfree-hub-screen-name", text: "Manage subscriptions" });
+
+    const tools = root.createDiv({ cls: "ytfree-manage-tools" });
+    const add = tools.createEl("button", {
+      cls: "mod-cta ytfree-manage-add",
+      attr: { type: "button" },
+    });
+    setIcon(add.createSpan({ cls: "ytfree-manage-add-icon" }), "plus");
+    add.createSpan({ text: "Add channel" });
+    add.addEventListener("click", () =>
+      new ImportSubscriptionsModal(this.app, this.store, () => this.renderAll()).open(),
+    );
+
+    const input = tools.createEl("input", {
+      cls: "ytfree-hub-search-input ytfree-manage-filter",
+      type: "search",
+      attr: {
+        placeholder: `Filter ${this.store.state.channels.length} channels`,
+        enterkeyhint: "search",
+        autocapitalize: "off",
+        autocorrect: "off",
+        spellcheck: "false",
+        "aria-label": "Filter your subscriptions",
+      },
+    });
+    input.value = this.manageQuery;
+    input.addEventListener("input", () => {
+      this.manageQuery = input.value;
+      this.renderManageList();
+    });
+
+    this.statusEl = root.createDiv({ cls: "ytfree-hub-status ytfree-manage-explainer" });
+    const body = root.createDiv({ cls: "ytfree-hub-body" });
+    this.listEl = body.createDiv({ cls: "ytfree-hub-list ytfree-manage-list" });
+  }
+
+  private renderManageList(): void {
+    const list = this.listEl;
+    if (!list) return;
+    list.empty();
+    const { channels, items } = this.store.state;
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      if (item.state !== "new") continue;
+      counts.set(item.channelId, (counts.get(item.channelId) ?? 0) + 1);
+    }
+    const uploads = lastUploads(items);
+    const now = new Date();
+    // An unsubscribed row keeps its place in the list until you leave, so the
+    // rows under your finger never move.
+    const shown = filterChannels(
+      [
+        ...channels.map((channel) => ({ channel, undo: null as UnsubscribeUndo | null })),
+        ...[...this.manageUndos.values()]
+          .filter((undo) => !channels.some((c) => c.id === undo.channel.id))
+          .map((undo) => ({ channel: undo.channel, undo })),
+      ].map((row) => ({ ...row, title: row.channel.title })),
+      this.manageQuery,
+    );
+    if (shown.length === 0) {
+      list.createDiv({
+        cls: "ytfree-hub-empty",
+        text: channels.length === 0 ? "No subscriptions yet. Add a channel above." : "No channel matches that.",
+      });
+      return;
+    }
+    for (const { channel, undo } of shown) {
+      const row = list.createDiv({ cls: "ytfree-manage-row" });
+      const text = row.createDiv({ cls: "ytfree-manage-text" });
+      if (undo) {
+        row.addClass("is-unsubscribed");
+        text.createDiv({ cls: "ytfree-manage-name", text: unsubscribedRow(channel.title) });
+        text.createDiv({ cls: "ytfree-manage-meta", text: "New videos stopped" });
+        const button = row.createEl("button", {
+          cls: "ytfree-manage-undo",
+          text: "Undo",
+          attr: { type: "button", "aria-label": `Undo: subscribe to ${channel.title} again` },
+        });
+        button.addEventListener("click", () => {
+          this.manageUndos.delete(channel.id);
+          this.store.undoUnsubscribe(undo);
+        });
+        continue;
+      }
+      // The name opens the channel's videos, like a Preview's channel link.
+      const name = text.createEl("button", {
+        cls: "ytfree-manage-name ytfree-manage-open",
+        text: channel.title,
+        attr: { type: "button", title: `See everything from ${channel.title}` },
+      });
+      name.addEventListener("click", () => this.showChannel(channel.id, channel.title));
+      const age = uploads.get(channel.id);
+      text.createDiv({
+        cls: "ytfree-manage-meta",
+        text: manageRowMeta(counts.get(channel.id) ?? 0, age ? relativeAge(age, now) : ""),
+      });
+      const button = row.createEl("button", {
+        cls: "ytfree-manage-unsubscribe",
+        text: "Unsubscribe",
+        attr: { type: "button", "aria-label": `Unsubscribe from ${channel.title}` },
+      });
+      button.addEventListener("click", () => {
+        const done = this.store.unsubscribeChannel(channel.id);
+        if (done) this.manageUndos.set(channel.id, done);
+        this.renderManageList();
+      });
+    }
+  }
+
   /** Swap screens. Everything either one needs is in a field, so this is safe. */
   private setMode(mode: HubMode): void {
     if (this.mode === mode) return;
+    // Leaving Manage settles its unsubscribes: the Undo rows go with it.
+    if (this.mode === "manage" && mode !== "channel") {
+      this.manageUndos.clear();
+      this.manageQuery = "";
+    }
     this.mode = mode;
     this.build();
     this.renderAll();
@@ -2227,7 +2410,6 @@ export class HubView extends ItemView {
     this.menuEl = body.createDiv({ cls: "ytfree-hub-menu" });
     this.menuEl.createDiv({ cls: "ytfree-hub-menu-heading", text: "Show" });
     this.buildFilters(this.menuEl);
-    this.menuEl.createDiv({ cls: "ytfree-hub-menu-heading", text: "Channels" });
     this.channelsEl = this.menuEl.createDiv({ cls: "ytfree-hub-channels" });
   }
 
@@ -2270,9 +2452,14 @@ export class HubView extends ItemView {
       this.statusEl.setText(this.channelCopy().status);
       return;
     }
+    if (this.mode === "manage") {
+      this.statusEl.setText(MANAGE_EXPLAINER);
+      return;
+    }
 
     const { channels, lastPolledAt } = this.store.state;
-    const shown = this.currentItems().length;
+    const shown =
+      this.filter === "searchHidden" ? this.searchHiddenEntries().length : this.currentItems().length;
     const parts: string[] = [];
     const paused = botCheck.message();
     if (paused) parts.push(paused);
@@ -2293,7 +2480,13 @@ export class HubView extends ItemView {
       parts.push(`${shown} ${noun} · ${FILTER_RULES[this.filter]}`);
       if (this.filter === "hidden" && shown > 0) parts.push("put one back with the arrow");
     }
-    if (lastPolledAt && !this.store.polling && this.filter !== "hidden" && this.filter !== "history") {
+    if (
+      lastPolledAt &&
+      !this.store.polling &&
+      this.filter !== "hidden" &&
+      this.filter !== "searchHidden" &&
+      this.filter !== "history"
+    ) {
       parts.push(`checked ${relativeAge(lastPolledAt, new Date())}`);
     }
     this.statusEl.setText(parts.join(" · "));
@@ -2327,6 +2520,24 @@ export class HubView extends ItemView {
     if (!this.channelsEl) return;
     this.channelsEl.empty();
 
+    // The list's name says what these are — subscriptions — and Manage beside
+    // it is where you unsubscribe (docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md, S1).
+    const heading = this.channelsEl.createDiv({ cls: "ytfree-hub-subs-heading" });
+    heading.createSpan({
+      cls: "ytfree-hub-subs-title",
+      text: subscriptionsHeading(this.store.state.channels.length),
+    });
+    const manage = heading.createEl("button", {
+      cls: "ytfree-hub-subs-manage",
+      attr: { type: "button", "aria-label": "Manage subscriptions", title: "Manage subscriptions" },
+    });
+    setIcon(manage.createSpan({ cls: "ytfree-hub-subs-manage-icon" }), "settings-2");
+    manage.createSpan({ text: "Manage" });
+    manage.addEventListener("click", () => {
+      this.setMenuOpen(false);
+      this.setMode("manage");
+    });
+
     const all = this.channelsEl.createDiv({ cls: "ytfree-hub-channel" });
     all.toggleClass("is-active", this.channelFilter === null);
     all.createSpan({ text: "All channels", cls: "ytfree-hub-channel-name" });
@@ -2355,8 +2566,61 @@ export class HubView extends ItemView {
         row.setAttribute("aria-label", `Feed failed: ${channel.error}`);
         row.setAttribute("title", `Feed failed: ${channel.error}`);
       }
-      row.addEventListener("click", () => this.selectChannel(channel.id));
+      row.addEventListener("click", () => {
+        if (row.dataset.longPressed) {
+          delete row.dataset.longPressed;
+          return;
+        }
+        this.selectChannel(channel.id);
+      });
+      this.addUnsubscribeMenu(row, channel);
     }
+  }
+
+  /**
+   * Right-click on a desktop, a long press on a phone: Unsubscribe from that
+   * channel, without going to Manage. The long press is timed by hand because
+   * iOS sends no `contextmenu` for a held tap on a plain element.
+   */
+  private addUnsubscribeMenu(row: HTMLElement, channel: Channel): void {
+    const show = (position: { x: number; y: number }) => {
+      const menu = new Menu();
+      menu.addItem((item) =>
+        item
+          .setTitle(`Unsubscribe from ${channel.title}`)
+          .setIcon("user-minus")
+          .onClick(() => {
+            this.setMenuOpen(false);
+            unsubscribeWithUndo(this.store, channel.id, channel.title);
+          }),
+      );
+      menu.showAtPosition(position);
+    };
+    row.addEventListener("contextmenu", (evt) => {
+      evt.preventDefault();
+      show({ x: evt.clientX, y: evt.clientY });
+    });
+    if (!this.phone) return;
+    let timer: number | null = null;
+    const cancel = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+    };
+    row.addEventListener("touchstart", (evt) => {
+      const touch = evt.touches[0];
+      if (!touch) return;
+      const at = { x: touch.clientX, y: touch.clientY };
+      cancel();
+      timer = window.setTimeout(() => {
+        timer = null;
+        // The click that ends this press must not also pick the channel.
+        row.dataset.longPressed = "1";
+        show(at);
+      }, 500);
+    }, { passive: true });
+    row.addEventListener("touchmove", cancel, { passive: true });
+    row.addEventListener("touchend", cancel);
+    row.addEventListener("touchcancel", cancel);
   }
 
   private selectChannel(channelId: string | null): void {
@@ -2494,9 +2758,10 @@ export class HubView extends ItemView {
   /**
    * Drop the results you have already dealt with.
    *
-   * "Dealt with" is anything the hub knows about: saved, kept, or hidden. A
-   * video you removed is a decision, and offering it back in a search two
-   * minutes later is the search arguing with you.
+   * Only repeats: a result already on screen from an earlier page. Everything
+   * else lists — Inbox, Saved and removed videos as normal cards (their Save
+   * and Watch read done where that is true), and videos hidden from search as
+   * text cards (Isaiah, 2026-11-12; docs/V1-SCOPE-HIDE-AND-REMOVE.md).
    *
    * This runs when a page *lands*, not when a card is drawn, which is what
    * keeps it compatible with the no-reflow rule: a result you add while looking
@@ -2506,33 +2771,26 @@ export class HubView extends ItemView {
   private acceptable(results: SearchResult[]): SearchResult[] {
     const shown = new Set(this.searchResults.map((result) => result.videoId));
     return results.filter(
-      (result) => !shown.has(result.videoId) && !this.store.hasItem(result.videoId),
+      (result) => !shown.has(result.videoId),
     );
   }
 
   /**
-   * Fetch pages until one of them survives `acceptable`, or the road runs out.
-   *
-   * Without this, a search whose whole first page is already in your hub would
-   * answer "nothing found" while sitting on a continuation token full of
-   * results. Three extra pages is the budget: enough for a query you have
-   * mostly worked through, bounded enough that a pathological one cannot turn a
-   * click into sixty requests.
+   * One search action's pages, merged: two for a new search, one for "More
+   * results", and up to four when everything is already in the hub. The rules
+   * live in `collectPages` (`src/search.ts`) so they are tested without a view.
    */
-  private async fetchPage(
+  private fetchPage(
     query: string,
     continuation: string | null,
   ): Promise<{ results: SearchResult[]; continuation: string | null; skipped: number }> {
-    let token = continuation;
-    let skipped = 0;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const page: SearchPage = await searchYouTube(query, this.searchFilters, token);
-      const fresh = this.acceptable(page.results);
-      skipped += page.results.length - fresh.length;
-      token = page.continuation;
-      if (fresh.length > 0 || !token) return { results: fresh, continuation: token, skipped };
-    }
-    return { results: [], continuation: token, skipped };
+    const filters = this.searchFilters;
+    return collectPages(
+      (token) => searchYouTube(query, filters, token),
+      (result) => this.acceptable([result]).length > 0,
+      continuation,
+      continuation === null ? 2 : 1,
+    );
   }
 
   /**
@@ -2552,6 +2810,7 @@ export class HubView extends ItemView {
     this.searchSkipped = 0;
     this.removedResults.clear();
     if (this.searchInputEl) this.searchInputEl.value = "";
+    this.syncSearchClear?.();
   }
 
   private exitSearch(): void {
@@ -2653,8 +2912,7 @@ export class HubView extends ItemView {
     list.empty();
     this.cards.clear();
     this.results.clear();
-    this.primaryEl = null;
-    this.relatedEl = null;
+    this.resultsEl = null;
 
     const copy = this.searchCopy();
     if (copy.kind !== "results") {
@@ -2662,11 +2920,9 @@ export class HubView extends ItemView {
       return;
     }
 
-    // Two hosts, created up front and in this order, so an appended page lands
-    // in the right half without anything above it being redrawn. Each is a card
-    // grid in its own right — two-up on a phone, a column on a desktop.
-    this.primaryEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
-    this.relatedEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
+    // One host, so an appended page lands at the end without anything above it
+    // being redrawn. A card grid — two-up on a phone, a column on a desktop.
+    this.resultsEl = list.createDiv({ cls: "ytfree-hub-results ytfree-hub-grid" });
 
     for (const result of this.searchResults) this.renderResult(result);
 
@@ -2738,32 +2994,6 @@ export class HubView extends ItemView {
   }
 
   /**
-   * Where a result goes: the answer, or the related material below it.
-   *
-   * Each half gets a heading with its first result rather than up front,
-   * because a heading over an empty section is a promise the section did not
-   * keep — after the already-in-your-hub filter, either half can come back with
-   * nothing. Both are at the bottom of a list that is only appended to, so
-   * creating one moves nothing that was already on screen.
-   */
-  private resultHost(result: SearchResult): HTMLElement | null {
-    const host = result.secondary ? this.relatedEl : this.primaryEl;
-    // A channel's catalogue is one list with nothing related under it, so it
-    // needs no heading saying which half you are in.
-    if (this.mode === "channel") return host;
-    if (host && host.childElementCount === 0) {
-      host.createDiv({
-        cls: "ytfree-hub-results-heading",
-        // "Results" says the section below is the answer, which is only worth
-        // saying because "Related to your search" is a section too — YouTube's
-        // own related material, kept out of the answer rather than mixed in.
-        text: result.secondary ? "Related to your search" : "Results",
-      });
-    }
-    return host;
-  }
-
-  /**
    * A search result card.
    *
    * The same card as the hub's, with the same four buttons in the same four
@@ -2773,7 +3003,7 @@ export class HubView extends ItemView {
    * no anchor and no `<video>` here — see `docs/V1-SCOPE-BROWSE.md`.
    */
   private renderResult(result: SearchResult): void {
-    const host = this.resultHost(result);
+    const host = this.resultsEl;
     if (!host) return;
     if (this.removedResults.has(result.videoId)) {
       host.appendChild(this.buildRemovedStrip(result));
@@ -2782,13 +3012,16 @@ export class HubView extends ItemView {
     const where = this.mode === "channel" ? "channel" : "search";
     if (this.store.isBlockedResult(result, where)) return;
 
+    const hidden = this.store.isHiddenFromSearch(result.videoId);
     const facts = (): CardFacts => ({
-      inHub: this.store.hasItem(result.videoId),
+      inHub: this.store.isInHub(result.videoId),
       noteExists: this.store.hasNote(result.videoId),
+      hiddenFromSearch: hidden,
     });
 
     const card = this.buildCard({
       extraClass: "ytfree-hub-result",
+      textOnly: hidden,
       videoId: result.videoId,
       title: result.title,
       thumbnail: result.thumbnail,
@@ -2836,8 +3069,9 @@ export class HubView extends ItemView {
       for (const entry of searchChannelMenu(this.store.isSubscribed(result.channelId))) {
         menu.addItem((item) => {
           item.setTitle(entry.title).setIcon(entry.icon);
-          if (entry.key === "subscribed") item.setDisabled(true);
-          else if (entry.key === "subscribe") {
+          if (entry.key === "unsubscribe") {
+            item.onClick(() => unsubscribeWithUndo(this.store, result.channelId, result.channelTitle));
+          } else if (entry.key === "subscribe") {
             item.onClick(() => this.subscribeToChannel(result.channelId, result.channelTitle));
           } else item.onClick(() => this.hideChannelFromSearch(result));
         });
@@ -2879,25 +3113,33 @@ export class HubView extends ItemView {
       return;
     }
     if (key === "remove") {
-      this.removeResult(result);
+      if (this.store.isHiddenFromSearch(result.videoId)) this.unhideResult(result);
+      else this.removeResult(result);
       return;
     }
 
     await this.store.addSearchResult(result);
-    const item = this.store.itemFor(result.videoId);
+    let item = this.store.itemFor(result.videoId);
     if (!item) return;
+    // Removed from the hub earlier: a tombstone with no picture or description.
+    // Put it back properly first, so the note and the card are whole again.
+    if (item.state === "dismissed") {
+      await this.store.restore(item);
+      item = this.store.itemFor(result.videoId);
+      if (!item) return;
+    }
     if (key === "save") await this.store.saveItem(item);
     else await this.store.openItem(item);
     this.renderStatus();
   }
 
   /**
-   * Remove on a search card: lasting, and undoable where it happened.
+   * Hide on a search card: lasting, and undoable where it happened.
    *
-   * The card collapses in place to a strip of the same height, so removing the
-   * third result does not pull the fourth up under your thumb. The removal is
-   * stored (issue 047) and syncs; later searches leave the video out, and
-   * Settings → Subscriptions hub lists it for undoing later.
+   * The card collapses in place to a strip of the same height, so hiding the
+   * third result does not pull the fourth up under your thumb. The hide is
+   * stored (issue 047) and syncs; later searches show the video as a text card
+   * with Unhide, and the hub's Hidden list has it too.
    */
   private removeResult(result: SearchResult): void {
     this.removedResults.add(result.videoId);
@@ -2913,7 +3155,25 @@ export class HubView extends ItemView {
   }
 
   /**
-   * "Removed — Undo", at the height of the card it replaced.
+   * Unhide on a hidden search card: the picture comes back where the card is.
+   * The card is rebuilt in place rather than the list redrawn, for the same
+   * no-reflow reason as the strip.
+   */
+  private unhideResult(result: SearchResult): void {
+    this.store.setSearchRemoved(result, false);
+    const card = this.results.get(result.videoId);
+    const host = card?.parentElement;
+    if (!card || !host) return;
+    const marker = card.nextSibling;
+    card.remove();
+    this.results.delete(result.videoId);
+    this.renderResult(result);
+    const rebuilt = this.results.get(result.videoId);
+    if (rebuilt && marker) host.insertBefore(rebuilt, marker);
+  }
+
+  /**
+   * "Hidden — Undo", at the height of the card it replaced.
    *
    * Undo swaps the card straight back in rather than re-rendering the results:
    * a redraw of the list under a finger that has just pressed Undo is the same
@@ -2921,7 +3181,7 @@ export class HubView extends ItemView {
    */
   private buildRemovedStrip(result: SearchResult): HTMLElement {
     const strip = createDiv({ cls: "ytfree-hub-card ytfree-hub-removed" });
-    strip.createDiv({ cls: "ytfree-hub-removed-text", text: "Removed" });
+    strip.createDiv({ cls: "ytfree-hub-removed-text", text: "Hidden" });
     const undo = strip.createEl("button", {
       cls: "ytfree-hub-removed-undo",
       text: "Undo",
@@ -2964,10 +3224,25 @@ export class HubView extends ItemView {
       this.renderChannelList();
       return;
     }
+    if (this.mode === "manage") {
+      this.renderManageList();
+      return;
+    }
     list.empty();
     this.cards.clear();
     this.stopSentinel();
     if (!keepPages) this.pages = 1;
+
+    if (this.filter === "searchHidden") {
+      const entries = this.searchHiddenEntries();
+      if (entries.length === 0) {
+        list.createDiv({ cls: "ytfree-hub-empty", text: this.emptyMessage() });
+        return;
+      }
+      const now = new Date();
+      for (const entry of entries) this.renderSearchHiddenRow(entry, now);
+      return;
+    }
 
     const items = this.currentItems();
     if (items.length === 0) {
@@ -3046,7 +3321,10 @@ export class HubView extends ItemView {
   private emptyMessage(): string {
     if (this.itemQuery) return `Nothing in this list matches “${this.itemQuery}”.`;
     if (this.filter === "hidden") {
-      return "Nothing hidden. Removing a video from the hub puts it here.";
+      return "Nothing removed. Removing a video from the hub puts it here.";
+    }
+    if (this.filter === "searchHidden") {
+      return "Nothing hidden. Hide on a search result puts it here.";
     }
     if (this.filter === "history") {
       return "Nothing watched yet. A video lands here once you have watched 2 minutes or a tenth of it.";
@@ -3056,8 +3334,46 @@ export class HubView extends ItemView {
       : "Nothing here. Try Everything, or check for new videos.";
   }
 
+  /** The Hidden list: videos hidden from search, filtered by the hub's search box. */
+  private searchHiddenEntries(): BlockEntry[] {
+    const query = this.itemQuery.trim().toLowerCase();
+    const all = this.store.removedSearchVideos();
+    return query ? all.filter((entry) => entry.title.toLowerCase().includes(query)) : all;
+  }
+
   /**
-   * One hidden video: a line of text and a way back.
+   * One video hidden from search: its title and Unhide. Built like a Removed
+   * row — a search hide stores only the ID and the title.
+   */
+  private renderSearchHiddenRow(entry: BlockEntry, now: Date): void {
+    const list = this.listEl;
+    if (!list) return;
+    const row = list.createDiv({ cls: "ytfree-hub-card ytfree-hub-hidden-row" });
+    this.cards.set(entry.id, row);
+
+    const meta = row.createDiv({ cls: "ytfree-hub-meta" });
+    meta.createDiv({ cls: "ytfree-hub-title", text: entry.title || entry.id });
+    const age = relativeAge(entry.at, now);
+    meta.createDiv({ cls: "ytfree-hub-sub", text: age ? `hidden from search ${age}` : "hidden from search" });
+
+    const actions = row.createDiv({ cls: "ytfree-hub-dismiss" });
+    const unhide = new ButtonComponent(actions)
+      .setIcon("eye")
+      .setTooltip("Unhide: show its picture in search again")
+      .onClick((evt) => {
+        evt.stopPropagation();
+        this.store.setSearchRemoved({ videoId: entry.id, title: entry.title }, false);
+        row.remove();
+        this.cards.delete(entry.id);
+        if (this.cards.size === 0) this.renderList();
+        this.renderStatus();
+      });
+    unhide.buttonEl.addClass("ytfree-hub-icon-button");
+    unhide.buttonEl.setAttribute("aria-label", "Unhide");
+  }
+
+  /**
+   * One removed video: a line of text and a way back.
    *
    * Deliberately not a card. A hidden item has no thumbnail stored — see
    * `hideItem` — and drawing one would mean rebuilding the URL and fetching an
@@ -3075,7 +3391,7 @@ export class HubView extends ItemView {
     const hiddenAge = relativeAge(item.dismissedAt ?? "", now);
     meta.createDiv({
       cls: "ytfree-hub-sub",
-      text: [item.channelTitle, hiddenAge ? `hidden ${hiddenAge}` : "hidden"]
+      text: [item.channelTitle, hiddenAge ? `removed ${hiddenAge}` : "removed"]
         .filter(Boolean)
         .join(" · "),
     });
@@ -3083,7 +3399,7 @@ export class HubView extends ItemView {
     const actions = row.createDiv({ cls: "ytfree-hub-dismiss" });
     const restore = new ButtonComponent(actions)
       .setIcon("rotate-ccw")
-      .setTooltip("Put back in the hub")
+      .setTooltip("Put back in the Inbox")
       .onClick((evt) => {
         evt.stopPropagation();
         void this.store.restore(item).catch((err: unknown) => {
@@ -3255,8 +3571,13 @@ export class HubView extends ItemView {
     const thumb = card.createDiv({ cls: "ytfree-hub-thumb" });
     // The halfway frame rather than the uploader's picture, falling back to the
     // stored thumbnail — see `src/thumbnail.ts`.
-    const pictures = thumbnailCandidates(spec.videoId, spec.thumbnail, spec.isShort);
-    if (pictures.length > 0) {
+    const pictures = spec.textOnly ? [] : thumbnailCandidates(spec.videoId, spec.thumbnail, spec.isShort);
+    if (spec.textOnly) {
+      card.addClass("ytfree-hub-textonly");
+      const blank = thumb.createDiv({ cls: "ytfree-hub-thumb-hidden" });
+      setIcon(blank.createSpan(), "eye-off");
+      blank.createSpan({ text: "Hidden" });
+    } else if (pictures.length > 0) {
       const img = thumb.createEl("img");
       img.loading = "lazy";
       img.alt = "";
@@ -3452,7 +3773,6 @@ export class HubView extends ItemView {
         views: null,
         duration: details.durationSeconds ? formatDuration(details.durationSeconds) : "",
         thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-        secondary: false,
       };
     }
     this.openPreview(videoId, () => undefined, seconds);
@@ -3493,7 +3813,6 @@ export class HubView extends ItemView {
             views: null,
             duration: formatDuration(item.durationSeconds),
             thumbnail: item.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-            secondary: false,
           }
         : null);
     const channelId = item?.channelId || result?.channelId || "";
@@ -3535,10 +3854,22 @@ export class HubView extends ItemView {
       // The way from a video to everything else its channel has made — the
       // question that follows a good video (045). Not offered from inside the
       // channel it would open: that is where you already are.
-      openChannel:
-        channelId && !(this.mode === "channel" && this.channel?.channelId === channelId)
-          ? () => this.showChannel(channelId, channelTitle)
-          : null,
+      // Always a link when there is a name (2026-11-14): a video with no
+      // channel id (a note-only or History card) looks it up on the tap. On
+      // the channel's own screen the tap just closes Preview: you are there.
+      openChannel: channelTitle
+        ? () =>
+            void resolvePreviewChannel({ channelId, channelTitle }, () => fetchVideoDetails(videoId)).then(
+              (found) => {
+                if (!found) {
+                  new Notice("YouTube for You: YouTube would not say whose video this is.");
+                  return;
+                }
+                if (this.mode === "channel" && this.channel?.channelId === found.channelId) return;
+                this.showChannel(found.channelId, found.channelTitle);
+              },
+            )
+        : null,
       slots: () => (item ? hubSlots(facts()) : searchSlots(facts())),
       run: async (key, repaint) => {
         // Re-looked-up: the modal outlives the card that opened it, and a poll
@@ -3629,8 +3960,6 @@ class PreviewModal extends Modal {
    * A list rather than two fields so a third region costs nothing.
    */
   private regions: ((open: boolean) => void)[] = [];
-  /** The description's own setter — the region an empty transcript hands back to. */
-  private openDescription: ((open: boolean) => void) | null = null;
 
   constructor(
     app: App,
@@ -3793,7 +4122,7 @@ class PreviewModal extends Modal {
         title: this.spec.title,
         channel: this.spec.channel,
         channelId: this.spec.channelId,
-      })
+      }, () => this.close())
       .then(
       (handle) => {
         // Dismissed while the stream was resolving. Nobody will call the
@@ -3912,13 +4241,12 @@ class PreviewModal extends Modal {
    * everywhere now, because the sheet has a single region at its foot and a
    * region that is always open is a region the transcript can never have.
    *
-   * Open by default off a phone, which is what it was there before: a laptop
-   * sheet that opened straight into an hour of transcript would bury the two
-   * paragraphs saying what the video is.
+   * Shut on open, everywhere (Isaiah, 2026-11-12: "open preview with neither
+   * selected"). See docs/V1-SCOPE-OPEN-AT-TOP.md.
    */
   private mountDescription(host: HTMLElement): void {
     const section = host.createDiv({ cls: "ytfree-preview-describe" });
-    const start = !Platform.isPhone;
+    const start = false;
     section.toggleClass("is-open", start);
 
     const header = section.createEl("button", {
@@ -3929,7 +4257,7 @@ class PreviewModal extends Modal {
     setIcon(chevron, start ? "chevron-down" : "chevron-right");
     header.createSpan({ cls: "ytfree-preview-disclose-label", text: "Description" });
     const body = section.createDiv({ cls: "ytfree-preview-description" });
-    this.openDescription = this.disclose(section, header, chevron);
+    this.disclose(section, header, chevron);
 
     body.setText(this.spec.description || (this.spec.fetchDescription ? "Loading…" : "No description."));
     if (this.spec.fetchDescription) {
@@ -3956,11 +4284,9 @@ class PreviewModal extends Modal {
   private mountTranscript(host: HTMLElement): void {
     if (!this.spec.fetchTranscript) return;
 
-    // Open from the start on a phone (039). The transcript is the reason the
-    // sheet has a region for it at all, and a region you have to open before it
-    // fills the screen is one that reflows the sheet the first time you use it.
-    // Off a phone the description has the region instead — see there.
-    const start = Platform.isPhone;
+    // Shut on open, like the description (Isaiah, 2026-11-12). It still
+    // fetches now, so it is there the moment its header is tapped.
+    const start = false;
     const section = host.createDiv({ cls: "ytfree-preview-transcript" });
     section.toggleClass("is-open", start);
     const header = section.createEl("button", {
@@ -3990,9 +4316,6 @@ class PreviewModal extends Modal {
       label.setText(why);
       header.setAttribute("disabled", "true");
       setOpen(false);
-      // On a phone this is the region that was open, and leaving both shut
-      // would be a sheet with a hole in it. The description takes it instead.
-      this.openDescription?.(true);
     };
 
     void this.spec.fetchTranscript().then(
@@ -4194,18 +4517,11 @@ export class ImportSubscriptionsModal extends Modal {
     contentEl.createEl("h2", { text: "Add channels" });
 
     const form = contentEl.createEl("form", { cls: "ytfree-add-channels-form" });
-    const input = form.createEl("input", {
-      cls: "ytfree-add-channels-input",
-      type: "search",
-      attr: {
-        placeholder: "Search channels, or paste a channel link",
-        "aria-label": "Search channels, or paste a channel link",
-        enterkeyhint: "search",
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: "false",
-      },
+    const { field, input } = buildSearchField(form, {
+      placeholder: "Search channels, or paste a channel link",
+      label: "Search channels, or paste a channel link",
     });
+    field.addClass("ytfree-add-channels-input");
     const go = form.createEl("button", { cls: "mod-cta", text: "Search", attr: { type: "submit" } });
     go.title = "One search per tap. A pasted link is added directly.";
 
@@ -4484,6 +4800,26 @@ function historyResult(item: HubItem): SearchResult {
     views: null,
     duration: formatDuration(item.durationSeconds),
     thumbnail: item.thumbnail,
-    secondary: false,
   };
+}
+
+/**
+ * Unsubscribe from anywhere but Manage subscriptions (which keeps its own Undo
+ * row): the channel screen, a search card's menu, a long press in the hub menu,
+ * a note's channel row. The Notice carries the Undo.
+ */
+export function unsubscribeWithUndo(store: SubscriptionsStore, channelId: string, title: string): boolean {
+  const undo = store.unsubscribeChannel(channelId);
+  if (!undo) return false;
+  const fragment = createFragment();
+  fragment.appendText(unsubscribedNotice(title || undo.channel.title));
+  fragment.appendText(" ");
+  const button = fragment.createEl("button", { cls: "ytfree-notice-undo", text: "Undo" });
+  const notice = new Notice(fragment, 8000);
+  button.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    store.undoUnsubscribe(undo);
+    notice.hide();
+  });
+  return true;
 }

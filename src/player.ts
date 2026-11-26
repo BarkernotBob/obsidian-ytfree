@@ -4,7 +4,7 @@ import { isBotCheck } from "./bot-check.ts";
 import { isAgeRestricted } from "./age-restricted.ts";
 import { formatTimestamp } from "./format.ts";
 import { playedSpanMs } from "./history.ts";
-import { SHARE_ICON, YT_ICON } from "./icon.ts";
+import { HD_ICON, SHARE_ICON } from "./icon.ts";
 import { anchorVisible, panelPlacement } from "./panel.ts";
 import type { SectionName } from "./sections.ts";
 import { compressibleWindows, moveFor, secondsSaved, secondsSkipped } from "./silence.ts";
@@ -18,7 +18,7 @@ import { fullscreenPress } from "./fullscreen.ts";
 import { dropOnJump, VIRTUAL_FRAG_POLICY, virtualLoader } from "./virtual-loader.ts";
 import { badgeText, bufferedAhead, HD_WAIT_MS, hdStartPhase, rungPhase, within } from "./hd-status.ts";
 import type { HdState } from "./hd-status.ts";
-import { shouldResumeSystemPause } from "./keep-playing.ts";
+import { shouldLeaveFullscreenForBackground, shouldResumeSystemPause } from "./keep-playing.ts";
 import { KEEPALIVE_MAX_MS, silentWav } from "./silent-audio.ts";
 
 export type { StreamProvider };
@@ -101,6 +101,13 @@ export interface PlayerOptions {
    * year does not deserve a permanent thumb-sized target next to Play.
    */
   onOpenSettings?: () => void;
+  /**
+   * Back to the hub: the grid button, first on the left of the bar (Isaiah,
+   * 2026-11-12). A note's player brings the hub tab forward and keeps playing;
+   * Preview's also closes its sheet, by the sheet's own close rule. Absent,
+   * no button.
+   */
+  onOpenHub?: () => void;
   /**
    * Share this video. One button on the bar, not two — the choice between a
    * plain link and a link at this moment is made *after* pressing it, in a menu
@@ -623,6 +630,13 @@ export class YtFreePlayer {
         void this.recover("HD unavailable, back to 360p");
         return;
       }
+      // MEDIA_ERR_ABORTED: the fetch was stopped on this side (a source swap,
+      // iOS suspending it), not refused by YouTube. Re-resolved, never counted
+      // as a dead link (GitHub #121).
+      if (this.video.error.code === 1) {
+        void this.recover("playback interrupted");
+        return;
+      }
       void this.recover("playback error");
     });
 
@@ -1098,20 +1112,12 @@ export class YtFreePlayer {
   private buildControls(): void {
     const bar = this.container.createDiv({ cls: "ytfree-controls" });
 
-    // Named rather than positional. They used to be told apart by `:first-child`
-    // and `:last-child`, and the pop-out — built into this same bar, and last in
-    // it — quietly took `:last-child` away from the right-hand group: it stopped
-    // being right-aligned, so it sat one grid gap from the transport with all
-    // the air stranded on the far side. A class cannot be stolen by a sibling.
-    const groups = {
-      left: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-side ytfree-controls-left" }),
-      mid: bar.createDiv({ cls: "ytfree-controls-group ytfree-controls-transport" }),
-      right: bar.createDiv({
-        cls: "ytfree-controls-group ytfree-controls-side ytfree-controls-right",
-      }),
-    };
-    const host = (side: "left" | "mid" | "right"): HTMLElement => groups[side];
-
+    // Every control is a direct child of the bar, tagged with its side, and
+    // CSS orders them. The sides used to be wrapper divs drawn with
+    // `display: contents`, which the store scan flags (0.2.2). The break is
+    // the phone's line between the transport row and the side row; the
+    // desktop hides it.
+    bar.createDiv({ cls: "ytfree-controls-break" });
     const button = (
       side: "left" | "mid" | "right",
       label: string,
@@ -1119,8 +1125,8 @@ export class YtFreePlayer {
       title: string,
       onClick: () => void,
     ) => {
-      const el = host(side).createEl("button", {
-        cls: "ytfree-btn",
+      const el = bar.createEl("button", {
+        cls: `ytfree-btn ytfree-side-${side}`,
         attr: { title, "aria-label": title },
       });
       el.type = "button";
@@ -1166,11 +1172,20 @@ export class YtFreePlayer {
     // corner badge inside a fixed-size button, so it costs no layout.
     for (const el of [back, forward]) el.createSpan({ cls: "ytfree-btn-badge", text: "10" });
 
+    // The way back to the hub, first of all: the top-left is where a way back
+    // is looked for. On a phone the side row has no room for a ninth 40pt
+    // target, so CSS lifts it to the left end of the transport row — the same
+    // top-left corner, a row higher. It stays visible over YouTube's player.
+    if (this.options.onOpenHub) {
+      const hub = button("left", "Hub", "layout-grid", "Back to the hub", () => this.options.onOpenHub?.());
+      hub.addClass("ytfree-btn-hub");
+    }
+
     // Left is how the picture plays and where it plays: the speed picker, then
     // the two ways out of the note — Picture-in-Picture and Fullscreen, which
     // are the same decision at two sizes and belong beside each other.
-    const speed = host("left").createEl("select", {
-      cls: "ytfree-speed",
+    const speed = bar.createEl("select", {
+      cls: "ytfree-speed ytfree-side-left",
       attr: { title: "Playback speed", "aria-label": "Playback speed" },
     });
     for (const rate of [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]) {
@@ -1230,7 +1245,7 @@ export class YtFreePlayer {
       // control left showing while YouTube's player is up (the rest are
       // hidden in place, not removed), so it never moves under the thumb.
       const open = this.options.quick.youtubePlayer;
-      this.ytToggle = button("right", "YT", YT_ICON, "Switch to YouTube's player", () => {
+      this.ytToggle = button("right", "HD", HD_ICON, "Switch to YouTube's player (HD)", () => {
         if (this.ytFallback) void this.retryOurStream();
         else if (this.ytEmbed) this.leaveYouTubePlayer();
         else void this.enterYouTubePlayer(open);
@@ -1523,18 +1538,10 @@ export class YtFreePlayer {
         ".ytfree-panel-label",
       )?.createSpan({ cls: "ytfree-panel-value" }) ?? null;
 
-      if (quick.onSkipNonSpeech) {
-        toggle("Skip music too", quick.skipNonSpeech ?? false, (on) => quick.onSkipNonSpeech?.(on));
-      }
-
-      choice(
-        "Pause speed",
-        [1.5, 2, 2.5, 3, 4, 5],
-        this.options.smartSpeed.silenceRate,
-        (value) => `${value}×`,
-        (value) =>
-          this.setSilenceSettings(this.options.smartSpeed?.minGap ?? 0.5, value),
-      );
+      // No "Skip music too" or "Pause speed" since 0.2.2: both act on the
+      // music ffmpeg measured, and ffmpeg is not run any more. Captions alone
+      // only ever skip (`combineSilence`), so neither control could change
+      // anything.
 
       choice(
         "Shortest pause",
@@ -1585,14 +1592,14 @@ export class YtFreePlayer {
         // would hand back the movement already cancelled.
         if (anchorTop !== null) return;
         shift = 0;
-        panel.style.transform = "";
+        panel.style.removeProperty("transform");
         anchorTop = panel.getBoundingClientRect().top;
       };
       const release = () => {
         if (anchorTop === null) return;
         anchorTop = null;
         shift = 0;
-        panel.style.transform = "";
+        panel.style.removeProperty("transform");
       };
       el.addEventListener("pointerdown", grab);
       el.addEventListener("pointerup", release);
@@ -1765,8 +1772,8 @@ export class YtFreePlayer {
       return;
     }
 
-    panel.style.maxHeight = "";
-    panel.style.width = "";
+    panel.style.removeProperty("max-height");
+    panel.style.removeProperty("width");
     const natural = panel.getBoundingClientRect();
 
     const placement = panelPlacement({
@@ -1958,8 +1965,14 @@ export class YtFreePlayer {
     const el = this.video as HTMLVideoElement & {
       webkitDisplayingFullscreen?: boolean;
       webkitPresentationMode?: string;
+      webkitExitFullscreen?: () => void;
+      webkitSetPresentationMode?: (mode: string) => void;
     };
     let wasFullscreen = false;
+    // Set while the player is leaving the phone's fullscreen because the app
+    // went to the background (Isaiah, 2026-11-25); see `leaveFullscreenForBackground`.
+    let leavingForBackground = false;
+    let leaveTimer: number | null = null;
 
     const consider = (cause: "background" | "fullscreen", causeAt: number): void => {
       if (this.destroyed || this.lastPauseAnswered || !this.video.paused) return;
@@ -1990,9 +2003,76 @@ export class YtFreePlayer {
       );
     };
 
+    const nativeFullscreen = (): boolean =>
+      Boolean(el.webkitDisplayingFullscreen) || el.webkitPresentationMode === "fullscreen";
+
+    // Inline, a video keeps playing behind the lock screen; in the phone's own
+    // fullscreen player iOS pauses it and our `play()` does not stick. So go
+    // inline first, then resume (`shouldLeaveFullscreenForBackground`).
+    const leaveFullscreenForBackground = (): boolean => {
+      if (!Platform.isMobile || leavingForBackground) return leavingForBackground;
+      const systemPaused =
+        this.video.paused &&
+        !this.lastPauseAnswered &&
+        shouldResumeSystemPause({
+          pauseAt: this.lastPauseAt,
+          readerPauseAt: this.readerPauseAt,
+          pausedByTyping: this.pausedByTyping,
+          causeAt: hiddenAt,
+          ended: this.video.ended,
+        });
+      const leave = shouldLeaveFullscreenForBackground({
+        nativeFullscreen: nativeFullscreen(),
+        playing: !this.video.paused,
+        systemPaused,
+      });
+      if (!leave) return false;
+      leavingForBackground = true;
+      this.options.debug?.("keep playing: app hidden in fullscreen, leaving fullscreen", {
+        paused: this.video.paused,
+      });
+      try {
+        if (typeof el.webkitExitFullscreen === "function") el.webkitExitFullscreen();
+        else el.webkitSetPresentationMode?.("inline");
+      } catch (err) {
+        this.options.debug?.("keep playing: leaving fullscreen refused", String(err));
+      }
+      // `webkitendfullscreen` may not arrive while the app is hidden; don't
+      // count on it to finish the job.
+      if (leaveTimer !== null) window.clearTimeout(leaveTimer);
+      leaveTimer = window.setTimeout(() => {
+        leaveTimer = null;
+        if (leavingForBackground) resumeAfterLeaving();
+      }, 600);
+      return true;
+    };
+
+    // Out of fullscreen for the background: play again if the phone paused it.
+    // The pause may have landed a while before fullscreen closed, so it is
+    // judged against the moment the app went hidden, not the moment it closed.
+    const resumeAfterLeaving = (): void => {
+      leavingForBackground = false;
+      if (leaveTimer !== null) {
+        window.clearTimeout(leaveTimer);
+        leaveTimer = null;
+      }
+      this.options.debug?.("keep playing: left fullscreen for the background", {
+        paused: this.video.paused,
+        stillFullscreen: nativeFullscreen(),
+        hidden: document.hidden,
+      });
+      if (!this.video.paused) return;
+      // A resume tried while fullscreen was still up does not count.
+      this.lastPauseAnswered = false;
+      consider("background", hiddenAt);
+    };
+
     this.video.addEventListener("pause", () => {
       this.lastPauseAt = Date.now();
       this.lastPauseAnswered = false;
+      // Paused while hidden and still in fullscreen: leave it, and the resume
+      // happens once it has closed.
+      if (document.hidden && leaveFullscreenForBackground()) return;
       if (document.hidden) consider("background", hiddenAt);
       consider("fullscreen", fullscreenEndAt);
       // Still paused after all that, and in the background: the reader paused
@@ -2019,6 +2099,7 @@ export class YtFreePlayer {
         startSilence(this.options.debug);
         return;
       }
+      if (leaveFullscreenForBackground()) return;
       consider("background", hiddenAt);
     };
     document.addEventListener("visibilitychange", this.onKeepPlayingVisibility);
@@ -2028,6 +2109,10 @@ export class YtFreePlayer {
     const ended = (): void => {
       wasFullscreen = false;
       fullscreenEndAt = Date.now();
+      if (leavingForBackground) {
+        resumeAfterLeaving();
+        return;
+      }
       consider("fullscreen", fullscreenEndAt);
     };
     this.video.addEventListener("webkitendfullscreen", ended);
@@ -2078,10 +2163,10 @@ export class YtFreePlayer {
     this.lastFrameAt = 0;
     const tick = (now: number): void => {
       if (this.destroyed) return;
-      this.smartRaf = requestAnimationFrame(tick);
+      this.smartRaf = window.requestAnimationFrame(tick);
       this.smartFrame(now);
     };
-    this.smartRaf = requestAnimationFrame(tick);
+    this.smartRaf = window.requestAnimationFrame(tick);
   }
 
   private stopSmartLoop(): void {
@@ -2832,11 +2917,11 @@ export class YtFreePlayer {
     if (!el) return;
     const on = !!this.ytEmbed;
     const title = !on
-      ? "Switch to YouTube's player"
+      ? "Switch to YouTube's player (HD)"
       : this.ytFallback
         ? "Close YouTube's player and try our stream again"
         : "Back to our player";
-    this.paint(el, "YT", YT_ICON, title);
+    this.paint(el, "HD", HD_ICON, title);
     el.toggleClass("is-active", on);
     el.setAttr("aria-pressed", on ? "true" : "false");
   }
@@ -3224,12 +3309,12 @@ export class YtFreePlayer {
 
     try {
       if (this.recoveries > 1) {
-        await new Promise((r) => setTimeout(r, RECOVERY_COOLDOWN_MS));
+        await new Promise((r) => window.setTimeout(r, RECOVERY_COOLDOWN_MS));
       }
       // Recover in whatever quality is currently playing, so a refresh never
       // silently downgrades the picture.
       // HD dropping back to 360p is not the 360p link's failure.
-      const deadLink = !this.upgraded && !reason.startsWith("HD unavailable");
+      const deadLink = !this.upgraded && !reason.startsWith("HD unavailable") && reason !== "playback interrupted";
       const stream = await this.provider(this.upgraded ? "quality" : "fast", true, deadLink);
       this.attach(stream, resumeAt, wasPlaying);
       this.onStatus(null);

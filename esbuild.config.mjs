@@ -9,35 +9,24 @@ const builtins = [...builtinModules, ...builtinModules.map((m) => `node:${m}`)];
 const prod = process.argv[2] === "production";
 
 /**
- * The mobile guard, checked on the artifact rather than on the source.
+ * The store guard, checked on the artifact rather than on the source.
  *
- * On iOS a `require("child_process")` throws at module load — before `onload`
- * runs, so the plugin does not degrade, it dies. Everything that touches Node
- * therefore lives under `src/desktop/` and is reached only through a dynamic
- * `import()`, which esbuild keeps inside a lazily-initialised closure.
- *
- * That property is easy to break by accident: one ordinary top-level import in
- * a file mobile loads pulls the whole subgraph back into the eager body, and
- * nothing about the source diff looks wrong. So the check is here, on the
- * bundle, where the truth actually lives — and it fails the build rather than
- * waiting for a phone to find out.
+ * Since 0.2.2 the plugin uses no Node at all: no `fs`, no `child_process`, no
+ * `https`. The community directory's scan rates any of them a warning (Shell
+ * Execution, Direct Filesystem Access, Node built-in imports), and on iOS an
+ * eager `require` of one kills the plugin at load. One stray import in any
+ * file brings that back without the diff looking wrong, so the build fails on
+ * a Node `require` anywhere in the bundle.
  */
-function assertNoEagerNodeRequires(file) {
+function assertNoNodeRequires(file) {
   const src = readFileSync(file, "utf8");
-  // Everything before the CJS export marker is esbuild's prelude and its lazy
-  // `__esm` closures; the eager module body is what runs at load.
-  const body = src.slice(src.indexOf("module.exports="));
-  // `@electron/remote` belongs on this list for the same reason the builtins
-  // do: it exists only in the desktop renderer, so requiring it at load time
-  // kills the plugin on iOS just as thoroughly as `child_process` would.
   const guarded = [...builtins, "@electron/remote"];
-  const leaked = guarded.filter((name) => body.includes(`require("${name}")`));
+  const leaked = guarded.filter((name) => src.includes(`require("${name}")`));
 
   if (leaked.length) {
     console.error(
-      `\nBuild failed: ${leaked.join(", ")} ${leaked.length === 1 ? "is" : "are"} required at load time.\n` +
-        "Node builtins must stay behind `await import(\"./desktop/…\")` inside a\n" +
-        "`Platform.isDesktopApp` branch, or the plugin will not load on iOS.\n",
+      `\nBuild failed: main.js requires ${leaked.join(", ")}.\n` +
+        "YouTube for You uses no Node modules (0.2.2): the store scan flags them and iOS cannot load them.\n",
     );
     process.exit(1);
   }
@@ -52,9 +41,8 @@ const ctx = await esbuild.context({
   external: [
     "obsidian",
     "electron",
-    // The dock badge and the old sign-in clean-up reach Electron through the
-    // remote module. It exists only in the desktop renderer and must not be
-    // bundled.
+    // Desktop-renderer only; nothing uses it since 0.2.2, and the guard above
+    // fails the build if anything starts to.
     "@electron/remote",
     "@codemirror/state",
     "@codemirror/view",
@@ -72,7 +60,7 @@ const ctx = await esbuild.context({
 
 if (prod) {
   await ctx.rebuild();
-  assertNoEagerNodeRequires("main.js");
+  assertNoNodeRequires("main.js");
   process.exit(0);
 } else {
   await ctx.watch();

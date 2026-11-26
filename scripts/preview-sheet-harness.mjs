@@ -109,16 +109,14 @@ const sheet = (transcript, phone = true) => {
         <div class="ytfree-panel-note">This video only</div>
         <button class="ytfree-panel-link">All YouTube for You settings…</button>
        </div>
-       <div class="ytfree-controls-group ytfree-controls-side ytfree-controls-left">
-        <select class="ytfree-speed"><option>1×</option></select>
-        <button class="ytfree-btn">P</button><button class="ytfree-btn">F</button></div>
-       <div class="ytfree-controls-group ytfree-controls-transport">
-        <button class="ytfree-btn">-</button><button class="ytfree-btn ytfree-btn-play">▶</button>
-        <button class="ytfree-btn">+</button></div>
-       <div class="ytfree-controls-group ytfree-controls-side ytfree-controls-right">
-        <button class="ytfree-btn ytfree-btn-collapse">^</button>
-        <button class="ytfree-btn ytfree-btn-share">s</button>
-        <button class="ytfree-btn ytfree-btn-panel">o</button></div>
+       <button class="ytfree-btn ytfree-side-mid ytfree-btn-back">-</button><button class="ytfree-btn ytfree-side-mid ytfree-btn-play">▶</button>
+       <button class="ytfree-btn ytfree-side-mid ytfree-btn-forward">+</button>
+       <div class="ytfree-controls-break"></div>
+       <select class="ytfree-speed ytfree-side-left"><option>1×</option></select>
+       <button class="ytfree-btn ytfree-side-left">P</button><button class="ytfree-btn ytfree-side-left">F</button>
+       <button class="ytfree-btn ytfree-side-right ytfree-btn-collapse">^</button>
+       <button class="ytfree-btn ytfree-side-right ytfree-btn-share">s</button>
+       <button class="ytfree-btn ytfree-side-right ytfree-btn-panel">o</button>
       </div>
      </div>
     </div>
@@ -305,8 +303,10 @@ async function measure(viewport, transcript = true, phone = true) {
 
     const tall = box(".ytfree-preview-player").height;
     q(".ytfree-preview-wrapper").classList.add("is-collapsed");
+    q(".ytfree-preview-player").classList.add("has-collapsed-wrapper");
     const short = box(".ytfree-preview-player").height;
     q(".ytfree-preview-wrapper").classList.remove("is-collapsed");
+    q(".ytfree-preview-player").classList.remove("has-collapsed-wrapper");
 
     return {
       viewport: `${window.innerWidth}×${window.innerHeight}`,

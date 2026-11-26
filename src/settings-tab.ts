@@ -19,7 +19,6 @@ import type YtFreePlugin from "./main.ts";
 import type { YtFreeSettings } from "./settings.ts";
 
 /** Where the optional desktop helpers are explained. */
-const HELPERS_DOC = "https://github.com/BarkernotBob/obsidian-ytfree/blob/main/docs/DESKTOP-HELPERS.md";
 
 /** One settings row: what search sees, and how its control is built. */
 interface Row {
@@ -28,7 +27,7 @@ interface Row {
   /** Extra words settings search should find this row by. */
   aliases?: string[];
   /** Adds the control. Left out for a row that is only text. */
-  build?: (setting: Setting) => void;
+  build?: (setting: Setting) => unknown;
 }
 
 /** Rows under one heading. No heading: the rows at the top of the tab. */
@@ -194,25 +193,12 @@ export class YtFreeSettingTab extends PluginSettingTab {
         // with a wrong default.
         heading: "Smart Speed: advanced",
         advanced: { note: "These trade accuracy for aggressiveness. Raising them can clip or skip real speech." },
-        rows: this.smartSpeedAdvancedRows(desktopApp),
+        rows: this.smartSpeedAdvancedRows(),
       },
       { heading: "Transcript", rows: this.transcriptRows() },
       { heading: "Flow capture", rows: this.flowRows(desktopApp) },
       { heading: "Troubleshooting", rows: this.troubleshootingRows() },
     ];
-    // Last, and folded away (Isaiah, 2026-11-10): nobody needs these to watch
-    // a video, and a store user should never be asked to install anything.
-    if (desktopApp) {
-      sections.push({
-        heading: "Desktop helpers (optional)",
-        advanced: {
-          note:
-            "YouTube for You needs none of this. If yt-dlp is already on this computer, YouTube for You uses it for offline downloads; " +
-            `ffmpeg adds downloads above 360p and finer Smart Speed. Setup steps: ${HELPERS_DOC}`,
-        },
-        rows: this.helperRows(),
-      });
-    }
     return sections;
   }
 
@@ -235,13 +221,12 @@ export class YtFreeSettingTab extends PluginSettingTab {
         ]
       : [
           // Saying this once, plainly, beats a mobile user wondering why the
-          // picture is soft and where the download button went.
+          // picture is soft.
           {
             name: "On this device",
             desc:
               "Playback here resolves the stream in the plugin and plays it in a normal video element — ad-free, at 360p unless HD is on below. " +
-              "Transcripts and most-replayed moments both work here, read straight off YouTube. " +
-              "Offline downloads are desktop only.",
+              "Transcripts and most-replayed moments both work here, read straight off YouTube.",
           },
           this.toggle(
             "phoneHighQuality",
@@ -268,7 +253,6 @@ export class YtFreeSettingTab extends PluginSettingTab {
 
   private hubRows(): Row[] {
     const { plugin } = this;
-    const removedCount = plugin.subscriptions.removedSearchVideos().length;
     const hiddenCount = plugin.subscriptions.hiddenSearchChannels().length;
     return [
       {
@@ -335,18 +319,6 @@ export class YtFreeSettingTab extends PluginSettingTab {
         "The feed mixes Shorts with normal videos and marks neither, so each new video is checked once to tell them apart. Off by default.",
         () => plugin.refreshHub(),
       ),
-      {
-        name: "Removed from search",
-        desc: `${removedCount} ${removedCount === 1 ? "video" : "videos"}. Remove on a search result keeps it out of later searches on both devices. Undo any of them here.`,
-        build: (setting) =>
-          setting.addButton((button) =>
-            button
-              .setButtonText("Show list…")
-              .onClick(() =>
-                new SearchBlocklistModal(this.app, plugin.subscriptions, "videos", () => this.redraw()).open(),
-              ),
-          ),
-      },
       {
         name: "Hidden from search",
         desc: `${hiddenCount} ${hiddenCount === 1 ? "channel" : "channels"}. Hidden with the ⋯ on a search result. Only search is affected; subscribing to one un-hides it.`,
@@ -521,30 +493,11 @@ export class YtFreeSettingTab extends PluginSettingTab {
       this.toggle(
         "smartSpeed",
         "Compress pauses",
-        "Silence is jumped over rather than played fast, so there is nothing to hear where a pause was. Audio that is not speech but is not silence either — music, a demo — plays fast instead of being cut. Works on any captioned video with nothing installed, on desktop and on the phone. Every player has its own toggle in the control row; this is the state it starts in. Off by default.",
+        "Jumps over the stretches where nobody is speaking, read from the video's captions. Works on any captioned video, on desktop and on the phone. Every player has its own toggle in the control row; this is the state it starts in. Off by default.",
       ),
-      this.toggle(
-        "skipNonSpeech",
-        "Skip non-speech audio",
-        "Compress anything nobody is talking over — musical intros, interludes, stings — and not only what is literally silent. On, the caption timing and the ffmpeg measurement are combined: a stretch both call quiet is skipped outright, and one only the captions call quiet plays at the pause speed below, because there is audio there to hear. Turn it off to leave music at normal speed, which needs ffmpeg to tell music from silence.",
-        refresh,
-      ),
-      {
-        name: "Pause speed",
-        desc: "How fast non-speech audio plays — music, and any pause too short or too far ahead of the buffer to jump over. Real silence is skipped instead, so this number never applies to it. Never slower than the speed you picked for the video itself.",
-        build: (setting) =>
-          setting.addDropdown((dropdown) => {
-            for (const rate of [1.5, 2, 2.5, 3, 4]) dropdown.addOption(String(rate), `${rate}×`);
-            dropdown.setValue(String(plugin.settings.silenceSpeed)).onChange(async (value) => {
-              plugin.settings.silenceSpeed = Number(value);
-              await plugin.saveSettings();
-              refresh();
-            });
-          }),
-      },
       {
         name: "Shortest pause to skip",
-        desc: "A quiet stretch has to last at least this long to be compressed. Lower catches the breaths between sentences and saves more; higher only compresses the real gaps and is safer on a fast talker. One number for both engines — it is the caption-gap threshold, and it is exactly what ffmpeg's silence detection is given when ffmpeg is installed, so the setting means the same thing on every machine.",
+        desc: "A quiet stretch has to last at least this long to be compressed. Lower catches the breaths between sentences and saves more; higher only compresses the real gaps and is safer on a fast talker. It is the shortest caption gap that counts.",
         build: (setting) =>
           setting.addDropdown((dropdown) => {
             const options: Array<[number, string]> = [
@@ -566,7 +519,7 @@ export class YtFreeSettingTab extends PluginSettingTab {
     ];
   }
 
-  private smartSpeedAdvancedRows(desktopApp: boolean): Row[] {
+  private smartSpeedAdvancedRows(): Row[] {
     const { plugin } = this;
     const rows: Row[] = [
       this.slider(
@@ -577,32 +530,6 @@ export class YtFreeSettingTab extends PluginSettingTab {
         () => plugin.refreshSmartSpeed(),
       ),
     ];
-    // Only meaningful where ffmpeg can exist. On a phone these would be dials
-    // attached to nothing.
-    if (!desktopApp) return rows;
-    rows.push(
-      this.slider(
-        "silenceFloorMargin",
-        "Floor margin (ffmpeg)",
-        "How far above each video's measured noise floor the silence threshold sits, in dB. The threshold itself is measured per video from the first minute of audio — this only moves it. Higher compresses more and starts eating quiet speech; lower is the safe direction.",
-        [2, 20, 1],
-      ),
-      {
-        name: "Manual silence threshold (ffmpeg)",
-        desc: "Overrides the measurement with a fixed dBFS value. Leave blank to measure each video, which is almost always better — a fixed number that suits one recording is inside the words on another. Enter a negative number, e.g. −40.",
-        build: (setting) =>
-          setting.addText((text) =>
-            text
-              .setPlaceholder("measured")
-              .setValue(plugin.settings.silenceNoiseDb === null ? "" : String(plugin.settings.silenceNoiseDb))
-              .onChange(async (value) => {
-                const parsed = Number(value.trim().replace(/[−–—]/g, "-"));
-                plugin.settings.silenceNoiseDb = value.trim() === "" || !Number.isFinite(parsed) ? null : parsed;
-                await plugin.saveSettings();
-              }),
-          ),
-      },
-    );
     return rows;
   }
 
@@ -612,7 +539,7 @@ export class YtFreeSettingTab extends PluginSettingTab {
       this.toggle(
         "autoFetchTranscript",
         "Fetch automatically for new notes",
-        "Notes created this session — from the template, the Web Clipper, or a tap in the hub — get their transcript without being asked, on the phone as well as the desktop. Replay peaks are added on desktop only. Opening an older note never triggers it; use the command for those.",
+        "Notes created this session — from the template, the Web Clipper, or a tap in the hub — get their transcript without being asked, on the phone as well as the desktop. Opening an older note never triggers it; use the command for those.",
       ),
       this.slider(
         "transcriptIntervalSeconds",
@@ -715,75 +642,9 @@ export class YtFreeSettingTab extends PluginSettingTab {
       this.toggle(
         "debugLogs",
         "Log what the player is doing",
-        "Prints the fullscreen and keyboard decisions to the developer console (Verbose level), which is the only way to see them: iOS refuses both silently when the tap that asked for them has already finished. Also adds the diagnostic commands (YouTube requests this session, dock badge) to the command palette. Turn on before reproducing a problem, and off afterwards.",
+        "Prints the fullscreen and keyboard decisions to the developer console (Verbose level), which is the only way to see them: iOS refuses both silently when the tap that asked for them has already finished. Also adds the diagnostic command (YouTube requests this session) to the command palette. Turn on before reproducing a problem, and off afterwards.",
         () => this.plugin.refreshPinnedPlayers(),
       ),
-    ];
-  }
-
-  /** yt-dlp, ffmpeg and where downloads go. Desktop only. */
-  private helperRows(): Row[] {
-    const { plugin } = this;
-    const folderText = (): string => {
-      const vaultPath = plugin.vaultPath();
-      const chosen = plugin.settings.downloadFolder.trim();
-      // A path inside the vault is the one mistake here that is expensive and
-      // hard to undo, because the vault syncs. Say so at the moment it is made.
-      const inVault = Boolean(chosen) && Boolean(vaultPath) && chosen.startsWith(vaultPath as string);
-      return inVault
-        ? "⚠ This folder is inside your vault. Downloads will sync to every device and count against your sync storage. Pick somewhere outside the vault."
-        : "Where downloaded videos are kept. Blank means a “YT Free” folder in Movies (Videos on Windows and Linux). Outside the vault on purpose — these files are a local cache, not vault content.";
-    };
-    return [
-      {
-        name: "yt-dlp path",
-        desc: "Leave blank to auto-detect. Obsidian does not inherit your shell PATH, so a full path may be needed.",
-        aliases: ["download", "offline"],
-        build: (setting) =>
-          setting.addText((text) =>
-            text
-              .setPlaceholder("Auto-detect")
-              .setValue(plugin.settings.ytDlpPath)
-              .onChange(async (value) => {
-                plugin.settings.ytDlpPath = value.trim();
-                plugin.resetResolver();
-                await plugin.saveSettings();
-              }),
-          ),
-      },
-      {
-        name: "ffmpeg path",
-        desc: "Leave blank to auto-detect. Needed for downloads above 360p: YouTube only serves one ready-made file (360p), and everything better needs ffmpeg to join separate picture and sound. Streaming is unaffected — that reaches 1080p without ffmpeg.",
-        build: (setting) =>
-          setting.addText((text) =>
-            text
-              .setPlaceholder("Auto-detect")
-              .setValue(plugin.settings.ffmpegPath)
-              .onChange(async (value) => {
-                plugin.settings.ffmpegPath = value.trim();
-                plugin.resetFfmpeg();
-                await plugin.saveSettings();
-              }),
-          ),
-      },
-      {
-        name: "Download folder",
-        desc: folderText(),
-        aliases: ["offline"],
-        build: (setting) =>
-          setting.addText((text) =>
-            text
-              .setPlaceholder("Movies/YT Free")
-              .setValue(plugin.settings.downloadFolder)
-              .onChange(async (value) => {
-                // Blank stays blank and means the default — which cannot be
-                // spelled out in the defaults, because it needs `os.homedir()`.
-                plugin.settings.downloadFolder = value.trim();
-                await plugin.saveSettings();
-                setting.setDesc(folderText());
-              }),
-          ),
-      },
     ];
   }
 }

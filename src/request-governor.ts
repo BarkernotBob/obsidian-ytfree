@@ -51,7 +51,7 @@ export class RequestGovernor {
 
   constructor(
     now: () => number = () => Date.now(),
-    sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+    sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => window.setTimeout(r, ms)),
   ) {
     this.now = now;
     this.sleep = sleep;

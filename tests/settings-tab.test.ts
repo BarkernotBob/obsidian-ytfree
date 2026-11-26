@@ -246,40 +246,17 @@ for (const desktop of [true, false]) {
   });
 }
 
-test("the optional desktop helpers are the last section, and only on desktop", () => {
-  reset(true);
-  const groups = new Tab({}, fakePlugin()).getSettingDefinitions().filter((d) => d.type === "group");
-  const last = groups[groups.length - 1];
-  assert.equal(last.heading, "Desktop helpers (optional)");
-  assert.deepEqual(
-    (last.items ?? []).filter((d) => d.render).map((d) => d.name),
-    ["yt-dlp path", "ffmpeg path", "Download folder"],
-  );
-
-  reset(false);
-  const phone = new Tab({}, fakePlugin()).getSettingDefinitions();
-  assert.equal(phone.some((d) => d.heading === "Desktop helpers (optional)"), false);
-  assert.equal(rowsOf(phone).some((d) => /yt-dlp|ffmpeg/.test(d.name ?? "")), false);
-});
-
 test("closing a search blocklist redraws the tab", () => {
   reset(true);
   const tab = new Tab({}, fakePlugin());
   tab.display();
-  const row = g.__drawn.find((s) => s.name === "Removed from search");
-  assert.match(row?.desc ?? "", /^2 videos\./);
+  // Hidden videos moved to the hub's Hidden list; only channels are here now.
+  assert.equal(g.__drawn.find((s) => s.name === "Removed from search"), undefined);
+  const row = g.__drawn.find((s) => s.name === "Hidden from search");
+  assert.match(row?.desc ?? "", /^1 channel\./);
   void row?.controls[0].click?.();
   const before = g.__drawn.length;
   g.__opened[0].done?.();
   assert.ok(g.__drawn.length > before, "nothing was drawn again");
 });
 
-test("the download folder warns when it is inside the vault", async () => {
-  reset(true);
-  const plugin = fakePlugin();
-  new Tab({}, plugin).display();
-  const row = g.__drawn.find((s) => s.name === "Download folder");
-  assert.match(row?.desc ?? "", /^Where downloaded videos are kept/);
-  await row?.controls[0].change?.("/vault/videos");
-  assert.match(row?.desc ?? "", /inside your vault/);
-});

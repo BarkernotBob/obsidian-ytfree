@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { previewCloseAction } from "../src/preview.ts";
+import { previewCloseAction, resolvePreviewChannel } from "../src/preview.ts";
 
 test("dismissing a sheet whose video is in PiP keeps it playing", () => {
   assert.equal(
@@ -30,4 +30,27 @@ test("handing over beats Picture-in-Picture, not the other way round", () => {
   );
   const keeps = states.filter((state) => previewCloseAction(state) === "keep-playing");
   assert.deepEqual(keeps, [{ pictureInPicture: true, handingOver: false }]);
+});
+
+test("Preview's channel name uses a known id without a lookup", async () => {
+  let looked = 0;
+  const found = await resolvePreviewChannel({ channelId: "UCaaaaaaaaaaaaaaaaaaaaaa", channelTitle: "Mike" }, async () => {
+    looked++;
+    return { channelId: "", channelTitle: "" };
+  });
+  assert.deepEqual(found, { channelId: "UCaaaaaaaaaaaaaaaaaaaaaa", channelTitle: "Mike" });
+  assert.equal(looked, 0);
+});
+
+test("Preview's channel name looks the id up when the card had none", async () => {
+  const found = await resolvePreviewChannel({ channelId: "", channelTitle: "Mike" }, async () => ({
+    channelId: "UCbbbbbbbbbbbbbbbbbbbbbb",
+    channelTitle: "",
+  }));
+  assert.deepEqual(found, { channelId: "UCbbbbbbbbbbbbbbbbbbbbbb", channelTitle: "Mike" });
+});
+
+test("Preview's channel name has nowhere to go when YouTube won't say, or fails", async () => {
+  assert.equal(await resolvePreviewChannel({ channelId: "", channelTitle: "M" }, async () => ({ channelId: "", channelTitle: "" })), null);
+  assert.equal(await resolvePreviewChannel({ channelId: "", channelTitle: "M" }, () => Promise.reject(new Error("x"))), null);
 });

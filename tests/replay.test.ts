@@ -16,7 +16,6 @@ import { BotCheckBreaker, isBotCheckPlayability } from "../src/bot-check.ts";
 import { pickMuxedFormat } from "../src/mobile/player-response.ts";
 import type { PlayerResponse } from "../src/mobile/player-response.ts";
 import { offlineFile, offlineFormats, offlineUrl, parseOfflineManifest } from "../src/offline-hd.ts";
-import { offlineFetchRange } from "../src/desktop/offline-hd.ts";
 import { parseJson3, pickCaptionTrack, pickPlayerCaptionTrack, topPeaks } from "../src/transcript.ts";
 import type { CaptionedPlayerResponse } from "../src/transcript.ts";
 import { fastStreamFromInfo, infoExpiresAt, pickAudioUrl } from "../src/ytdlp-info.ts";
@@ -170,32 +169,4 @@ test("an offline manifest becomes yt-dlp-shaped formats, and its URLs stay in th
   assert.equal(offlineFile("https://example.com/video-720.mp4"), null);
   assert.equal(parseOfflineManifest("{}"), null);
   assert.equal(parseOfflineManifest("not json"), null);
-});
-
-test("the offline player stitches HD from files on disk", async () => {
-  // The synthetic fixture's openings, padded out to a 100 s video's length
-  // (sparse, so nothing is written): the files the offline player reads.
-  const fx = fixtures.find((f) => f.name === "synthetic")!;
-  const dir = mkdtempSync(join(tmpdir(), "ytfree-offline-"));
-  const videos = (fx.info.formats ?? []).filter((f) => f.height && f.acodec === "none");
-  const audio = (fx.info.formats ?? []).find((f) => f.vcodec === "none")!;
-  const files = [...videos, audio].map((f) => {
-    const file = `${f.format_id}.mp4`;
-    writeFileSync(join(dir, file), fx.bytes[f.format_id!]);
-    truncateSync(join(dir, file), 64 << 20);
-    return file;
-  });
-  writeFileSync(join(dir, "offline.json"), JSON.stringify({
-    progressive: "360.mp4",
-    videos: videos.map((f, i) => ({ file: files[i], width: f.width, height: f.height, codecs: f.vcodec, kbps: f.tbr })),
-    audio: { file: files[files.length - 1], codecs: audio.acodec, kbps: audio.tbr },
-  }));
-  const manifest = parseOfflineManifest(readFileSync(join(dir, "offline.json"), "utf8"))!;
-  try {
-    const stream = await resolveHdFromYtDlp("offline", offlineFormats(manifest), offlineFetchRange(dir));
-    assert.equal(stream.height, 1080);
-    assert.ok(stream.virtual!.files[rungUrl("offline", 1080)].includes("#EXTINF:"));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 });

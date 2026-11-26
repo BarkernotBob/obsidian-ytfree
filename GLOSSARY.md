@@ -15,10 +15,16 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Drained** (`progress.json`): watch stamps already handed to `history.json` (#48), so a
   merge with an older copy cannot bring them back and restart the hand-over every save.
 
-- **Hub**: the subscriptions screen. Chips: Inbox, In progress, Saved, Hidden, Everything.
+- **Hub**: the subscriptions screen. Chips: Inbox, In progress, Saved, Hidden, History, Everything.
 - **Inbox**: hub items not yet opened, kept or hidden.
 - **Saved** (chip; `kept` in code): hub items you opened or saved. Not the same as "has a note" (see 017).
-- **Hidden**: the drawer for hub mistakes. Never holds search removals (see 047).
+- **Removed** (state `dismissed`, filter key `hidden` in code): a video removed from the hub. No
+  list shows them; search for one to get it back. Does not affect search (Isaiah, 2026-11-13).
+- **Hidden** (chip; filter `searchHidden`, list `searchRemovedVideos` in code): videos hidden from
+  search with Hide. They still list in search as a text card (no picture) with Unhide (Isaiah,
+  2026-11-12; [scope](docs/V1-SCOPE-HIDE-AND-REMOVE.md)). Replaced Settings → "Removed from search".
+- **Search shows hub videos** (Isaiah, 2026-11-13): Inbox, Saved and removed videos all list in
+  search; only repeats are dropped.
 - **Feed poll**: the check of a subscribed channel's RSS feed, a rolling window of 15
   uploads by that channel only. Every channel, every 60 minutes, 5 at a time, stalest first;
   Sync now checks every channel too. A channel's first check after an import seeds its videos
@@ -137,6 +143,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   most 15s (`HD_WAIT_MS`), then plays 360p and sharpens later as before.
 - With "Start in HD" on, a jump still drops to the lowest rung for its first chunk (Isaiah's
   rule of 2026-10-15 stands).
+
 ### 2026-10-22 (Isaiah reported; fix picked by Claude, open to change)
 
 - **HD stutter at ~55 s and slow jumps**: treated as YouTube refusing a stream URL past its
@@ -152,6 +159,9 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   locking the phone do not pause the video. Reverses the old "collapse pauses" rule. Whether iOS
   allows the background resume is unmeasured; see
   [docs/V1-SCOPE-KEEP-PLAYING.md](docs/V1-SCOPE-KEEP-PLAYING.md).
+- **Locking in fullscreen** (2026-11-25): the video keeps playing too. The player leaves the
+  phone's fullscreen when the app goes to the background and resumes inline, so coming back
+  finds it in the note, not fullscreen (iOS needs a tap to re-enter). MVP.
 
 ### 2026-11-07 (Isaiah)
 
@@ -226,6 +236,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   wait, and a press on a player nobody started begins loading it without playing.
 - **Paste to Preview (GitHub #10, #11)**: wanted, on phone and desktop. Scope written, not yet
   approved.
+
 ### 2026-10-15 (Isaiah asked; defaults picked by Claude, open to change)
 
 - Desktop plays without yt-dlp by falling back to the phone's path; Download and Smart Speed
@@ -284,6 +295,8 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   link or its 360p link will not play before expiry; that video skips the tier for 30 minutes.
   Users are never told to install or update yt-dlp (Isaiah, 2026-11-10: "a user should never have
   to update YT DLP themselves").
+  2026-11-25 (#121, Claude's call): our own stream, the last tier, fails only on its second dead
+  link (the first gets a fresh link) or after a network blip retried once; yt-dlp still fails at once.
 - **YouTube's player as last tier** (#43, approved 2026-11-10): when every stream tier failed for
   a video, or on a bot check, YouTube's player replaces ours in place (hosted page, GitHub Pages),
   with "Try our stream again". Desktop never offers it as a menu choice.
@@ -292,7 +305,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Subscribe in YT Free** (GitHub #65; details Claude's calls, open to change): adds the channel
   to the hub's list only, nothing sent to YouTube; videos arrive on the next feed check (no extra
   poll). On the channel screen the button turns into a greyed "Subscribed" of the same width;
-  there is no unsubscribe there yet. A search card's ⋯ menu offers "Subscribe in YT Free" above
+  there is no unsubscribe there yet (superseded 2026-11-12: see Managing subscriptions). A search card's ⋯ menu offers "Subscribe in YT Free" above
   "Hide this channel", and shows a greyed "Subscribed in YT Free" for a followed channel.
 
 ### Earlier
@@ -309,6 +322,14 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   passed `strict`; the switch keeps it that way.
 - On Windows the plugin never rewrites the PATH it gives yt-dlp, and yt-dlp and ffmpeg are also
   looked for by bare name, last. Not tested on a Windows machine.
+
+### 2026-11-12 (search, #46; Isaiah)
+
+- **Search shows one list.** No "Related to your search" heading. Only YouTube's first results
+  section (the one it sorts and filters) is kept; the sections after it are dropped.
+- **A new search reads two pages at once** (about 27 results, 2 requests). "More results" reads
+  one page. Picked over merging the later sections on plain searches.
+- **One recording run of 6 searches** from the Mac is allowed to confirm the filters, once.
 
 ### 2026-11-11 (Notes button, replaces 2026-11-10)
 
@@ -343,8 +364,6 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   so the first switch per video needs one tap on its play button; after that its frame is kept
   loaded behind ours so later switches start by themselves. Pages serves `gh-pages`, not `docs/`.
 
-
-
 ### 2026-11-10 (store defaults and helpers; Isaiah)
 
 - **New installs start with the note tidy off and Smart Speed off.** An install that already
@@ -367,3 +386,67 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   ecosystem. TypeScript stays pinned.
 - The plugin's four data files are read together at load, not in sequence.
 
+### 2026-11-12 (open at top, Isaiah)
+
+- **Preview opens with neither Description nor Transcript open**, phone and desktop. A missing
+  transcript no longer opens the Description.
+- **A video note opens at its top with no keyboard**, every time it is opened into a pane, new
+  note included (Watch no longer puts the cursor in Notes). The Notes button is the way into
+  writing. Returning to a tab where the note is already open does not move it (Claude's call).
+  [Scope](docs/V1-SCOPE-OPEN-AT-TOP.md).
+
+### 2026-11-12 (hub button, MVP)
+
+- **Hub button** (grid icon) first on the left of every player bar, video notes and Preview.
+  In a note it brings the hub tab forward, the note stays open and **keeps playing**. In Preview it
+  closes the sheet like its close button (stops unless in PiP), then shows the hub.
+- **Bar spacing is equal** between every pair of controls (Isaiah). On a phone the hub button sits
+  at the left end of the transport row, because the side row has no room for a ninth button.
+
+## Managing subscriptions (Isaiah, 2026-11-12; [scope](docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md))
+
+- **Unsubscribe**, never "remove": an edit-mode − in the sidebar read as removing a sidebar row
+  (Isaiah). The hub menu's list is "Subscriptions · N" with **Manage**, which opens the Manage
+  subscriptions screen: Add channel, a filter, and a red **Unsubscribe** per channel.
+- Unsubscribe acts at once with **Undo** (row in place on Manage, a Notice elsewhere). New and
+  Hidden videos of the channel leave the hub; Saved videos, notes and watch history stay.
+- **Subscribed ✓** on the channel screen, a note's channel row and a search card's ⋯ is a button:
+  tapping it unsubscribes. Long-press (right-click on desktop) a channel in the hub menu also
+  offers Unsubscribe.
+- A **note's channel row** sits always visible under the player controls (not hidden in ⋯,
+  Isaiah): channel name, "See all their videos ›", Subscribe. New notes carry `channel_id`.
+- **Adding by channel search** is post-MVP (#108). Add channel opens the paste-a-link + Takeout
+  dialog until then.
+
+### 2026-11-14 (channel paging, Preview → channel; [scope](docs/V1-SCOPE-CHANNEL-PAGING.md))
+
+- Preview's channel name is always a link when there is a name; a missing channel id is looked up
+  on the tap. MVP.
+- A channel's "More videos" ends only with no token, or after 2 pages in a row with nothing new.
+  The end of the list says YouTube's header count also counts Shorts and live streams. MVP.
+- Even-numbered batches and auto-load at the bottom: post-MVP (Isaiah), issue #118, after #104.
+
+### 2026-11-26 (first store release, Isaiah)
+
+- **0.2.0 is the first store release** ("Ship it", Isaiah). `versions.json` starts fresh at 0.2.0:
+  the old `v0.1.0` release has a `v` tag Obsidian ignores, so listing it would send older apps to a
+  release that does not exist.
+- The README says the plugin is not affiliated with YouTube or Google, and that YouTube's embedded
+  player (the fallback) can show YouTube's own ads.
+- The Manage subscriptions filter ships without a × clear button (#125, post-MVP).
+
+### 2026-11-26 (store Caution label, Isaiah)
+
+- **0.2.2 drops everything the store scan warns about**, including yt-dlp and ffmpeg ("I understand
+  we will lose dlp, smart speed, and all the associated items and I accept that"). Goal: no Caution
+  label on the listing. Gone: offline downloads, yt-dlp playback, ffmpeg Smart Speed (caption
+  Smart Speed stays), Dock badge, Shorts redirect probe, Node HD range reader (desktop HD uses
+  `requestUrl` like the phone), the old sign-in cookie-file clean-up.
+- The plugin uses no Node module at all; `esbuild.config.mjs` fails the build if main.js
+  requires one.
+- If 0.2.2 clears the label, a separate desktop-only companion plugin can bring the helpers back.
+  If it does not, the cause is something else and the companion is not the fix.
+- Not changed: the 7 deprecation notes ("Other", not warnings) need minAppVersion 1.13.
+- Quick controls show only what works without ffmpeg (Isaiah): "Skip music too" and "Pause speed"
+  are gone from the pop-out and settings; Smart Speed, Shortest pause and Word protection stay.
+- The switch to YouTube's player shows an **HD** icon, not the YouTube badge (Isaiah).

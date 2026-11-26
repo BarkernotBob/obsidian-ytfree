@@ -2,49 +2,27 @@
 
 Current state only, under 80 lines, replace don't append. History: [docs/archive/](docs/archive/HANDOFF-history-2026-09.md).
 
-## Status (2026-11-13)
+## Status (2026-11-26)
 
+- **0.2.0 was the first store release; 0.2.1 is listed with a Caution label** (all MVP work merged: #46 search, #62 device pass, #104–#123).
+  Isaiah phone-tested the integrated build before release. Display name "YouTube for You", id `ytfree`.
 - Public repo; history rewritten 2026-09-10 (`git filter-repo`), never re-add `app.css`.
-- Ships as GitHub releases (`v0.1.0` exists; `setup.sh` is the README one-liner). Isaiah's answers
-  are in [GLOSSARY.md](GLOSSARY.md); follow-ups are GitHub issues, not files in `issues/`.
-- 2026-11-09: sign-in/cookies/account sync removed (#64); Subscribe + Takeout (#65); hub sync fix
-  (PR #76, Mac+iPhone test pending; follow-up #75). Display name "YouTube for You", id `ytfree`.
-- #66 HD on Play + ceilings (`tests/player-ceilings.test.ts`, `src/play-provider.ts`); blocked on #43.
-  Bot-check Play retries 1, 5, 10, 30 min, 1 h, 2 h, 6 h ([scope](docs/V1-SCOPE-BOT-SAFE.md)).
-- #48 watch history ([scope](docs/V1-SCOPE-WATCH-HISTORY.md)): device test next.
-- #43 (PR #79): dead stream → next tier → YouTube's player ([scope](docs/V1-SCOPE-PLAYER-FALLBACK.md)).
-- Phone YouTube-player button ([scope](docs/V1-SCOPE-YOUTUBE-TOGGLE.md)), Notes button (GLOSSARY): phone test.
-- 2026-11-13 nightly (#111): age-restricted videos blocked everywhere
-  ([scope](docs/V1-SCOPE-AGE-RESTRICTED.md), `src/age-restricted.ts`). Synced `ageRestricted` list;
-  new feed items wait `ageCheck: "pending"` for one player call (`checkAges` in hub poll). U1/U2
-  (does Restricted Mode / the content flags really drop 18+?) need the scope's device test.
-- #108 nightly: Add channels sheet searches channels (`src/channel-search.ts`), Subscribe per row.
-
-## Shipped on main (scope doc = manual test)
-
-- HD: badge, buffered band, Start in HD ([V1-SCOPE-HD-PROGRESS-AND-WAIT](docs/V1-SCOPE-HD-PROGRESS-AND-WAIT.md));
-  ~55 s stutter and jumps ([V1-SCOPE-HD-STUTTER-AND-SEEK](docs/V1-SCOPE-HD-STUTTER-AND-SEEK.md), #23/#24);
-  desktop HD from yt-dlp's files; per-video quality switch ([V1-SCOPE-QUALITY-SWITCH](docs/V1-SCOPE-QUALITY-SWITCH.md)).
-- Phone HD (#25): native IOS HLS (~1 in 5 videos) and YouTube's own player from ⋯ → Quality
-  ([V1-SCOPE-PHONE-HD](docs/V1-SCOPE-PHONE-HD.md)). Pages serves the player page from the `gh-pages`
-  branch: copy `docs/player/index.html` there after each change (`npm run check` fails if it lags; docs/DEVELOPING.md).
+- Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md); follow-ups are GitHub issues, not files in `issues/`.
+- GitHub Pages serves the player page from the `gh-pages` branch: copy `docs/player/index.html`
+  there after each change (`npm run check` fails if it lags; docs/DEVELOPING.md).
 - #91: player page logs `ad seen`/`ad ended`; no-ads device test is a release step (DEVELOPING.md).
-- Keep playing on the phone, resumable background pause, Now playing button
-  ([V1-SCOPE-KEEP-PLAYING](docs/V1-SCOPE-KEEP-PLAYING.md)).
-- Halfway thumbnails (#41), paste-to-Preview, deep link, #29, request research: `docs/V1-SCOPE-*`. **Parked:** 018 (Watch Later); do not re-ask.
+- Scope docs (`docs/V1-SCOPE-*.md`) double as manual tests. **Parked:** 018 (Watch Later); do not re-ask.
 
 ## Next step
 
-**Focus: Obsidian store MVP** ([V1-SCOPE-MVP](docs/V1-SCOPE-MVP.md)). Issues labelled `mvp` come
-first; `post-mvp` waits. New filings get an MVP call against the rule in that doc.
-
-1. MVP order (2026-11-09): #61, #64 → #66 → #43 → #46, #48, #65 → #25, #5 → #62. One ad-free
-   build; own stream, YouTube's player as fallback (#43). Build split (#60) is post-MVP.
-2. #43 fallback; GitHub Pages must serve the hosted player page (phone needs it).
-3. #61 store compliance (LICENSE, versions.json, `x.y.z` tags, Obsidian lint: 32 errors).
-4. #62 device test of merged-but-untested features; #25, #5, #46, #48; bugs Isaiah lists.
-5. Hardening ([V1-SCOPE-HARDENING](docs/V1-SCOPE-HARDENING.md)): Batches 0–2 built;
-   Batch 3 (#87) waits until after release. Still open: a Windows or Linux test.
+1. 0.2.2 removes every store-scan warning, yt-dlp and ffmpeg included (Isaiah, 2026-11-26; see
+   GLOSSARY), and carries the #132 poster fix. After Isaiah's device test, he tags 0.2.2 from his
+   Mac. Then read the listing's Review rating: no Caution means the label is solved and a desktop
+   companion plugin can be scoped; Caution still means the 7 deprecation notes or the
+   disclosures are the cause.
+2. #133 Preview layout awaits scope OK.
+3. Then post-MVP backlog (label `post-mvp`): #125 manage-filter ×, #87 Batch 3, #86 Windows/Linux
+   test, #118/#119 channel lists. Dependabot PRs #101/#113 after release.
 
 ## How to ship and test
 

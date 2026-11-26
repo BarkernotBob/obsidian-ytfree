@@ -95,14 +95,14 @@ export function rungPhase(height: number, top: number): HdPhase {
 /** `promise`, or null if it has not settled within `ms`. A rejection is null too. */
 export function within<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), ms);
+    const timer = window.setTimeout(() => resolve(null), ms);
     promise.then(
       (value) => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         resolve(value);
       },
       () => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         resolve(null);
       },
     );

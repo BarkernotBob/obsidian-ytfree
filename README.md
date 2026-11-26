@@ -3,6 +3,9 @@
 Watch YouTube videos inside your Obsidian notes, in a plain video player, and take notes
 against them with clickable timestamps. Works on desktop and mobile. Nothing else to install.
 
+YouTube for You is an independent project. It is not affiliated with, endorsed by or sponsored by
+YouTube or Google.
+
 YouTube for You does not strip ads out of YouTube's player. It skips that player: it asks YouTube for
 the video's stream and plays it in a normal `<video>` element. When a video's stream can't be
 reached, it falls back to YouTube's own embedded player in the same place.
@@ -44,7 +47,7 @@ whole point of taking notes against a video.
 - **Web Clipper:** import `templates/webclipper-ytfree.json`. It fires automatically on
   any `youtube.com/watch` page. The description arrives as a blockquote, with `[[` written as an HTML entity, on
   purpose: the clipper cannot run the plugin's own escaping, and a raw description can open a
-  code fence or a heading that breaks the rest of the note (049). Re-import the template after
+  code fence or a heading that breaks the rest of the note. Re-import the template after
   updating.
 
 ### YouTube links open in Obsidian
@@ -89,8 +92,8 @@ and never wrote in is moved to Obsidian's trash after that many days.
 YouTube for You talks to these services. Nothing else, and no telemetry: it sends no data about you
 or your vault to its author or anyone else.
 
-- **YouTube** (`youtube.com`, `i.ytimg.com`, `*.googlevideo.com`): video pages, streams,
-  thumbnails, search, channel pages, transcripts and the RSS feeds of channels you subscribe
+- **YouTube** (`youtube.com`, `i.ytimg.com`, `*.googlevideo.com`, and YouTube's image hosts such as
+  `yt3.ggpht.com` for channel pictures): video pages, streams, thumbnails, search, channel pages, transcripts and the RSS feeds of channels you subscribe
   to. The subscriptions hub checks those feeds on a timer while Obsidian is open (hourly by
   default; Settings → *Check every*). Requests are always signed out.
 - **The YouTube for You player page** (`barkernotbob.github.io/obsidian-ytfree/player/`, served by
@@ -99,22 +102,18 @@ or your vault to its author or anyone else.
 - **A notification address you enter** (optional, blank by default): when you fill it in, new
   videos are POSTed there.
 
-**Optional desktop helpers.** YouTube for You needs nothing installed. If
-[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) or `ffmpeg` is already on your computer, YouTube for You
-runs them on desktop for offline downloads and finer Smart Speed. They are separate programs
-you install yourself; YouTube for You never downloads or installs them
-([details](docs/DESKTOP-HELPERS.md)).
-
-**Files outside your vault.** Only if you use offline downloads (desktop, needs yt-dlp):
-downloaded videos go to a `YT Free` folder in Movies (Videos on Windows and Linux), or the folder
-you choose in settings. (Versions before
-sign-in was removed kept a cookie file in `~/Library/Application Support/obsidian-ytfree/`;
-YouTube for You deletes it on first load.)
+**No programs run, no files outside your vault.** YouTube for You runs no other program and
+reads or writes nothing outside your vault. Its own data is in `.obsidian/plugins/ytfree/`.
+(Versions before 0.2.2 could run yt-dlp and ffmpeg for offline downloads; see
+[docs/DESKTOP-HELPERS.md](docs/DESKTOP-HELPERS.md). Versions before sign-in was removed kept a
+cookie file in `~/Library/Application Support/obsidian-ytfree/`; if you used one, delete that
+folder by hand.)
 
 **Accounts and payments.** No account and no sign-in; nothing is paid for. Your YouTube
 cookies never reach the plugin.
 
-**Ads.** YouTube for You shows no ads of its own.
+**Ads.** YouTube for You shows no ads of its own. When a video falls back to YouTube's embedded
+player, that player is YouTube's own and YouTube may show its ads in it.
 
 ## Using more than one device
 
@@ -136,7 +135,9 @@ told otherwise. If the hub never matches between devices, check that first.
   videos play in YouTube's embedded player.
 - Pop-out windows (a note dragged out to its own Obsidian window on desktop) are not supported
   yet: play videos in the main window.
-- Offline downloads are desktop only and need yt-dlp ([details](docs/DESKTOP-HELPERS.md)).
+- No offline downloads since 0.2.2. Videos always stream.
+- Shorts are told apart from regular videos only by length: a subscription's video under
+  3 minutes may show as a regular video.
 
 ## Developing
 
