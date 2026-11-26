@@ -15,14 +15,13 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 
 ## Next step
 
-1. 0.2.2 removes every store-scan warning, yt-dlp and ffmpeg included (Isaiah, 2026-11-26; see
-   GLOSSARY), and carries the #132 poster fix. After Isaiah's device test, he tags 0.2.2 from his
-   Mac. Then read the listing's Review rating: no Caution means the label is solved and a desktop
-   companion plugin can be scoped; Caution still means the 7 deprecation notes or the
-   disclosures are the cause.
-2. #133 Preview layout awaits scope OK.
-3. Then post-MVP backlog (label `post-mvp`): #125 manage-filter ×, #87 Batch 3, #86 Windows/Linux
-   test, #118/#119 channel lists. Dependabot PRs #101/#113 after release.
+1. 0.2.2 is out and the store scan shows 0 warnings. Remaining scan "Recommendations":
+   `display`/`setDynamicTooltip` (kept for Obsidian < 1.13, Isaiah's choice), `virtual-loader`
+   `timeout`, and the Vault enumeration / Clipboard / localStorage behaviors.
+2. Settings as native sub-pages + README rewrite (docs/V1-SCOPE-SETTINGS-PAGES.md): PR open, needs
+   Isaiah's device test (steps in that doc). Store description: its own thread.
+3. Then Isaiah's priority 2: polish the main UI with one design philosophy (needs a scope).
+4. #133 Preview layout awaits scope OK. Post-MVP backlog (label `post-mvp`).
 
 ## How to ship and test
 

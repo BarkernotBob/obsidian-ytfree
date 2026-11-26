@@ -30,10 +30,10 @@ test("a tidy setting the user chose is kept, zero included", () => {
 
 test("saved values of the right type are kept", () => {
   const saved = {
-    ytDlpPath: "/x/yt-dlp",
+    transcriptLanguage: "es",
     smartSpeed: false,
     pinnedHeightVh: 55,
-    silenceNoiseDb: -42,
+    silenceWordPad: 0.3,
     notificationFormat: "text",
     tidyEmptyNoteDays: 10,
   };
@@ -45,23 +45,21 @@ test("saved values of the right type are kept", () => {
 
 test("a value of the wrong type goes back to its default", () => {
   const got = sanitizeSettings({
-    ytDlpPath: 7,
+    transcriptLanguage: 7,
     smartSpeed: "yes",
     pinnedHeightVh: "40",
     lookbackSeconds: Number.NaN,
     heatmapPeaks: -3,
-    silenceNoiseDb: "quiet",
     notificationFormat: "xml",
     notificationWebhook: null,
     tidyEmptyNoteDays: "30",
   });
-  assert.equal(got.ytDlpPath, DEFAULT_SETTINGS.ytDlpPath);
+  assert.equal(got.transcriptLanguage, DEFAULT_SETTINGS.transcriptLanguage);
   assert.equal(got.smartSpeed, DEFAULT_SETTINGS.smartSpeed);
   assert.equal(got.smartSpeed, false);
   assert.equal(got.pinnedHeightVh, DEFAULT_SETTINGS.pinnedHeightVh);
   assert.equal(got.lookbackSeconds, DEFAULT_SETTINGS.lookbackSeconds);
   assert.equal(got.heatmapPeaks, DEFAULT_SETTINGS.heatmapPeaks);
-  assert.equal(got.silenceNoiseDb, null);
   assert.equal(got.notificationFormat, "json");
   assert.equal(got.notificationWebhook, "");
   // Present but unreadable: the new default, off. Never a guess that trashes notes.
@@ -88,4 +86,10 @@ test("keys this build does not know are kept for whoever does", () => {
 test("the developer's offline folder survives only as text", () => {
   assert.equal(sanitizeSettings({ devOfflineHd: "/tmp/hd" }).devOfflineHd, "/tmp/hd");
   assert.equal("devOfflineHd" in sanitizeSettings({ devOfflineHd: 5 }), false);
+});
+
+test("settings removed with yt-dlp and ffmpeg are not defaults any more", () => {
+  for (const gone of ["ytDlpPath", "ffmpegPath", "downloadFolder", "silenceNoiseDb", "silenceFloorMargin"]) {
+    assert.equal(gone in DEFAULT_SETTINGS, false, gone);
+  }
 });

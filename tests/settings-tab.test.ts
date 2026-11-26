@@ -176,9 +176,11 @@ function reset(desktop: boolean): void {
   g.__desktop = desktop;
 }
 
-/** Every row a definitions list holds, in order, flattened out of its groups. */
+/** Every row a definitions list holds, in order, flattened out of its pages and groups. */
 function rowsOf(defs: Definition[]): Definition[] {
-  return defs.flatMap((d) => (d.type === "group" ? (d.items ?? []) : [d])).filter((d) => d.render);
+  return defs
+    .flatMap((d) => (d.type === "page" || d.type === "group" ? rowsOf(d.items ?? []) : [d]))
+    .filter((d) => d.render);
 }
 
 const Tab = await loadTab();
@@ -229,7 +231,7 @@ for (const desktop of [true, false]) {
     for (const setting of g.__drawn) {
       for (const control of setting.controls) {
         if (control.kind !== "toggle" && control.kind !== "slider") continue;
-        if (setting.name === "Resume after") continue; // stored in ms, shown in seconds
+        if (setting.name === "Play again after") continue; // stored in ms, shown in seconds
         const before = { ...plugin.settings } as Record<string, unknown>;
         const next = control.kind === "toggle" ? !control.value : (control.limits?.[1] ?? 1);
         plugin.calls.length = 0;
@@ -252,11 +254,21 @@ test("closing a search blocklist redraws the tab", () => {
   tab.display();
   // Hidden videos moved to the hub's Hidden list; only channels are here now.
   assert.equal(g.__drawn.find((s) => s.name === "Removed from search"), undefined);
-  const row = g.__drawn.find((s) => s.name === "Hidden from search");
-  assert.match(row?.desc ?? "", /^1 channel\./);
+  const row = g.__drawn.find((s) => s.name === "Hidden channels");
+  assert.match(row?.desc ?? "", /^1 channel hidden from search results\./);
   void row?.controls[0].click?.();
   const before = g.__drawn.length;
   g.__opened[0].done?.();
   assert.ok(g.__drawn.length > before, "nothing was drawn again");
 });
 
+
+test("on 1.13+ every row sits on one of seven sub-pages", () => {
+  reset(false);
+  const defs = new Tab({}, fakePlugin()).getSettingDefinitions();
+  assert.deepEqual(
+    defs.map((d) => [d.type, d.name]),
+    ["Playback", "Notes", "Transcripts", "Subscriptions", "Alerts", "Links", "Advanced"].map((n) => ["page", n]),
+  );
+  for (const page of defs) assert.ok(page.desc, `${page.name} has no summary`);
+});

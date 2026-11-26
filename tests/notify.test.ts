@@ -433,7 +433,7 @@ test("the status line says the consequence, not the state", () => {
 
 test("the test button reports what happened, including the failure", () => {
   assert.match(describeTestOutcome({ ok: true }), /^Sent/);
-  assert.match(describeTestOutcome({ ok: false, reason: "disabled" }), /turn Send notifications on/);
+  assert.match(describeTestOutcome({ ok: false, reason: "disabled" }), /turn Send alerts on/);
   assert.match(describeTestOutcome({ ok: false, reason: "failed", error: "503" }), /503/);
 });
 
