@@ -1299,6 +1299,12 @@ body.ytfree-immersive-open {
   /* The thumbnail may 404 or arrive late; the box is black underneath either
      way, so a missing image is a dark poster rather than a jump. */
   display: block;
+  /* The button takes the hover and the click, never the picture. Otherwise
+     Obsidian treats it as an image in the note: a zoom-in cursor on hover and
+     its image zoom on click instead of Play (GitHub #132). */
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 .ytfree-poster-play {
