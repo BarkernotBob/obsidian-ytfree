@@ -51,7 +51,7 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
     context: LoaderContext | null = null;
     stats: LoaderStats = newStats();
     private done = false;
-    private timer: ReturnType<typeof setTimeout> | null = null;
+    private timer: number | null = null;
     private controller: AbortController | null = null;
     private callbacks: LoaderCallbacks<LoaderContext> | null = null;
     /** Which `load` is current: a late answer to an earlier one is dropped. */
@@ -94,7 +94,7 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
 
       const limit = config.loadPolicy?.maxLoadTimeMs || config.timeout;
       if (limit > 0) {
-        this.timer = setTimeout(() => {
+        this.timer = window.setTimeout(() => {
           if (stale()) return;
           this.done = true;
           this.cancel();
@@ -170,7 +170,7 @@ export function virtualLoader(source: VirtualPlaylist): LoaderClass {
     }
 
     private clearTimer(): void {
-      if (this.timer !== null) clearTimeout(this.timer);
+      if (this.timer !== null) window.clearTimeout(this.timer);
       this.timer = null;
     }
   };

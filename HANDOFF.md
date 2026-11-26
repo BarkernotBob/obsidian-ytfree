@@ -4,7 +4,7 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 
 ## Status (2026-11-26)
 
-- **0.2.0 is the first store release** (all MVP work merged: #46 search, #62 device pass, #104–#123).
+- **0.2.0 was the first store release; 0.2.1 is listed with a Caution label** (all MVP work merged: #46 search, #62 device pass, #104–#123).
   Isaiah phone-tested the integrated build before release. Display name "YouTube for You", id `ytfree`.
 - Public repo; history rewritten 2026-09-10 (`git filter-repo`), never re-add `app.css`.
 - Isaiah's answers are in [GLOSSARY.md](GLOSSARY.md); follow-ups are GitHub issues, not files in `issues/`.
@@ -15,12 +15,14 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 
 ## Next step
 
-1. Isaiah submits at community.obsidian.md (sign in, link GitHub, add plugin); fix whatever the
-   automated review lists with a new patch release.
-2. #132 (MVP): on desktop Obsidian treated the poster <img> as a note image (zoom-in magnifier on
-   hover, click opens its image zoom instead of Play). Poster image now ignores the pointer (0.2.2 candidate). #133 Preview layout awaits scope OK.
-3. Then post-MVP backlog (label `post-mvp`): #125 manage-filter ×, #87 Batch 3 (pop-out warnings),
-   #86 Windows/Linux test, #118/#119 channel lists. Dependabot PRs #101/#113 after release.
+1. 0.2.2 removes every store-scan warning, yt-dlp and ffmpeg included (Isaiah, 2026-11-26; see
+   GLOSSARY), and carries the #132 poster fix. After Isaiah's device test, he tags 0.2.2 from his
+   Mac. Then read the listing's Review rating: no Caution means the label is solved and a desktop
+   companion plugin can be scoped; Caution still means the 7 deprecation notes or the
+   disclosures are the cause.
+2. #133 Preview layout awaits scope OK.
+3. Then post-MVP backlog (label `post-mvp`): #125 manage-filter ×, #87 Batch 3, #86 Windows/Linux
+   test, #118/#119 channel lists. Dependabot PRs #101/#113 after release.
 
 ## How to ship and test
 

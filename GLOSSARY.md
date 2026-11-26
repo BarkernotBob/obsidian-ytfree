@@ -434,3 +434,19 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - The README says the plugin is not affiliated with YouTube or Google, and that YouTube's embedded
   player (the fallback) can show YouTube's own ads.
 - The Manage subscriptions filter ships without a × clear button (#125, post-MVP).
+
+### 2026-11-26 (store Caution label, Isaiah)
+
+- **0.2.2 drops everything the store scan warns about**, including yt-dlp and ffmpeg ("I understand
+  we will lose dlp, smart speed, and all the associated items and I accept that"). Goal: no Caution
+  label on the listing. Gone: offline downloads, yt-dlp playback, ffmpeg Smart Speed (caption
+  Smart Speed stays), Dock badge, Shorts redirect probe, Node HD range reader (desktop HD uses
+  `requestUrl` like the phone), the old sign-in cookie-file clean-up.
+- The plugin uses no Node module at all; `esbuild.config.mjs` fails the build if main.js
+  requires one.
+- If 0.2.2 clears the label, a separate desktop-only companion plugin can bring the helpers back.
+  If it does not, the cause is something else and the companion is not the fix.
+- Not changed: the 7 deprecation notes ("Other", not warnings) need minAppVersion 1.13.
+- Quick controls show only what works without ffmpeg (Isaiah): "Skip music too" and "Pause speed"
+  are gone from the pop-out and settings; Smart Speed, Shortest pause and Word protection stay.
+- The switch to YouTube's player shows an **HD** icon, not the YouTube badge (Isaiah).

@@ -24,7 +24,6 @@ import { setBlocked } from "../src/search-blocklist.ts";
 import type { HubItem } from "../src/subscriptions.ts";
 import { emptyState, mergeItems, mergeStates, normalizeState, visibleItems } from "../src/subscriptions.ts";
 import { pickNotifiable } from "../src/notify.ts";
-import { AGE_LIMIT_PREFIX, buildArgs, downloadVideo } from "../src/desktop/download.ts";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -118,22 +117,6 @@ test("search and channel browse send Restricted Mode; the player does not need i
   assert.equal(requestContext(CLIENTS.web.ctx, false).user, undefined);
 });
 
-test("yt-dlp downloads refuse anything rated above 17", () => {
-  const args = buildArgs({
-    videoId: "aaaaaaaaaaa",
-    ytDlpPath: "yt-dlp",
-    ffmpegPath: null,
-    destDir: "/tmp/yt",
-    baseName: "x",
-    onProgress: () => undefined,
-  });
-  const at = args.indexOf("--age-limit");
-  assert.ok(at >= 0);
-  assert.equal(args[at + 1], "17");
-  // The rating is printed before the filter, since --print silences the skip line.
-  assert.ok(args.some((a) => a.startsWith(`pre_process:${AGE_LIMIT_PREFIX}`)));
-});
-
 // ------------------------------------------------------------------ the synced list and the hub
 
 test("the ageRestricted list survives a load and unions across devices", () => {
@@ -177,47 +160,4 @@ test("notifications skip age-restricted and still-unchecked videos", () => {
   const items = [item("okokokokoko"), item("pendingpend", { ageCheck: "pending" }), item("blockedbloc")];
   const picked = pickNotifiable(items, items, [], { blocked: new Set(["blockedbloc"]) });
   assert.deepEqual(picked.map((i) => i.videoId), ["okokokokoko"]);
-});
-
-// ------------------------------------------------------------------ a download that meets one
-
-/** A stand-in yt-dlp that prints the given stdout lines and exits 0. */
-function fakeYtDlp(lines: string[]): { path: string; dir: string } {
-  const dir = mkdtempSync(join(tmpdir(), "ytfree-age-"));
-  const path = join(dir, "yt-dlp");
-  writeFileSync(path, `#!/bin/sh\n${lines.map((l) => `printf '%s\\n' '${l}'`).join("\n")}\nexit 0\n`);
-  chmodSync(path, 0o755);
-  return { path, dir };
-}
-
-function download(ytDlpPath: string, destDir: string) {
-  return downloadVideo({
-    videoId: "aaaaaaaaaaa",
-    ytDlpPath,
-    ffmpegPath: null,
-    destDir,
-    baseName: "x [aaaaaaaaaaa]",
-    onProgress: () => undefined,
-  }).done;
-}
-
-test("a download yt-dlp skipped for its 18+ rating is refused as age-restricted", async () => {
-  const fake = fakeYtDlp([`${AGE_LIMIT_PREFIX}18`]);
-  try {
-    await assert.rejects(download(fake.path, fake.dir), (err: unknown) => isAgeRestricted(err));
-  } finally {
-    rmSync(fake.dir, { recursive: true, force: true });
-  }
-});
-
-test("a normal download whose title mentions an age gate still succeeds", async () => {
-  const fake = fakeYtDlp([`${AGE_LIMIT_PREFIX}0`]);
-  const saved = join(fake.dir, "Why my video got age-restricted [aaaaaaaaaaa].mp4");
-  writeFileSync(saved, "");
-  writeFileSync(fake.path, `#!/bin/sh\nprintf '%s\\n' '${AGE_LIMIT_PREFIX}0' '${saved}'\nexit 0\n`);
-  try {
-    assert.equal(await download(fake.path, fake.dir), saved);
-  } finally {
-    rmSync(fake.dir, { recursive: true, force: true });
-  }
 });

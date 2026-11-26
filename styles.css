@@ -49,18 +49,20 @@
  * Three selectors because the shadow parts are not the same on both engines and
  * an unrecognised one invalidates only its own rule: `-panel` is the bar itself
  * in both, `-enclosure` is Chromium's wrapper, and `-webkit-media-controls` is
- * WebKit's root. `!important` because these are UA styles.
+ * WebKit's root. No `!important` (0.2.2, store scan): a page's normal rule
+ * already beats the engine's own normal styles for these parts, both as an
+ * outer-tree rule against a shadow tree and as author against user agent.
  */
 .ytfree-video.is-hushed::-webkit-media-controls {
-  display: none !important;
+  display: none;
 }
 
 .ytfree-video.is-hushed::-webkit-media-controls-enclosure {
-  display: none !important;
+  display: none;
 }
 
 .ytfree-video.is-hushed::-webkit-media-controls-panel {
-  display: none !important;
+  display: none;
 }
 
 /*
@@ -260,8 +262,9 @@
    *
    * It used to be a `1fr auto 1fr` grid with 8px inside each group and the
    * leftover air between the groups, so the gaps were 8, 8, 40-odd, 8, 8 and
-   * read as three clusters. The groups are now `display: contents` and the
-   * bar spreads every control evenly with `space-between`. The left and right
+   * read as three clusters. Every control is now a direct child of the bar
+   * (the groups were `display: contents` until 0.2.2, which the store scan
+   * flags) and the bar spreads them evenly with `space-between`. The left and right
    * runs are the same width give or take the speed picker, so Play stays
    * within a few pixels of the centre without the grid forcing it there.
    */
@@ -276,28 +279,27 @@
   box-sizing: border-box;
 }
 
-/* The groups stay in the DOM because the code and the YouTube-player rules
-   name them; they no longer draw a box of their own. */
-.ytfree-controls-group {
-  display: contents;
+/* The phone's line between the transport row and the side row. */
+.ytfree-controls-break {
+  display: none;
 }
 
 /* Left first, then the transport (ordered below), then the right. */
-.ytfree-controls-right > * {
+.ytfree-controls > .ytfree-side-right {
   order: 4;
 }
 
 /* Construction order puts Play first, because Play is the button the rest of
    this file talks about; the order it is *drawn* in belongs here. */
-.ytfree-controls-transport .ytfree-btn-back {
+.ytfree-controls > .ytfree-btn-back {
   order: 1;
 }
 
-.ytfree-controls-transport .ytfree-btn-play {
+.ytfree-controls > .ytfree-btn-play {
   order: 2;
 }
 
-.ytfree-controls-transport .ytfree-btn-forward {
+.ytfree-controls > .ytfree-btn-forward {
   order: 3;
 }
 
@@ -1076,29 +1078,47 @@
      on the second row of a 390pt phone with any gap at all. */
   .ytfree-controls {
     flex-wrap: wrap;
-    row-gap: 8px;
-    column-gap: 0;
+    /* No row gap: the zero-height break is a row of its own, and a row gap
+       would land on both sides of it. Row two's margin is the 8pt instead. */
+    gap: 0;
     padding: 4px 6px;
     /* 8 padding + 48 transport + 8 row gap + 40 side row. Fixed, so the row
        count cannot change under a control that has just been pressed. */
     min-height: 104px;
   }
 
-  .ytfree-controls-transport {
-    display: flex;
+  /* Row one: the transport, centred by the auto margins (they win over
+     `space-between`) with 8px between the three. Then the break, then row two. */
+  .ytfree-controls > .ytfree-btn-back {
+    margin-left: auto;
+  }
+
+  .ytfree-controls > .ytfree-btn-play {
+    margin: 0 8px;
+  }
+
+  .ytfree-controls > .ytfree-btn-forward {
+    margin-right: auto;
+  }
+
+  .ytfree-controls-break {
+    display: block;
     flex-basis: 100%;
-    justify-content: center;
-    align-items: center;
-    gap: 8px;
-    order: 0;
+    height: 0;
+    order: 4;
   }
 
-  .ytfree-controls-left > * {
-    order: 1;
+  .ytfree-controls > .ytfree-side-left {
+    order: 5;
   }
 
-  .ytfree-controls-right > * {
-    order: 2;
+  .ytfree-controls > .ytfree-side-right {
+    order: 6;
+  }
+
+  .ytfree-controls > .ytfree-side-left:not(.ytfree-btn-hub),
+  .ytfree-controls > .ytfree-side-right {
+    margin-top: 8px;
   }
 
   .ytfree-controls .ytfree-btn-hub {
@@ -1729,7 +1749,7 @@ body.ytfree-immersive-open {
     "thumb meta"
     "thumb actions";
   align-items: start;
-  column-gap: 0.8em;
+  gap: 0 0.8em;
   padding: 8px 0.5em;
   border-radius: var(--radius-m);
   cursor: var(--cursor-link);
@@ -3651,7 +3671,7 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
     grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
     /* Picture, title, facts, the space left over, and the buttons under both. */
     grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-    column-gap: 1.2em;
+    gap: 0 1.2em;
   }
 
   body:not(.is-mobile) .ytfree-preview-modal .ytfree-preview-player {
@@ -3820,7 +3840,9 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
  * with buttons at both ends. The close button gets a row of its own above it
  * rather than landing on one of them.
  */
-.ytfree-preview-modal .ytfree-preview-player:has(.ytfree-preview-wrapper.is-collapsed) {
+/* `.modal` for weight: the `:has()` this replaced (0.2.2, store scan) counted
+   its argument, and the phone's player rules are that specific. */
+.modal.ytfree-preview-modal .ytfree-preview-player.has-collapsed-wrapper {
   padding-top: 44px;
 }
 
@@ -3899,9 +3921,12 @@ body.ytfree-immersive-open .ytfree-preview-close {
  * - The header you are reading widens to the full row and the other one goes;
  *   shut it and the two are side by side again.
  *
- * Done with a grid and `display: contents` on the boxes that group the
- * headers with their bodies, so the DOM the laptop and landscape layouts rely
- * on is unchanged.
+ * Done with a grid on the sheet and a second one inside the reading box, so
+ * the DOM the laptop and landscape layouts rely on is unchanged. Shut, the
+ * reading box is the header row and nothing else (both bodies have no height),
+ * so the title and the facts sit under it. Open, it spans the header row down
+ * through the body row, and the title and the facts are off the sheet anyway.
+ * (It used to be `display: contents` on the boxes, which the store scan flags.)
  */
 @media (min-height: 521px) {
   .is-phone .ytfree-preview-modal .modal-content {
@@ -3915,7 +3940,7 @@ body.ytfree-immersive-open .ytfree-preview-close {
       "facts facts"
       "body body"
       "actions actions";
-    column-gap: 0.5em;
+    gap: 0 0.5em;
   }
 
   .is-phone .ytfree-preview-modal .ytfree-preview-player {
@@ -3923,20 +3948,38 @@ body.ytfree-immersive-open .ytfree-preview-close {
     margin-bottom: 0.5em;
   }
 
-  .is-phone .ytfree-preview-read,
+  .is-phone .ytfree-preview-read {
+    grid-area: dhead-start / dhead-start / dhead-end / thead-end;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0 0.5em;
+    min-height: 0;
+  }
+
+  .is-phone .ytfree-sheet-reading .ytfree-preview-read {
+    grid-area: dhead-start / dhead-start / body-end / thead-end;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
   .is-phone .ytfree-preview-describe,
-  .is-phone .ytfree-preview-transcript,
+  .is-phone .ytfree-preview-transcript {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    /* The laptop's space between the two regions; here they are side by side. */
+    margin-top: 0;
+  }
+
+  /* Reading: the open region takes both columns and the other one goes. */
   .is-phone .ytfree-sheet-reading .ytfree-preview-describe:not(.is-open),
   .is-phone .ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) {
-    display: contents;
+    display: none;
   }
 
-  .is-phone .ytfree-preview-disclose {
-    grid-area: dhead;
-  }
-
-  .is-phone .ytfree-preview-transcript-head {
-    grid-area: thead;
+  .is-phone .ytfree-sheet-reading .ytfree-preview-describe.is-open,
+  .is-phone .ytfree-sheet-reading .ytfree-preview-transcript.is-open {
+    grid-column: 1 / -1;
   }
 
   .is-phone .ytfree-preview-disclose,
@@ -3965,16 +4008,6 @@ body.ytfree-immersive-open .ytfree-preview-close {
    * goes; shut, they are two halves again (Isaiah's third phone test). The row
    * itself stays put either way, so nothing below the picture jumps.
    */
-  .is-phone .ytfree-sheet-reading .ytfree-preview-describe:not(.is-open) .ytfree-preview-disclose,
-  .is-phone .ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) .ytfree-preview-transcript-head {
-    display: none;
-  }
-
-  .is-phone .ytfree-preview-describe.is-open .ytfree-preview-disclose,
-  .is-phone .ytfree-preview-transcript.is-open .ytfree-preview-transcript-head {
-    grid-area: dhead-start / dhead-start / dhead-end / thead-end;
-  }
-
   .is-phone .ytfree-preview-title {
     grid-area: title;
     margin-top: 0.6em;
@@ -3984,10 +4017,10 @@ body.ytfree-immersive-open .ytfree-preview-close {
     grid-area: facts;
   }
 
-  /* Both bodies share the region; only the open one has any height. */
+  /* Only the open region's body has any height, and it takes what is left. */
   .is-phone .ytfree-preview-description,
   .is-phone .ytfree-preview-transcript-body {
-    grid-area: body;
+    flex: 1 1 auto;
     min-height: 0;
   }
 
@@ -4042,7 +4075,7 @@ body.ytfree-immersive-open .ytfree-preview-close {
      * now — so it is spare space and is allowed to be nothing at all.
      */
     grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-    column-gap: 0.9em;
+    gap: 0 0.9em;
   }
 
   .is-phone .ytfree-preview-modal .ytfree-preview-player {
@@ -4205,12 +4238,11 @@ body.ytfree-immersive-open .ytfree-preview-close {
   font: inherit;
   color: var(--text-accent);
   cursor: pointer;
-  text-decoration: underline;
-  text-decoration-color: transparent;
+  text-decoration: none;
 }
 
 .ytfree-preview-channel:hover {
-  text-decoration-color: currentColor;
+  text-decoration: underline;
 }
 
 /* YouTube's own player on the phone (#25, part 2): over the picture, in place. */
@@ -4448,7 +4480,14 @@ body.ytfree-immersive-open .ytfree-preview-close {
 
 /* The name is a link-styled button: it opens the channel's videos. */
 .ytfree-manage-open {
-  all: unset;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
   cursor: pointer;
   font-size: var(--font-ui-medium);
   white-space: nowrap;
@@ -4501,7 +4540,14 @@ body.ytfree-immersive-open .ytfree-preview-close {
 }
 
 .ytfree-channel-row-open {
-  all: unset;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 40px;
