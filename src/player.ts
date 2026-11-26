@@ -144,6 +144,14 @@ export interface PlayerOptions {
    * volume, which is what a first sight of a video should do.
    */
   session?: SessionOptions;
+  /**
+   * SPIKE (built-in vs ours, Isaiah 2026-11-26): the platform's controls off,
+   * and ours drawn instead — Back, Play and Forward centred on the picture,
+   * Fullscreen in its corner, and a time / seek / time row under it. A note
+   * opts in with `ytfree_controls: ours` in its frontmatter. Absent, nothing
+   * changes. Removed or made permanent once the comparison is decided.
+   */
+  ownTransport?: boolean;
 }
 
 /**
@@ -590,9 +598,12 @@ export class YtFreePlayer {
     this.stage = stage;
     this.video = stage.createEl("video", {
       cls: "ytfree-video",
-      attr: { controls: "", playsinline: "", preload: "metadata" },
+      attr: options.ownTransport
+        ? { playsinline: "", preload: "metadata" }
+        : { controls: "", playsinline: "", preload: "metadata" },
     });
     this.buildProgressBar(stage);
+    if (options.ownTransport) this.buildOwnTransport(stage);
     if (options.dragSeek) this.bindDragSeek(stage);
 
     // Before anything can set a rate above 1: without this a 3× pause is a
@@ -1224,6 +1235,7 @@ export class YtFreePlayer {
     this.fullscreenBtn = button("left", "Fullscreen", "maximize", "Fullscreen", () => {
       this.fullscreenPressed();
     });
+    this.fullscreenBtn.addClass("ytfree-btn-fullscreen");
     // Dimmed until there is media to show (GitHub #9). These are the events
     // that move `readyState` across the line `fullscreenPress` draws.
     for (const event of ["loadstart", "loadedmetadata", "emptied", "error"]) {
@@ -1300,6 +1312,98 @@ export class YtFreePlayer {
     }
 
     this.buildSectionLinks();
+  }
+
+  /** SPIKE: see `PlayerOptions.ownTransport`. */
+  private buildOwnTransport(stage: HTMLElement): void {
+    this.container.addClass("ytfree-own-transport");
+    const layer = stage.createDiv({ cls: "ytfree-transport is-shown" });
+    const make = (parent: HTMLElement, cls: string, icon: string, title: string, run: () => void) => {
+      const el = parent.createEl("button", { cls: `ytfree-transport-btn ${cls}`, attr: { title, "aria-label": title } });
+      el.type = "button";
+      setIcon(el, icon);
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        run();
+        wake();
+      });
+      return el;
+    };
+    const row = layer.createDiv({ cls: "ytfree-transport-row" });
+    make(row, "ytfree-transport-back", "rotate-ccw", "Back 10 seconds", () => this.seekBy(-10));
+    const play = make(row, "ytfree-transport-play", "play", "Play or pause", () => {
+      if (this.pendingPlay) {
+        this.setPendingPlay(false);
+        return;
+      }
+      if (!this.video.paused) {
+        this.readerPauseAt = Date.now();
+        this.video.pause();
+        return;
+      }
+      void this.withMedia(() => this.play());
+    });
+    make(row, "ytfree-transport-forward", "rotate-cw", "Forward 10 seconds", () => this.seekBy(10));
+    make(layer, "ytfree-transport-full", "maximize", "Fullscreen", () => this.fullscreenPressed());
+
+    let fade: number | null = null;
+    const wake = (): void => {
+      layer.addClass("is-shown");
+      if (fade !== null) window.clearTimeout(fade);
+      fade = null;
+      if (!this.isPlaying) return;
+      fade = window.setTimeout(() => {
+        fade = null;
+        if (this.isPlaying) layer.removeClass("is-shown");
+      }, 3000);
+    };
+    const paintPlay = (): void => {
+      setIcon(play, this.isPlaying ? "pause" : "play");
+      wake();
+    };
+    for (const event of ["play", "pause", "ended"]) this.video.addEventListener(event, paintPlay);
+    // A tap on the picture brings them back, or puts them away while playing.
+    stage.addEventListener("click", (e) => {
+      const target = e.target as Node | null;
+      if (target?.instanceOf(HTMLElement) && target.closest(".ytfree-transport-btn")) return;
+      if (layer.hasClass("is-shown") && this.isPlaying) {
+        if (fade !== null) window.clearTimeout(fade);
+        fade = null;
+        layer.removeClass("is-shown");
+      } else wake();
+    });
+
+    const seek = this.container.createDiv({ cls: "ytfree-seekrow" });
+    const now = seek.createSpan({ cls: "ytfree-seekrow-time", text: "0:00" });
+    const range = seek.createEl("input", {
+      cls: "ytfree-seekrow-range",
+      attr: { type: "range", min: "0", max: "1000", step: "1", value: "0", "aria-label": "Seek" },
+    });
+    const total = seek.createSpan({ cls: "ytfree-seekrow-time", text: "0:00" });
+    let dragging = false;
+    const paintSeek = (): void => {
+      const d = this.video.duration;
+      const known = Number.isFinite(d) && d > 0;
+      total.setText(known ? formatTimestamp(Math.floor(d)) : "0:00");
+      if (dragging) return;
+      now.setText(formatTimestamp(Math.floor(this.video.currentTime)));
+      range.value = known ? String(Math.round((this.video.currentTime / d) * 1000)) : "0";
+    };
+    for (const event of ["timeupdate", "durationchange", "loadedmetadata", "seeked", "emptied"]) {
+      this.video.addEventListener(event, paintSeek);
+    }
+    range.addEventListener("input", () => {
+      dragging = true;
+      const d = this.video.duration;
+      if (Number.isFinite(d) && d > 0) now.setText(formatTimestamp(Math.floor((Number(range.value) / 1000) * d)));
+    });
+    range.addEventListener("change", () => {
+      dragging = false;
+      const d = this.video.duration;
+      if (Number.isFinite(d) && d > 0) this.video.currentTime = (Number(range.value) / 1000) * d;
+      paintSeek();
+    });
   }
 
   /**

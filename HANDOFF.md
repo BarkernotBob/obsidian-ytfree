@@ -21,7 +21,10 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
    localStorage behaviors.
 2. Settings as native sub-pages + README rewrite (docs/V1-SCOPE-SETTINGS-PAGES.md) merged
    (#140, Isaiah device-tested). Store description: its own thread.
-3. UI polish: Cinema design language picked (docs/V1-SCOPE-CINEMA-UI.md, includes #133).
+3. UI polish: Cinema design language picked (docs/V1-SCOPE-CINEMA-UI.md, includes #133). Building on
+   `claude/project-thread-cb7hxd`: hub cards done. SPIKE in progress: frontmatter
+   `ytfree_controls: ours` swaps the platform's video controls for ours (`ownTransport`), for Isaiah
+   to compare on his phone. Remove the spike or make it the default once he picks.
 4. Then post-MVP backlog (label `post-mvp`): #125 manage-filter ×, #87 Batch 3, #86 Windows/Linux
    test, #118/#119 channel lists. Dependabot PRs #101/#113 after release.
 

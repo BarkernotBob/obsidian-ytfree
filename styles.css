@@ -1742,23 +1742,26 @@ body.ytfree-immersive-open {
  * title and a three-line one produce the same picture in the same place.
  */
 .ytfree-hub-card {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  grid-template-areas:
-    "thumb meta"
-    "thumb actions";
-  align-items: start;
-  gap: 0 0.8em;
-  padding: 8px 0.5em;
-  border-radius: var(--radius-m);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 16px;
   cursor: var(--cursor-link);
 }
 
-/* A column on a desktop; the phone block below turns it into two. */
+/*
+ * Cinema (docs/V1-SCOPE-CINEMA-UI.md): a grid of picture-first cards on a
+ * desktop, as many 260px-or-wider columns as the list has room for. The phone
+ * block below makes it one column.
+ */
 .ytfree-hub-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  align-items: start;
+  padding: 8px 0;
 }
 
 /* Watched by an IntersectionObserver, never seen. */
@@ -1780,11 +1783,10 @@ body.ytfree-immersive-open {
 }
 
 .ytfree-hub-thumb {
-  grid-area: thumb;
   position: relative;
-  width: 160px;
-  height: 90px;
-  border-radius: var(--radius-s);
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
   overflow: hidden;
   background: var(--background-secondary);
 }
@@ -1812,9 +1814,49 @@ body.ytfree-immersive-open {
 }
 
 .ytfree-hub-meta {
-  grid-area: meta;
   min-width: 0;
 }
+
+/* The channel's initial, then the whole title and the byline beside it. */
+.ytfree-hub-byline {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.ytfree-hub-text {
+  min-width: 0;
+}
+
+/*
+ * The channel's initial in a coloured circle, standing in for a channel picture
+ * the hub does not store (#139). Eight fixed mid-tone colours that carry white
+ * text in a light theme and a dark one alike; the name picks the colour, so a
+ * channel is always the same one.
+ */
+.ytfree-hub-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 15px;
+  font-weight: var(--font-semibold);
+  line-height: 1;
+  user-select: none;
+}
+
+.ytfree-avatar-0 { background: #2f6fb0; }
+.ytfree-avatar-1 { background: #a0632b; }
+.ytfree-avatar-2 { background: #2f8f6a; }
+.ytfree-avatar-3 { background: #6a54b8; }
+.ytfree-avatar-4 { background: #b3563f; }
+.ytfree-avatar-5 { background: #355a8a; }
+.ytfree-avatar-6 { background: #8a3a6a; }
+.ytfree-avatar-7 { background: #5c7a2e; }
 
 /*
  * The four buttons.
@@ -1833,15 +1875,17 @@ body.ytfree-immersive-open {
  * accent, which is the same signal without the amnesia.
  */
 .ytfree-card-actions {
-  grid-area: actions;
   display: grid;
-  grid-template-columns: repeat(4, 96px);
-  grid-auto-rows: 34px;
-  justify-content: start;
-  gap: 4px;
-  padding-top: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 56px;
+  gap: 0;
 }
 
+/*
+ * Icon over label, no outline (Isaiah, 2026-11-26): a phone's tab bar, not a
+ * row of pills. With no border there is no edge for a word to crowd, and the
+ * longest label ("Preview", "Remove", "Delete") has its column to itself.
+ */
 .ytfree-card-act {
   display: grid;
   grid-template-areas: "s";
@@ -1849,13 +1893,14 @@ body.ytfree-immersive-open {
   box-sizing: border-box;
   overflow: hidden;
   margin: 0;
-  padding: 0;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  background: var(--background-primary);
+  padding: 0 4px;
+  height: 56px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
   box-shadow: none;
   color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
+  font-size: 12px;
   font-weight: var(--font-normal);
   line-height: 1;
   cursor: pointer;
@@ -1876,27 +1921,27 @@ body.ytfree-immersive-open {
 /* Colour only — a border that appeared with the state would move the label, so
    it is present in every state and only its colour changes. */
 .ytfree-card-act.is-done {
-  border-color: var(--text-accent);
   color: var(--text-accent);
 }
 
 .ytfree-card-act.is-danger.is-done {
-  border-color: var(--text-error);
   color: var(--text-error);
 }
 
 .ytfree-card-state {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 4px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .ytfree-card-icon {
   display: flex;
   align-items: center;
-  --icon-size: 16px;
+  --icon-size: 22px;
 }
 
 .ytfree-card-label {
@@ -1948,20 +1993,18 @@ body.ytfree-immersive-open {
   background: var(--text-error);
 }
 
-/* Two lines maximum, always: a long title must not make its card taller than
-   the one above it. */
+/* The whole title, always (Isaiah, 2026-11-26): never an ellipsis. The card
+   grows to fit it; nothing beside it depends on its height. */
 .ytfree-hub-title {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.35;
-  max-height: 2.7em;
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  line-height: 1.3;
   color: var(--text-normal);
+  overflow-wrap: anywhere;
 }
 
 .ytfree-hub-sub {
-  margin-top: 0.25em;
+  margin-top: 4px;
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
   white-space: nowrap;
@@ -2599,6 +2642,7 @@ body.ytfree-immersive-open {
    one, and Restore is the only action it has. */
 .ytfree-hub-hidden-row {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 0.8em;
   height: 56px;
@@ -2632,9 +2676,8 @@ body.ytfree-immersive-open {
 }
 
 .ytfree-hub-hidden-row .ytfree-hub-title {
-  -webkit-line-clamp: 1;
-  max-height: 1.4em;
   font-size: var(--font-ui-small);
+  font-weight: var(--font-normal);
 }
 
 /* The label swaps to "Loading…" on click; the width must not follow it. */
@@ -2732,7 +2775,7 @@ body.ytfree-immersive-open {
    bordered boxes now, and a box flush against the screen edge reads as clipped. */
 .ytfree-hub.ytfree-phone .ytfree-hub-list {
   height: 100%;
-  padding: 0 8px calc(88px + env(safe-area-inset-bottom, 0px)) 8px;
+  padding: 0 16px calc(88px + env(safe-area-inset-bottom, 0px)) 16px;
   box-sizing: border-box;
 }
 
@@ -2814,82 +2857,28 @@ body.ytfree-immersive-open {
 }
 
 /*
- * A list, not a stack of floating cards.
- *
- * Rounded corners and a hover tint are how a desktop separates rows; a phone
- * separates them with a hairline, which is also what gives the delete column's
- * rule something to meet at both ends. Border-box, so adding the line does not
- * add a pixel to the row.
- */
-/*
- * The phone: a two-up grid of cards, not a list of rows.
- *
- * This is a rewrite, not a tweak. The dismiss column, the 112×63 thumbnail and
- * the byline geometry are all gone — Remove is one of four buttons now, and
- * four buttons need width to be legible. The prototype settled the shape: at
- * 390pt a two-up grid gives a ~178px card, four buttons across that is ~40px
- * each, which is a legal target but not a readable label, so the buttons are
- * 2×2 with an icon and a word. The price, stated plainly: a ~250px card, about
- * four per screen. See docs/V1-SCOPE-CARD-CONTROLS.md.
+ * The phone: one column of full-width cards (Cinema). The picture runs the
+ * width of the screen, the whole title sits under it beside the channel's
+ * initial, and the four actions are one row of icon-over-label buttons.
  */
 .ytfree-hub.ytfree-phone .ytfree-hub-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  align-items: start;
-  padding: 4px 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  padding: 8px 0;
 }
 
 .ytfree-hub.ytfree-phone .ytfree-hub-card {
-  display: block;
-  height: auto;
   padding: 0;
-  box-sizing: border-box;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  background: var(--background-secondary);
-  overflow: hidden;
-}
-
-.ytfree-hub.ytfree-phone .ytfree-hub-thumb {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 16 / 9;
   border-radius: 0;
 }
 
-.ytfree-hub.ytfree-phone .ytfree-hub-meta {
-  padding: 6px 8px 0;
-  min-width: 0;
-}
-
-/*
- * Two lines, and a fixed height for them.
- *
- * A one-line title and a two-line one have to make the same card, or the two
- * columns of the grid stop lining up with each other and every row below jogs.
- */
-.ytfree-hub.ytfree-phone .ytfree-hub-title {
-  font-size: var(--font-ui-small);
-  line-height: 1.3;
-  -webkit-line-clamp: 2;
-  height: 2.6em;
-  max-height: 2.6em;
-}
-
-/*
- * The byline: who made it, and when. Two segments, and the quiet half of the
- * card — see `phoneSubParts`. A fixed height, so a card with no date is the
- * same height as the one beside it.
- */
 .ytfree-hub.ytfree-phone .ytfree-hub-sub {
   display: flex;
   align-items: center;
   gap: 0.35em;
-  margin-top: 3px;
-  height: 16px;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-faint);
+  min-width: 0;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
 }
 
 .ytfree-hub.ytfree-phone .ytfree-hub-sub-name {
@@ -2904,15 +2893,6 @@ body.ytfree-immersive-open {
 .ytfree-hub.ytfree-phone .ytfree-hub-sub-age {
   flex: 0 0 auto;
   white-space: nowrap;
-}
-
-/* 2×2, 40px rows. The one shape that carries four equal, legible actions at
-   this width — a row of four cannot, and the labels clip to "Prev / Watc". */
-.ytfree-hub.ytfree-phone .ytfree-card-actions {
-  grid-template-columns: 1fr 1fr;
-  grid-auto-rows: 40px;
-  justify-content: stretch;
-  padding: 6px;
 }
 
 /*
@@ -3095,7 +3075,6 @@ body.ytfree-immersive-open {
 
 .ytfree-hub.ytfree-phone .ytfree-hub-hidden-row .ytfree-hub-title {
   height: auto;
-  max-height: 2.6em;
 }
 
 .ytfree-hub.ytfree-phone .ytfree-hub-hidden-row .ytfree-hub-sub {
@@ -4605,4 +4584,120 @@ body.ytfree-immersive-open .ytfree-preview-close {
 
 .ytfree-notice-undo {
   margin-left: 0.4em;
+}
+
+/*
+ * SPIKE: built-in vs ours (Isaiah, 2026-11-26). A note with
+ * `ytfree_controls: ours` turns the platform's controls off and draws these:
+ * Back, Play and Forward centred on the picture, Fullscreen in its corner, and
+ * a time / seek / time row under it. The bar's own copies of those four step
+ * aside, so nothing is there twice.
+ */
+.ytfree-transport {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+.ytfree-transport.is-shown {
+  opacity: 1;
+}
+
+.ytfree-transport-row {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.ytfree-transport-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: none;
+  color: #fff;
+  --icon-size: 22px;
+}
+
+.ytfree-transport.is-shown .ytfree-transport-btn {
+  pointer-events: auto;
+}
+
+.ytfree-transport-btn.ytfree-transport-play {
+  width: 56px;
+  height: 56px;
+  --icon-size: 28px;
+}
+
+.ytfree-transport-btn.ytfree-transport-full {
+  position: absolute;
+  right: 8px;
+  bottom: 12px;
+  width: 36px;
+  height: 36px;
+  --icon-size: 18px;
+}
+
+.ytfree-seekrow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+}
+
+.ytfree-seekrow .ytfree-seekrow-range {
+  width: 100%;
+  margin: 0;
+}
+
+.is-youtube .ytfree-transport,
+.is-youtube .ytfree-seekrow {
+  display: none;
+}
+
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-back,
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-play,
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-forward,
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-fullscreen {
+  display: none;
+}
+
+@media (max-width: 460px) {
+  .ytfree-own-transport .ytfree-controls {
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    min-height: 0;
+  }
+
+  .ytfree-own-transport .ytfree-controls-break {
+    display: none;
+  }
+
+  .ytfree-own-transport .ytfree-controls .ytfree-btn-hub {
+    position: static;
+  }
+
+  .ytfree-own-transport .ytfree-controls > .ytfree-side-left:not(.ytfree-btn-hub),
+  .ytfree-own-transport .ytfree-controls > .ytfree-side-right {
+    margin-top: 0;
+  }
+}
+
+.ytfree-own-transport .ytfree-poster-play {
+  display: none;
 }

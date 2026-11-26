@@ -77,7 +77,7 @@ import {
   unclaimed,
 } from "./notify";
 import type { NotificationSettings, Post, SendOutcome } from "./notify";
-import { hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
+import { avatarHue, avatarInitial, hubSlots, searchSlots, shownCount, watchedFraction } from "./cards";
 import type { CardActionKey, CardFacts, CardSlot } from "./cards";
 import {
   browseChannel,
@@ -3597,10 +3597,21 @@ export class HubView extends ItemView {
       .createDiv({ cls: "ytfree-hub-progress-fill" });
     fill.style.width = `${Math.round(spec.watched * 100)}%`;
 
-    const meta = card.createDiv({ cls: "ytfree-hub-meta" });
-    meta.createDiv({ cls: "ytfree-hub-title", text: spec.title });
-    if (this.phone) this.renderPhoneSub(meta, spec.phoneSub.channel, spec.phoneSub.trailing);
-    else meta.createDiv({ cls: "ytfree-hub-sub", text: spec.deskSubText });
+    // The byline: the channel's initial in a coloured circle, then the whole
+    // title and who made it. The circle stands in for a channel picture the hub
+    // does not store (#139); its colour comes from the name, so one channel is
+    // always the same colour. A class per colour, not an inline style.
+    const meta = card.createDiv({ cls: "ytfree-hub-meta ytfree-hub-byline" });
+    const channelName = spec.phoneSub.channel;
+    const avatar = meta.createSpan({
+      cls: `ytfree-hub-avatar ytfree-avatar-${avatarHue(channelName)}`,
+      attr: { "aria-hidden": "true" },
+    });
+    avatar.setText(avatarInitial(channelName));
+    const text = meta.createDiv({ cls: "ytfree-hub-text" });
+    text.createDiv({ cls: "ytfree-hub-title", text: spec.title });
+    if (this.phone) this.renderPhoneSub(text, spec.phoneSub.channel, spec.phoneSub.trailing);
+    else text.createDiv({ cls: "ytfree-hub-sub", text: spec.deskSubText });
 
     const actions = card.createDiv({ cls: "ytfree-card-actions" });
     const buttons = new Map<CardActionKey, CardButton>();

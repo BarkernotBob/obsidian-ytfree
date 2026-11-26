@@ -3768,6 +3768,10 @@ export default class YtFreePlugin extends Plugin {
         // builds its own `.ytfree-stage` around the video, which is what the
         // line needs to be able to sit on the picture's bottom edge.
         mediaHost: mobile ? media : undefined,
+        // SPIKE: built-in vs ours (see `PlayerOptions.ownTransport`).
+        ownTransport:
+          noteFile instanceof TFile &&
+          this.app.metadataCache.getFileCache(noteFile)?.frontmatter?.ytfree_controls === "ours",
         // Phones only. A desktop has a mouse on the native scrubber and no host
         // gesture to take the movement away in the first place.
         dragSeek: mobile,

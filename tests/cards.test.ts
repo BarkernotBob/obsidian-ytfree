@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CARD_PAGE, hubSlots, searchSlots, shownCount, watchedFraction } from "../src/cards.ts";
+import { CARD_PAGE, avatarHue, avatarInitial, hubSlots, searchSlots, shownCount, watchedFraction } from "../src/cards.ts";
 import type { CardActionKey } from "../src/cards.ts";
 
 const POSITIONS: CardActionKey[] = ["preview", "watch", "save", "remove"];
@@ -126,4 +126,23 @@ test("a note-only card says Delete where Remove was (#50)", () => {
   assert.equal(remove.label, "Delete");
   assert.equal(remove.icon, "trash-2");
   assert.equal(hubSlots({ inHub: true, noteExists: true })[3].label, "Remove");
+});
+
+test("channel avatar: gives one channel the same colour every time, and a colour in range", () => {
+  const a = avatarHue("Field Notes Science");
+  assert.equal(avatarHue("Field Notes Science"), a);
+  assert.equal(avatarHue("  field notes science "), a);
+  for (const name of ["", "A", "3Blue1Brown", "Technology Connections Extra", "日本語チャンネル"]) {
+    const hue = avatarHue(name);
+    assert.ok(hue >= 0 && hue < 8, `${name} -> ${hue}`);
+  }
+});
+
+test("channel avatar: uses the first letter or digit, upper-cased, and ? for none", () => {
+  assert.equal(avatarInitial("field notes"), "F");
+  assert.equal(avatarInitial("3Blue1Brown"), "3");
+  assert.equal(avatarInitial("@slow_workshop"), "S");
+  assert.equal(avatarInitial("ñandú"), "Ñ");
+  assert.equal(avatarInitial(""), "?");
+  assert.equal(avatarInitial("—"), "?");
 });

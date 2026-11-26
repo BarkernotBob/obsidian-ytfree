@@ -117,3 +117,19 @@ export function watchedFraction(seconds: number, duration: number | null | undef
   if (!duration || duration <= 0 || seconds <= 0) return 0;
   return Math.min(1, seconds / duration);
 }
+
+/** How many avatar colours `styles.css` defines (`.ytfree-avatar-0` …). */
+const AVATAR_COLOURS = 8;
+
+/** A channel's avatar colour: the same name always lands on the same one. */
+export function avatarHue(name: string): number {
+  let hash = 0;
+  for (const ch of name.trim().toLowerCase()) hash = (hash * 31 + (ch.codePointAt(0) ?? 0)) >>> 0;
+  return hash % AVATAR_COLOURS;
+}
+
+/** The letter in a channel's avatar: its first letter or digit, or "?" when it has none. */
+export function avatarInitial(name: string): string {
+  const match = /[\p{L}\p{N}]/u.exec(name);
+  return match ? match[0].toLocaleUpperCase() : "?";
+}
