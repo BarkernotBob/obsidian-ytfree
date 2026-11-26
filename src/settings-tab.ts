@@ -493,27 +493,8 @@ export class YtFreeSettingTab extends PluginSettingTab {
       this.toggle(
         "smartSpeed",
         "Compress pauses",
-        "Silence is jumped over rather than played fast, so there is nothing to hear where a pause was. Audio that is not speech but is not silence either — music, a demo — plays fast instead of being cut. Works on any captioned video with nothing installed, on desktop and on the phone. Every player has its own toggle in the control row; this is the state it starts in. Off by default.",
+        "Jumps over the stretches where nobody is speaking, read from the video's captions. Works on any captioned video, on desktop and on the phone. Every player has its own toggle in the control row; this is the state it starts in. Off by default.",
       ),
-      this.toggle(
-        "skipNonSpeech",
-        "Skip non-speech audio",
-        "Compress anything nobody is talking over — musical intros, interludes, stings — and not only what is literally silent. Stretches the captions call quiet play at the pause speed below. Turn it off to leave music at normal speed.",
-        refresh,
-      ),
-      {
-        name: "Pause speed",
-        desc: "How fast non-speech audio plays — music, and any pause too short or too far ahead of the buffer to jump over. Real silence is skipped instead, so this number never applies to it. Never slower than the speed you picked for the video itself.",
-        build: (setting) =>
-          setting.addDropdown((dropdown) => {
-            for (const rate of [1.5, 2, 2.5, 3, 4]) dropdown.addOption(String(rate), `${rate}×`);
-            dropdown.setValue(String(plugin.settings.silenceSpeed)).onChange(async (value) => {
-              plugin.settings.silenceSpeed = Number(value);
-              await plugin.saveSettings();
-              refresh();
-            });
-          }),
-      },
       {
         name: "Shortest pause to skip",
         desc: "A quiet stretch has to last at least this long to be compressed. Lower catches the breaths between sentences and saves more; higher only compresses the real gaps and is safer on a fast talker. It is the shortest caption gap that counts.",

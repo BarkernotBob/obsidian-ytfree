@@ -4,7 +4,7 @@ import { isBotCheck } from "./bot-check.ts";
 import { isAgeRestricted } from "./age-restricted.ts";
 import { formatTimestamp } from "./format.ts";
 import { playedSpanMs } from "./history.ts";
-import { SHARE_ICON, YT_ICON } from "./icon.ts";
+import { HD_ICON, SHARE_ICON } from "./icon.ts";
 import { anchorVisible, panelPlacement } from "./panel.ts";
 import type { SectionName } from "./sections.ts";
 import { compressibleWindows, moveFor, secondsSaved, secondsSkipped } from "./silence.ts";
@@ -1245,7 +1245,7 @@ export class YtFreePlayer {
       // control left showing while YouTube's player is up (the rest are
       // hidden in place, not removed), so it never moves under the thumb.
       const open = this.options.quick.youtubePlayer;
-      this.ytToggle = button("right", "YT", YT_ICON, "Switch to YouTube's player", () => {
+      this.ytToggle = button("right", "HD", HD_ICON, "Switch to YouTube's player (HD)", () => {
         if (this.ytFallback) void this.retryOurStream();
         else if (this.ytEmbed) this.leaveYouTubePlayer();
         else void this.enterYouTubePlayer(open);
@@ -1538,18 +1538,10 @@ export class YtFreePlayer {
         ".ytfree-panel-label",
       )?.createSpan({ cls: "ytfree-panel-value" }) ?? null;
 
-      if (quick.onSkipNonSpeech) {
-        toggle("Skip music too", quick.skipNonSpeech ?? false, (on) => quick.onSkipNonSpeech?.(on));
-      }
-
-      choice(
-        "Pause speed",
-        [1.5, 2, 2.5, 3, 4, 5],
-        this.options.smartSpeed.silenceRate,
-        (value) => `${value}×`,
-        (value) =>
-          this.setSilenceSettings(this.options.smartSpeed?.minGap ?? 0.5, value),
-      );
+      // No "Skip music too" or "Pause speed" since 0.2.2: both act on the
+      // music ffmpeg measured, and ffmpeg is not run any more. Captions alone
+      // only ever skip (`combineSilence`), so neither control could change
+      // anything.
 
       choice(
         "Shortest pause",
@@ -2925,11 +2917,11 @@ export class YtFreePlayer {
     if (!el) return;
     const on = !!this.ytEmbed;
     const title = !on
-      ? "Switch to YouTube's player"
+      ? "Switch to YouTube's player (HD)"
       : this.ytFallback
         ? "Close YouTube's player and try our stream again"
         : "Back to our player";
-    this.paint(el, "YT", YT_ICON, title);
+    this.paint(el, "HD", HD_ICON, title);
     el.toggleClass("is-active", on);
     el.setAttr("aria-pressed", on ? "true" : "false");
   }

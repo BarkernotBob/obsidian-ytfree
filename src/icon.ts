@@ -22,6 +22,15 @@ export const YT_ICON = "ytfree-youtube";
 export const SHARE_ICON = "ytfree-share";
 
 /**
+ * The player switch, as "HD" in a rounded box (Isaiah, 2026-11-26).
+ *
+ * The button swaps our player for YouTube's, and the reason to press it is the
+ * picture. The YouTube badge said where you would go, not why you would want
+ * to.
+ */
+export const HD_ICON = "ytfree-hd";
+
+/**
  * Search YouTube, as a lens with a play triangle in it.
  *
  * The button that opens the search screen used to be the plain YouTube badge —
@@ -40,6 +49,13 @@ export const SEARCH_YT_ICON = "ytfree-search-youtube";
 const PATHS =
   '<path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/>' +
   '<path d="m10 15 5-3-5-3z"/>';
+
+// A Lucide-proportioned box with the two letters drawn as strokes, so they
+// stay crisp at 20px and take the icon colour like every other control.
+const HD_PATHS =
+  '<rect x="2" y="5" width="20" height="14" rx="2.5"/>' +
+  '<path d="M6.5 9v6M6.5 12h4M10.5 9v6"/>' +
+  '<path d="M13.5 9v6h1.75a3 3 0 0 0 0-6z"/>';
 
 const SHARE_PATHS = '<path d="m15 17 5-5-5-5"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/>';
 
@@ -67,5 +83,6 @@ function lucide(paths: string): string {
 export function registerIcons(): void {
   addIcon(YT_ICON, lucide(PATHS));
   addIcon(SHARE_ICON, lucide(SHARE_PATHS));
+  addIcon(HD_ICON, lucide(HD_PATHS));
   addIcon(SEARCH_YT_ICON, lucide(SEARCH_YT_PATHS));
 }
