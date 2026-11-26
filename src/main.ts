@@ -5474,7 +5474,7 @@ export default class YtFreePlugin extends Plugin {
    */
   youtubeLog(line: string): void {
     this.debug(`youtube player: ${line}`);
-    const path = `${this.manifest.dir ?? ".obsidian/plugins/ytfree"}/youtube-player-log.txt`;
+    const path = `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/ytfree`}/youtube-player-log.txt`;
     const adapter = this.app.vault.adapter;
     this.youtubeLogWrites = this.youtubeLogWrites
       .then(async () => {

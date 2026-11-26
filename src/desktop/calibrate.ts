@@ -76,7 +76,7 @@ export function measurePeakLevels(opts: CalibrateOptions): Promise<number[]> {
 
     // A stalled network read can hang ffmpeg indefinitely, and this runs before
     // the analysis it gates. Better to fall back than to never start.
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       if (settled) return;
       settled = true;
       try {
@@ -90,7 +90,7 @@ export function measurePeakLevels(opts: CalibrateOptions): Promise<number[]> {
     const finish = (err: Error | null, levels?: number[]): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      window.clearTimeout(timer);
       if (err) reject(err);
       else resolve(levels ?? []);
     };
