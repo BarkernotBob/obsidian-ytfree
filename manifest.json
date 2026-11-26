@@ -1,7 +1,7 @@
 {
   "id": "ytfree",
   "name": "YouTube for You",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "minAppVersion": "1.8.7",
   "description": "Watch YouTube videos inside your notes in a plain video player, with clickable timestamps, resume and a subscriptions hub. Works on desktop and mobile with no install; optional yt-dlp on desktop adds downloads and Smart Speed.",
   "author": "BarkernotBob",
