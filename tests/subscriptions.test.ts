@@ -32,6 +32,11 @@ import {
   searchResultToItem,
   thumbnailUrl,
   visibleItems,
+  emptyState,
+  lastUploads,
+  mergeStates,
+  undoUnsubscribe,
+  unsubscribeChannel,
 } from "../src/subscriptions.ts";
 
 const CHANNEL = "UC6107grRI4m0o2-emgoDnAA";
@@ -802,4 +807,66 @@ test("In progress still honours the channel filter and the search box", () => {
     visibleItems([mine, other], { ...options, channelId: null, query: "nothing" }),
     [],
   );
+});
+
+// --------------------------------------------- unsubscribe (manage subscriptions)
+
+function subscribedState() {
+  const state = emptyState();
+  state.channels = [
+    { id: CHANNEL, title: "SmarterEveryDay", addedAt: "2026-01-01T00:00:00.000Z", error: null },
+    { id: "UCaaaaaaaaaaaaaaaaaaaaaa", title: "Other", addedAt: "2026-01-01T00:00:00.000Z", error: null },
+  ];
+  state.items = [
+    item({ videoId: "aaaaaaaaaaa", state: "new" }),
+    item({ videoId: "bbbbbbbbbbb", state: "kept" }),
+    item({ videoId: "ccccccccccc", state: "dismissed" }),
+    item({ videoId: "ddddddddddd", channelId: "UCaaaaaaaaaaaaaaaaaaaaaa", channelTitle: "Other" }),
+  ];
+  return state;
+}
+
+test("unsubscribing drops the channel and its New and Hidden videos, keeps Saved, leaves a tombstone", () => {
+  const state = subscribedState();
+  const undo = unsubscribeChannel(state, CHANNEL, NOW);
+  assert.ok(undo);
+  assert.deepEqual(state.channels.map((c) => c.id), ["UCaaaaaaaaaaaaaaaaaaaaaa"]);
+  assert.deepEqual(state.items.map((i) => i.videoId).sort(), ["bbbbbbbbbbb", "ddddddddddd"]);
+  assert.deepEqual(state.removedChannels, [{ id: CHANNEL, at: NOW.toISOString() }]);
+  assert.equal(unsubscribeChannel(state, CHANNEL, NOW), null, "a second unsubscribe is a no-op");
+});
+
+test("Undo puts the channel and its videos back and lifts the tombstone", () => {
+  const state = subscribedState();
+  const undo = unsubscribeChannel(state, CHANNEL, NOW)!;
+  const later = new Date(NOW.getTime() + 5000);
+  undoUnsubscribe(state, undo, later);
+  assert.ok(state.channels.some((c) => c.id === CHANNEL));
+  assert.deepEqual(state.items.map((i) => i.videoId).sort(), ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"]);
+  assert.deepEqual(state.removedChannels, []);
+});
+
+test("an undone unsubscribe survives a merge with a device that already has the tombstone", () => {
+  const phone = subscribedState();
+  const mac = subscribedState();
+  const undo = unsubscribeChannel(phone, CHANNEL, NOW)!;
+  // The Mac merged the unsubscribe before the phone's Undo.
+  const macAfter = mergeStates(mac, structuredClone(phone));
+  assert.ok(!macAfter.channels.some((c) => c.id === CHANNEL));
+  undoUnsubscribe(phone, undo, new Date(NOW.getTime() + 5000));
+  const merged = mergeStates(phone, macAfter);
+  assert.ok(merged.channels.some((c) => c.id === CHANNEL), "the fresh addedAt beats the tombstone");
+});
+
+test("last upload per channel is the newest publish time the hub holds", () => {
+  const uploads = lastUploads([
+    item({ videoId: "a", published: "2026-07-01T00:00:00Z" }),
+    item({ videoId: "b", published: "2026-07-20T00:00:00Z" }),
+  ]);
+  assert.equal(uploads.get(CHANNEL), "2026-07-20T00:00:00Z");
+});
+
+test("a new note records the channel ID for its channel row", () => {
+  assert.match(buildWatchLaterNote(item(), NOW), new RegExp(`\\nchannel_id: ${CHANNEL}\\n`));
+  assert.doesNotMatch(buildWatchLaterNote(item({ channelId: "" }), NOW), /channel_id/);
 });
