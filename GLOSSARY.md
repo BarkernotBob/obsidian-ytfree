@@ -460,4 +460,6 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - **Back / Play / Forward sit on the picture, Play at its exact centre; every other control stays
   in an always-visible strip under the video** (Isaiah). Notes, Description, Transcript and card
   actions stay. One spacing scale (4/8/12/16/24/32).
+- Small button rows (section buttons, card actions) are **icon over label, no outline** (Isaiah).
+  Speed pill is fixed width and centred between three tools a side; Fullscreen sits on the picture.
 - #133 (desktop Preview, video on the right) is built as part of it.

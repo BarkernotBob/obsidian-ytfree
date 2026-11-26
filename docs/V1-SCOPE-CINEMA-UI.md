@@ -51,7 +51,8 @@ variables, so it works in light, dark and community themes.
   speed | Collapse, Share, Options. The speed pill is a fixed 72 px wide with its value centred, so
   1×, 1.25×, 1.75× and 2× all sit in the same place and nothing beside it moves. On a phone this replaces today's transport row and side row, so the
   player loses a row.
-- **Strip row 3 (notes only):** Notes, Description, Transcript, This moment as four equal pills.
+- **Strip row 3 (notes only):** Notes, Description, Transcript, This moment as four equal
+  icon-over-label buttons (22 px icon, 12 px label, 56 px tall, no outline; Isaiah, 2026-11-26).
   Same behaviour as today's section links (Notes still folds the video only while the keyboard is up).
 - No button is removed and none moves into Options.
 
@@ -61,7 +62,8 @@ variables, so it works in light, dark and community themes.
 - Desktop (#133 folds in here): follows the theme (only the player is dark). 32 px margins, two
   columns at 5:7, 32 px apart. Left: whole title (22 px), facts, action pills, the two tabs. Right:
   the player with the same transport and strip. Each block on the left is 24 px from the next.
-- Card actions on hub cards (Preview, Watch, Save, Remove) stay; one row of four equal pills.
+- Card actions on hub cards (Preview, Watch, Save, Remove) stay; one row of four equal
+  icon-over-label buttons, same style as the section buttons. Save's done state is accent colour.
 
 ### Settings
 - **No restyle.** On Obsidian 1.13+ Obsidian draws the settings tab itself from our definitions, in
