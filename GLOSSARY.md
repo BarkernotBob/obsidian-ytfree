@@ -454,7 +454,9 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 ### 2026-11-26 (design language, Isaiah)
 
 - **The app's design language is "Cinema"** (option B of three mockups): big 16:9 pictures, an
-  always-dark stage, controls floating on the picture, pill controls. Scope:
+  always-dark stage, pill controls. Scope:
   docs/V1-SCOPE-CINEMA-UI.md. Priority 2, after the description and settings cleanup.
 - **Video titles are always shown whole**, never cut with an ellipsis (Isaiah).
+- **Player controls stay always visible under the video**, not floating over it (Isaiah). Same
+  buttons as before; only the plugin's fullscreen keeps a floating bar.
 - #133 (desktop Preview, video on the right) is built as part of it.
