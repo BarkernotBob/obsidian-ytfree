@@ -3,15 +3,18 @@
  * passes through on load.
  *
  * Pure and platform-neutral (no `obsidian` import), so the check is testable
- * under plain `node --test`. The settings tab itself is still in `main.ts`.
+ * under plain `node --test`. The settings tab is `settings-tab.ts`.
+ *
+ * Settings removed in 0.2.3 (yt-dlp and ffmpeg paths, the download folder, two
+ * ffmpeg loudness dials) may still sit in an older `data.json`. They are kept,
+ * unread, like any key this build does not know.
  */
 
 import type { NotificationFormat } from "./notify.ts";
-import { FLOOR_MARGIN_DB, MIN_SILENCE_GAP, WORD_PAD } from "./silence.ts";
+import { MIN_SILENCE_GAP, WORD_PAD } from "./silence.ts";
 import { DEFAULT_TIDY_DAYS } from "./tidy.ts";
 
 export interface YtFreeSettings {
-  ytDlpPath: string;
   /**
    * Developer only, set by hand in `data.json`: a folder made by
    * `scripts/make-offline-hd.mjs`. Every video then plays from it, 360p and HD,
@@ -46,8 +49,6 @@ export interface YtFreeSettings {
   followTranscript: boolean;
   autoFetchTranscript: boolean;
   heatmapPeaks: number;
-  downloadFolder: string;
-  ffmpegPath: string;
   subscriptionsPollMinutes: number;
   subscriptionsExpiryDays: number;
   subscriptionsIncludeShorts: boolean;
@@ -97,23 +98,6 @@ export interface YtFreeSettings {
    */
   silenceMinGap: number;
   /**
-   * A manual `silencedetect` threshold in dBFS, or `null` to measure the audio.
-   *
-   * `null` by default, and 022 is why: this was a fixed −30 dB, which is inside
-   * the words on a normally-mastered voice track, so the player skipped the
-   * gaps between syllables. Every recording has its own noise floor, so the
-   * threshold is now measured per video — see `pickThreshold`. The setting
-   * survives as an Advanced escape hatch for audio the measurement gets wrong.
-   */
-  silenceNoiseDb: number | null;
-  /**
-   * How far above the measured noise floor the threshold sits, in dB.
-   *
-   * Advanced. Raising it compresses more and risks clipping quiet speech;
-   * lowering it is the safe direction. See `FLOOR_MARGIN_DB`.
-   */
-  silenceFloorMargin: number;
-  /**
    * How much room each spoken word is given, on both sides, before a skip is
    * allowed to cross it. Seconds. See `vetoWords`.
    *
@@ -160,7 +144,6 @@ export interface YtFreeSettings {
 }
 
 export const DEFAULT_SETTINGS: YtFreeSettings = {
-  ytDlpPath: "",
   upgradeToHighQuality: true,
   phoneHighQuality: false,
   startInHd: false,
@@ -187,12 +170,6 @@ export const DEFAULT_SETTINGS: YtFreeSettings = {
   // hourly background cap.
   autoFetchTranscript: true,
   heatmapPeaks: 8,
-  // Blank means "wherever `defaultDownloadFolder()` says", which is
-  // ~/Movies/YT Free — deliberately outside the vault, because the vault is in
-  // iCloud and a 700MB video inside it would sync to every device. It cannot be
-  // spelled out here: `os.homedir()` is unreachable at module load on mobile.
-  downloadFolder: "",
-  ffmpegPath: "",
   // Hourly. #66 weighed two hours and kept one: feed traffic was measured
   // safe (scripts/feed-torture.ts), and a feed only holds its last 15 videos.
   subscriptionsPollMinutes: 60,
@@ -216,8 +193,6 @@ export const DEFAULT_SETTINGS: YtFreeSettings = {
   smartSpeed: false,
   silenceSpeed: 3,
   silenceMinGap: 0.5,
-  silenceNoiseDb: null,
-  silenceFloorMargin: FLOOR_MARGIN_DB,
   silenceWordPad: WORD_PAD,
   skipNonSpeech: true,
   debugLogs: false,
@@ -225,19 +200,15 @@ export const DEFAULT_SETTINGS: YtFreeSettings = {
   warmOnOpen: false,
 };
 
-/** Numbers that may be negative. Every other number setting is a size, a count or a time. */
-const SIGNED: ReadonlySet<string> = new Set(["silenceNoiseDb"]);
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Is `value` usable for the setting `key`, judged against that key's default? */
 function fits(key: string, value: unknown, fallback: unknown): boolean {
-  if (key === "silenceNoiseDb") return value === null || (typeof value === "number" && Number.isFinite(value));
   if (key === "notificationFormat") return value === "json" || value === "text";
   if (typeof fallback === "number") {
-    return typeof value === "number" && Number.isFinite(value) && (SIGNED.has(key) || value >= 0);
+    return typeof value === "number" && Number.isFinite(value) && value >= 0;
   }
   return typeof value === typeof fallback;
 }
