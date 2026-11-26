@@ -15,13 +15,15 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 
 ## Next step
 
-1. 0.2.2 is out and the store scan shows 0 warnings. Remaining scan "Recommendations":
-   `display`/`setDynamicTooltip` (kept for Obsidian < 1.13, Isaiah's choice), `virtual-loader`
-   `timeout`, and the Vault enumeration / Clipboard / localStorage behaviors.
-2. Settings as native sub-pages + README rewrite (docs/V1-SCOPE-SETTINGS-PAGES.md): PR open, needs
-   Isaiah's device test (steps in that doc). Store description: its own thread.
-3. Then Isaiah's priority 2: polish the main UI with one design philosophy (needs a scope).
-4. #133 Preview layout awaits scope OK. Post-MVP backlog (label `post-mvp`).
+1. 0.2.2 is out and the store scan shows 0 warnings (Caution label gone). Remaining scan
+   "Recommendations": `display`/`setDynamicTooltip`/`setWarning` (kept for Obsidian < 1.13,
+   Isaiah's choice), `virtual-loader` `timeout`, and the Vault enumeration / Clipboard /
+   localStorage behaviors.
+2. Settings as native sub-pages + README rewrite (docs/V1-SCOPE-SETTINGS-PAGES.md) merged
+   (#140, Isaiah device-tested). Store description: its own thread.
+3. UI polish: Cinema design language picked (docs/V1-SCOPE-CINEMA-UI.md, includes #133).
+4. Then post-MVP backlog (label `post-mvp`): #125 manage-filter ×, #87 Batch 3, #86 Windows/Linux
+   test, #118/#119 channel lists. Dependabot PRs #101/#113 after release.
 
 ## How to ship and test
 
