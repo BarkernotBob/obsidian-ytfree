@@ -450,3 +450,16 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - Quick controls show only what works without ffmpeg (Isaiah): "Skip music too" and "Pause speed"
   are gone from the pop-out and settings; Smart Speed, Shortest pause and Word protection stay.
 - The switch to YouTube's player shows an **HD** icon, not the YouTube badge (Isaiah).
+
+### 2026-11-26 (design language, Isaiah)
+
+- **The app's design language is "Cinema"** (option B of three mockups): big 16:9 pictures, an
+  always-dark stage, pill controls. Scope:
+  docs/V1-SCOPE-CINEMA-UI.md. Priority 2, after the description and settings cleanup.
+- **Video titles are always shown whole**, never cut with an ellipsis (Isaiah).
+- **Back / Play / Forward sit on the picture, Play at its exact centre; every other control stays
+  in an always-visible strip under the video** (Isaiah). Notes, Description, Transcript and card
+  actions stay. One spacing scale (4/8/12/16/24/32).
+- Small button rows (section buttons, card actions) are **icon over label, no outline** (Isaiah).
+  Speed pill is fixed width and centred between three tools a side; Fullscreen sits on the picture.
+- #133 (desktop Preview, video on the right) is built as part of it.
