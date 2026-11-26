@@ -2084,6 +2084,13 @@ body.ytfree-immersive-open {
   flex: 0 0 auto;
 }
 
+/* The hub's filter box is the shared search field (buildSearchField), so it
+   takes the row's width; it filters as you type, so it has no run button. */
+.ytfree-hub-search .ytfree-search-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .ytfree-hub-search-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -2269,9 +2276,12 @@ body.ytfree-immersive-open {
   background: var(--background-modifier-form-field);
 }
 
+/* Typing in the box lights the whole field in the accent colour: the box has
+   no frame of its own any more, so this ring is the only sign of focus and has
+   to read at a glance (WCAG 2.4.7). */
 .ytfree-search-field:focus-within {
-  border-color: var(--background-modifier-border-focus);
-  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
 }
 
 .ytfree-search-field-icon {
@@ -2303,6 +2313,69 @@ body.ytfree-immersive-open {
   outline: none;
 }
 
+/* Obsidian's app styles give every search input its own border, fill and
+   focus ring; at a higher rank than one class, so the box drew a second box
+   inside the field. Outranked here so the field is the only frame. */
+.ytfree-search-field input.ytfree-search-field-input,
+.ytfree-search-field input.ytfree-search-field-input:hover,
+.ytfree-search-field input.ytfree-search-field-input:focus,
+.ytfree-search-field input.ytfree-search-field-input:focus-visible {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+/* Our own × (see search-clear.ts), so the browser's is hidden where it draws
+   one: two clear controls side by side would be one too many. */
+.ytfree-search-field-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+/* A small, faint circle-× at the box's right edge, the way iOS, Material and
+   Obsidian's own search draw it: part of the text box, not a control of its
+   own. The class pair outranks Obsidian's button and clickable-icon rules, so
+   no grey box or hover square appears around it. */
+.ytfree-search-field .ytfree-search-field-clear {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0 2px 0 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-faint);
+  cursor: var(--cursor);
+  --icon-size: 16px;
+  --icon-stroke: 2px;
+}
+
+.ytfree-search-field .ytfree-search-field-clear[hidden] {
+  display: none;
+}
+
+/* Tabbing onto the × gives it its own ring, so focus visibly moves off the
+   text and onto the button inside the same lit field. */
+.ytfree-search-field .ytfree-search-field-clear:focus-visible {
+  outline: none;
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.ytfree-search-field .ytfree-search-field-clear:hover,
+.ytfree-search-field .ytfree-search-field-clear:active {
+  background: transparent;
+  color: var(--text-muted);
+}
+
 /* The one accented thing on the screen, because pressing it is the screen's
    whole purpose. A fixed square, so nothing about it depends on its state. */
 .ytfree-search-field-go {
@@ -2320,6 +2393,12 @@ body.ytfree-immersive-open {
   color: var(--text-on-accent);
   cursor: var(--cursor);
   --icon-size: 16px;
+}
+
+/* The next Tab stop after the ×, ringed the same way. */
+.ytfree-search-field .ytfree-search-field-go:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--interactive-accent);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -2865,8 +2944,30 @@ body.ytfree-immersive-open {
   padding: 0 4px 0 0.7em;
 }
 
-.ytfree-hub.ytfree-phone .ytfree-search-field-input {
+.ytfree-hub.ytfree-phone .ytfree-search-field-input,
+.is-mobile .ytfree-search-field-input {
   font-size: 16px;
+}
+
+/* The Add channels sheet is a modal, outside the hub's phone class: same
+   thumb-sized field there. */
+.is-phone .ytfree-add-channels-form .ytfree-search-field {
+  height: 44px;
+}
+
+.is-phone .ytfree-add-channels-form .ytfree-search-field .ytfree-search-field-clear {
+  width: 36px;
+  height: 36px;
+  --icon-size: 18px;
+}
+
+/* A thumb-sized target, matching the go button beside it. */
+/* The glyph stays small; only the tap target grows to a thumb's width. */
+.ytfree-hub.ytfree-phone .ytfree-search-field .ytfree-search-field-clear {
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  --icon-size: 18px;
 }
 
 .ytfree-hub.ytfree-phone .ytfree-search-field-go {

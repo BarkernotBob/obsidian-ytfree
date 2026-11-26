@@ -53,6 +53,7 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
   on PR #106 ([scope](docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md)). Next: Isaiah's phone + Mac test.
 - 2026-11-12 Remove vs Hide (#110, [scope](docs/V1-SCOPE-HIDE-AND-REMOVE.md)): hub Remove → out of
   the hub, no list; search Hide → Hidden chip + text card; search shows Inbox/Saved too. Phone test, then merge.
+- 2026-11-25: × clear button in the YouTube and channel search boxes (`src/search-clear.ts`); phone test pending.
 
 ## Shipped on main (scope doc = manual test)
 
