@@ -1,6 +1,6 @@
 {
   "name": "obsidian-ytfree",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ad-free YouTube playback inside Obsidian notes",
   "main": "main.js",
   "private": true,

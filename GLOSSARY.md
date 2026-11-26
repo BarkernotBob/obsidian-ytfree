@@ -143,6 +143,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   most 15s (`HD_WAIT_MS`), then plays 360p and sharpens later as before.
 - With "Start in HD" on, a jump still drops to the lowest rung for its first chunk (Isaiah's
   rule of 2026-10-15 stands).
+
 ### 2026-10-22 (Isaiah reported; fix picked by Claude, open to change)
 
 - **HD stutter at ~55 s and slow jumps**: treated as YouTube refusing a stream URL past its
@@ -235,6 +236,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   wait, and a press on a player nobody started begins loading it without playing.
 - **Paste to Preview (GitHub #10, #11)**: wanted, on phone and desktop. Scope written, not yet
   approved.
+
 ### 2026-10-15 (Isaiah asked; defaults picked by Claude, open to change)
 
 - Desktop plays without yt-dlp by falling back to the phone's path; Download and Smart Speed
@@ -362,8 +364,6 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   so the first switch per video needs one tap on its play button; after that its frame is kept
   loaded behind ours so later switches start by themselves. Pages serves `gh-pages`, not `docs/`.
 
-
-
 ### 2026-11-10 (store defaults and helpers; Isaiah)
 
 - **New installs start with the note tidy off and Smart Speed off.** An install that already
@@ -386,7 +386,6 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   ecosystem. TypeScript stays pinned.
 - The plugin's four data files are read together at load, not in sequence.
 
-
 ### 2026-11-12 (open at top, Isaiah)
 
 - **Preview opens with neither Description nor Transcript open**, phone and desktop. A missing
@@ -395,6 +394,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   note included (Watch no longer puts the cursor in Notes). The Notes button is the way into
   writing. Returning to a tab where the note is already open does not move it (Claude's call).
   [Scope](docs/V1-SCOPE-OPEN-AT-TOP.md).
+
 ### 2026-11-12 (hub button, MVP)
 
 - **Hub button** (grid icon) first on the left of every player bar, video notes and Preview.
@@ -402,6 +402,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   closes the sheet like its close button (stops unless in PiP), then shows the hub.
 - **Bar spacing is equal** between every pair of controls (Isaiah). On a phone the hub button sits
   at the left end of the transport row, because the side row has no room for a ninth button.
+
 ## Managing subscriptions (Isaiah, 2026-11-12; [scope](docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md))
 
 - **Unsubscribe**, never "remove": an edit-mode − in the sidebar read as removing a sidebar row
@@ -416,6 +417,7 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
   Isaiah): channel name, "See all their videos ›", Subscribe. New notes carry `channel_id`.
 - **Adding by channel search** is post-MVP (#108). Add channel opens the paste-a-link + Takeout
   dialog until then.
+
 ### 2026-11-14 (channel paging, Preview → channel; [scope](docs/V1-SCOPE-CHANNEL-PAGING.md))
 
 - Preview's channel name is always a link when there is a name; a missing channel id is looked up
@@ -423,3 +425,12 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - A channel's "More videos" ends only with no token, or after 2 pages in a row with nothing new.
   The end of the list says YouTube's header count also counts Shorts and live streams. MVP.
 - Even-numbered batches and auto-load at the bottom: post-MVP (Isaiah), issue #118, after #104.
+
+### 2026-11-26 (first store release, Isaiah)
+
+- **0.2.0 is the first store release** ("Ship it", Isaiah). `versions.json` starts fresh at 0.2.0:
+  the old `v0.1.0` release has a `v` tag Obsidian ignores, so listing it would send older apps to a
+  release that does not exist.
+- The README says the plugin is not affiliated with YouTube or Google, and that YouTube's embedded
+  player (the fallback) can show YouTube's own ads.
+- The Manage subscriptions filter ships without a × clear button (#125, post-MVP).
