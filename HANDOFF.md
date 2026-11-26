@@ -51,6 +51,8 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 - 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
 - 2026-11-12: unsubscribe (Manage subscriptions screen), Subscribed toggles, note channel row
   on PR #106 ([scope](docs/V1-SCOPE-MANAGE-SUBSCRIPTIONS.md)). Next: Isaiah's phone + Mac test.
+- 2026-11-12 Remove vs Hide (#110, [scope](docs/V1-SCOPE-HIDE-AND-REMOVE.md)): hub Remove → out of
+  the hub, no list; search Hide → Hidden chip + text card; search shows Inbox/Saved too. Phone test, then merge.
 
 ## Shipped on main (scope doc = manual test)
 

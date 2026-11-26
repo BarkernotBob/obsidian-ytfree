@@ -39,6 +39,11 @@ export interface CardFacts {
    * left to remove except the note, so it says Delete (GitHub #50).
    */
   noteOnly?: boolean;
+  /**
+   * A search card for a video you hid from search: it still lists, as a text
+   * card, and its fourth button undoes the hide.
+   */
+  hiddenFromSearch?: boolean;
 }
 
 /**
@@ -86,7 +91,9 @@ export function searchSlots(facts: CardFacts): CardSlot[] {
       label: "Save",
       done: facts.inHub,
     },
-    { key: "remove", icon: "x", label: "Remove", done: false, danger: true },
+    facts.hiddenFromSearch
+      ? { key: "remove", icon: "eye", label: "Unhide", done: false }
+      : { key: "remove", icon: "eye-off", label: "Hide", done: false, danger: true },
   ];
 }
 
