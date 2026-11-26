@@ -447,3 +447,6 @@ with who made it. Ticket detail stays in `issues/` and GitHub issues.
 - If 0.2.2 clears the label, a separate desktop-only companion plugin can bring the helpers back.
   If it does not, the cause is something else and the companion is not the fix.
 - Not changed: the 7 deprecation notes ("Other", not warnings) need minAppVersion 1.13.
+- Quick controls show only what works without ffmpeg (Isaiah): "Skip music too" and "Pause speed"
+  are gone from the pop-out and settings; Smart Speed, Shortest pause and Word protection stay.
+- The switch to YouTube's player shows an **HD** icon, not the YouTube badge (Isaiah).
