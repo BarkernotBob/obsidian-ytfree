@@ -52,15 +52,15 @@
  * WebKit's root. `!important` because these are UA styles.
  */
 .ytfree-video.is-hushed::-webkit-media-controls {
-  display: none !important;
+  display: none;
 }
 
 .ytfree-video.is-hushed::-webkit-media-controls-enclosure {
-  display: none !important;
+  display: none;
 }
 
 .ytfree-video.is-hushed::-webkit-media-controls-panel {
-  display: none !important;
+  display: none;
 }
 
 /*
@@ -279,7 +279,8 @@
 /* The groups stay in the DOM because the code and the YouTube-player rules
    name them; they no longer draw a box of their own. */
 .ytfree-controls-group {
-  display: contents;
+  display: flex;
+  align-items: center;
 }
 
 /* Left first, then the transport (ordered below), then the right. */
@@ -1076,8 +1077,7 @@
      on the second row of a 390pt phone with any gap at all. */
   .ytfree-controls {
     flex-wrap: wrap;
-    row-gap: 8px;
-    column-gap: 0;
+    gap: 8px 0;
     padding: 4px 6px;
     /* 8 padding + 48 transport + 8 row gap + 40 side row. Fixed, so the row
        count cannot change under a control that has just been pressed. */
@@ -1723,7 +1723,7 @@ body.ytfree-immersive-open {
     "thumb meta"
     "thumb actions";
   align-items: start;
-  column-gap: 0.8em;
+  gap: 0 0.8em;
   padding: 8px 0.5em;
   border-radius: var(--radius-m);
   cursor: var(--cursor-link);
@@ -3645,7 +3645,7 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
     grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
     /* Picture, title, facts, the space left over, and the buttons under both. */
     grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-    column-gap: 1.2em;
+    gap: 0 1.2em;
   }
 
   body:not(.is-mobile) .ytfree-preview-modal .ytfree-preview-player {
@@ -3814,7 +3814,7 @@ body:not(.is-mobile) .ytfree-preview-wrapper {
  * with buttons at both ends. The close button gets a row of its own above it
  * rather than landing on one of them.
  */
-.ytfree-preview-modal .ytfree-preview-player:has(.ytfree-preview-wrapper.is-collapsed) {
+.ytfree-preview-modal .ytfree-preview-player.has-collapsed-wrapper {
   padding-top: 44px;
 }
 
@@ -3909,7 +3909,7 @@ body.ytfree-immersive-open .ytfree-preview-close {
       "facts facts"
       "body body"
       "actions actions";
-    column-gap: 0.5em;
+    gap: 0 0.5em;
   }
 
   .is-phone .ytfree-preview-modal .ytfree-preview-player {
@@ -3922,7 +3922,7 @@ body.ytfree-immersive-open .ytfree-preview-close {
   .is-phone .ytfree-preview-transcript,
   .is-phone .ytfree-sheet-reading .ytfree-preview-describe:not(.is-open),
   .is-phone .ytfree-sheet-reading .ytfree-preview-transcript:not(.is-open) {
-    display: contents;
+    display: block;
   }
 
   .is-phone .ytfree-preview-disclose {
@@ -4036,7 +4036,7 @@ body.ytfree-immersive-open .ytfree-preview-close {
      * now — so it is spare space and is allowed to be nothing at all.
      */
     grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-    column-gap: 0.9em;
+    gap: 0 0.9em;
   }
 
   .is-phone .ytfree-preview-modal .ytfree-preview-player {
@@ -4199,12 +4199,11 @@ body.ytfree-immersive-open .ytfree-preview-close {
   font: inherit;
   color: var(--text-accent);
   cursor: pointer;
-  text-decoration: underline;
-  text-decoration-color: transparent;
+  text-decoration: none;
 }
 
 .ytfree-preview-channel:hover {
-  text-decoration-color: currentColor;
+  text-decoration: underline;
 }
 
 /* YouTube's own player on the phone (#25, part 2): over the picture, in place. */
@@ -4442,7 +4441,14 @@ body.ytfree-immersive-open .ytfree-preview-close {
 
 /* The name is a link-styled button: it opens the channel's videos. */
 .ytfree-manage-open {
-  all: unset;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
   cursor: pointer;
   font-size: var(--font-ui-medium);
   white-space: nowrap;
@@ -4495,7 +4501,14 @@ body.ytfree-immersive-open .ytfree-preview-close {
 }
 
 .ytfree-channel-row-open {
-  all: unset;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 40px;

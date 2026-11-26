@@ -22,7 +22,7 @@ import {
   shouldAutoStamp,
   stampInsertOffset,
 } from "./capture";
-import type { DownloadHandle } from "./desktop/download.ts";
+import type { DownloadHandle } from "./desktop/download";
 import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
 import { liveTimestampAt, liveTimestamps } from "./live-timestamps.ts";
 import {
@@ -141,7 +141,7 @@ import type { StreamProvider } from "./stream";
  * esbuild keeps the dynamically-imported subgraph in a lazily-initialised
  * closure, so the `require` calls happen on first use and never at startup.
  */
-type DesktopApi = typeof import("./desktop/index.ts");
+type DesktopApi = typeof import("./desktop/index");
 let desktopApi: Promise<DesktopApi> | null = null;
 /** A frontmatter field's first value: the field itself, or its first item when it is a list. */
 function firstValue(field: unknown): unknown {
@@ -149,7 +149,9 @@ function firstValue(field: unknown): unknown {
 }
 
 function desktop(): Promise<DesktopApi> {
-  if (!desktopApi) desktopApi = import("./desktop/index.ts");
+  // SCAN SPIKE: the desktop helpers (yt-dlp, ffmpeg, Node fs/https) are removed
+  // from this branch to see what the directory scan says without them.
+  if (!desktopApi) desktopApi = Promise.reject(new Error("Desktop helpers are not in this build"));
   return desktopApi;
 }
 
@@ -5402,6 +5404,7 @@ export default class YtFreePlugin extends Plugin {
   private setCollapsed(entry: PlayerEntry, mode: CollapseMode): void {
     entry.collapsed = mode;
     entry.wrapper.toggleClass("is-collapsed", mode !== null);
+    entry.wrapper.closest(".ytfree-preview-player")?.toggleClass("has-collapsed-wrapper", mode !== null);
     entry.wrapper.toggleClass("is-collapsed-keyboard", mode === "keyboard");
     entry.player.setCollapsed(mode !== null);
   }

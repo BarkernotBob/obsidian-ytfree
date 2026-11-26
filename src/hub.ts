@@ -759,14 +759,8 @@ export class SubscriptionsStore {
       if (Platform.isDesktopApp) {
         for (const item of this.state.items) if (shortsCheck(item) === "long") item.isShort = false;
         const unprobed = this.state.items.filter((item) => shortsCheck(item) === "ask");
-        if (unprobed.length) {
-          const { probeIsShort } = await import("./desktop/shorts-probe.ts");
-          await mapLimit(unprobed, 2, async (item) => {
-            if (!governor.backgroundRoom()) return;
-            governor.count("probe");
-            item.isShort = await probeIsShort(item.videoId);
-          });
-        }
+        // SCAN SPIKE: the Node shorts probe is removed; unprobed items stay null.
+        void unprobed;
       }
 
       this.state.lastPolledAt = now.toISOString();

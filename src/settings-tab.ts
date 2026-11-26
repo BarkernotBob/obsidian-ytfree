@@ -28,7 +28,7 @@ interface Row {
   /** Extra words settings search should find this row by. */
   aliases?: string[];
   /** Adds the control. Left out for a row that is only text. */
-  build?: (setting: Setting) => void;
+  build?: (setting: Setting) => unknown;
 }
 
 /** Rows under one heading. No heading: the rows at the top of the tab. */
