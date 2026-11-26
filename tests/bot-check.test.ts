@@ -179,28 +179,3 @@ test("the message names the next retry on the device's clock, or the next Play o
   assert.match(pauseMessage(next, next - 1), /prove it isn't a bot\. .*first video you play after 09:05\.$/);
   assert.match(pauseMessage(next, next), /try again with the next video you play\.$/);
 });
-
-test("the resolver tries yt-dlp once on a bot check, signed out, and pauses", async () => {
-  const { mkdtempSync, writeFileSync, chmodSync, readFileSync: read } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const { resolveStream } = await import("../src/desktop/resolver.ts");
-  const { botCheck } = await import("../src/bot-check.ts");
-
-  // A stand-in yt-dlp that logs its arguments and answers with the bot check.
-  const dir = mkdtempSync(join(tmpdir(), "ytfree-botcheck-"));
-  const log = join(dir, "calls.log");
-  const fake = join(dir, "yt-dlp");
-  writeFileSync(
-    fake,
-    `#!/bin/sh\necho "$@" >> "${log}"\necho "ERROR: [youtube] x: Sign in to confirm you’re not a bot." >&2\nexit 1\n`,
-  );
-  chmodSync(fake, 0o755);
-
-  botCheck.clear();
-  await assert.rejects(resolveStream("dQw4w9WgXcQ", fake, "fast"), /not a bot/);
-  const calls = read(log, "utf8").trim().split("\n");
-  assert.equal(calls.length, 1, "no second client after a bot check");
-  assert.ok(!calls[0].includes("--cookies"), "no automatic signed-in retry");
-  assert.equal(botCheck.isPaused(), true);
-  botCheck.clear();
-});

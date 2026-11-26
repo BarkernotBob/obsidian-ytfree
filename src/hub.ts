@@ -750,18 +750,11 @@ export class SubscriptionsStore {
       // Durations first: they decide which videos need the Shorts check.
       await this.backfillDurations(DURATIONS_PER_POLL);
 
-      // Telling a Short from a long-form video means reading a redirect status,
-      // which needs Node's `https` — so it only happens on desktop, and it is
-      // imported dynamically because that import throws at module load on iOS.
-      // Mobile leaves `isShort` null, which already means "ask again later";
-      // the next desktop poll fills it in and nothing is misclassified. A video
-      // known to run over 3 minutes is not asked (GitHub #66 G4).
-      if (Platform.isDesktopApp) {
-        for (const item of this.state.items) if (shortsCheck(item) === "long") item.isShort = false;
-        const unprobed = this.state.items.filter((item) => shortsCheck(item) === "ask");
-        // SCAN SPIKE: the Node shorts probe is removed; unprobed items stay null.
-        void unprobed;
-      }
+      // Telling a Short from a long-form video meant reading a redirect status
+      // with Node's `https`, which went in 0.2.2 (store scan). What is left is
+      // the duration rule: a video known to run over 3 minutes is not a Short
+      // (GitHub #66 G4). Anything else keeps `isShort` null.
+      for (const item of this.state.items) if (shortsCheck(item) === "long") item.isShort = false;
 
       this.state.lastPolledAt = now.toISOString();
       // Which kind of device polled, so the phone can leave it to the desktop.

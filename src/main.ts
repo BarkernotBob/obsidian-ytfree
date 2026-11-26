@@ -22,7 +22,6 @@ import {
   shouldAutoStamp,
   stampInsertOffset,
 } from "./capture";
-import type { DownloadHandle } from "./desktop/download";
 import { findTimestamps, seekLinkAt, seekModeFromHref } from "./description";
 import { liveTimestampAt, liveTimestamps } from "./live-timestamps.ts";
 import {
@@ -102,8 +101,6 @@ import { trimYtDlpInfo } from "./answer-trim.ts";
 import { governor } from "./request-governor.ts";
 import { pollIsDue } from "./subscriptions.ts";
 import type { VideoNote } from "./subscriptions.ts";
-import { offlineFormats } from "./offline-hd.ts";
-import { infoExpiresAt, pickAudioUrl } from "./ytdlp-info.ts";
 import { cachedProvider, desktopResolve, mobileResolve } from "./play-provider.ts";
 import type { DesktopSources } from "./play-provider.ts";
 import type { YtDlpInfo } from "./ytdlp-info.ts";
@@ -125,35 +122,16 @@ import type { NowPlaying } from "./player";
 import { showThumbnail, thumbnailCandidates } from "./thumbnail";
 import {
   extractVideoId,
-  ResolveMode,
-  ResolvedStream,
   StreamCache,
   YtDlpMissingError,
 } from "./stream";
 import type { StreamProvider } from "./stream";
 
-/**
- * The single door into the desktop-only code.
- *
- * Everything under `src/desktop/` imports a Node builtin at the top level, and
- * on iOS that throws at module load — before `onload`, so the plugin dies
- * rather than degrading. Only ever reached from behind `Platform.isDesktopApp`;
- * esbuild keeps the dynamically-imported subgraph in a lazily-initialised
- * closure, so the `require` calls happen on first use and never at startup.
- */
-type DesktopApi = typeof import("./desktop/index");
-let desktopApi: Promise<DesktopApi> | null = null;
 /** A frontmatter field's first value: the field itself, or its first item when it is a list. */
 function firstValue(field: unknown): unknown {
   return Array.isArray(field) ? (field[0] as unknown) : field;
 }
 
-function desktop(): Promise<DesktopApi> {
-  // SCAN SPIKE: the desktop helpers (yt-dlp, ffmpeg, Node fs/https) are removed
-  // from this branch to see what the directory scan says without them.
-  if (!desktopApi) desktopApi = Promise.reject(new Error("Desktop helpers are not in this build"));
-  return desktopApi;
-}
 
 
 /** Frontmatter key holding the path to a downloaded copy. */
@@ -534,16 +512,9 @@ export default class YtFreePlugin extends Plugin {
   private editorTouchOrigin: { x: number; y: number } | null = null;
   /** Reading-view seek anchor under a touchstart, consumed by its touchend. */
   private armedSeekAnchor: HTMLAnchorElement | null = null;
-  private ytDlpPath: string | null = null;
-  /** yt-dlp was looked for and is not on this machine. Reset with `ytDlpPath`. */
-  private ytDlpUnavailable = false;
-  private noYtDlpNoticeShown = false;
   /** Desktop stream tiers that failed per video (#43 part 1). */
   private tierFailures = new TierFailures();
   private resumeTimer: number | null = null;
-  private downloads = new Map<string, DownloadHandle>();
-  /** undefined = not probed yet; null = probed and absent. */
-  private ffmpegPath: string | null | undefined = undefined;
   subscriptions!: SubscriptionsStore;
   /** Where each video got to, so reopening a note does not start at 0:00. */
   progress!: ProgressStore;
@@ -623,7 +594,6 @@ export default class YtFreePlugin extends Plugin {
     this.setupNowPlayingButton();
     this.setupSubscriptions();
     await this.removeLegacySignIn();
-    await this.setupDockBadge();
 
     this.registerMarkdownCodeBlockProcessor("ytfree", (source, el, ctx) =>
       this.renderBlock(source, el, ctx),
@@ -973,7 +943,6 @@ export default class YtFreePlugin extends Plugin {
     // Registered only after layout is ready: during startup Obsidian fires
     // `create` for every file already in the vault, which would make the whole
     // vault look new and queue a transcript fetch for all of it.
-    this.app.workspace.onLayoutReady(() => void this.probeYtDlp());
     this.app.workspace.onLayoutReady(() => {
       this.registerEvent(
         this.app.vault.on("create", (file) => {
@@ -1031,23 +1000,6 @@ export default class YtFreePlugin extends Plugin {
         }
       }),
     );
-
-    // Downloading shells out to yt-dlp, which does not exist on a phone.
-    // Registering these anyway would put commands in mobile's palette that can
-    // only ever answer with an error.
-    if (Platform.isDesktopApp) {
-      this.addCommand({
-        id: "download-video",
-        name: "Download this video for offline",
-        callback: () => void this.downloadForActiveNote(),
-      });
-
-      this.addCommand({
-        id: "delete-local-copy",
-        name: "Delete the local copy of this video",
-        callback: () => void this.deleteLocalCopy(),
-      });
-    }
 
     // Both platforms now, and both halves: the phone reads captions off the
     // InnerTube player response and the heatmap off `next`, neither of which
@@ -1567,111 +1519,8 @@ export default class YtFreePlugin extends Plugin {
     const raw = this.settings as unknown as Record<string, unknown>;
     const present = LEGACY_ACCOUNT_KEYS.filter((key) => key in raw);
     if (present.length === 0) return;
-    const cookieFile = typeof raw.accountCookieFile === "string" ? raw.accountCookieFile : "";
-    if (Platform.isDesktopApp) {
-      try {
-        const { removeLegacySignIn } = await desktop();
-        if (await removeLegacySignIn(cookieFile)) {
-          console.debug("YouTube for You: deleted the old YouTube cookie file. Sign-in has been removed.");
-        }
-      } catch (err) {
-        console.error("YouTube for You: could not remove the old YouTube sign-in.", err);
-      }
-    }
     for (const key of present) delete raw[key];
     await this.saveSettings();
-  }
-
-  /**
-   * The ▶ on the dock icon (issue 025).
-   *
-   * Everything about it is in `desktop/dock-badge.ts`; this is the lifecycle.
-   * `register` rather than a line in `onunload` because the handle only exists
-   * on the platforms that returned one — disabling the plugin mid-episode has
-   * to take the badge down with it, and a null check in `onunload` is the kind
-   * of thing that gets dropped in a later edit.
-   */
-  private async setupDockBadge(): Promise<void> {
-    if (!Platform.isDesktopApp) return;
-    const { createDockAudioBadge, SWEEP_MS } = await desktop();
-
-    // Registered before the null check, not after: "there is no badge" is the
-    // state the diagnostics exist to explain, so the command has to survive it.
-    this.addCommand({
-      id: "diagnose-dock-badge",
-      name: "Diagnose the dock badge",
-      checkCallback: (checking) => this.developerCommand(checking, () => void this.writeDockDiagnostics()),
-    });
-
-    this.addCommand({
-      id: "selftest-dock-badge",
-      name: "Self-test the dock badge (plays a tone)",
-      checkCallback: (checking) => this.developerCommand(checking, () => void this.selfTestDockBadge()),
-    });
-
-    const badge = createDockAudioBadge();
-    if (!badge) return;
-
-    this.register(() => badge.dispose());
-    this.registerInterval(window.setInterval(() => badge.refresh(), SWEEP_MS));
-    // Enabling the plugin while something is already playing is the one moment
-    // no event will fire for.
-    badge.refresh();
-  }
-
-  /**
-   * The end-to-end self-test: make a real noise, watch the real Dock.
-   *
-   * Temporary. `isCurrentlyAudible()` is the one link in the chain that cannot
-   * be proved from the outside — everything else answers a question, this one
-   * needs sound to exist. A short tone through WebAudio is sound as far as
-   * Chromium is concerned, which is the whole point.
-   */
-  private async selfTestDockBadge(): Promise<void> {
-    const { readDockBadge, readAudible } = await desktop();
-    const wait = (ms: number) => new Promise((done) => window.setTimeout(done, ms));
-    const sample = (label: string) => ({
-      at: label,
-      audible: readAudible(),
-      badge: readDockBadge(),
-    });
-
-    const log: unknown[] = [sample("before")];
-
-    const ctx = new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    gain.gain.value = 0.12;
-    osc.frequency.value = 440;
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-
-    await wait(1_000);
-    log.push(sample("tone +1s"));
-    await wait(2_500);
-    log.push(sample("tone +3.5s"));
-
-    osc.stop();
-    osc.disconnect();
-    gain.disconnect();
-    await ctx.close();
-
-    await wait(3_000);
-    log.push(sample("silence +3s"));
-
-    const path = `${this.pluginDir()}/dock-selftest.json`;
-    await this.app.vault.adapter.write(path, JSON.stringify(log, null, 2));
-    new Notice("YouTube for You: dock self-test finished.");
-  }
-
-  /** The diagnostics, written where they can be read without a console. */
-  private async writeDockDiagnostics(): Promise<void> {
-    const { diagnoseDockBadge } = await desktop();
-    const report = diagnoseDockBadge();
-    const path = `${this.pluginDir()}/dock-diagnostics.json`;
-    await this.app.vault.adapter.write(path, JSON.stringify(report, null, 2));
-    console.debug("YouTube for You dock badge diagnostics", report);
-    new Notice(`YouTube for You: dock diagnostics written to ${path}`);
   }
 
   /** Re-filter every open hub. Poll results can change what a filter matches. */
@@ -1947,8 +1796,6 @@ export default class YtFreePlugin extends Plugin {
     // Before the players go: it holds an interval and a set of listeners on a
     // note that outlives the plugin being disabled.
     this.stopFollowing();
-    for (const handle of this.downloads.values()) handle.cancel();
-    this.downloads.clear();
     for (const job of this.silenceJobs.values()) job.cancel();
     this.silenceJobs.clear();
     for (const view of [...this.pinned.keys()]) this.unmountPinned(view);
@@ -2744,16 +2591,7 @@ export default class YtFreePlugin extends Plugin {
   private async fetchTranscriptInto(file: TFile, videoId: string, quiet: boolean): Promise<void> {
     const progress = new Notice("YouTube for You: fetching transcript…", 0);
     try {
-      const harvest = Platform.isDesktopApp
-        ? await this.harvestWithYtDlp(videoId)
-        : await this.harvestWithInnertube(videoId);
-      // Only the desktop path reports a missing yt-dlp, and it has already said
-      // so in a Notice of its own.
-      if (!harvest) {
-        progress.hide();
-        return;
-      }
-      const { track, cues, heatmap } = harvest;
+      const { track, cues, heatmap } = await this.harvestWithInnertube(videoId);
 
       const paragraphs = groupCues(cues, this.settings.transcriptIntervalSeconds);
       const peaks = topPeaks(heatmap, this.settings.heatmapPeaks);
@@ -2807,27 +2645,6 @@ export default class YtFreePlugin extends Plugin {
       const detail = err instanceof Error ? err.message : String(err);
       new Notice(`YouTube for You: transcript failed — ${detail}`, 10000);
     }
-  }
-
-  /**
-   * The desktop harvest: yt-dlp's info JSON, which carries the caption
-   * tracklist and the replay heatmap in one call.
-   *
-   * Returns null — rather than throwing — for the one failure that is a setup
-   * problem instead of a fetch problem, because the Notice it needs is specific
-   * and there is nothing to retry.
-   */
-  private async harvestWithYtDlp(videoId: string): Promise<CaptionHarvest | null> {
-    let info: YtDlpInfo;
-    try {
-      info = await this.ytDlpInfo(videoId);
-    } catch (err) {
-      if (!(err instanceof YtDlpMissingError)) throw err;
-      new Notice("YouTube for You: this needs yt-dlp, an optional desktop helper. See Settings → YouTube for You → Desktop helpers.");
-      return null;
-    }
-    const track = pickCaptionTrack(info, this.transcriptLanguage());
-    return { track, cues: await this.fetchCues(videoId, track), heatmap: info.heatmap };
   }
 
   /**
@@ -2931,44 +2748,6 @@ export default class YtFreePlugin extends Plugin {
 
   // -------------------------------------------------------------- download
 
-  /**
-   * The local copy of a note's video, or null when there isn't one on this
-   * machine — the normal case on a second Mac, where the frontmatter syncs but
-   * the file does not. Silence is the correct behaviour there.
-   */
-  private async localFileFor(path: string | undefined, videoId: string): Promise<string | null> {
-    // A phone has no download folder to look in, and `local_media` in synced
-    // frontmatter points at a path on the Mac. Streaming is the only answer.
-    if (!Platform.isDesktopApp) return null;
-    if (!path) return null;
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof TFile)) return null;
-    const recorded: unknown = this.app.metadataCache.getFileCache(file)?.frontmatter?.[LOCAL_MEDIA_KEY];
-    const { resolveLocalFile } = await desktop();
-    // Search the folder even with nothing recorded: a file downloaded on this
-    // Mac is findable by its [videoId] marker regardless of what the note says.
-    return resolveLocalFile(
-      typeof recorded === "string" ? recorded : "",
-      await this.downloadFolder(),
-      videoId,
-    );
-  }
-
-  /** The configured download folder, or the platform default when it is blank. */
-  async downloadFolder(): Promise<string> {
-    const configured = this.settings.downloadFolder.trim();
-    if (configured) return configured;
-    const { defaultDownloadFolder } = await desktop();
-    return defaultDownloadFolder();
-  }
-
-  private async setLocalMedia(file: TFile, path: string | null): Promise<void> {
-    await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-      if (path) fm[LOCAL_MEDIA_KEY] = path;
-      else delete fm[LOCAL_MEDIA_KEY];
-    });
-  }
-
   /** Active note, plus the video it points at. Both are required to download. */
   private activeNoteVideo(): { file: TFile; videoId: string } | null {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -2976,161 +2755,6 @@ export default class YtFreePlugin extends Plugin {
     if (!file) return null;
     const videoId = this.videoIdForNote(file.path);
     return videoId ? { file, videoId } : null;
-  }
-
-  private async downloadForActiveNote(): Promise<void> {
-    const context = this.activeNoteVideo();
-    if (!context) {
-      new Notice("YouTube for You: this note does not point at a YouTube video.");
-      return;
-    }
-    await this.startDownload(context.videoId, context.file);
-  }
-
-  /**
-   * Download the video, record it in the note, and swap the running player onto
-   * the file without interrupting playback.
-   */
-  private async startDownload(videoId: string, file: TFile): Promise<void> {
-    const {
-      downloadBaseName,
-      downloadVideo,
-      ensureDir,
-      findFfmpeg,
-      formatBytes,
-      freeBytes,
-      findYtDlp,
-      LARGE_FILE_BYTES,
-      localFileUrl,
-      MIN_FREE_BYTES,
-    } = await desktop();
-
-    if (this.downloads.has(videoId)) {
-      this.downloads.get(videoId)?.cancel();
-      this.downloads.delete(videoId);
-      new Notice("YouTube for You: download cancelled.");
-      return;
-    }
-
-    // Refused like Play (GitHub #111).
-    if (this.subscriptions.isAgeRestricted(videoId)) {
-      new Notice(`YouTube for You: ${AGE_BLOCKED_MESSAGE}`);
-      return;
-    }
-
-    const entry = this.players.get(videoId);
-    const existing = await this.localFileFor(file.path, videoId);
-    if (existing) {
-      await this.setLocalMedia(file, existing);
-      new Notice("YouTube for You: already downloaded.");
-      entry?.player.setDownloadState("done");
-      return;
-    }
-
-    const dir = await this.downloadFolder();
-    try {
-      await ensureDir(dir);
-    } catch (err) {
-      new Notice(`YouTube for You: cannot create ${dir} — ${(err as Error).message}`);
-      return;
-    }
-
-    const free = await freeBytes(dir);
-    if (free !== null && free < MIN_FREE_BYTES) {
-      new Notice(`YouTube for You: only ${formatBytes(free)} free. Downloading needs at least 2 GB.`);
-      return;
-    }
-
-    if (!this.ytDlpPath) {
-      try {
-        this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-      } catch {
-        new Notice("YouTube for You: downloads need yt-dlp, an optional desktop helper. See Settings → YouTube for You → Desktop helpers.");
-        return;
-      }
-    }
-
-    // Cached across downloads; an ffmpeg install mid-session is rare enough to
-    // be worth a plugin reload.
-    if (this.ffmpegPath === undefined) {
-      this.ffmpegPath = await findFfmpeg(this.settings.ffmpegPath);
-    }
-
-    const title =
-      (this.app.metadataCache.getFileCache(file)?.frontmatter?.title as string) || file.basename;
-    const baseName = downloadBaseName(String(title), videoId);
-
-    let warnedLarge = false;
-    const notice = new Notice("YouTube for You: starting download…", 0);
-    entry?.player.setDownloadState("running");
-
-    const handle = downloadVideo({
-      videoId,
-      ytDlpPath: this.ytDlpPath,
-      ffmpegPath: this.ffmpegPath,
-      destDir: dir,
-      baseName,
-      onProgress: (percent, totalBytes) => {
-        if (!warnedLarge && totalBytes !== null && totalBytes > LARGE_FILE_BYTES) {
-          warnedLarge = true;
-          new Notice(`YouTube for You: this one is ${formatBytes(totalBytes)}.`);
-        }
-        const size = totalBytes === null ? "" : ` of ${formatBytes(totalBytes)}`;
-        notice.setMessage(`YouTube for You: downloading ${percent.toFixed(1)}%${size} — run the command again to cancel`);
-        entry?.player.setDownloadState("running", percent);
-      },
-    });
-    this.downloads.set(videoId, handle);
-
-    try {
-      const finalPath = await handle.done;
-      await this.setLocalMedia(file, finalPath);
-      // Same position, same play state — the swap should be invisible.
-      this.players.get(videoId)?.player.swapToLocal(localFileUrl(finalPath));
-      entry?.player.setDownloadState("done");
-      notice.setMessage(
-        this.ffmpegPath
-          ? "YouTube for You: downloaded. This note now plays the local copy."
-          : "YouTube for You: downloaded at 360p — that is the only quality available without ffmpeg. Streaming this note was higher quality. Install ffmpeg, then download again.",
-      );
-    } catch (err) {
-      entry?.player.setDownloadState("idle");
-      const message = (err as Error).message;
-      if (isAgeRestricted(err)) {
-        reportAgeRestricted(videoId);
-        notice.setMessage(`YouTube for You: ${AGE_BLOCKED_MESSAGE}`);
-      } else {
-        notice.setMessage(
-          message === "cancelled" ? "YouTube for You: download cancelled." : `YouTube for You: download failed — ${message}`,
-        );
-      }
-    } finally {
-      this.downloads.delete(videoId);
-      window.setTimeout(() => notice.hide(), 8000);
-    }
-  }
-
-  private async deleteLocalCopy(): Promise<void> {
-    const context = this.activeNoteVideo();
-    if (!context) {
-      new Notice("YouTube for You: this note does not point at a YouTube video.");
-      return;
-    }
-    const local = await this.localFileFor(context.file.path, context.videoId);
-    if (!local) {
-      await this.setLocalMedia(context.file, null);
-      new Notice("YouTube for You: no local copy on this Mac.");
-      return;
-    }
-    const { removeFile } = await desktop();
-    try {
-      await removeFile(local);
-    } catch (err) {
-      new Notice(`YouTube for You: could not delete the file — ${(err as Error).message}`);
-      return;
-    }
-    await this.setLocalMedia(context.file, null);
-    new Notice("YouTube for You: local copy deleted. This note streams again from now on.");
   }
 
   /**
@@ -4132,12 +3756,9 @@ export default class YtFreePlugin extends Plugin {
       wrapper,
       provider,
       setStatus,
-      // Downloading needs yt-dlp, so the button is desktop-only. A note file is
-      // also required — there is nowhere to record the path without one, which
-      // is also why a preview never offers it.
-      !mobile && noteFile instanceof TFile
-        ? () => void this.startDownload(videoId, noteFile)
-        : undefined,
+      // No download button: offline downloads needed yt-dlp, which this
+      // plugin no longer runs (0.2.2, store scan).
+      undefined,
       {
         // Mobile only, and that is the fix for the progress line the desktop
         // never had: `media` is the *wrapper* on a desktop — status, video,
@@ -4246,9 +3867,7 @@ export default class YtFreePlugin extends Plugin {
             const { mountYouTubePlayer } = await import("./mobile/youtube-embed.ts");
             return mountYouTubePlayer(host, videoId, at, rate, onStatus, (line) => this.youtubeLog(line), play);
           },
-          // The phone, and a desktop without yt-dlp: with yt-dlp the desktop
-          // gets HD from it (Isaiah, 2026-11-10).
-          youtubeToggle: mobile || this.ytDlpUnavailable,
+          youtubeToggle: true,
           forgetStreamFailures: () => this.tierFailures.clear(videoId),
         },
         // Everything the reader set on this video that a rebuilt player would
@@ -4309,29 +3928,13 @@ export default class YtFreePlugin extends Plugin {
     player.video.addEventListener(
       "play",
       () => {
-        void this.produceSilence(player, videoId, sourcePath);
+        void this.produceSilence(player, videoId);
         // Most-replayed for a note that lacks it, on Play, not on open (GitHub #66 G5).
         const note = preview ? null : this.app.vault.getAbstractFileByPath(sourcePath);
         if (note instanceof TFile) this.queueHeatmapBackfill(note, videoId);
       },
       { once: true },
     );
-
-    // A present local copy wins: no yt-dlp, no expiry, instant first frame.
-    const localFile = await this.localFileFor(sourcePath, videoId);
-    if (localFile) {
-      const { localFileUrl } = await desktop();
-      player.setDownloadState("done");
-      player.loadLocal(localFileUrl(localFile), () => {
-        // Corrupt file, unmounted volume, truncated download. Say so once, then
-        // fall back to the network rather than showing a dead player.
-        setStatus("Local copy could not be played — streaming instead.");
-        window.setTimeout(() => setStatus(null), 6000);
-        void player.load(this.settings.upgradeToHighQuality, this.settings.startInHd).catch(() => undefined);
-      });
-      this.announceResume(videoId, setStatus);
-      return entry;
-    }
 
     // Nothing before Play, on every device (GitHub #66): opening a note or a
     // preview sends no request. The desktop used to resolve here so HD was
@@ -4471,16 +4074,6 @@ export default class YtFreePlugin extends Plugin {
     if (!message) return;
     setStatus(message);
     window.setTimeout(() => setStatus(null), 10_000);
-  }
-
-  private announceResume(videoId: string, setStatus: (message: string | null) => void): void {
-    const seconds = this.progress.resumeFor(videoId);
-    if (seconds <= 0) {
-      setStatus(null);
-      return;
-    }
-    setStatus(`Picking up at ${formatTimestamp(seconds)}`);
-    window.setTimeout(() => setStatus(null), 6000);
   }
 
   // ----------------------------------------------------------- Smart Speed
@@ -4720,11 +4313,7 @@ export default class YtFreePlugin extends Plugin {
    * feature that is absent, and a video that will not play is a plugin that is
    * broken. They must never be the same event.
    */
-  private async produceSilence(
-    player: YtFreePlayer,
-    videoId: string,
-    sourcePath: string,
-  ): Promise<void> {
+  private async produceSilence(player: YtFreePlayer, videoId: string): Promise<void> {
     if (this.silenceAttempted.has(videoId)) return;
     this.silenceAttempted.add(videoId);
 
@@ -4758,7 +4347,6 @@ export default class YtFreePlugin extends Plugin {
       }
     }
 
-    await this.upgradeSilenceWithFfmpeg(player, videoId, sourcePath, minGap);
   }
 
   /**
@@ -4829,167 +4417,6 @@ export default class YtFreePlugin extends Plugin {
     return { windows: transcriptWindows(cues, minGap), words, wordTimed: isWordTimed(cues) };
   }
 
-  /**
-   * Producer two: ffmpeg's `silencedetect`, on the audio alone. Desktop, and
-   * only if ffmpeg is already on the machine.
-   *
-   * This is the enhancer, and it is written to be skippable at every step: no
-   * desktop, no ffmpeg, no yt-dlp, a failed resolve, a non-zero exit — each one
-   * simply leaves the transcript map in place. Nothing warns, nothing nags, and
-   * nothing is missing that the user could have had for free.
-   *
-   * **Chunked and parallel since 016**, and that is not an optimisation — it is
-   * what makes the producer useful at all. A single stream off googlevideo
-   * analyses at about 1.9× realtime because the connection is throttled, which
-   * is slower than the video is being watched at 4×; six chunks in parallel
-   * measured ~10×. Chunks are ordered outward from the playhead, so the minute
-   * being listened to is the first one measured. A local download, if there is
-   * one, is analysed instead of the network: no bandwidth, and no throttle.
-   */
-  private async upgradeSilenceWithFfmpeg(
-    player: YtFreePlayer,
-    videoId: string,
-    sourcePath: string,
-    minGap: number,
-  ): Promise<void> {
-    if (!Platform.isDesktopApp) return;
-    const stored = this.silence.rawMapFor(videoId, "ffmpeg");
-    // Already measured to the end, at a floor fine enough to answer.
-    if (stored && !isStale(stored, minGap) && stored.analyzedTo === undefined) return;
-
-    const { calibrateThreshold, detectSilence, detectSilenceChunked, findFfmpeg } = await desktop();
-    if (this.ffmpegPath === undefined) {
-      this.ffmpegPath = await findFfmpeg(this.settings.ffmpegPath);
-    }
-    if (!this.ffmpegPath) return;
-
-    // The offline HD player analyses its own sound file, never YouTube's.
-    const offline = this.settings.devOfflineHd?.trim();
-    const local = offline
-      ? `${offline.replace(/\/+$/, "")}/${(await (await desktop()).loadOfflineManifest(offline)).audio.file}`
-      : await this.localFileFor(sourcePath, videoId);
-    if (!local && botCheck.isPaused()) {
-      // Asked again on the next play once the pause is over.
-      this.silenceAttempted.delete(videoId);
-      return;
-    }
-    let input: string;
-    try {
-      // The sound from the same `-J` as playback (GitHub #32), not a run of its own.
-      const audio = local ?? pickAudioUrl((await this.ytDlpInfo(videoId)).formats ?? []);
-      if (!audio) throw new Error("yt-dlp offered no audio-only format");
-      input = audio;
-    } catch (err) {
-      console.error("YouTube for You: no audio to analyse for Smart Speed.", err);
-      return;
-    }
-
-    // Chunking needs a length. The element knows it once metadata has loaded,
-    // which by first `play` it has; a video that will not say how long it is
-    // gets the old single-stream treatment rather than nothing.
-    const duration = Number.isFinite(player.video.duration) ? player.video.duration : 0;
-    if (duration <= 0) {
-      console.debug("YouTube for You: Smart Speed analysing without chunking — no duration yet.");
-    }
-
-    // Where silence is on *this* recording, measured once and handed to every
-    // chunk. Calibrating per chunk would let the threshold drift between minute
-    // 3 and minute 4 of one video; see 022 for what a fixed −30 dB did instead.
-    const choice = await calibrateThreshold({
-      ffmpegPath: this.ffmpegPath,
-      input,
-      floorMargin: this.settings.silenceFloorMargin,
-    });
-    const noiseDb = this.settings.silenceNoiseDb ?? choice.thresholdDb;
-    console.debug(
-      `YouTube for You: Smart Speed threshold ${noiseDb} dB for ${videoId}` +
-        (this.settings.silenceNoiseDb !== null
-          ? " (manual override)"
-          : choice.calibrated
-            ? ` (floor ${choice.floorDb?.toFixed(1)}, speech ${choice.speechDb?.toFixed(1)})`
-            : " (calibration unavailable)"),
-    );
-
-    // Windows accumulate here rather than in the store, so the file is written
-    // once with a complete map instead of a hundred times with a growing one —
-    // but the player is fed on every batch.
-    //
-    // A stored map measured at a different threshold is not resumable: its
-    // windows and the ones about to arrive would disagree about what silence
-    // is. That map is thrown away and the video re-analysed from zero.
-    const resumable = !!stored && stored.noiseDb === noiseDb;
-    const windows: SilenceWindow[] = resumable ? [...(stored?.windows ?? [])] : [];
-    let frontier = resumable ? (stored?.analyzedTo ?? 0) : 0;
-    const feed = (): void => {
-      // Identity, not "the map still has this video": the player being fed has
-      // to be the one still on screen, and since 024 that can be the preview's.
-      if (this.entryOf(player)) {
-        this.pushCombinedSilence(player, videoId, { windows: [...windows], analyzedTo: frontier });
-      }
-    };
-
-    console.debug(
-      `YouTube for You: Smart Speed analysing ${videoId} with ffmpeg` +
-        (duration > 0 ? ` (${Math.round(duration)}s, from ${Math.round(frontier)}s)` : ""),
-    );
-
-    const shared = {
-      ffmpegPath: this.ffmpegPath,
-      input,
-      noiseDb,
-      minGap,
-      onWindows: (batch: SilenceWindow[]) => {
-        windows.push(...batch);
-        feed();
-      },
-    };
-    const job =
-      duration > 0
-        ? detectSilenceChunked({
-            ...shared,
-            // Three ffmpeg connections to YouTube, not six (GitHub #37); a file
-            // on disk costs YouTube nothing and keeps all six.
-            workers: local ? 6 : 3,
-            duration,
-            playheadSeconds: player.video.currentTime,
-            analyzedTo: frontier,
-            onProgress: (reached) => {
-              frontier = reached;
-              feed();
-            },
-          })
-        : detectSilence(shared);
-    this.silenceJobs.set(videoId, job);
-
-    try {
-      await job.done;
-      // 015 recorded every finished job as complete — including one killed
-      // twenty seconds in, because a cancel resolves rather than throws. That
-      // stub then answered for the whole video forever. A cancelled job now
-      // stores how far it actually got, which also makes it resumable; only a
-      // job that ran to the end may claim the whole video.
-      const stopped = this.silenceCancelled.has(job);
-      if (!stopped || frontier > 0 || windows.length > 0) {
-        this.recordSilence(
-          player,
-          videoId,
-          "ffmpeg",
-          minGap,
-          windows,
-          stopped ? frontier : undefined,
-          undefined,
-          noiseDb,
-        );
-      }
-    } catch (err) {
-      // The transcript map is still in place and still working. This is the
-      // enhancer failing, which by design costs the user nothing.
-      console.error("YouTube for You: ffmpeg silence analysis failed.", err);
-    } finally {
-      if (this.silenceJobs.get(videoId) === job) this.silenceJobs.delete(videoId);
-    }
-  }
-
   /** Stop analysing a video nobody is watching any more. */
   private cancelSilence(videoId: string): void {
     const job = this.silenceJobs.get(videoId);
@@ -5033,7 +4460,7 @@ export default class YtFreePlugin extends Plugin {
         // Only what is actually being watched. A note sitting open unplayed
         // keeps the same bargain it made at load: nothing is fetched for it.
         if (!entry.player.hasPlayed) continue;
-        void this.produceSilence(entry.player, entry.videoId, entry.sourcePath);
+        void this.produceSilence(entry.player, entry.videoId);
       }
     }, SILENCE_REFRESH_DEBOUNCE_MS);
   }
@@ -5044,8 +4471,6 @@ export default class YtFreePlugin extends Plugin {
    * ceilings are tested (GitHub #66).
    */
   private desktopProvider(videoId: string): StreamProvider {
-    const offline = this.settings.devOfflineHd?.trim();
-    if (offline) return (mode) => this.offlineStream(videoId, offline, mode);
     return cachedProvider(
       videoId,
       this.cache,
@@ -5061,12 +4486,11 @@ export default class YtFreePlugin extends Plugin {
   /** What `desktopResolve` asks: yt-dlp, InnerTube and the byte reader. */
   private desktopSources(): DesktopSources {
     return {
-      ytDlpInfo: (videoId) => this.ytDlpInfo(videoId),
-      ytDlpUnavailable: () => this.ytDlpUnavailable,
-      markYtDlpUnavailable: () => {
-        this.ytDlpUnavailable = true;
-        this.paintYouTubeToggles();
-      },
+      // yt-dlp is not run (0.2.2): the store scan rates any shell use as a
+      // warning. Desktop plays our own stream, then YouTube's player.
+      ytDlpInfo: () => Promise.reject(new YtDlpMissingError()),
+      ytDlpUnavailable: () => true,
+      markYtDlpUnavailable: () => undefined,
       innertubeFast: async (videoId) => {
         const { resolveMobileStream } = await import("./mobile/innertube.ts");
         return resolveMobileStream(videoId);
@@ -5079,52 +4503,15 @@ export default class YtFreePlugin extends Plugin {
         const { resolveHdFromYtDlpFormats } = await import("./hd.ts");
         return resolveHdFromYtDlpFormats(videoId, formats, undefined, fetch);
       },
-      // Streamed and cancellable on desktop (GitHub #23); `requestUrl` if the
-      // desktop code will not load.
+      // `requestUrl`, as on the phone. The streamed Node reader (GitHub #23)
+      // went with the other Node code in 0.2.2.
       rangeFetch: async () => {
         const { fetchRange } = await import("./hd.ts");
-        return desktop().then(
-          (d) => d.streamingWithFallback(fetchRange),
-          () => fetchRange,
-        );
+        return fetchRange;
       },
       failures: this.tierFailures,
-      onPlayingWithoutYtDlp: () => {
-        if (this.noYtDlpNoticeShown) return;
-        this.noYtDlpNoticeShown = true;
-        // No Notice (2026-11-10): playing without yt-dlp is what a store user's
-        // computer does, every session. It is not news and nothing is wrong.
-        this.debug("playing without yt-dlp");
-      },
+      onPlayingWithoutYtDlp: () => undefined,
     };
-  }
-
-  /** The offline HD player (GitHub #38): local files, never YouTube. */
-  private async offlineStream(videoId: string, folder: string, mode: ResolveMode): Promise<ResolvedStream> {
-    const { loadOfflineManifest, localFileUrl, offlineFetchRange } = await desktop();
-    const manifest = await loadOfflineManifest(folder);
-    const forever = Date.now() + 365 * 86400_000;
-    if (mode === "fast") {
-      const url = localFileUrl(`${folder.replace(/\/+$/, "")}/${manifest.progressive}`);
-      return { url, isHls: false, mode, expiresAt: forever, height: 360 };
-    }
-    const { resolveHdFromYtDlpFormats } = await import("./hd.ts");
-    const stream = await resolveHdFromYtDlpFormats(
-      videoId, offlineFormats(manifest), undefined, offlineFetchRange(folder),
-    );
-    return { ...stream, expiresAt: forever };
-  }
-
-  /**
-   * The one `yt-dlp -J` for a video (GitHub #32), shared by 360p, HD, the
-   * transcript and Smart Speed, and kept until its links expire. Always
-   * signed out (GitHub #64).
-   */
-  private async ytDlpInfo(videoId: string): Promise<YtDlpInfo> {
-    const { fetchYtDlpInfo, findYtDlp } = await desktop();
-    if (!this.ytDlpPath) this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-    const ytDlpPath = this.ytDlpPath;
-    return this.ytInfo.get(videoId, () => fetchYtDlpInfo(videoId, ytDlpPath), (info) => infoExpiresAt(info));
   }
 
   /** InnerTube, via the same cache. Mobile only. */
@@ -5529,36 +4916,4 @@ export default class YtFreePlugin extends Plugin {
     return adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
   }
 
-  resetFfmpeg(): void {
-    this.ffmpegPath = undefined;
-  }
-
-  resetResolver(): void {
-    this.ytDlpPath = null;
-    this.ytDlpUnavailable = false;
-    this.cache.clear();
-    void this.probeYtDlp();
-  }
-
-  /**
-   * Desktop: look for yt-dlp once, locally (`yt-dlp --version`, no network),
-   * so the YouTube button is on the bar from the start when it is missing.
-   */
-  private async probeYtDlp(): Promise<void> {
-    if (!Platform.isDesktopApp || this.ytDlpPath) return;
-    try {
-      const { findYtDlp } = await desktop();
-      this.ytDlpPath = await findYtDlp(this.settings.ytDlpPath);
-      this.ytDlpUnavailable = false;
-    } catch {
-      this.ytDlpUnavailable = true;
-    }
-    this.paintYouTubeToggles();
-  }
-
-  /** Every open player's YouTube button follows whether yt-dlp is here. */
-  private paintYouTubeToggles(): void {
-    if (!Platform.isDesktopApp) return;
-    for (const entry of this.players.values()) entry.player.setYouTubeToggle(this.ytDlpUnavailable);
-  }
 }

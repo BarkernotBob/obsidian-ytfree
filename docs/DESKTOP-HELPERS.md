@@ -1,3 +1,21 @@
+# Desktop helpers (removed in 0.2.2)
+
+**YouTube for You 0.2.2 and later does not run yt-dlp or ffmpeg.** The Obsidian community
+directory's automated review rates any plugin that runs other programs (Shell Execution) or
+touches files outside the vault (Direct Filesystem Access) with a Caution label. To list
+without it, these went:
+
+- Offline downloads (*Download this video for offline*, *Delete the local copy*), and playing a
+  downloaded copy.
+- yt-dlp as the first playback tier. Desktop now plays our own stream, with YouTube's embedded
+  player as the fallback, the same as the phone.
+- ffmpeg Smart Speed. Smart Speed still works from caption timing on every device.
+- The Dock audio badge (macOS) and the Shorts redirect probe.
+
+A separate desktop-only companion plugin may bring these back later (Isaiah, 2026-11-26).
+
+The rest of this page describes the helpers as they were in 0.2.1, for anyone on that version.
+
 # Optional desktop helpers: yt-dlp and ffmpeg
 
 YouTube for You needs neither. Without them it plays every video through its own stream, with YouTube's

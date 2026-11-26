@@ -102,17 +102,12 @@ or your vault to its author or anyone else.
 - **A notification address you enter** (optional, blank by default): when you fill it in, new
   videos are POSTed there.
 
-**Optional desktop helpers.** YouTube for You needs nothing installed. If
-[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) or `ffmpeg` is already on your computer, YouTube for You
-runs them on desktop for offline downloads and finer Smart Speed. They are separate programs
-you install yourself; YouTube for You never downloads or installs them
-([details](docs/DESKTOP-HELPERS.md)).
-
-**Files outside your vault.** Only if you use offline downloads (desktop, needs yt-dlp):
-downloaded videos go to a `YT Free` folder in Movies (Videos on Windows and Linux), or the folder
-you choose in settings. (Versions before
-sign-in was removed kept a cookie file in `~/Library/Application Support/obsidian-ytfree/`;
-YouTube for You deletes it on first load.)
+**No programs run, no files outside your vault.** YouTube for You runs no other program and
+reads or writes nothing outside your vault. Its own data is in `.obsidian/plugins/ytfree/`.
+(Versions before 0.2.2 could run yt-dlp and ffmpeg for offline downloads; see
+[docs/DESKTOP-HELPERS.md](docs/DESKTOP-HELPERS.md). Versions before sign-in was removed kept a
+cookie file in `~/Library/Application Support/obsidian-ytfree/`; if you used one, delete that
+folder by hand.)
 
 **Accounts and payments.** No account and no sign-in; nothing is paid for. Your YouTube
 cookies never reach the plugin.
@@ -140,7 +135,9 @@ told otherwise. If the hub never matches between devices, check that first.
   videos play in YouTube's embedded player.
 - Pop-out windows (a note dragged out to its own Obsidian window on desktop) are not supported
   yet: play videos in the main window.
-- Offline downloads are desktop only and need yt-dlp ([details](docs/DESKTOP-HELPERS.md)).
+- No offline downloads since 0.2.2. Videos always stream.
+- Shorts are told apart from regular videos only by length: a subscription's video under
+  3 minutes may show as a regular video.
 
 ## Developing
 

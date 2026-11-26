@@ -87,16 +87,11 @@ const panel = `
  */
 const controls = (phone) => `
   <div class="ytfree-controls">
-    <div class="ytfree-controls-group ytfree-controls-side ytfree-controls-left">
-      ${speed}${btn("ytfree-btn-pip")}${btn("ytfree-btn-fullscreen")}
-    </div>
-    <div class="ytfree-controls-group ytfree-controls-transport">
-      ${btn("ytfree-btn-play")}${btn("ytfree-btn-back", badge)}${btn("ytfree-btn-forward", badge)}
-    </div>
-    <div class="ytfree-controls-group ytfree-controls-side ytfree-controls-right">
-      ${phone ? btn("ytfree-btn-collapse") : btn("ytfree-btn-download")}
-      ${btn("ytfree-btn-pin")}${btn("ytfree-btn-panel")}
-    </div>
+    ${btn("ytfree-side-mid ytfree-btn-play")}${btn("ytfree-side-mid ytfree-btn-back", badge)}${btn("ytfree-side-mid ytfree-btn-forward", badge)}
+    <div class="ytfree-controls-break"></div>
+    ${speed.replace('class="ytfree-speed"', 'class="ytfree-speed ytfree-side-left"')}${btn("ytfree-side-left ytfree-btn-pip")}${btn("ytfree-side-left ytfree-btn-fullscreen")}
+    ${phone ? btn("ytfree-side-right ytfree-btn-collapse") : btn("ytfree-side-right ytfree-btn-download")}
+    ${btn("ytfree-side-right ytfree-btn-pin")}${btn("ytfree-side-right ytfree-btn-panel")}
     ${panel}
   </div>`;
 
@@ -183,8 +178,10 @@ const measure = () => {
 
   // The two side groups, which should look like a pair rather than like one
   // group and a leftover.
-  const side = [...bar.querySelectorAll(".ytfree-controls-side")].map((g) => {
-    const kids = [...g.children].map((k) => k.getBoundingClientRect());
+  const side = [".ytfree-side-left", ".ytfree-side-right"].map((sel) => {
+    const kids = [...bar.querySelectorAll(`:scope > ${sel}`)]
+      .map((k) => k.getBoundingClientRect())
+      .sort((a, b) => a.left - b.left);
     return Math.round(kids[kids.length - 1].right - kids[0].left);
   });
 
