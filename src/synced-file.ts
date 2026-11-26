@@ -191,7 +191,7 @@ export class SyncedFile<T> {
     this.path = path;
     this.codec = codec;
     this.local = local;
-    this.sleep = options.sleep ?? ((ms) => new Promise((r) => globalThis.setTimeout(r, ms)));
+    this.sleep = options.sleep ?? ((ms) => new Promise((r) => window.setTimeout(r, ms)));
     this.now = options.now ?? (() => Date.now());
     this.random = options.random ?? Math.random;
     this.writeBack = options.writeBack ?? true;

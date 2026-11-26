@@ -130,7 +130,7 @@ export async function resolveByTier<S>(opts: {
       if (!retried.has(choice.tier) && opts.transient?.(err)) {
         retried.add(choice.tier);
         const wait = opts.retryDelayMs ?? TRANSIENT_RETRY_MS;
-        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        if (wait > 0) await new Promise((r) => window.setTimeout(r, wait));
         continue;
       }
       firstError ??= err;

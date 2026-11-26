@@ -1608,14 +1608,14 @@ export class YtFreePlayer {
         // would hand back the movement already cancelled.
         if (anchorTop !== null) return;
         shift = 0;
-        panel.style.transform = "";
+        panel.style.removeProperty("transform");
         anchorTop = panel.getBoundingClientRect().top;
       };
       const release = () => {
         if (anchorTop === null) return;
         anchorTop = null;
         shift = 0;
-        panel.style.transform = "";
+        panel.style.removeProperty("transform");
       };
       el.addEventListener("pointerdown", grab);
       el.addEventListener("pointerup", release);
@@ -1788,8 +1788,8 @@ export class YtFreePlayer {
       return;
     }
 
-    panel.style.maxHeight = "";
-    panel.style.width = "";
+    panel.style.removeProperty("max-height");
+    panel.style.removeProperty("width");
     const natural = panel.getBoundingClientRect();
 
     const placement = panelPlacement({
@@ -2179,10 +2179,10 @@ export class YtFreePlayer {
     this.lastFrameAt = 0;
     const tick = (now: number): void => {
       if (this.destroyed) return;
-      this.smartRaf = requestAnimationFrame(tick);
+      this.smartRaf = window.requestAnimationFrame(tick);
       this.smartFrame(now);
     };
-    this.smartRaf = requestAnimationFrame(tick);
+    this.smartRaf = window.requestAnimationFrame(tick);
   }
 
   private stopSmartLoop(): void {
@@ -3325,7 +3325,7 @@ export class YtFreePlayer {
 
     try {
       if (this.recoveries > 1) {
-        await new Promise((r) => setTimeout(r, RECOVERY_COOLDOWN_MS));
+        await new Promise((r) => window.setTimeout(r, RECOVERY_COOLDOWN_MS));
       }
       // Recover in whatever quality is currently playing, so a refresh never
       // silently downgrades the picture.

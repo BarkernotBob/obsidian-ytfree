@@ -311,7 +311,7 @@ function vaultFolder(typed: string): string {
   return folder === "/" ? "" : folder;
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 /**
  * How long a save waits before trying again after refusing to write.
