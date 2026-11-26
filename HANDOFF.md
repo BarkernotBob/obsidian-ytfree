@@ -20,7 +20,8 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
    Mac. Then read the listing's Review rating: no Caution means the label is solved and a desktop
    companion plugin can be scoped; Caution still means the 7 deprecation notes or the
    disclosures are the cause.
-2. #133 Preview layout awaits scope OK.
+2. UI polish: Cinema design language picked (docs/V1-SCOPE-CINEMA-UI.md, includes #133).
+   Build after the description and settings cleanup lands.
 3. Then post-MVP backlog (label `post-mvp`): #125 manage-filter ×, #87 Batch 3, #86 Windows/Linux
    test, #118/#119 channel lists. Dependabot PRs #101/#113 after release.
 
