@@ -43,6 +43,9 @@ Current state only, under 80 lines, replace don't append. History: [docs/archive
 - 2026-11-12 (#46): search scope drafted ([V1-SCOPE-SEARCH](docs/V1-SCOPE-SEARCH.md)). Next:
   Isaiah answers D1 (later sections) and D2 (one 6-search recording run), then build.
 
+- 2026-11-12: notes and Previews open at the top, nothing selected, no keyboard
+  ([V1-SCOPE-OPEN-AT-TOP](docs/V1-SCOPE-OPEN-AT-TOP.md)). Next: Isaiah's phone test.
+
 - 2026-11-10: display name is now "YouTube for You"; plugin id stays `ytfree` (GLOSSARY).
 
 ## Shipped on main (scope doc = manual test)
