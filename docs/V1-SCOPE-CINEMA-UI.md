@@ -46,8 +46,10 @@ variables, so it works in light, dark and community themes.
   tap on the picture brings them back. Hidden when YouTube's embedded player (the fallback) is
   showing, so they never block YouTube's own controls.
 - **Strip row 1:** elapsed time, seek bar, total time.
-- **Strip row 2 (tools):** Hub, PiP, Fullscreen on the left; speed pill centred; HD, Collapse,
-  Share, Options on the right. On a phone this replaces today's transport row and side row, so the
+- **Fullscreen** sits in the picture's bottom-right corner (36 px), so the tools row is symmetric.
+- **Strip row 2 (tools):** a 7-column grid, `repeat(3, 1fr) 72px repeat(3, 1fr)`: Hub, PiP, HD |
+  speed | Collapse, Share, Options. The speed pill is a fixed 72 px wide with its value centred, so
+  1×, 1.25×, 1.75× and 2× all sit in the same place and nothing beside it moves. On a phone this replaces today's transport row and side row, so the
   player loses a row.
 - **Strip row 3 (notes only):** Notes, Description, Transcript, This moment as four equal pills.
   Same behaviour as today's section links (Notes still folds the video only while the keyboard is up).
@@ -92,6 +94,8 @@ variables, so it works in light, dark and community themes.
 4. Under the picture: the seek bar, then one row with speed in the middle (Hub, PiP, Fullscreen
    left; HD, Collapse, Share, Options right), then Notes, Description, Transcript, This moment.
    Each of those buttons still does what it does today.
+   Change the speed through 1×, 1.25×, 1.75× and 2×: the pill and the icons beside it do not move.
+   No button label is cut off.
 5. Desktop Preview: nothing touches anything else; the title, actions and tabs line up on one
    left edge, and the tabs switch between Description and Transcript.
 6. Switch Obsidian to light, then dark. The stage stays black; everything else follows the theme.
