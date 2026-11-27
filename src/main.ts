@@ -3773,6 +3773,10 @@ export default class YtFreePlugin extends Plugin {
         mediaHost: mobile ? media : undefined,
         // Ours everywhere (Isaiah, 2026-11-27). A note can still ask for the
         // platform's own with `ytfree_controls: built-in`, for comparison.
+        // SPIKE: `ytfree_layout: top` puts the tools on the picture, YouTube's way.
+        topRow:
+          noteFile instanceof TFile &&
+          this.app.metadataCache.getFileCache(noteFile)?.frontmatter?.ytfree_layout === "top",
         ownTransport: !(
           noteFile instanceof TFile &&
           this.app.metadataCache.getFileCache(noteFile)?.frontmatter?.ytfree_controls === "built-in"

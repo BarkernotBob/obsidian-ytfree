@@ -151,6 +151,12 @@ export interface PlayerOptions {
    * `ytfree_controls: built-in`.
    */
   ownTransport?: boolean;
+  /**
+   * SPIKE (2026-11-27): YouTube's layout. The tools move from the bar under the
+   * video onto the top of the picture with the transport, and Fullscreen joins
+   * the seek row. With `ownTransport` only.
+   */
+  topRow?: boolean;
 }
 
 /**
@@ -458,6 +464,9 @@ export class YtFreePlayer {
   private transportCleanup: (() => void) | null = null;
   /** Shows the "Back to 12:04" pill after a jump; set by `buildOwnTransport`. */
   private offerJumpBack: ((from: number, to: number) => void) | null = null;
+  private transportLayer: HTMLElement | null = null;
+  private showTransport: (() => void) | null = null;
+  private seekRowEl: HTMLElement | null = null;
   /** The strip's Transcript button, lit while the note follows along. */
   private followBtn: HTMLButtonElement | null = null;
   /** When the last `pause` event fired, and whether it has already been answered. */
@@ -632,6 +641,7 @@ export class YtFreePlayer {
     }
 
     this.buildControls();
+    if (options.ownTransport && options.topRow) this.moveToolsToTopRow();
     this.trackSmartSpeed();
 
     // Native error path (direct mp4, and some HLS failures).
@@ -1405,18 +1415,111 @@ export class YtFreePlayer {
       });
     }
 
-    // The first tap on the picture brings them up; a tap on the picture that
-    // is not on a control puts them away.
+    // Taps on the picture, YouTube's way (2026-11-27 spike): one tap shows or
+    // hides the controls; a double tap on the left or right third skips 10s
+    // back or forward, and each further tap there adds 10s more; pressing and
+    // holding plays at 2x until you let go. A single tap waits a beat so a
+    // double tap can claim it.
+    const onControl = (target: EventTarget | null): boolean => {
+      const node = target as Node | null;
+      return Boolean(
+        node?.instanceOf(HTMLElement) &&
+          node.closest(".ytfree-transport-btn, .ytfree-seekrow, .ytfree-jumpback, .ytfree-transport-top"),
+      );
+    };
+    const ripple = stage.createDiv({ cls: "ytfree-tapseek" });
+    const holdBadge = stage.createDiv({ cls: "ytfree-hold2x", text: "2× ▸▸" });
+    let single: number | null = null;
+    let lastTap = { at: 0, side: 0 };
+    let streak = { side: 0, total: 0, until: 0 };
+    let rippleTimer: number | null = null;
+    let holdTimer: number | null = null;
+    let holding: { rate: number } | null = null;
+    let swallowClick = false;
+    const sideOf = (x: number): number => {
+      const box = stage.getBoundingClientRect();
+      const third = box.width / 3;
+      if (x < box.left + third) return -1;
+      if (x > box.right - third) return 1;
+      return 0;
+    };
+    const showRipple = (side: number, total: number): void => {
+      ripple.setText(`${side < 0 ? "−" : "+"}${total}s`);
+      ripple.toggleClass("is-left", side < 0);
+      ripple.toggleClass("is-right", side > 0);
+      ripple.addClass("is-shown");
+      if (rippleTimer !== null) window.clearTimeout(rippleTimer);
+      rippleTimer = window.setTimeout(() => ripple.removeClass("is-shown"), 700);
+    };
     stage.addEventListener("click", (e) => {
-      const target = e.target as Node | null;
-      if (
-        target?.instanceOf(HTMLElement) &&
-        target.closest(".ytfree-transport-btn, .ytfree-seekrow, .ytfree-jumpback")
-      ) {
+      if (swallowClick) {
+        swallowClick = false;
         return;
       }
-      if (layer.hasClass("is-shown")) hide();
-      else show();
+      if (onControl(e.target)) return;
+      const now = Date.now();
+      const side = sideOf(e.clientX);
+      const ready = this.video.readyState > 0;
+      // Already in a run of skips on this side: every tap is another 10s.
+      const inStreak = ready && side !== 0 && side === streak.side && now < streak.until;
+      const isDouble = ready && side !== 0 && side === lastTap.side && now - lastTap.at < 300;
+      lastTap = { at: now, side };
+      if (inStreak || isDouble) {
+        if (single !== null) window.clearTimeout(single);
+        single = null;
+        const before = this.video.currentTime;
+        this.seekBy(10 * side);
+        streak = {
+          side,
+          total: inStreak ? streak.total + 10 : 10,
+          until: now + 700,
+        };
+        showRipple(side, streak.total);
+        if (!inStreak) this.offerJumpBack?.(before, before + 10 * side);
+        return;
+      }
+      if (single !== null) window.clearTimeout(single);
+      single = window.setTimeout(() => {
+        single = null;
+        if (layer.hasClass("is-shown")) hide();
+        else show();
+      }, 250);
+    });
+    const endHold = (): void => {
+      if (holdTimer !== null) window.clearTimeout(holdTimer);
+      holdTimer = null;
+      if (!holding) return;
+      this.video.playbackRate = holding.rate;
+      holding = null;
+      holdBadge.removeClass("is-shown");
+      swallowClick = true;
+    };
+    let holdStart = { x: 0, y: 0 };
+    stage.addEventListener("pointerdown", (e) => {
+      if (onControl(e.target) || !this.isPlaying) return;
+      holdStart = { x: e.clientX, y: e.clientY };
+      if (holdTimer !== null) window.clearTimeout(holdTimer);
+      holdTimer = window.setTimeout(() => {
+        holdTimer = null;
+        if (!this.isPlaying) return;
+        holding = { rate: this.video.playbackRate };
+        this.video.playbackRate = 2;
+        holdBadge.addClass("is-shown");
+      }, 500);
+    });
+    stage.addEventListener("pointermove", (e) => {
+      if (holdTimer === null) return;
+      if (Math.abs(e.clientX - holdStart.x) > 10 || Math.abs(e.clientY - holdStart.y) > 10) {
+        window.clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+    });
+    for (const event of ["pointerup", "pointercancel", "pointerleave"]) {
+      stage.addEventListener(event, endHold);
+    }
+    // iOS: no long-press callout or text selection over the picture.
+    stage.addEventListener("contextmenu", (e) => {
+      if (holding || holdTimer !== null) e.preventDefault();
     });
     // And a tap anywhere else on the page, like the platform's own.
     const outside = (e: Event): void => {
@@ -1472,7 +1575,10 @@ export class YtFreePlayer {
       activeDocument.removeEventListener("pointerdown", outside, true);
     };
 
+    this.transportLayer = layer;
+    this.showTransport = show;
     const seek = layer.createDiv({ cls: "ytfree-seekrow" });
+    this.seekRowEl = seek;
     const now = seek.createSpan({ cls: "ytfree-seekrow-time", text: "0:00" });
     const range = seek.createEl("input", {
       cls: "ytfree-seekrow-range",
@@ -1532,6 +1638,37 @@ export class YtFreePlayer {
   }
 
   /**
+   * SPIKE: YouTube's layout (see `PlayerOptions.topRow`). Collapse goes to the
+   * picture's top-left, the speed and the other tools to its top-right, and
+   * Fullscreen to the end of the seek row — all of them shown and hidden with
+   * the transport. The bar itself stays in the page at no height, because the
+   * pop-out is positioned against it.
+   */
+  private moveToolsToTopRow(): void {
+    const layer = this.transportLayer;
+    const seek = this.seekRowEl;
+    const bar = this.container.querySelector<HTMLElement>(".ytfree-controls");
+    if (!layer || !seek || !bar) return;
+    this.container.addClass("ytfree-layout-top");
+    const top = layer.createDiv({ cls: "ytfree-transport-top" });
+    const left = top.createDiv({ cls: "ytfree-transport-top-side" });
+    const right = top.createDiv({ cls: "ytfree-transport-top-side" });
+    const pick = (cls: string): HTMLElement | null => bar.querySelector<HTMLElement>(`:scope > .${cls}`);
+    const collapse = pick("ytfree-btn-collapse");
+    if (collapse) left.appendChild(collapse);
+    for (const cls of ["ytfree-speed", "ytfree-btn-youtube", "ytfree-btn-pip", "ytfree-btn-share", "ytfree-btn-panel"]) {
+      const el = pick(cls);
+      if (el) right.appendChild(el);
+    }
+    const full = pick("ytfree-btn-fullscreen");
+    if (full) seek.appendChild(full);
+    // Pressing any of them is using the controls, so they stay up.
+    for (const host of [top, seek]) {
+      host.addEventListener("click", () => this.showTransport?.());
+    }
+  }
+
+  /**
    * The Transcript button is lit while the note follows the transcript. The
    * host says when a follow starts and ends; the player only draws it.
    */
@@ -1573,7 +1710,7 @@ export class YtFreePlayer {
     if (jump) {
       const links: Array<[SectionName, string, string]> = [
         ["notes", "Notes", "pencil-line"],
-        ["description", "Description", "align-left"],
+        ["description", "Description", "file-text"],
         ["transcript", "Transcript", "captions"],
       ];
       for (const [section, label, icon] of links) {

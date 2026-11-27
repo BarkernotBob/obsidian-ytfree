@@ -5125,3 +5125,127 @@ body.ytfree-immersive-open .ytfree-preview-close {
 .ytfree-strip button.ytfree-strip-btn .ytfree-strip-label {
   text-align: center;
 }
+
+/* The channel row joins the same grey block, edge to edge. */
+.ytfree-own-transport .ytfree-channel-row,
+.ytfree-docked.ytfree-own-transport .ytfree-channel-row {
+  margin: 0;
+  padding: 4px 12px;
+  border-radius: 0;
+}
+
+/* Double-tap skip: "−10s" / "+20s" on the side that was tapped. */
+.ytfree-tapseek {
+  position: absolute;
+  top: 50%;
+  z-index: 4;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  font-variant-numeric: tabular-nums;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.ytfree-tapseek.is-left {
+  left: 16px;
+}
+
+.ytfree-tapseek.is-right {
+  right: 16px;
+}
+
+.ytfree-tapseek.is-shown {
+  opacity: 1;
+}
+
+/* Press and hold: playing at 2x until you let go. */
+.ytfree-hold2x {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 4;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ytfree-hold2x.is-shown {
+  opacity: 1;
+}
+
+.ytfree-own-transport .ytfree-stage,
+.ytfree-own-transport .ytfree-media {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+/*
+ * SPIKE: YouTube's layout (`ytfree_layout: top`). The tools ride on the top of
+ * the picture and come and go with the transport; Fullscreen ends the seek row.
+ */
+.ytfree-transport-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+}
+
+.ytfree-transport-top-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ytfree-transport-top button.ytfree-btn,
+.ytfree-seekrow button.ytfree-btn,
+.ytfree-transport-top button.ytfree-btn:hover,
+.ytfree-seekrow button.ytfree-btn:hover {
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  background-color: transparent;
+  box-shadow: none;
+  color: #fff;
+  --icon-size: 22px;
+}
+
+.ytfree-transport-top select.ytfree-speed {
+  width: 52px;
+  height: 32px;
+  margin: 0;
+  border-radius: 999px;
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  text-align: center;
+  text-align-last: center;
+}
+
+.ytfree-layout-top .ytfree-seekrow {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  padding-right: 4px;
+}
+
+.ytfree-own-transport.ytfree-layout-top .ytfree-controls {
+  min-height: 0;
+  padding: 0;
+}
+
+.ytfree-layout-top .ytfree-hold2x {
+  top: 56px;
+}
