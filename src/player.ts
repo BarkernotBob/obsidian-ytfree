@@ -151,8 +151,6 @@ export interface PlayerOptions {
    * `ytfree_controls: built-in`.
    */
   ownTransport?: boolean;
-  /** Stop the note following the transcript ("Following" pressed again). */
-  onStopFollowing?: () => void;
 }
 
 /**
@@ -460,8 +458,8 @@ export class YtFreePlayer {
   private transportCleanup: (() => void) | null = null;
   /** Shows the "Back to 12:04" pill after a jump; set by `buildOwnTransport`. */
   private offerJumpBack: ((from: number, to: number) => void) | null = null;
-  /** "This moment", which reads "Following" while the note follows along. */
-  private momentBtn: HTMLButtonElement | null = null;
+  /** The strip's Transcript button, lit while the note follows along. */
+  private followBtn: HTMLButtonElement | null = null;
   /** When the last `pause` event fired, and whether it has already been answered. */
   private lastPauseAt = 0;
   private lastPauseAnswered = true;
@@ -1529,18 +1527,11 @@ export class YtFreePlayer {
   }
 
   /**
-   * "This moment" while the note is following the transcript reads
-   * "Following", and pressing it then stops the follow. The host says when a
-   * follow starts and ends; the player only draws it.
+   * The Transcript button is lit while the note follows the transcript. The
+   * host says when a follow starts and ends; the player only draws it.
    */
   setFollowing(on: boolean): void {
-    const el = this.momentBtn;
-    if (!el) return;
-    el.toggleClass("is-on", on);
-    this.paintStripButton(el, on ? "Following" : "This moment", on ? "locate-fixed" : "locate");
-    const title = on ? "Stop following the transcript" : "Jump to this moment in the transcript";
-    el.setAttribute("title", title);
-    el.setAttribute("aria-label", title);
+    this.followBtn?.toggleClass("is-on", on);
   }
 
   private paintStripButton(el: HTMLElement, label: string, icon: string): void {
@@ -1551,7 +1542,7 @@ export class YtFreePlayer {
 
   /**
    * The row under the bar, with our controls: Hub first, then the note's
-   * sections, then This moment — icon over label, no outline (Isaiah's pick,
+   * sections — icon over label, no outline (Isaiah's pick,
    * 2026-11-26). Hub moved here from the bar on 2026-11-27 so the bar's tools
    * can sit symmetrically around the speed.
    */
@@ -1581,18 +1572,23 @@ export class YtFreePlayer {
         ["transcript", "Transcript", "captions"],
       ];
       for (const [section, label, icon] of links) {
-        const el = add(label, icon, `Go to ${label}`, () => jump(section));
+        // Transcript always lands on the paragraph being spoken and follows
+        // along until the reader scrolls (Isaiah, 2026-11-27) — the job "This
+        // moment" used to do, so that button is gone.
+        const run =
+          section === "transcript" && moment
+            ? () => moment(this.video.currentTime)
+            : () => jump(section);
+        const el = add(label, icon, `Go to ${label}`, run);
         // main.ts tells Notes apart by this: it is the one button that keeps the
         // keyboard up rather than putting it away.
         el.dataset.ytfreeSection = section;
+        if (section === "transcript" && moment) {
+          this.followBtn = el;
+          el.setAttribute("title", "Go to this moment in the transcript and follow along");
+          el.setAttribute("aria-label", "Go to this moment in the transcript and follow along");
+        }
       }
-    }
-    if (jump && moment) {
-      this.momentBtn = add("This moment", "locate", "Jump to this moment in the transcript", () => {
-        if (this.momentBtn?.hasClass("is-on")) this.options.onStopFollowing?.();
-        else moment(this.video.currentTime);
-      });
-      this.momentBtn.addClass("ytfree-section-moment");
     }
     row.style.setProperty("--ytfree-strip-count", String(row.childElementCount));
   }

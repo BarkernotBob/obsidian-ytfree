@@ -3114,15 +3114,15 @@ export default class YtFreePlugin extends Plugin {
    * the paragraph you just asked to read. The paragraph is marked the way
    * Obsidian marks the target of any link instead — the yellow flash.
    */
-  private jumpToTranscript(seconds: number): void {
+  private jumpToTranscript(seconds: number, quiet = false): boolean {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!view) return;
+    if (!view) return false;
 
     const content = view.data;
     const line = transcriptLineFor(content, seconds);
     if (line === null) {
-      new Notice("YouTube for You: this note has no transcript to jump to yet.");
-      return;
+      if (!quiet) new Notice("YouTube for You: this note has no transcript to jump to yet.");
+      return false;
     }
 
     // The transcript is folded by default and folded again by every second tap
@@ -3142,6 +3142,7 @@ export default class YtFreePlugin extends Plugin {
     };
     if (unfolded) window.setTimeout(land, 0);
     else land();
+    return true;
   }
 
   /**
@@ -3809,9 +3810,14 @@ export default class YtFreePlugin extends Plugin {
         // paragraph of about twenty seconds, so shifting the query back five
         // would sometimes land on the paragraph *before* the words on screen,
         // which is the one thing this control must never do.
+        // The strip's Transcript button: this moment, followed. A note with no
+        // timed paragraphs yet still gets its Transcript heading.
         onJumpToMoment:
-          noteFile instanceof TFile ? (seconds) => this.jumpToTranscript(seconds) : undefined,
-        onStopFollowing: () => this.stopFollowing(),
+          noteFile instanceof TFile
+            ? (seconds) => {
+                if (!this.jumpToTranscript(seconds, true)) this.jumpToSection(noteFile, "transcript");
+              }
+            : undefined,
         // Where you got to last time, and where you are getting to now. Read
         // through the store on each call rather than captured once, so a video
         // open in two panes agrees with itself.
