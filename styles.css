@@ -4731,3 +4731,139 @@ body.ytfree-immersive-open .ytfree-preview-close {
 .ytfree-hub.ytfree-phone .ytfree-hub-status {
   padding-inline: 16px;
 }
+
+/* ----------------------------------------------------- Cinema: Preview ---
+ *
+ * Description | Transcript are tabs: one fixed row at the top of the reading
+ * region, both always drawn, the open one underlined. The sections under the
+ * row are only their bodies. On a phone the row stays directly under the
+ * picture (#8) and the title, facts and buttons give way while you read; on a
+ * wide window the sheet is text on the left and the picture on the right
+ * (#133), 32px margins, columns at 5:7 and 32px apart.
+ */
+.ytfree-preview-tabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  flex: none;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ytfree-preview-tabs button.ytfree-preview-disclose,
+.ytfree-preview-tabs button.ytfree-preview-transcript-head {
+  justify-content: center;
+  height: 40px;
+  padding: 0 8px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ytfree-preview-tabs button.ytfree-preview-disclose[aria-expanded="true"],
+.ytfree-preview-tabs button.ytfree-preview-transcript-head[aria-expanded="true"] {
+  border-bottom-color: var(--text-normal);
+  color: var(--text-normal);
+}
+
+.ytfree-preview-tabs .ytfree-preview-disclose-label,
+.ytfree-preview-tabs .ytfree-preview-transcript-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ytfree-preview-tabs .ytfree-preview-disclose-chevron,
+.ytfree-preview-tabs .ytfree-preview-transcript-chevron {
+  display: none;
+}
+
+.ytfree-preview-read .ytfree-preview-describe,
+.ytfree-preview-read .ytfree-preview-transcript {
+  margin-top: 0;
+  border-top: none;
+}
+
+.ytfree-preview-read .ytfree-preview-describe.is-open .ytfree-preview-description,
+.ytfree-preview-read .ytfree-preview-transcript.is-open .ytfree-preview-transcript-body {
+  margin-top: 8px;
+}
+
+/* The whole title, always: no ellipsis in any orientation. */
+.ytfree-preview-modal .ytfree-preview-title {
+  min-height: 0;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  font-weight: var(--font-semibold);
+}
+
+.ytfree-preview-modal .ytfree-preview-actions {
+  grid-auto-rows: 56px;
+  gap: 0;
+}
+
+/* The phone's reading box is a column now: the tab row, then the open body. */
+.is-phone .ytfree-preview-modal .ytfree-preview-read {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 1000px) {
+  body:not(.is-mobile) .ytfree-preview-modal .modal-content {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "title player"
+      "facts player"
+      "actions player"
+      "read player";
+    gap: 24px 32px;
+    /* With the modal's own 16px, 32px from every edge. */
+    padding: 16px;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-modal .ytfree-preview-player {
+    grid-area: player;
+    align-self: start;
+    margin: 0;
+    padding: 0;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-modal .ytfree-preview-title {
+    grid-area: title;
+    font-size: 22px;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-modal .ytfree-preview-facts {
+    grid-area: facts;
+    margin-top: -16px;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-modal .ytfree-preview-actions {
+    grid-area: actions;
+    padding-top: 0;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-modal .ytfree-preview-read {
+    grid-area: read;
+    min-height: 0;
+  }
+
+  body:not(.is-mobile) .ytfree-preview-modal .ytfree-preview-wrapper {
+    max-width: none;
+  }
+}
+
+/* Flat rows: Obsidian's button fill and shadow otherwise box every paragraph. */
+.ytfree-preview-transcript-body button.ytfree-preview-cue {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.ytfree-preview-transcript-body button.ytfree-preview-cue.is-now {
+  background-color: var(--background-modifier-active-hover);
+}

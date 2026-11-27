@@ -4013,9 +4013,18 @@ class PreviewModal extends Modal {
     // picture and the facts do not have to be re-laid-out to give the reading
     // its own full-height column.
     const read = contentEl.createDiv({ cls: "ytfree-preview-read" });
+    // Cinema: the two headers are one row of tabs at the top of the region,
+    // and the sections under it are only their bodies. Moved rather than built
+    // there, so `disclose` and everything it wires stay exactly as they were.
+    const tabs = read.createDiv({ cls: "ytfree-preview-tabs" });
     this.mountDescription(read);
 
     this.mountTranscript(read);
+    for (const head of Array.from(
+      read.querySelectorAll(".ytfree-preview-disclose, .ytfree-preview-transcript-head"),
+    )) {
+      tabs.appendChild(head);
+    }
 
     // The starting state of the same flag `disclose` maintains. Exactly one
     // region opens by default — the transcript on a phone, the description off
@@ -4333,17 +4342,17 @@ class PreviewModal extends Modal {
       (cues) => {
         if (this.closed) return;
         if (cues.length === 0) {
-          nothing("Transcript — none for this video");
+          nothing("No transcript");
           return;
         }
-        label.setText(`Transcript · ${cues.length} sections`);
+        label.setText("Transcript");
         this.fillTranscript(body, cues);
         if (section.hasClass("is-open")) this.startTicking();
       },
       (err: unknown) => {
         console.error("YouTube for You: preview transcript could not be fetched.", err);
         if (this.closed) return;
-        nothing("Transcript — could not be fetched");
+        nothing("Transcript failed");
       },
     );
   }
