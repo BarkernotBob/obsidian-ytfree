@@ -2265,19 +2265,14 @@ export class HubView extends ItemView {
       new ImportSubscriptionsModal(this.app, this.store, () => this.renderAll()).open(),
     );
 
-    const input = tools.createEl("input", {
-      cls: "ytfree-hub-search-input ytfree-manage-filter",
-      type: "search",
-      attr: {
-        placeholder: `Filter ${this.store.state.channels.length} channels`,
-        enterkeyhint: "search",
-        autocapitalize: "off",
-        autocorrect: "off",
-        spellcheck: "false",
-        "aria-label": "Filter your subscriptions",
-      },
+    // The same field as every other search box: × to clear, one focus ring (#125).
+    const { field, input } = buildSearchField(tools, {
+      placeholder: `Filter ${this.store.state.channels.length} channels`,
+      label: "Filter your subscriptions",
+      // Survives a trip to a channel screen and back, like the hub's own filter.
+      value: this.manageQuery,
     });
-    input.value = this.manageQuery;
+    field.addClass("ytfree-manage-filter");
     input.addEventListener("input", () => {
       this.manageQuery = input.value;
       this.renderManageList();
