@@ -5249,3 +5249,10 @@ body.ytfree-immersive-open .ytfree-preview-close {
 .ytfree-layout-top .ytfree-hold2x {
   top: 56px;
 }
+
+/* A vertical swipe on the picture is a gesture now (full screen / fold),
+   not a scroll; the note below scrolls as before. */
+.ytfree-own-transport .ytfree-stage,
+.ytfree-own-transport .ytfree-media {
+  touch-action: none;
+}

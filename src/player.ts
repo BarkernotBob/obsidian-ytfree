@@ -1436,6 +1436,15 @@ export class YtFreePlayer {
     let holdTimer: number | null = null;
     let holding: { rate: number } | null = null;
     let swallowClick = false;
+    // The click a hold or a swipe may end with is not a tap. Not every
+    // platform sends one, so the flag also expires rather than eating the
+    // next real tap.
+    const swallowNextClick = (): void => {
+      swallowClick = true;
+      window.setTimeout(() => {
+        swallowClick = false;
+      }, 400);
+    };
     const sideOf = (x: number): number => {
       const box = stage.getBoundingClientRect();
       const third = box.width / 3;
@@ -1492,7 +1501,7 @@ export class YtFreePlayer {
       this.video.playbackRate = holding.rate;
       holding = null;
       holdBadge.removeClass("is-shown");
-      swallowClick = true;
+      swallowNextClick();
     };
     let holdStart = { x: 0, y: 0 };
     stage.addEventListener("pointerdown", (e) => {
@@ -1517,6 +1526,44 @@ export class YtFreePlayer {
     for (const event of ["pointerup", "pointercancel", "pointerleave"]) {
       stage.addEventListener(event, endHold);
     }
+    // Swipes that start on the picture (Isaiah, 2026-11-27): up for full
+    // screen; down leaves full screen, or folds the video away when it is not
+    // full screen. Only from the picture: the note below scrolls as ever.
+    let swipe: { id: number; x: number; y: number } | null = null;
+    stage.addEventListener(
+      "touchstart",
+      (e) => {
+        if (e.touches.length !== 1 || onControl(e.target)) {
+          swipe = null;
+          return;
+        }
+        const t = e.touches[0];
+        swipe = { id: t.identifier, x: t.clientX, y: t.clientY };
+      },
+      { passive: true },
+    );
+    stage.addEventListener("touchend", (e) => {
+      const start = swipe;
+      swipe = null;
+      if (!start) return;
+      const t = Array.from(e.changedTouches).find((c) => c.identifier === start.id);
+      if (!t) return;
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (Math.abs(dy) < 50 || Math.abs(dy) < Math.abs(dx) * 1.5) return;
+      swallowNextClick();
+      if (holdTimer !== null) window.clearTimeout(holdTimer);
+      holdTimer = null;
+      const full = this.immersive || Boolean(activeDocument.fullscreenElement);
+      if (dy < 0) {
+        if (!full) this.fullscreenPressed();
+      } else if (full) {
+        void this.exitFullscreen();
+      } else {
+        this.options.onToggleCollapse?.();
+      }
+    });
+
     // iOS: no long-press callout or text selection over the picture.
     stage.addEventListener("contextmenu", (e) => {
       if (holding || holdTimer !== null) e.preventDefault();
