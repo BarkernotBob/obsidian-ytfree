@@ -66,6 +66,28 @@ const SEARCH_YT_PATHS =
   '<path d="m21 21-4.35-4.35"/>' +
   '<path d="m9.2 7.8 5.6 3.2-5.6 3.2z" fill="currentColor" stroke-width="1.2"/>';
 
+// Our player's transport: solid glyphs, white on the picture (Isaiah,
+// 2026-11-27: "white controls and not see through").
+export const PLAY_SOLID_ICON = "ytfree-play-solid";
+export const PAUSE_SOLID_ICON = "ytfree-pause-solid";
+export const BACK10_ICON = "ytfree-back-10";
+export const FORWARD10_ICON = "ytfree-forward-10";
+const PLAY_SOLID_PATHS =
+  '<path d="M7 4.6v14.8a1 1 0 0 0 1.52.85l12.2-7.4a1 1 0 0 0 0-1.7L8.52 3.75A1 1 0 0 0 7 4.6z" ' +
+  'fill="currentColor" stroke="none"/>';
+const PAUSE_SOLID_PATHS =
+  '<rect x="5.5" y="4" width="4.5" height="16" rx="1.2" fill="currentColor" stroke="none"/>' +
+  '<rect x="14" y="4" width="4.5" height="16" rx="1.2" fill="currentColor" stroke="none"/>';
+const TEN =
+  '<text x="12" y="15.6" font-size="8.5" font-weight="700" text-anchor="middle" ' +
+  'font-family="-apple-system, system-ui, sans-serif" fill="currentColor" stroke="none">10</text>';
+const BACK10_PATHS =
+  '<path d="M3.5 12a8.5 8.5 0 1 0 2.5-6" stroke-width="2.4"/>' +
+  '<path d="M6.4 1.8 5.6 6.4l4.5.9" stroke-width="2.4"/>' + TEN;
+const FORWARD10_PATHS =
+  '<path d="M20.5 12a8.5 8.5 0 1 1-2.5-6" stroke-width="2.4"/>' +
+  '<path d="m17.6 1.8.8 4.6-4.5.9" stroke-width="2.4"/>' + TEN;
+
 /**
  * `addIcon` drops the string into an svg with `viewBox="0 0 100 100"`, so the
  * 24-unit Lucide path is scaled up (100 / 24) — the group transform scales the
@@ -85,4 +107,8 @@ export function registerIcons(): void {
   addIcon(SHARE_ICON, lucide(SHARE_PATHS));
   addIcon(HD_ICON, lucide(HD_PATHS));
   addIcon(SEARCH_YT_ICON, lucide(SEARCH_YT_PATHS));
+  addIcon(PLAY_SOLID_ICON, lucide(PLAY_SOLID_PATHS));
+  addIcon(PAUSE_SOLID_ICON, lucide(PAUSE_SOLID_PATHS));
+  addIcon(BACK10_ICON, lucide(BACK10_PATHS));
+  addIcon(FORWARD10_ICON, lucide(FORWARD10_PATHS));
 }

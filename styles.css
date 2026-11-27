@@ -4621,13 +4621,13 @@ body.ytfree-immersive-open .ytfree-preview-close {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   padding: 0;
   border: none;
   border-radius: 50%;
   color: #fff;
-  --icon-size: 28px;
+  --icon-size: 36px;
 }
 
 .ytfree-transport-btn .svg-icon {
@@ -4635,9 +4635,9 @@ body.ytfree-immersive-open .ytfree-preview-close {
 }
 
 .ytfree-transport-btn.ytfree-transport-play {
-  width: 64px;
-  height: 64px;
-  --icon-size: 44px;
+  width: 72px;
+  height: 72px;
+  --icon-size: 52px;
 }
 
 .ytfree-seekrow {
@@ -4722,9 +4722,11 @@ body.ytfree-immersive-open .ytfree-preview-close {
 }
 
 .ytfree-transport button.ytfree-transport-btn,
-.ytfree-transport button.ytfree-transport-btn:hover {
+.ytfree-transport button.ytfree-transport-btn:hover,
+.ytfree-transport button.ytfree-transport-btn.mobile-tap {
   background-color: transparent;
   box-shadow: none;
+  color: #fff;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -4928,4 +4930,156 @@ body.ytfree-immersive-open .ytfree-preview-close {
   border: none;
   border-radius: 50%;
   background: #fff;
+}
+
+/*
+ * The bar with our controls: three tools, the speed, three tools — the speed
+ * at the exact centre whatever its value, and a missing tool (no Collapse on a
+ * desktop) leaves its cell empty rather than sliding the speed off centre.
+ * Hub lives in the strip below now.
+ */
+.ytfree-own-transport .ytfree-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 72px repeat(3, minmax(0, 1fr));
+  justify-items: center;
+  align-items: center;
+  gap: 0;
+  min-height: 0;
+  padding: 4px;
+}
+
+.ytfree-own-transport .ytfree-controls > .ytfree-controls-break {
+  display: none;
+}
+
+.ytfree-own-transport .ytfree-controls > .ytfree-btn,
+.ytfree-own-transport .ytfree-controls > .ytfree-speed {
+  grid-row: 1;
+  margin: 0;
+}
+
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-pip {
+  grid-column: 1;
+}
+
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-fullscreen {
+  grid-column: 2;
+}
+
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-youtube {
+  grid-column: 3;
+}
+
+.ytfree-own-transport .ytfree-controls > .ytfree-speed {
+  grid-column: 4;
+  width: 72px;
+  text-align: center;
+  text-align-last: center;
+}
+
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-collapse {
+  grid-column: 5;
+}
+
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-share {
+  grid-column: 6;
+}
+
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-panel {
+  grid-column: 7;
+}
+
+/* Hub, the note's sections and This moment: icon over label, no outline. */
+.ytfree-sections.ytfree-strip {
+  grid-template-columns: repeat(var(--ytfree-strip-count, 5), minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+}
+
+.ytfree-strip button.ytfree-strip-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 56px;
+  padding: 0 2px;
+  border: none;
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.ytfree-strip-icon {
+  display: flex;
+  --icon-size: 22px;
+}
+
+.ytfree-strip-label {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ytfree-strip button.ytfree-strip-btn.is-on {
+  color: var(--text-accent);
+}
+
+/* The way back after a jump: over the foot of the picture, above the seek row. */
+.ytfree-jumpback {
+  position: absolute;
+  left: 50%;
+  bottom: 48px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transform: translateX(-50%);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 200ms ease, visibility 0s linear 200ms;
+}
+
+.ytfree-jumpback.is-shown {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 200ms ease;
+}
+
+.ytfree-jumpback button.ytfree-jumpback-go,
+.ytfree-jumpback button.ytfree-jumpback-close {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  border: none;
+  border-radius: 999px;
+  background-color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  color: #111;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  white-space: nowrap;
+}
+
+.ytfree-jumpback button.ytfree-jumpback-go {
+  padding: 0 16px 0 12px;
+}
+
+.ytfree-jumpback button.ytfree-jumpback-close {
+  justify-content: center;
+  width: 36px;
+  padding: 0;
+}
+
+.ytfree-jumpback-icon {
+  display: flex;
+  --icon-size: 18px;
+}
+
+.ytfree-jumpback button .svg-icon {
+  color: #111;
 }

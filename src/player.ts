@@ -4,7 +4,7 @@ import { isBotCheck } from "./bot-check.ts";
 import { isAgeRestricted } from "./age-restricted.ts";
 import { formatTimestamp } from "./format.ts";
 import { playedSpanMs } from "./history.ts";
-import { HD_ICON, SHARE_ICON } from "./icon.ts";
+import { BACK10_ICON, FORWARD10_ICON, HD_ICON, PAUSE_SOLID_ICON, PLAY_SOLID_ICON, SHARE_ICON } from "./icon.ts";
 import { anchorVisible, panelPlacement } from "./panel.ts";
 import type { SectionName } from "./sections.ts";
 import { compressibleWindows, moveFor, secondsSaved, secondsSkipped } from "./silence.ts";
@@ -151,6 +151,8 @@ export interface PlayerOptions {
    * `ytfree_controls: built-in`.
    */
   ownTransport?: boolean;
+  /** Stop the note following the transcript ("Following" pressed again). */
+  onStopFollowing?: () => void;
 }
 
 /**
@@ -456,6 +458,10 @@ export class YtFreePlayer {
   private readerPauseAt = 0;
   /** Takes our controls' document listener and timer away on `destroy`. */
   private transportCleanup: (() => void) | null = null;
+  /** Shows the "Back to 12:04" pill after a jump; set by `buildOwnTransport`. */
+  private offerJumpBack: ((from: number, to: number) => void) | null = null;
+  /** "This moment", which reads "Following" while the note follows along. */
+  private momentBtn: HTMLButtonElement | null = null;
   /** When the last `pause` event fired, and whether it has already been answered. */
   private lastPauseAt = 0;
   private lastPauseAnswered = true;
@@ -882,7 +888,10 @@ export class YtFreePlayer {
     this.drag = null;
     if (this.dragReadout) this.dragReadout.removeClass("is-visible");
     if (!drag) return;
-    if (commit && drag.live) this.video.currentTime = drag.to;
+    if (commit && drag.live) {
+      this.video.currentTime = drag.to;
+      this.offerJumpBack?.(drag.from, drag.to);
+    }
     this.paintProgress();
   }
 
@@ -1188,7 +1197,7 @@ export class YtFreePlayer {
     // is looked for. On a phone the side row has no room for a ninth 40pt
     // target, so CSS lifts it to the left end of the transport row — the same
     // top-left corner, a row higher. It stays visible over YouTube's player.
-    if (this.options.onOpenHub) {
+    if (this.options.onOpenHub && !this.options.ownTransport) {
       const hub = button("left", "Hub", "layout-grid", "Back to the hub", () => this.options.onOpenHub?.());
       hub.addClass("ytfree-btn-hub");
     }
@@ -1231,7 +1240,7 @@ export class YtFreePlayer {
 
     button("left", "PiP", "picture-in-picture", "Picture-in-Picture", () => {
       void this.withMedia(() => this.togglePip());
-    });
+    }).addClass("ytfree-btn-pip");
 
     this.fullscreenBtn = button("left", "Fullscreen", "maximize", "Fullscreen", () => {
       this.fullscreenPressed();
@@ -1312,16 +1321,19 @@ export class YtFreePlayer {
       this.paintSmart();
     }
 
-    this.buildSectionLinks();
+    if (this.options.ownTransport) this.buildStrip();
+    else this.buildSectionLinks();
   }
 
   /**
    * Our controls on the picture, in place of the platform's (Isaiah,
-   * 2026-11-27, after the built-in vs ours spike): a dimming scrim with white
-   * Back, Play and Forward at its centre and the seek row along its foot.
+   * 2026-11-27, after the built-in vs ours spike): a dimming scrim with solid
+   * white Back, Play and Forward at its centre and the seek row along its foot.
    * Hidden until the picture is tapped; a tap anywhere that is not a control
    * puts them away again, and while playing they fade on their own after 3s.
-   * Fullscreen stays on the bar under the video.
+   *
+   * Dragging the seek bar shows the frame you would land on, and letting go
+   * somewhere new offers a way back to where you were — see `offerJumpBack`.
    */
   private buildOwnTransport(stage: HTMLElement): void {
     this.container.addClass("ytfree-own-transport");
@@ -1341,7 +1353,7 @@ export class YtFreePlayer {
       if (!this.isPlaying) return;
       fade = window.setTimeout(() => {
         fade = null;
-        if (this.isPlaying) setShown(false);
+        if (this.isPlaying && !scrub) setShown(false);
       }, 3000);
     };
     const hide = (): void => {
@@ -1365,8 +1377,8 @@ export class YtFreePlayer {
       return el;
     };
     const row = layer.createDiv({ cls: "ytfree-transport-row" });
-    make(row, "ytfree-transport-back", "rotate-ccw", "Back 10 seconds", () => this.seekBy(-10));
-    const play = make(row, "ytfree-transport-play", "play", "Play or pause", () => {
+    make(row, "ytfree-transport-back", BACK10_ICON, "Back 10 seconds", () => this.seekBy(-10));
+    const play = make(row, "ytfree-transport-play", PLAY_SOLID_ICON, "Play or pause", () => {
       if (this.pendingPlay) {
         this.setPendingPlay(false);
         return;
@@ -1378,11 +1390,12 @@ export class YtFreePlayer {
       }
       void this.withMedia(() => this.play());
     });
-    make(row, "ytfree-transport-forward", "rotate-cw", "Forward 10 seconds", () => this.seekBy(10));
+    make(row, "ytfree-transport-forward", FORWARD10_ICON, "Forward 10 seconds", () => this.seekBy(10));
 
     for (const event of ["play", "pause", "ended"]) {
       this.video.addEventListener(event, () => {
-        setIcon(play, this.isPlaying ? "pause" : "play");
+        if (scrub) return; // the scrub's own pause, not the reader's
+        setIcon(play, this.isPlaying ? PAUSE_SOLID_ICON : PLAY_SOLID_ICON);
         // Playing on: start the fade if they are up. Paused: leave them as
         // they are — a pause is not a request to see them.
         if (layer.hasClass("is-shown")) show();
@@ -1393,7 +1406,12 @@ export class YtFreePlayer {
     // is not on a control puts them away.
     stage.addEventListener("click", (e) => {
       const target = e.target as Node | null;
-      if (target?.instanceOf(HTMLElement) && target.closest(".ytfree-transport-btn, .ytfree-seekrow")) return;
+      if (
+        target?.instanceOf(HTMLElement) &&
+        target.closest(".ytfree-transport-btn, .ytfree-seekrow, .ytfree-jumpback")
+      ) {
+        return;
+      }
       if (layer.hasClass("is-shown")) hide();
       else show();
     });
@@ -1405,8 +1423,49 @@ export class YtFreePlayer {
       hide();
     };
     activeDocument.addEventListener("pointerdown", outside, true);
+
+    // The way back after a jump: a pill over the foot of the picture, there
+    // whether or not the controls are, until it is used, closed, or 8s pass.
+    const back = stage.createDiv({ cls: "ytfree-jumpback" });
+    const backGo = back.createEl("button", { cls: "ytfree-jumpback-go", attr: { type: "button" } });
+    setIcon(backGo.createSpan({ cls: "ytfree-jumpback-icon" }), "undo-2");
+    const backLabel = backGo.createSpan({ cls: "ytfree-jumpback-label" });
+    const backClose = back.createEl("button", {
+      cls: "ytfree-jumpback-close",
+      attr: { type: "button", "aria-label": "Dismiss", title: "Dismiss" },
+    });
+    setIcon(backClose, "x");
+    let backTimer: number | null = null;
+    let backTo = 0;
+    const dismissBack = (): void => {
+      if (backTimer !== null) window.clearTimeout(backTimer);
+      backTimer = null;
+      back.removeClass("is-shown");
+    };
+    this.offerJumpBack = (from: number, to: number): void => {
+      if (Math.abs(to - from) < 5) return;
+      backTo = from;
+      backLabel.setText(`Back to ${formatTimestamp(Math.floor(from))}`);
+      backGo.setAttribute("aria-label", `Go back to ${formatTimestamp(Math.floor(from))}`);
+      back.addClass("is-shown");
+      if (backTimer !== null) window.clearTimeout(backTimer);
+      backTimer = window.setTimeout(dismissBack, 8000);
+    };
+    backGo.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.video.currentTime = backTo;
+      dismissBack();
+    });
+    backClose.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dismissBack();
+    });
+
     this.transportCleanup = () => {
       clearFade();
+      dismissBack();
       activeDocument.removeEventListener("pointerdown", outside, true);
     };
 
@@ -1417,34 +1476,125 @@ export class YtFreePlayer {
       attr: { type: "range", min: "0", max: "1000", step: "1", value: "0", "aria-label": "Seek" },
     });
     const total = seek.createSpan({ cls: "ytfree-seekrow-time", text: "0:00" });
-    let dragging = false;
+    // A drag in progress: where it started, and whether it was playing.
+    let scrub: { from: number; wasPlaying: boolean } | null = null;
+    const fill = (value: number): void => {
+      range.style.setProperty("--ytfree-seek-fill", `${value / 10}%`);
+    };
     const paintSeek = (): void => {
       const d = this.video.duration;
       const known = Number.isFinite(d) && d > 0;
       total.setText(known ? formatTimestamp(Math.floor(d)) : "0:00");
-      if (dragging) return;
+      if (scrub) return;
       now.setText(formatTimestamp(Math.floor(this.video.currentTime)));
       const value = known ? Math.round((this.video.currentTime / d) * 1000) : 0;
       range.value = String(value);
-      range.style.setProperty("--ytfree-seek-fill", `${value / 10}%`);
+      fill(value);
     };
     for (const event of ["timeupdate", "durationchange", "loadedmetadata", "seeked", "emptied"]) {
       this.video.addEventListener(event, paintSeek);
     }
-    range.addEventListener("input", () => {
-      dragging = true;
-      clearFade();
-      range.style.setProperty("--ytfree-seek-fill", `${Number(range.value) / 10}%`);
+    const target = (): number | null => {
       const d = this.video.duration;
-      if (Number.isFinite(d) && d > 0) now.setText(formatTimestamp(Math.floor((Number(range.value) / 1000) * d)));
+      return Number.isFinite(d) && d > 0 ? (Number(range.value) / 1000) * d : null;
+    };
+    range.addEventListener("input", () => {
+      clearFade();
+      const to = target();
+      if (to === null) return;
+      if (!scrub) {
+        scrub = { from: this.video.currentTime, wasPlaying: this.isPlaying };
+        // Held still while the finger is down, so the picture is the frame
+        // under it rather than the video running on from there.
+        if (scrub.wasPlaying) this.video.pause();
+      }
+      fill(Number(range.value));
+      now.setText(formatTimestamp(Math.floor(to)));
+      const v = this.video as HTMLVideoElement & { fastSeek?: (t: number) => void };
+      if (typeof v.fastSeek === "function") v.fastSeek(to);
+      else this.video.currentTime = to;
     });
     range.addEventListener("change", () => {
-      dragging = false;
-      const d = this.video.duration;
-      if (Number.isFinite(d) && d > 0) this.video.currentTime = (Number(range.value) / 1000) * d;
+      const started = scrub;
+      scrub = null;
+      const to = target();
+      if (to !== null) this.video.currentTime = to;
+      if (started) {
+        if (to !== null) this.offerJumpBack?.(started.from, to);
+        if (started.wasPlaying) void this.video.play().catch(() => undefined);
+      }
       paintSeek();
       show();
     });
+  }
+
+  /**
+   * "This moment" while the note is following the transcript reads
+   * "Following", and pressing it then stops the follow. The host says when a
+   * follow starts and ends; the player only draws it.
+   */
+  setFollowing(on: boolean): void {
+    const el = this.momentBtn;
+    if (!el) return;
+    el.toggleClass("is-on", on);
+    this.paintStripButton(el, on ? "Following" : "This moment", on ? "locate-fixed" : "locate");
+    const title = on ? "Stop following the transcript" : "Jump to this moment in the transcript";
+    el.setAttribute("title", title);
+    el.setAttribute("aria-label", title);
+  }
+
+  private paintStripButton(el: HTMLElement, label: string, icon: string): void {
+    el.empty();
+    setIcon(el.createSpan({ cls: "ytfree-strip-icon" }), icon);
+    el.createSpan({ cls: "ytfree-strip-label", text: label });
+  }
+
+  /**
+   * The row under the bar, with our controls: Hub first, then the note's
+   * sections, then This moment — icon over label, no outline (Isaiah's pick,
+   * 2026-11-26). Hub moved here from the bar on 2026-11-27 so the bar's tools
+   * can sit symmetrically around the speed.
+   */
+  private buildStrip(): void {
+    const jump = this.options.onJump;
+    const moment = this.options.onJumpToMoment;
+    const hub = this.options.onOpenHub;
+    if (!jump && !hub) return;
+    const row = this.container.createDiv({ cls: "ytfree-sections ytfree-strip" });
+    const add = (label: string, icon: string, title: string, run: () => void): HTMLButtonElement => {
+      const el = row.createEl("button", {
+        cls: "ytfree-section-link ytfree-strip-btn",
+        attr: { type: "button", title, "aria-label": title },
+      });
+      this.paintStripButton(el, label, icon);
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        run();
+      });
+      return el;
+    };
+    if (hub) add("Hub", "layout-grid", "Back to the hub", hub).addClass("ytfree-btn-hub");
+    if (jump) {
+      const links: Array<[SectionName, string, string]> = [
+        ["notes", "Notes", "pencil-line"],
+        ["description", "Description", "align-left"],
+        ["transcript", "Transcript", "captions"],
+      ];
+      for (const [section, label, icon] of links) {
+        const el = add(label, icon, `Go to ${label}`, () => jump(section));
+        // main.ts tells Notes apart by this: it is the one button that keeps the
+        // keyboard up rather than putting it away.
+        el.dataset.ytfreeSection = section;
+      }
+    }
+    if (jump && moment) {
+      this.momentBtn = add("This moment", "locate", "Jump to this moment in the transcript", () => {
+        if (this.momentBtn?.hasClass("is-on")) this.options.onStopFollowing?.();
+        else moment(this.video.currentTime);
+      });
+      this.momentBtn.addClass("ytfree-section-moment");
+    }
+    row.style.setProperty("--ytfree-strip-count", String(row.childElementCount));
   }
 
   /**

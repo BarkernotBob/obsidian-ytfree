@@ -3280,6 +3280,7 @@ export default class YtFreePlugin extends Plugin {
     };
     this.follow = follow;
     this.markFollowedLine(view, line);
+    entry.player.setFollowing(true);
   }
 
   /** One step of the follow: which paragraph now, and has it changed? */
@@ -3346,6 +3347,7 @@ export default class YtFreePlugin extends Plugin {
     this.follow = null;
     window.clearInterval(follow.timer);
     follow.release();
+    follow.entry.player.setFollowing(false);
   }
 
   /**
@@ -3809,6 +3811,7 @@ export default class YtFreePlugin extends Plugin {
         // which is the one thing this control must never do.
         onJumpToMoment:
           noteFile instanceof TFile ? (seconds) => this.jumpToTranscript(seconds) : undefined,
+        onStopFollowing: () => this.stopFollowing(),
         // Where you got to last time, and where you are getting to now. Read
         // through the store on each call rather than captured once, so a video
         // open in two panes agrees with itself.
