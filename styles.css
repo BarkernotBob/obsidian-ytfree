@@ -4585,11 +4585,11 @@ body.ytfree-immersive-open .ytfree-preview-close {
 }
 
 /*
- * SPIKE: built-in vs ours (Isaiah, 2026-11-26). A note with
- * `ytfree_controls: ours` turns the platform's controls off and draws these:
- * Back, Play and Forward centred on the picture, Fullscreen in its corner, and
- * a time / seek / time row under it. The bar's own copies of those four step
- * aside, so nothing is there twice.
+ * Our controls on the picture (Isaiah, 2026-11-27). Like the platform's: a
+ * dark scrim over the video with white controls on it, hidden until the
+ * picture is tapped. Back, Play and Forward at the exact centre; the seek row
+ * along the foot. The purple progress line steps aside for the seek row, and
+ * the bar's own Back/Play/Forward do too, so nothing is there twice.
  */
 .ytfree-transport {
   position: absolute;
@@ -4598,81 +4598,90 @@ body.ytfree-immersive-open .ytfree-preview-close {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
   opacity: 0;
-  pointer-events: none;
-  transition: opacity 200ms ease;
+  visibility: hidden;
+  transition: opacity 200ms ease, visibility 0s linear 200ms;
 }
 
 .ytfree-transport.is-shown {
   opacity: 1;
+  visibility: visible;
+  transition: opacity 200ms ease;
 }
 
 .ytfree-transport-row {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 32px;
 }
 
 .ytfree-transport-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   padding: 0;
   border: none;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  box-shadow: none;
   color: #fff;
-  --icon-size: 22px;
-}
-
-.ytfree-transport.is-shown .ytfree-transport-btn {
-  pointer-events: auto;
-}
-
-.ytfree-transport-btn.ytfree-transport-play {
-  width: 56px;
-  height: 56px;
   --icon-size: 28px;
 }
 
-.ytfree-transport-btn.ytfree-transport-full {
-  position: absolute;
-  right: 8px;
-  bottom: 12px;
-  width: 36px;
-  height: 36px;
-  --icon-size: 18px;
+.ytfree-transport-btn .svg-icon {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+
+.ytfree-transport-btn.ytfree-transport-play {
+  width: 64px;
+  height: 64px;
+  --icon-size: 44px;
 }
 
 .ytfree-seekrow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
-  color: var(--text-muted);
+  padding: 4px 12px 8px;
+  color: #fff;
   font-size: var(--font-ui-smaller);
   font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
 .ytfree-seekrow .ytfree-seekrow-range {
   width: 100%;
+  height: 4px;
   margin: 0;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    #fff 0,
+    #fff var(--ytfree-seek-fill, 0%),
+    rgba(255, 255, 255, 0.35) var(--ytfree-seek-fill, 0%)
+  );
 }
 
-.is-youtube .ytfree-transport,
-.is-youtube .ytfree-seekrow {
+.is-youtube .ytfree-transport {
   display: none;
 }
 
+.ytfree-own-transport .ytfree-progress,
 .ytfree-own-transport .ytfree-controls > .ytfree-btn-back,
 .ytfree-own-transport .ytfree-controls > .ytfree-btn-play,
-.ytfree-own-transport .ytfree-controls > .ytfree-btn-forward,
-.ytfree-own-transport .ytfree-controls > .ytfree-btn-fullscreen {
+.ytfree-own-transport .ytfree-controls > .ytfree-btn-forward {
   display: none;
+}
+
+.ytfree-own-transport.is-transport-shown .ytfree-poster-play {
+  visibility: hidden;
 }
 
 @media (max-width: 460px) {
@@ -4696,10 +4705,6 @@ body.ytfree-immersive-open .ytfree-preview-close {
   }
 }
 
-.ytfree-own-transport .ytfree-poster-play {
-  display: none;
-}
-
 /*
  * Cinema buttons are flat. Obsidian paints every `button` with its own fill
  * and shadow (`button:not(.clickable-icon)`, and `.mobile-tap` while a finger
@@ -4716,8 +4721,9 @@ body.ytfree-immersive-open .ytfree-preview-close {
   background-color: var(--text-normal);
 }
 
-.ytfree-transport button.ytfree-transport-btn {
-  background-color: rgba(0, 0, 0, 0.55);
+.ytfree-transport button.ytfree-transport-btn,
+.ytfree-transport button.ytfree-transport-btn:hover {
+  background-color: transparent;
   box-shadow: none;
 }
 
@@ -4866,4 +4872,60 @@ body.ytfree-immersive-open .ytfree-preview-close {
 
 .ytfree-preview-transcript-body button.ytfree-preview-cue.is-now {
   background-color: var(--background-modifier-active-hover);
+}
+
+/*
+ * Desktop hub: one scrolling column (Isaiah's spike, 2026-11-27).
+ *
+ * Each card is the picture on the left with its four actions directly under
+ * it, and the whole title to the right. The actions sit at the same distance
+ * from the top of every card whatever the title does, so a cursor left on
+ * Remove is on Remove for the next video too. The title column takes as many
+ * lines as it needs without moving them.
+ */
+.ytfree-hub:not(.ytfree-phone) .ytfree-hub-grid {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 880px;
+  gap: 8px;
+}
+
+.ytfree-hub:not(.ytfree-phone) .ytfree-hub-card:not(.ytfree-hub-hidden-row) {
+  display: grid;
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "thumb text"
+    "actions text";
+  gap: 8px 24px;
+  align-items: start;
+}
+
+.ytfree-hub:not(.ytfree-phone) .ytfree-hub-card:not(.ytfree-hub-hidden-row) > .ytfree-hub-thumb {
+  grid-area: thumb;
+}
+
+.ytfree-hub:not(.ytfree-phone) .ytfree-hub-card:not(.ytfree-hub-hidden-row) > .ytfree-hub-meta {
+  grid-area: text;
+  padding-top: 4px;
+}
+
+.ytfree-hub:not(.ytfree-phone) .ytfree-hub-card:not(.ytfree-hub-hidden-row) > .ytfree-card-actions {
+  grid-area: actions;
+}
+
+.ytfree-hub:not(.ytfree-phone) .ytfree-hub-card .ytfree-hub-title {
+  font-size: var(--font-ui-large);
+}
+
+.ytfree-seekrow .ytfree-seekrow-range::-webkit-slider-runnable-track {
+  height: 4px;
+}
+
+.ytfree-seekrow .ytfree-seekrow-range::-webkit-slider-thumb {
+  top: -5px;
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
 }

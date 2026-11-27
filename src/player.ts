@@ -145,11 +145,10 @@ export interface PlayerOptions {
    */
   session?: SessionOptions;
   /**
-   * SPIKE (built-in vs ours, Isaiah 2026-11-26): the platform's controls off,
-   * and ours drawn instead — Back, Play and Forward centred on the picture,
-   * Fullscreen in its corner, and a time / seek / time row under it. A note
-   * opts in with `ytfree_controls: ours` in its frontmatter. Absent, nothing
-   * changes. Removed or made permanent once the comparison is decided.
+   * Our controls instead of the platform's: no `controls` attribute, and
+   * `buildOwnTransport` draws Back, Play, Forward and the seek row on the
+   * picture. The default since 2026-11-27; a note opts out with
+   * `ytfree_controls: built-in`.
    */
   ownTransport?: boolean;
 }
@@ -455,6 +454,8 @@ export class YtFreePlayer {
   private resumeGuardUntil = 0;
   /** When the reader last asked for a pause — see `keepPlayingThroughSystemPauses`. */
   private readerPauseAt = 0;
+  /** Takes our controls' document listener and timer away on `destroy`. */
+  private transportCleanup: (() => void) | null = null;
   /** When the last `pause` event fired, and whether it has already been answered. */
   private lastPauseAt = 0;
   private lastPauseAnswered = true;
@@ -1314,19 +1315,52 @@ export class YtFreePlayer {
     this.buildSectionLinks();
   }
 
-  /** SPIKE: see `PlayerOptions.ownTransport`. */
+  /**
+   * Our controls on the picture, in place of the platform's (Isaiah,
+   * 2026-11-27, after the built-in vs ours spike): a dimming scrim with white
+   * Back, Play and Forward at its centre and the seek row along its foot.
+   * Hidden until the picture is tapped; a tap anywhere that is not a control
+   * puts them away again, and while playing they fade on their own after 3s.
+   * Fullscreen stays on the bar under the video.
+   */
   private buildOwnTransport(stage: HTMLElement): void {
     this.container.addClass("ytfree-own-transport");
-    const layer = stage.createDiv({ cls: "ytfree-transport is-shown" });
+    const layer = stage.createDiv({ cls: "ytfree-transport" });
+    let fade: number | null = null;
+    const clearFade = (): void => {
+      if (fade !== null) window.clearTimeout(fade);
+      fade = null;
+    };
+    const setShown = (on: boolean): void => {
+      layer.toggleClass("is-shown", on);
+      this.container.toggleClass("is-transport-shown", on);
+    };
+    const show = (): void => {
+      setShown(true);
+      clearFade();
+      if (!this.isPlaying) return;
+      fade = window.setTimeout(() => {
+        fade = null;
+        if (this.isPlaying) setShown(false);
+      }, 3000);
+    };
+    const hide = (): void => {
+      clearFade();
+      setShown(false);
+    };
+
     const make = (parent: HTMLElement, cls: string, icon: string, title: string, run: () => void) => {
-      const el = parent.createEl("button", { cls: `ytfree-transport-btn ${cls}`, attr: { title, "aria-label": title } });
+      const el = parent.createEl("button", {
+        cls: `ytfree-transport-btn ${cls}`,
+        attr: { title, "aria-label": title },
+      });
       el.type = "button";
       setIcon(el, icon);
       el.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
         run();
-        wake();
+        show();
       });
       return el;
     };
@@ -1345,36 +1379,38 @@ export class YtFreePlayer {
       void this.withMedia(() => this.play());
     });
     make(row, "ytfree-transport-forward", "rotate-cw", "Forward 10 seconds", () => this.seekBy(10));
-    make(layer, "ytfree-transport-full", "maximize", "Fullscreen", () => this.fullscreenPressed());
 
-    let fade: number | null = null;
-    const wake = (): void => {
-      layer.addClass("is-shown");
-      if (fade !== null) window.clearTimeout(fade);
-      fade = null;
-      if (!this.isPlaying) return;
-      fade = window.setTimeout(() => {
-        fade = null;
-        if (this.isPlaying) layer.removeClass("is-shown");
-      }, 3000);
-    };
-    const paintPlay = (): void => {
-      setIcon(play, this.isPlaying ? "pause" : "play");
-      wake();
-    };
-    for (const event of ["play", "pause", "ended"]) this.video.addEventListener(event, paintPlay);
-    // A tap on the picture brings them back, or puts them away while playing.
+    for (const event of ["play", "pause", "ended"]) {
+      this.video.addEventListener(event, () => {
+        setIcon(play, this.isPlaying ? "pause" : "play");
+        // Playing on: start the fade if they are up. Paused: leave them as
+        // they are — a pause is not a request to see them.
+        if (layer.hasClass("is-shown")) show();
+      });
+    }
+
+    // The first tap on the picture brings them up; a tap on the picture that
+    // is not on a control puts them away.
     stage.addEventListener("click", (e) => {
       const target = e.target as Node | null;
-      if (target?.instanceOf(HTMLElement) && target.closest(".ytfree-transport-btn")) return;
-      if (layer.hasClass("is-shown") && this.isPlaying) {
-        if (fade !== null) window.clearTimeout(fade);
-        fade = null;
-        layer.removeClass("is-shown");
-      } else wake();
+      if (target?.instanceOf(HTMLElement) && target.closest(".ytfree-transport-btn, .ytfree-seekrow")) return;
+      if (layer.hasClass("is-shown")) hide();
+      else show();
     });
+    // And a tap anywhere else on the page, like the platform's own.
+    const outside = (e: Event): void => {
+      if (!layer.hasClass("is-shown")) return;
+      const target = e.target as Node | null;
+      if (target && stage.contains(target)) return;
+      hide();
+    };
+    activeDocument.addEventListener("pointerdown", outside, true);
+    this.transportCleanup = () => {
+      clearFade();
+      activeDocument.removeEventListener("pointerdown", outside, true);
+    };
 
-    const seek = this.container.createDiv({ cls: "ytfree-seekrow" });
+    const seek = layer.createDiv({ cls: "ytfree-seekrow" });
     const now = seek.createSpan({ cls: "ytfree-seekrow-time", text: "0:00" });
     const range = seek.createEl("input", {
       cls: "ytfree-seekrow-range",
@@ -1388,13 +1424,17 @@ export class YtFreePlayer {
       total.setText(known ? formatTimestamp(Math.floor(d)) : "0:00");
       if (dragging) return;
       now.setText(formatTimestamp(Math.floor(this.video.currentTime)));
-      range.value = known ? String(Math.round((this.video.currentTime / d) * 1000)) : "0";
+      const value = known ? Math.round((this.video.currentTime / d) * 1000) : 0;
+      range.value = String(value);
+      range.style.setProperty("--ytfree-seek-fill", `${value / 10}%`);
     };
     for (const event of ["timeupdate", "durationchange", "loadedmetadata", "seeked", "emptied"]) {
       this.video.addEventListener(event, paintSeek);
     }
     range.addEventListener("input", () => {
       dragging = true;
+      clearFade();
+      range.style.setProperty("--ytfree-seek-fill", `${Number(range.value) / 10}%`);
       const d = this.video.duration;
       if (Number.isFinite(d) && d > 0) now.setText(formatTimestamp(Math.floor((Number(range.value) / 1000) * d)));
     });
@@ -1403,6 +1443,7 @@ export class YtFreePlayer {
       const d = this.video.duration;
       if (Number.isFinite(d) && d > 0) this.video.currentTime = (Number(range.value) / 1000) * d;
       paintSeek();
+      show();
     });
   }
 
@@ -3632,6 +3673,8 @@ export class YtFreePlayer {
   }
 
   destroy(): void {
+    this.transportCleanup?.();
+    this.transportCleanup = null;
     // Before the flag, or the report refuses itself: closing the note is the
     // most common way a session ends, and it is the position that matters most.
     if (this.ytEmbed) {
