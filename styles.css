@@ -5083,3 +5083,45 @@ body.ytfree-immersive-open .ytfree-preview-close {
 .ytfree-jumpback button .svg-icon {
   color: #111;
 }
+
+/*
+ * With our controls, the bar and the strip are one grey surface under the
+ * picture: edge to edge, square, nothing between them (Isaiah, 2026-11-27).
+ */
+.ytfree-own-transport .ytfree-controls,
+.ytfree-own-transport .ytfree-sections,
+.ytfree-docked.ytfree-own-transport .ytfree-controls,
+.ytfree-docked.ytfree-own-transport .ytfree-sections {
+  margin: 0;
+  border-radius: 0;
+  background: var(--background-secondary);
+}
+
+.ytfree-wrapper.ytfree-own-transport {
+  gap: 0;
+}
+
+/* Seven equal cells, the speed in the middle one like any other tool. */
+.ytfree-own-transport .ytfree-controls {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  padding: 4px 0;
+}
+
+.ytfree-own-transport .ytfree-controls > select.ytfree-speed {
+  width: 100%;
+  max-width: 40px;
+  height: 40px;
+  padding: 0;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Four characters ("1.25×") close up rather than widen the cell. */
+.ytfree-own-transport .ytfree-controls > select.ytfree-speed.is-long {
+  letter-spacing: -0.04em;
+}
+
+/* Labels stay centred under their icons, even when one only just fits. */
+.ytfree-strip button.ytfree-strip-btn .ytfree-strip-label {
+  text-align: center;
+}

@@ -1222,6 +1222,11 @@ export class YtFreePlayer {
     } else {
       speed.value = "1";
     }
+    // "1.25×" is a character longer than "1×" or "2×": it closes up in CSS
+    // instead of asking for a wider cell, so nothing beside it moves.
+    const paintSpeedLength = (): void => speed.toggleClass("is-long", speed.value.length >= 4);
+    paintSpeedLength();
+    speed.addEventListener("change", paintSpeedLength);
     speed.addEventListener("change", () => {
       this.playbackRate = Number(speed.value);
       this.video.playbackRate = this.playbackRate;
