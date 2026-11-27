@@ -5256,3 +5256,118 @@ body.ytfree-immersive-open .ytfree-preview-close {
 .ytfree-own-transport .ytfree-media {
   touch-action: none;
 }
+
+/* Top-row spike: the bar under the picture only appears while YouTube's
+   player is up, holding the way back to ours. */
+.ytfree-layout-top .ytfree-controls > .ytfree-btn-youtube {
+  display: none;
+}
+
+.ytfree-own-transport.ytfree-layout-top.is-youtube .ytfree-controls {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.ytfree-own-transport.ytfree-layout-top.is-youtube .ytfree-controls > .ytfree-btn-youtube {
+  display: inline-flex;
+}
+
+/*
+ * Phone hub, compact (Isaiah, 2026-11-27: "you can basically only see one
+ * video at a time"). Each card is a row: the picture on the left at 144px,
+ * the whole title and the channel beside it, and the four actions in a
+ * shorter row under both. About five videos to a screen instead of one.
+ */
+.ytfree-hub.ytfree-phone .ytfree-hub-grid {
+  gap: 0;
+  padding: 0;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-card:not(.ytfree-hub-hidden-row) {
+  display: grid;
+  grid-template-columns: 144px minmax(0, 1fr);
+  grid-template-areas:
+    "thumb text"
+    "actions actions";
+  gap: 4px 12px;
+  align-items: start;
+  padding: 12px 0 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-card:not(.ytfree-hub-hidden-row) > .ytfree-hub-thumb {
+  grid-area: thumb;
+  border-radius: 8px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-card:not(.ytfree-hub-hidden-row) > .ytfree-hub-meta {
+  grid-area: text;
+  display: block;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-card:not(.ytfree-hub-hidden-row) > .ytfree-card-actions {
+  grid-area: actions;
+  grid-auto-rows: 44px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-byline .ytfree-hub-avatar {
+  display: none;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-card .ytfree-hub-title {
+  font-size: var(--font-ui-small);
+  line-height: 1.3;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-card .ytfree-hub-sub {
+  margin-top: 4px;
+  font-size: var(--font-ui-smaller);
+}
+
+.ytfree-hub.ytfree-phone .ytfree-card-actions .ytfree-card-icon {
+  --icon-size: 18px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-card-actions .ytfree-card-label {
+  font-size: 11px;
+}
+
+/* The header: one row. Search YouTube is its icon alone here. */
+.ytfree-hub.ytfree-phone .ytfree-hub-browse-label {
+  display: none;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-search {
+  display: none;
+}
+
+.ytfree-hub.ytfree-phone.ytfree-hub-filtering .ytfree-hub-search {
+  display: flex;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-pills {
+  padding: 8px 16px;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-filter {
+  height: 28px;
+  padding: 0 12px;
+}
+
+.ytfree-hub.ytfree-phone.ytfree-hub-filtering .ytfree-hub-filter-toggle {
+  color: var(--text-accent);
+}
+
+/* Scrolled down: only the header row stays. */
+.ytfree-hub.ytfree-phone.ytfree-hub-compact .ytfree-hub-search,
+.ytfree-hub.ytfree-phone.ytfree-hub-compact .ytfree-hub-pills,
+.ytfree-hub.ytfree-phone.ytfree-hub-compact .ytfree-hub-status {
+  display: none;
+}
+
+.ytfree-hub.ytfree-phone .ytfree-hub-browse-button {
+  width: 40px;
+  padding: 0;
+  justify-content: center;
+}

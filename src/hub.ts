@@ -1680,6 +1680,24 @@ export class HubView extends ItemView {
 
     const actions = header.createDiv({ cls: "ytfree-hub-actions" });
 
+    // Phone: the filter box is out of the way until asked for (Isaiah,
+    // 2026-11-27: the top of the hub was too tall). A query already typed
+    // keeps it open.
+    if (this.phone) {
+      const filterBtn = actions.createEl("button", {
+        cls: "ytfree-hub-icon-button ytfree-hub-filter-toggle",
+        attr: { type: "button", "aria-label": "Filter these videos", title: "Filter these videos" },
+      });
+      setIcon(filterBtn, "list-filter");
+      root.toggleClass("ytfree-hub-filtering", this.itemQuery.length > 0);
+      filterBtn.addEventListener("click", () => {
+        const open = !root.hasClass("ytfree-hub-filtering");
+        root.toggleClass("ytfree-hub-filtering", open);
+        root.removeClass("ytfree-hub-compact");
+        if (open) root.querySelector<HTMLInputElement>(".ytfree-hub-search input")?.focus();
+      });
+    }
+
     // The way to YouTube — a button with the words on it, not a bare glyph.
     //
     // It was the YouTube badge alone, which is the same shape as the ribbon
@@ -2406,6 +2424,24 @@ export class HubView extends ItemView {
    */
   private buildPhoneBody(body: HTMLElement): void {
     this.listEl = body.createDiv({ cls: "ytfree-hub-list" });
+
+    // Scrolling down the list folds the search box, the pills and the count
+    // away, leaving the one header row; scrolling back up brings them back.
+    const root = this.contentEl;
+    const list = this.listEl;
+    let lastTop = 0;
+    list.addEventListener(
+      "scroll",
+      () => {
+        const top = list.scrollTop;
+        if (top < 24) root.removeClass("ytfree-hub-compact");
+        else if (top > lastTop + 8) root.addClass("ytfree-hub-compact");
+        else if (top < lastTop - 8) root.removeClass("ytfree-hub-compact");
+        else return;
+        lastTop = top;
+      },
+      { passive: true },
+    );
 
     this.scrimEl = body.createDiv({ cls: "ytfree-hub-scrim" });
     this.scrimEl.addEventListener("click", () => this.setMenuOpen(false));

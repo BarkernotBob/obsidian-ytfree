@@ -1527,8 +1527,8 @@ export class YtFreePlayer {
       stage.addEventListener(event, endHold);
     }
     // Swipes that start on the picture (Isaiah, 2026-11-27): up for full
-    // screen; down leaves full screen, or folds the video away when it is not
-    // full screen. Only from the picture: the note below scrolls as ever.
+    // screen; down leaves full screen, or goes to Picture-in-Picture when it
+    // is not full screen. Only from the picture: the note below scrolls as ever.
     let swipe: { id: number; x: number; y: number } | null = null;
     stage.addEventListener(
       "touchstart",
@@ -1560,7 +1560,9 @@ export class YtFreePlayer {
       } else if (full) {
         void this.exitFullscreen();
       } else {
-        this.options.onToggleCollapse?.();
+        // Down and out of the way, still playing: Picture-in-Picture, like
+        // YouTube's mini-player (Isaiah, 2026-11-27).
+        void this.withMedia(() => this.togglePip());
       }
     });
 
@@ -1703,9 +1705,21 @@ export class YtFreePlayer {
     const pick = (cls: string): HTMLElement | null => bar.querySelector<HTMLElement>(`:scope > .${cls}`);
     const collapse = pick("ytfree-btn-collapse");
     if (collapse) left.appendChild(collapse);
-    for (const cls of ["ytfree-speed", "ytfree-btn-youtube", "ytfree-btn-pip", "ytfree-btn-share", "ytfree-btn-panel"]) {
+    for (const cls of ["ytfree-speed", "ytfree-btn-pip", "ytfree-btn-share", "ytfree-btn-panel"]) {
       const el = pick(cls);
       if (el) right.appendChild(el);
+      // HD goes in second, as a stand-in: the real toggle stays on the bar
+      // under the picture, which is the one place still showing once
+      // YouTube's player has the picture — and the only way back from it.
+      if (cls === "ytfree-speed" && this.ytToggle && !this.ytToggle.hasClass("is-fallback-only")) {
+        const real = this.ytToggle;
+        const proxy = right.createEl("button", {
+          cls: "ytfree-btn ytfree-btn-youtube-proxy",
+          attr: { type: "button", title: real.title, "aria-label": real.title },
+        });
+        setIcon(proxy, HD_ICON);
+        proxy.addEventListener("click", () => real.click());
+      }
     }
     const full = pick("ytfree-btn-fullscreen");
     if (full) seek.appendChild(full);
