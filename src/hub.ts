@@ -98,6 +98,7 @@ import {
   walkBackfillPage,
 } from "./backfill";
 import { parseYouTubeLink } from "./handoff";
+import { markDestructive } from "./destructive";
 import {
   HIDDEN_CHANNELS_LIMIT,
   REMOVED_VIDEOS_LIMIT,
@@ -4771,10 +4772,7 @@ class ConfirmDeleteModal extends Modal {
     });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
     new ButtonComponent(row).setButtonText("Cancel").onClick(() => this.finish(false));
-    new ButtonComponent(row)
-      .setButtonText("Delete")
-      .setWarning()
-      .onClick(() => this.finish(true));
+    markDestructive(new ButtonComponent(row).setButtonText("Delete").onClick(() => this.finish(true)));
   }
 
   onClose(): void {

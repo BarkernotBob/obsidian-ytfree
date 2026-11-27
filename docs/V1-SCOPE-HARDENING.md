@@ -67,7 +67,7 @@ defaults written for one Mac.
 | D1 | Auto-trash watched, unwritten video notes after 30 days by default? | **Off for new installs.** Existing installs keep what they had |
 | D2 | Other defaults a stranger gets | **Smart Speed off for new installs.** Open YouTube links here, transcript auto-fetch and hourly feed checks stay on |
 | D3 | Pop-out windows in the MVP? | **No.** Post-MVP (#87) |
-| D4 | yt-dlp, ffmpeg and `setup.sh` | **Hide them.** Nobody is asked to install anything; the settings sit in a folded "Desktop helpers (optional)" section and the instructions live in [DESKTOP-HELPERS](DESKTOP-HELPERS.md). Removing yt-dlp outright is revisited after launch |
+| D4 | yt-dlp, ffmpeg and `setup.sh` | **Hide them.** Nobody is asked to install anything; the settings sit in a folded "Desktop helpers (optional)" section and the instructions live in [DESKTOP-HELPERS](archive/DESKTOP-HELPERS.md). Removing yt-dlp outright is revisited after launch |
 | D5 | Settings search (Obsidian 1.13+) | **MVP.** Built in Batch 1 |
 
 ### Lint warnings: do they block? (checked 2026-11-10)

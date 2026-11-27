@@ -311,7 +311,7 @@ export function describeWebhook(settings: NotificationSettings): string {
 export function describeTestOutcome(outcome: SendOutcome): string {
   if (outcome.ok) return "Sent. If nothing arrives, the URL is wrong or the service dropped it.";
   if (outcome.reason === "disabled") {
-    return "Not sent — set a valid https URL and turn Send notifications on first.";
+    return "Not sent — set a valid alert address and turn Send alerts on first.";
   }
   if (outcome.reason === "empty") return "Not sent — nothing to say.";
   return `Failed: ${outcome.error ?? "the request did not go through"}.`;
